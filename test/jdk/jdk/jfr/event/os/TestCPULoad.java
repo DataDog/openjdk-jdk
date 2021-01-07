@@ -76,7 +76,7 @@ public class TestCPULoad {
         for (RecordedEvent event : events) {
             for (String metricName : metricNames) {
                 String loadName = metricName;
-                String cpuTimeName = metricName + "CpuTime";
+                String cpuTimeName = metricName + "Time";
 
                 EventField loadField = Events.assertField(event, loadName).atLeast(0.0f).atMost(1.0f);
                 EventField timeField = Events.assertField(event, cpuTimeName).atLeast((Float)loadField.getValue() > 0.0f ? 1L : 0L);
