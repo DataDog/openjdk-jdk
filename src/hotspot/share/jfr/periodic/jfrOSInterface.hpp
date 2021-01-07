@@ -50,7 +50,7 @@ class JfrOSInterface: public JfrCHeapObj {
   static int cpu_load(int which_logical_cpu, double* cpu_load);
   static int context_switch_rate(double* rate);
   static int cpu_load_total_process(double* cpu_load);
-  static int cpu_loads_process(double* pjvmUserLoad, double* pjvmKernelLoad, double* psystemTotalLoad);
+  static int cpu_loads_process(double* pjvmUserLoad, double* pjvmKernelLoad, double* psystemTotalLoad, uint64_t* pjvmUserTime, uint64_t* pjvmKernelTime, uint64_t* psystemTotalTime);
   static int os_version(char** os_version);
   static const char* virtualization_name();
   static int generate_initial_environment_variable_events();

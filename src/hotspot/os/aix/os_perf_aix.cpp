@@ -445,7 +445,7 @@ class CPUPerformanceInterface::CPUPerformance : public CHeapObj<mtInternal> {
   int cpu_load(int which_logical_cpu, double* cpu_load);
   int context_switch_rate(double* rate);
   int cpu_load_total_process(double* cpu_load);
-  int cpu_loads_process(double* pjvmUserLoad, double* pjvmKernelLoad, double* psystemTotalLoad);
+  int cpu_loads_process(double* pjvmUserLoad, double* pjvmKernelLoad, double* psystemTotalLoad, uint64_t* pjvmUserTime, uint64_t* pjvmKernelTime, uint64_t* psystemTotalTime);
 
  public:
   CPUPerformance();
@@ -565,7 +565,7 @@ int CPUPerformanceInterface::cpu_load_total_process(double* cpu_load) const {
   return _impl->cpu_load_total_process(cpu_load);
 }
 
-int CPUPerformanceInterface::cpu_loads_process(double* pjvmUserLoad, double* pjvmKernelLoad, double* psystemTotalLoad) const {
+int CPUPerformanceInterface::cpu_loads_process(double* pjvmUserLoad, double* pjvmKernelLoad, double* psystemTotalLoad, uint64_t* pjvmUserTime, uint64_t* pjvmKernelTime, uint64_t* psystemTotalTime) const {
   return _impl->cpu_loads_process(pjvmUserLoad, pjvmKernelLoad, psystemTotalLoad);
 }
 

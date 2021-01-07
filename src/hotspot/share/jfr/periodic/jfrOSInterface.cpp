@@ -84,7 +84,7 @@ class JfrOSInterface::JfrOSInterfaceImpl : public JfrCHeapObj {
   int cpu_load(int which_logical_cpu, double* cpu_load);
   int context_switch_rate(double* rate);
   int cpu_load_total_process(double* cpu_load);
-  int cpu_loads_process(double* pjvmUserLoad, double* pjvmKernelLoad, double* psystemTotal);
+  int cpu_loads_process(double* pjvmUserLoad, double* pjvmKernelLoad, double* psystemTotalLoad, uint64_t* pjvmUserTime, uint64_t* pjvmKernelTime, uint64_t* psystemTotalTime);
 
   // os information
   int os_version(char** os_version) const;
@@ -189,9 +189,13 @@ int JfrOSInterface::JfrOSInterfaceImpl::cpu_load_total_process(double* cpu_load)
 
 int JfrOSInterface::JfrOSInterfaceImpl::cpu_loads_process(double* pjvmUserLoad,
                                                           double* pjvmKernelLoad,
-                                                          double* psystemTotal) {
+                                                          double* psystemTotalLoad,
+                                                          uint64_t* pjvmUserTime,
+                                                          uint64_t* pjvmKernelTime,
+                                                          uint64_t* psystemTotalTime
+                                                          ) {
   CPUPerformanceInterface* const iface = cpu_perf_interface();
-  return iface == NULL ? OS_ERR : iface->cpu_loads_process(pjvmUserLoad, pjvmKernelLoad, psystemTotal);
+  return iface == NULL ? OS_ERR : iface->cpu_loads_process(pjvmUserLoad, pjvmKernelLoad, psystemTotalLoad, pjvmUserTime, pjvmKernelTime, psystemTotalTime);
 }
 
 int JfrOSInterface::JfrOSInterfaceImpl::system_processes(SystemProcess** system_processes, int* no_of_sys_processes) {
@@ -248,8 +252,8 @@ int JfrOSInterface::cpu_load_total_process(double* cpu_load) {
   return instance()._impl->cpu_load_total_process(cpu_load);
 }
 
-int JfrOSInterface::cpu_loads_process(double* jvm_user_load, double* jvm_kernel_load, double* system_total_load){
-  return instance()._impl->cpu_loads_process(jvm_user_load, jvm_kernel_load, system_total_load);
+int JfrOSInterface::cpu_loads_process(double* jvm_user_load, double* jvm_kernel_load, double* system_total_load, uint64_t* jvm_user_time, uint64_t* jvm_kernel_time, uint64_t* system_total_time){
+  return instance()._impl->cpu_loads_process(jvm_user_load, jvm_kernel_load, system_total_load, jvm_user_time, jvm_kernel_time, system_total_time);
 }
 
 int JfrOSInterface::os_version(char** os_version) {

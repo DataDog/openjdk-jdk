@@ -46,6 +46,7 @@ static const double NANOS_PER_SEC = 1000000000.0;
 class CPUPerformanceInterface::CPUPerformance : public CHeapObj<mtInternal> {
    friend class CPUPerformanceInterface;
  private:
+  long _nanos_per_tick;
   long _total_cpu_nanos;
   long _total_csr_nanos;
   long _jvm_user_nanos;
@@ -70,8 +71,8 @@ class CPUPerformanceInterface::CPUPerformance : public CHeapObj<mtInternal> {
   }
   int cpu_load(int which_logical_cpu, double* cpu_load);
   int context_switch_rate(double* rate);
-  int cpu_load_total_process(double* cpu_load);
-  int cpu_loads_process(double* pjvmUserLoad, double* pjvmKernelLoad, double* psystemTotalLoad);
+  int cpu_load_time_total_process(double* cpu_load, uint64_t* cpu_time);
+  int cpu_loads_process(double* pjvmUserLoad, double* pjvmKernelLoad, double* psystemTotalLoad, uint64_t* pjvmUserTime, uint64_t* pjvmKernelTime, uint64_t* psystemTotalTime);
 
   NONCOPYABLE(CPUPerformance);
 
@@ -93,6 +94,17 @@ CPUPerformanceInterface::CPUPerformance::CPUPerformance() {
 }
 
 bool CPUPerformanceInterface::CPUPerformance::initialize() {
+  int mib[2];
+
+  mib[0] = CTL_KERN;
+  mib[1] = KERN_CLOCKRATE;
+  clockinfo cinfo;
+  size_t len = sizeof(cinfo);
+
+  if (sysctl(mib, 2, &cinfo, &len, NULL, 0) == -1) {
+    return false;
+  }
+  _nanos_per_tick = cinfo.tick * 1000; // tick is in u-seconds per tick; need to upscale it to nanoseconds
   return true;
 }
 
@@ -103,7 +115,7 @@ int CPUPerformanceInterface::CPUPerformance::cpu_load(int which_logical_cpu, dou
   return FUNCTIONALITY_NOT_IMPLEMENTED;
 }
 
-int CPUPerformanceInterface::CPUPerformance::cpu_load_total_process(double* cpu_load) {
+int CPUPerformanceInterface::CPUPerformance::cpu_load_time_total_process(double* cpu_load, uint64_t* cpu_time) {
 #ifdef __APPLE__
   host_name_port_t host = mach_host_self();
   host_flavor_t flavor = HOST_CPU_LOAD_INFO;
@@ -131,6 +143,9 @@ int CPUPerformanceInterface::CPUPerformance::cpu_load_total_process(double* cpu_
   _used_ticks  = used_ticks;
   _total_ticks = total_ticks;
 
+  if (cpu_time != NULL) {
+    *cpu_time = _used_ticks * _nanos_per_tick;
+  }
   if (total_delta == 0) {
     // Avoid division by zero
     return OS_ERR;
@@ -144,9 +159,9 @@ int CPUPerformanceInterface::CPUPerformance::cpu_load_total_process(double* cpu_
 #endif
 }
 
-int CPUPerformanceInterface::CPUPerformance::cpu_loads_process(double* pjvmUserLoad, double* pjvmKernelLoad, double* psystemTotalLoad) {
+int CPUPerformanceInterface::CPUPerformance::cpu_loads_process(double* pjvmUserLoad, double* pjvmKernelLoad, double* psystemTotalLoad, uint64_t* pjvmUserTime, uint64_t* pjvmKernelTime, uint64_t* psystemTotalTime) {
 #ifdef __APPLE__
-  int result = cpu_load_total_process(psystemTotalLoad);
+  int result = cpu_load_time_total_process(psystemTotalLoad, psystemTotalTime);
   mach_port_t task = mach_task_self();
   mach_msg_type_number_t task_info_count = TASK_INFO_MAX;
   task_info_data_t task_info_data;
@@ -176,8 +191,10 @@ int CPUPerformanceInterface::CPUPerformance::cpu_loads_process(double* pjvmUserL
     return OS_ERR;
   }
 
-  *pjvmUserLoad = normalize((double)(jvm_user_nanos - _jvm_user_nanos)/delta_nanos);
-  *pjvmKernelLoad = normalize((double)(jvm_system_nanos - _jvm_system_nanos)/delta_nanos);
+  *pjvmUserTime = jvm_user_nanos - _jvm_user_nanos;
+  *pjvmKernelTime = jvm_system_nanos - _jvm_system_nanos;
+  *pjvmUserLoad = normalize((double)(*pjvmUserTime)/delta_nanos);
+  *pjvmKernelLoad = normalize((double)(*pjvmKernelTime)/delta_nanos);
 
   _active_processor_count = active_processor_count;
   _total_cpu_nanos = total_cpu_nanos;
@@ -249,11 +266,11 @@ int CPUPerformanceInterface::cpu_load(int which_logical_cpu, double* cpu_load) c
 }
 
 int CPUPerformanceInterface::cpu_load_total_process(double* cpu_load) const {
-  return _impl->cpu_load_total_process(cpu_load);
+  return _impl->cpu_load_time_total_process(cpu_load, NULL);
 }
 
-int CPUPerformanceInterface::cpu_loads_process(double* pjvmUserLoad, double* pjvmKernelLoad, double* psystemTotalLoad) const {
-  return _impl->cpu_loads_process(pjvmUserLoad, pjvmKernelLoad, psystemTotalLoad);
+int CPUPerformanceInterface::cpu_loads_process(double* pjvmUserLoad, double* pjvmKernelLoad, double* psystemTotalLoad, uint64_t* pjvmUserTime, uint64_t* pjvmKernelTime, uint64_t* psystemTotalTime) const {
+  return _impl->cpu_loads_process(pjvmUserLoad, pjvmKernelLoad, psystemTotalLoad, pjvmUserTime, pjvmKernelTime, psystemTotalTime);
 }
 
 int CPUPerformanceInterface::context_switch_rate(double* rate) const {
