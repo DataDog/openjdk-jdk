@@ -32,8 +32,13 @@
 
 static JfrStackTraceRepository* _instance = NULL;
 
-JfrStackTraceRepository::JfrStackTraceRepository() : _next_id(0), _entries(0) {
+JfrStackTraceRepository::JfrStackTraceRepository() :
+  _next_id(0),
+  _next_id_leak_profiler(0),
+  _entries(0),
+  _entries_leak_profiler(0) {
   memset(_table, 0, sizeof(_table));
+  memset(_table_leak_profiler, 0, sizeof(_table_leak_profiler));
 }
 
 JfrStackTraceRepository& JfrStackTraceRepository::instance() {
@@ -160,6 +165,19 @@ traceid JfrStackTraceRepository::add(const JfrStackTrace& stacktrace) {
   return tid;
 }
 
+//////////////////////////////////////////
+// FLO: Copy-paste of add() but adding to the leak-profiler table
+traceid JfrStackTraceRepository::add_leak_profiler(const JfrStackTrace& stacktrace) {
+  traceid tid = instance().add_trace_leak_profiler(stacktrace);
+  if (tid == 0) {
+    stacktrace.resolve_linenos();
+    tid = instance().add_trace_leak_profiler(stacktrace);
+  }
+  assert(tid != 0, "invariant");
+  return tid;
+}
+//////////////////////////////////////////
+
 void JfrStackTraceRepository::record_and_cache(JavaThread* thread, int skip /* 0 */) {
   assert(thread != NULL, "invariant");
   JfrThreadLocal* const tl = thread->jfr_thread_local();
@@ -169,7 +187,7 @@ void JfrStackTraceRepository::record_and_cache(JavaThread* thread, int skip /* 0
   stacktrace.record_safe(thread, skip);
   const unsigned int hash = stacktrace.hash();
   if (hash != 0) {
-    tl->set_cached_stack_trace_id(instance().add(stacktrace), hash);
+    tl->set_cached_stack_trace_id(instance().add_leak_profiler(stacktrace), hash);
   }
 }
 
@@ -194,6 +212,30 @@ traceid JfrStackTraceRepository::add_trace(const JfrStackTrace& stacktrace) {
   ++_entries;
   return id;
 }
+
+//////////////////////////////////////////
+traceid JfrStackTraceRepository::add_trace_leak_profiler(const JfrStackTrace& stacktrace) {
+  MutexLocker lock(JfrStacktrace_lock, Mutex::_no_safepoint_check_flag);
+  const size_t index = stacktrace._hash % TABLE_SIZE;
+  const JfrStackTrace* table_entry = _table_leak_profiler[index];
+
+  while (table_entry != NULL) {
+    if (table_entry->equals(stacktrace)) {
+      return table_entry->id();
+    }
+    table_entry = table_entry->next();
+  }
+
+  if (!stacktrace.have_lineno()) {
+    return 0;
+  }
+
+  traceid id = ++_next_id_leak_profiler;
+  _table_leak_profiler[index] = new JfrStackTrace(id, stacktrace, _table_leak_profiler[index]);
+  ++_entries_leak_profiler;
+  return id;
+}
+//////////////////////////////////////////
 
 // invariant is that the entry to be resolved actually exists in the table
 const JfrStackTrace* JfrStackTraceRepository::lookup(unsigned int hash, traceid id) const {

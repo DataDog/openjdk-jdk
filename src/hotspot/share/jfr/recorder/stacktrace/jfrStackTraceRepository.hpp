@@ -45,8 +45,11 @@ class JfrStackTraceRepository : public JfrCHeapObj {
  private:
   static const u4 TABLE_SIZE = 2053;
   JfrStackTrace* _table[TABLE_SIZE];
+  JfrStackTrace* _table_leak_profiler[TABLE_SIZE];
   traceid _next_id;
+  traceid _next_id_leak_profiler;
   u4 _entries;
+  u4 _entries_leak_profiler;
 
   JfrStackTraceRepository();
   static JfrStackTraceRepository& instance();
@@ -61,7 +64,9 @@ class JfrStackTraceRepository : public JfrCHeapObj {
   const JfrStackTrace* lookup(unsigned int hash, traceid id) const;
 
   traceid add_trace(const JfrStackTrace& stacktrace);
+  traceid add_trace_leak_profiler(const JfrStackTrace& stacktrace);
   static traceid add(const JfrStackTrace& stacktrace);
+  static traceid add_leak_profiler(const JfrStackTrace& stacktrace);
   traceid record_for(JavaThread* thread, int skip, JfrStackFrame* frames, u4 max_frames);
 
  public:
