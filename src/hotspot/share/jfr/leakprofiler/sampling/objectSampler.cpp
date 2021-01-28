@@ -161,6 +161,11 @@ static traceid get_thread_id(JavaThread* thread) {
 static void record_stacktrace(JavaThread* thread) {
   assert(thread != NULL, "invariant");
   if (JfrEventSetting::has_stacktrace(EventOldObjectSample::eventId)) {
+    // FLO:
+    // - Add the stack trace into the repository
+    // - Set the stack trace id (traceid) and hash in JfrThreadLocal (thread->jfr_thread_local()) 
+    // (done by using set_cached_stack_trace_id(traceid, hash))
+    // TODO: Register stack trace to another table
     JfrStackTraceRepository::record_and_cache(thread);
   }
 }
@@ -217,6 +222,7 @@ void ObjectSampler::add(HeapWord* obj, size_t allocated, traceid thread_id, Java
   sample->set_thread(tl->thread_blob());
 
   const unsigned int stacktrace_hash = tl->cached_stack_trace_hash();
+  // FLO: Should have been set with the call to record_stacktrace()
   if (stacktrace_hash != 0) {
     sample->set_stack_trace_id(tl->cached_stack_trace_id());
     sample->set_stack_trace_hash(stacktrace_hash);

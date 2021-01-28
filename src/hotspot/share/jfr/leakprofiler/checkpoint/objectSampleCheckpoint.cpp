@@ -253,6 +253,7 @@ static void install_stack_traces(const ObjectSampler* sampler, JfrStackTraceRepo
   if (last != sampler->last_resolved()) {
     ResourceMark rm;
     JfrKlassUnloading::sort();
+    // FLO: inject new stack trace repo instead of 'stack_trace_repo'
     StackTraceBlobInstaller installer(stack_trace_repo);
     iterate_samples(installer);
   }
