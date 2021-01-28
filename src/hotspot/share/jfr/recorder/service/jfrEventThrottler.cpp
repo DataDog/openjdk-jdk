@@ -35,7 +35,7 @@ constexpr static const JfrSamplerParams _disabled_params = {
                                                              false // reconfigure
                                                            };
 
-static JfrEventThrottler* _throttler = NULL;
+static JfrEventThrottler** _throttlers = NULL;
 
 JfrEventThrottler::JfrEventThrottler(JfrEventId event_id) :
   JfrAdaptiveSampler(),
@@ -48,30 +48,49 @@ JfrEventThrottler::JfrEventThrottler(JfrEventId event_id) :
   _update(false) {}
 
 bool JfrEventThrottler::create() {
-  assert(_throttler == NULL, "invariant");
-  _throttler = new JfrEventThrottler(JfrObjectAllocationSampleEvent);
-  return _throttler != NULL && _throttler->initialize();
+  assert(_throttlers == NULL, "invariant");
+  _throttlers = NEW_C_HEAP_ARRAY(JfrEventThrottler*, 2, mtTracing);
+  _throttlers[0] = new JfrEventThrottler(JfrObjectAllocationSampleEvent);
+  _throttlers[1] = new JfrEventThrottler(JfrThreadSleepEvent);
+
+  if (_throttlers == NULL) {
+    return false;
+  }
+  for (int i = 0; i < 2; i++) {
+    if (_throttlers[i] == NULL || !_throttlers[i]->initialize()) {
+      return false;
+    }
+  }
+  return true;
 }
 
 void JfrEventThrottler::destroy() {
-  delete _throttler;
-  _throttler = NULL;
+  FREE_C_HEAP_ARRAY(JfrEventThrottler*, _throttlers);
+  _throttlers = NULL;
 }
 
 // There is currently only one throttler instance, for the jdk.ObjectAllocationSample event.
 // When introducing additional throttlers, also add a lookup map keyed by event id.
 JfrEventThrottler* JfrEventThrottler::for_event(JfrEventId event_id) {
-  assert(_throttler != NULL, "JfrEventThrottler has not been properly initialized");
-  assert(event_id == JfrObjectAllocationSampleEvent, "Event type has an unconfigured throttler");
-  return event_id == JfrObjectAllocationSampleEvent ? _throttler : NULL;
+  assert(_throttlers != NULL, "JfrEventThrottler has not been properly initialized");
+  assert(event_id == JfrObjectAllocationSampleEvent || event_id == JfrThreadSleepEvent, "Event type has an unconfigured throttler");
+  if (event_id == JfrObjectAllocationSampleEvent) {
+    return _throttlers[0];
+  } else if (event_id == JfrThreadSleepEvent) {
+    return _throttlers[1];
+  }
+  return NULL;
 }
 
 void JfrEventThrottler::configure(JfrEventId event_id, int64_t sample_size, int64_t period_ms) {
   if (event_id != JfrObjectAllocationSampleEvent) {
     return;
   }
-  assert(_throttler != NULL, "JfrEventThrottler has not been properly initialized");
-  _throttler->configure(sample_size, period_ms);
+  assert(_throttlers != NULL, "JfrEventThrottler has not been properly initialized");
+  JfrEventThrottler* throttler = for_event(event_id);
+  if (throttler != NULL) {
+    throttler->configure(sample_size, period_ms);
+ }
 }
 
 /*
@@ -94,7 +113,7 @@ void JfrEventThrottler::configure(int64_t sample_size, int64_t period_ms) {
 bool JfrEventThrottler::accept(JfrEventId event_id, int64_t timestamp /* 0 */) {
   JfrEventThrottler* const throttler = for_event(event_id);
   if (throttler == NULL) return true;
-  return _throttler->_disabled ? true : _throttler->sample(timestamp);
+  return throttler->_disabled ? true : throttler->sample(timestamp);
 }
 
 /*

@@ -35,7 +35,7 @@
     <Field type="Thread" name="thread" label="Java Thread" />
   </Event>
 
-  <Event name="ThreadSleep" category="Java Application" label="Java Thread Sleep" thread="true" stackTrace="true">
+  <Event name="ThreadSleep" category="Java Application" label="Java Thread Sleep" thread="true" stackTrace="true" throttle="true">
     <Field type="long" contentType="millis" name="time" label="Sleep Time" />
   </Event>
 
