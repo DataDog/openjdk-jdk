@@ -218,7 +218,7 @@ StackTraceBlobInstaller::StackTraceBlobInstaller(const JfrStackTraceRepository& 
 }
 
 const JfrStackTrace* StackTraceBlobInstaller::resolve(const ObjectSample* sample) {
-  return _stack_trace_repo.lookup(sample->stack_trace_hash(), sample->stack_trace_id());
+  return _stack_trace_repo.lookup_leak_profiler(sample->stack_trace_hash(), sample->stack_trace_id());
 }
 
 #ifdef ASSERT

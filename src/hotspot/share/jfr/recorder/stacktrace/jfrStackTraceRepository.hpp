@@ -62,6 +62,7 @@ class JfrStackTraceRepository : public JfrCHeapObj {
   size_t clear();
 
   const JfrStackTrace* lookup(unsigned int hash, traceid id) const;
+  const JfrStackTrace* lookup_leak_profiler(unsigned int hash, traceid id) const;
 
   traceid add_trace(const JfrStackTrace& stacktrace);
   traceid add_trace_leak_profiler(const JfrStackTrace& stacktrace);

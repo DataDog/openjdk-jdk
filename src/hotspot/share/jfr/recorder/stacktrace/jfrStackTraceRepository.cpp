@@ -249,3 +249,18 @@ const JfrStackTrace* JfrStackTraceRepository::lookup(unsigned int hash, traceid 
   assert(trace->id() == id, "invariant");
   return trace;
 }
+
+//////////////////////////////////////////
+// invariant is that the entry to be resolved actually exists in the table
+const JfrStackTrace* JfrStackTraceRepository::lookup_leak_profiler(unsigned int hash, traceid id) const {
+  const size_t index = (hash % TABLE_SIZE);
+  const JfrStackTrace* trace = _table_leak_profiler[index];
+  while (trace != NULL && trace->id() != id) {
+    trace = trace->next();
+  }
+  assert(trace != NULL, "invariant");
+  assert(trace->hash() == hash, "invariant");
+  assert(trace->id() == id, "invariant");
+  return trace;
+}
+//////////////////////////////////////////
