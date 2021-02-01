@@ -45,16 +45,20 @@ class JfrStackTraceRepository : public JfrCHeapObj {
  private:
   static const u4 TABLE_SIZE = 2053;
   JfrStackTrace* _table[TABLE_SIZE];
-  JfrStackTrace* _table_leak_profiler[TABLE_SIZE];
+  //JfrStackTrace* _table_leak_profiler[TABLE_SIZE];
   traceid _next_id;
-  traceid _next_id_leak_profiler;
+  //traceid _next_id_leak_profiler;
   u4 _entries;
-  u4 _entries_leak_profiler;
+  //u4 _entries_leak_profiler;
+  traceid _last_id;
 
   JfrStackTraceRepository();
   static JfrStackTraceRepository& instance();
+  static JfrStackTraceRepository& leak_profiler_instance();
   static JfrStackTraceRepository* create();
+  static JfrStackTraceRepository* create_leak_profiler();
   static void destroy();
+  static void destroy_leak_profiler();
   bool initialize();
 
   bool is_modified() const;
@@ -62,17 +66,19 @@ class JfrStackTraceRepository : public JfrCHeapObj {
   size_t clear();
 
   const JfrStackTrace* lookup(unsigned int hash, traceid id) const;
-  const JfrStackTrace* lookup_leak_profiler(unsigned int hash, traceid id) const;
+  //const JfrStackTrace* lookup_leak_profiler(unsigned int hash, traceid id) const;
 
   traceid add_trace(const JfrStackTrace& stacktrace);
-  traceid add_trace_leak_profiler(const JfrStackTrace& stacktrace);
-  static traceid add(const JfrStackTrace& stacktrace);
-  static traceid add_leak_profiler(const JfrStackTrace& stacktrace);
+  //traceid add_trace_leak_profiler(const JfrStackTrace& stacktrace);
+  traceid add(const JfrStackTrace& stacktrace);
+  //static traceid add_leak_profiler(const JfrStackTrace& stacktrace);
   traceid record_for(JavaThread* thread, int skip, JfrStackFrame* frames, u4 max_frames);
 
  public:
-  static traceid record(Thread* thread, int skip = 0);
-  static void record_and_cache(JavaThread* thread, int skip = 0);
+  static JfrStackTraceRepository& instance();
+  static JfrStackTraceRepository& leak_profiler_instance();
+  traceid record(Thread* thread, int skip = 0);
+  void record_and_cache(instance, JavaThread* thread, int skip = 0);
 };
 
 #endif // SHARE_JFR_RECORDER_STACKTRACE_JFRSTACKTRACEREPOSITORY_HPP

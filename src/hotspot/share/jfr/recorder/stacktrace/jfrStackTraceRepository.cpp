@@ -31,24 +31,36 @@
 #include "runtime/mutexLocker.hpp"
 
 static JfrStackTraceRepository* _instance = NULL;
+static JfrStackTraceRepository* _leak_profiler_instance = NULL;
 
 JfrStackTraceRepository::JfrStackTraceRepository() :
   _next_id(0),
-  _next_id_leak_profiler(0),
+  //_next_id_leak_profiler(0),
   _entries(0),
-  _entries_leak_profiler(0) {
+  _last_id(0) {
+  //_entries_leak_profiler(0) {
   memset(_table, 0, sizeof(_table));
-  memset(_table_leak_profiler, 0, sizeof(_table_leak_profiler));
+  //memset(_table_leak_profiler, 0, sizeof(_table_leak_profiler));
 }
 
 JfrStackTraceRepository& JfrStackTraceRepository::instance() {
   return *_instance;
 }
 
+JfrStackTraceRepository& JfrStackTraceRepository::leak_profiler_instance() {
+  return *_leak_profiler_instance;
+}
+
 JfrStackTraceRepository* JfrStackTraceRepository::create() {
   assert(_instance == NULL, "invariant");
   _instance = new JfrStackTraceRepository();
   return _instance;
+}
+
+JfrStackTraceRepository* JfrStackTraceRepository::create_leak_profiler() {
+  assert(_leak_profiler_instance == NULL, "invariant");
+  _leak_profiler_instance = new JfrStackTraceRepository();
+  return _leak_profiler_instance;
 }
 
 class JfrFrameType : public JfrSerializer {
@@ -76,10 +88,16 @@ void JfrStackTraceRepository::destroy() {
   _instance = NULL;
 }
 
-static traceid last_id = 0;
+void JfrStackTraceRepository::destroy_leak_profiler() {
+  assert(_leak_profiler_instance != NULL, "invarinat");
+  delete _leak_profiler_instance;
+  _leak_profiler_instance = NULL;
+}
+
+// static traceid last_id = 0;
 
 bool JfrStackTraceRepository::is_modified() const {
-  return last_id != _next_id;
+  return _last_id != _next_id;
 }
 
 size_t JfrStackTraceRepository::write(JfrChunkWriter& sw, bool clear) {
@@ -107,7 +125,7 @@ size_t JfrStackTraceRepository::write(JfrChunkWriter& sw, bool clear) {
     memset(_table, 0, sizeof(_table));
     _entries = 0;
   }
-  last_id = _next_id;
+  _last_id = _next_id;
   return count;
 }
 
@@ -147,7 +165,7 @@ traceid JfrStackTraceRepository::record(Thread* thread, int skip /* 0 */) {
   }
   assert(frames != NULL, "invariant");
   assert(tl->stackframes() == frames, "invariant");
-  return instance().record_for(thread->as_Java_thread(), skip, frames, tl->stackdepth());
+  return instance.record_for(thread->as_Java_thread(), skip, frames, tl->stackdepth());
 }
 
 traceid JfrStackTraceRepository::record_for(JavaThread* thread, int skip, JfrStackFrame *frames, u4 max_frames) {
@@ -155,30 +173,17 @@ traceid JfrStackTraceRepository::record_for(JavaThread* thread, int skip, JfrSta
   return stacktrace.record_safe(thread, skip) ? add(stacktrace) : 0;
 }
 
-traceid JfrStackTraceRepository::add(const JfrStackTrace& stacktrace) {
-  traceid tid = instance().add_trace(stacktrace);
+traceid JfrStackTraceRepository::add(JfrStackTraceRepository& instance, const JfrStackTrace& stacktrace) {
+  traceid tid = instance.add_trace(stacktrace);
   if (tid == 0) {
     stacktrace.resolve_linenos();
-    tid = instance().add_trace(stacktrace);
+    tid = instance.add_trace(stacktrace);
   }
   assert(tid != 0, "invariant");
   return tid;
 }
 
-//////////////////////////////////////////
-// FLO: Copy-paste of add() but adding to the leak-profiler table
-traceid JfrStackTraceRepository::add_leak_profiler(const JfrStackTrace& stacktrace) {
-  traceid tid = instance().add_trace_leak_profiler(stacktrace);
-  if (tid == 0) {
-    stacktrace.resolve_linenos();
-    tid = instance().add_trace_leak_profiler(stacktrace);
-  }
-  assert(tid != 0, "invariant");
-  return tid;
-}
-//////////////////////////////////////////
-
-void JfrStackTraceRepository::record_and_cache(JavaThread* thread, int skip /* 0 */) {
+void JfrStackTraceRepository::record_and_cache(JfrStackTraceRepository& instance, JavaThread* thread, int skip /* 0 */) {
   assert(thread != NULL, "invariant");
   JfrThreadLocal* const tl = thread->jfr_thread_local();
   assert(tl != NULL, "invariant");
@@ -187,7 +192,7 @@ void JfrStackTraceRepository::record_and_cache(JavaThread* thread, int skip /* 0
   stacktrace.record_safe(thread, skip);
   const unsigned int hash = stacktrace.hash();
   if (hash != 0) {
-    tl->set_cached_stack_trace_id(instance().add_leak_profiler(stacktrace), hash);
+    tl->set_cached_stack_trace_id(instance.add(stacktrace), hash);
   }
 }
 
@@ -213,30 +218,6 @@ traceid JfrStackTraceRepository::add_trace(const JfrStackTrace& stacktrace) {
   return id;
 }
 
-//////////////////////////////////////////
-traceid JfrStackTraceRepository::add_trace_leak_profiler(const JfrStackTrace& stacktrace) {
-  MutexLocker lock(JfrStacktrace_lock, Mutex::_no_safepoint_check_flag);
-  const size_t index = stacktrace._hash % TABLE_SIZE;
-  const JfrStackTrace* table_entry = _table_leak_profiler[index];
-
-  while (table_entry != NULL) {
-    if (table_entry->equals(stacktrace)) {
-      return table_entry->id();
-    }
-    table_entry = table_entry->next();
-  }
-
-  if (!stacktrace.have_lineno()) {
-    return 0;
-  }
-
-  traceid id = ++_next_id_leak_profiler;
-  _table_leak_profiler[index] = new JfrStackTrace(id, stacktrace, _table_leak_profiler[index]);
-  ++_entries_leak_profiler;
-  return id;
-}
-//////////////////////////////////////////
-
 // invariant is that the entry to be resolved actually exists in the table
 const JfrStackTrace* JfrStackTraceRepository::lookup(unsigned int hash, traceid id) const {
   const size_t index = (hash % TABLE_SIZE);
@@ -249,18 +230,3 @@ const JfrStackTrace* JfrStackTraceRepository::lookup(unsigned int hash, traceid 
   assert(trace->id() == id, "invariant");
   return trace;
 }
-
-//////////////////////////////////////////
-// invariant is that the entry to be resolved actually exists in the table
-const JfrStackTrace* JfrStackTraceRepository::lookup_leak_profiler(unsigned int hash, traceid id) const {
-  const size_t index = (hash % TABLE_SIZE);
-  const JfrStackTrace* trace = _table_leak_profiler[index];
-  while (trace != NULL && trace->id() != id) {
-    trace = trace->next();
-  }
-  assert(trace != NULL, "invariant");
-  assert(trace->hash() == hash, "invariant");
-  assert(trace->id() == id, "invariant");
-  return trace;
-}
-//////////////////////////////////////////
