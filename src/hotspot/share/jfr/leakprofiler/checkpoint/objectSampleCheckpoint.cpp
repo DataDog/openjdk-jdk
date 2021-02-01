@@ -197,6 +197,100 @@ static bool stack_trace_precondition(const ObjectSample* sample) {
   return sample->has_stack_trace_id() && !sample->is_dead();
 }
 
+/////////////////////////////////////////////////////////////////////////
+class StackTraceBlobWriter {
+ private:
+  const JfrStackTraceRepository& _stack_trace_repo;
+  JfrChunkWriter& _chunkwriter;
+  int _count;
+  const JfrStackTrace* resolve(const ObjectSample* sample);
+  //void write(ObjectSample* sample);
+ public:
+  StackTraceBlobWriter(const JfrStackTraceRepository& stack_trace_repo, JfrChunkWriter& chunkwriter);
+  void sample_do(ObjectSample* sample) {
+    if (stack_trace_precondition(sample)) {
+      //write(sample);
+      const JfrStackTrace* const stack_trace = resolve(sample);
+
+      if (stack_trace->should_write()) {
+        tty->print_cr("PRINTED A ST \\o/");
+        stack_trace->write(_chunkwriter);
+        _count++;
+      }
+      /*
+      DEBUG_ONLY(validate_stack_trace(sample, stack_trace));
+      JfrCheckpointWriter writer;
+      writer.write_type(TYPE_STACKTRACE);
+      writer.write_count(1);
+      ObjectSampleCheckpoint::write_stacktrace(stack_trace, writer);
+      blob = writer.move();
+      _cache.put(sample, blob);
+      sample->set_stacktrace(blob);
+      */
+    }
+  }
+  int count() const {
+    return _count;
+  }
+};
+
+StackTraceBlobWriter::StackTraceBlobWriter(const JfrStackTraceRepository& stack_trace_repo, JfrChunkWriter& chunkwriter) :
+  _stack_trace_repo(stack_trace_repo), _chunkwriter(chunkwriter), _count(0) {
+  prepare_for_resolution();
+}
+
+const JfrStackTrace* StackTraceBlobWriter::resolve(const ObjectSample* sample) {
+  return _stack_trace_repo.lookup(sample->stack_trace_hash(), sample->stack_trace_id());
+}
+
+/*
+void StackTraceBlobWriter::write(ObjectSample* sample) {
+  const JfrStackTrace* const stack_trace = resolve(sample);
+
+  if (stack_trace->should_write()) {
+    stack_trace->write(_chunkwriter);
+  }
+  /*
+  DEBUG_ONLY(validate_stack_trace(sample, stack_trace));
+  JfrCheckpointWriter writer;
+  writer.write_type(TYPE_STACKTRACE);
+  writer.write_count(1);
+  ObjectSampleCheckpoint::write_stacktrace(stack_trace, writer);
+  blob = writer.move();
+  _cache.put(sample, blob);
+  sample->set_stacktrace(blob);
+  *
+}*/
+
+static int do_write_stacktraces(const ObjectSampler* sampler, JfrStackTraceRepository& stack_trace_repo, JfrChunkWriter& chunkwriter) {
+  assert(sampler != NULL, "invariant");
+  const ObjectSample* const last = sampler->last();
+  if (last != sampler->last_resolved()) {
+    ResourceMark rm;
+    JfrKlassUnloading::sort();
+    // FLO: inject new stack trace repo instead of 'stack_trace_repo'
+    StackTraceBlobWriter writer(stack_trace_repo, chunkwriter);
+    iterate_samples(writer);
+    tty->print_cr("Count() gives %d STs", writer.count());
+    return writer.count();
+  }
+  return 0;
+}
+
+int ObjectSampleCheckpoint::write_objectsampler_stacktraces(const ObjectSampler* sampler, JfrStackTraceRepository& stack_trace_repo, JfrChunkWriter& chunkwriter) {
+  assert(sampler != NULL, "invariant");
+  assert(LeakProfiler::is_running(), "invariant");
+  JavaThread* const thread = JavaThread::current();
+  DEBUG_ONLY(JfrJavaSupport::check_java_thread_in_native(thread);)
+  // can safepoint here
+  ThreadInVMfromNative transition(thread);
+  MutexLocker lock(ClassLoaderDataGraph_lock);
+  // the lock is needed to ensure the unload lists do not grow in the middle of inspection.
+  return do_write_stacktraces(sampler, stack_trace_repo, chunkwriter);
+}
+/////////////////////////////////////////////////////////////////////////
+
+
 class StackTraceBlobInstaller {
  private:
   const JfrStackTraceRepository& _stack_trace_repo;
@@ -218,7 +312,7 @@ StackTraceBlobInstaller::StackTraceBlobInstaller(const JfrStackTraceRepository& 
 }
 
 const JfrStackTrace* StackTraceBlobInstaller::resolve(const ObjectSample* sample) {
-  return _stack_trace_repo.lookup_leak_profiler(sample->stack_trace_hash(), sample->stack_trace_id());
+  return _stack_trace_repo.lookup(sample->stack_trace_hash(), sample->stack_trace_id());
 }
 
 #ifdef ASSERT

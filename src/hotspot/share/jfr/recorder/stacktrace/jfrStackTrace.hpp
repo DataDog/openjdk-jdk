@@ -67,6 +67,7 @@ class JfrStackTrace : public JfrCHeapObj {
   friend class ObjectSampleCheckpoint;
   friend class ObjectSampler;
   friend class OSThreadSampler;
+  friend class StackTraceBlobWriter;
   friend class StackTraceResolver;
  private:
   const JfrStackTrace* _next;

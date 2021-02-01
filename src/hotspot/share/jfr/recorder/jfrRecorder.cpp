@@ -359,7 +359,7 @@ bool JfrRecorder::create_stacktrace_repository() {
 
 bool JfrRecorder::create_leak_profiler_stacktrace_repository() {
   assert(_stack_trace_repository_leak_profiler == NULL, "invariant");
-  _stack_trace_repository_leak_profiler = JfrStackTraceRepository::create();
+  _stack_trace_repository_leak_profiler = JfrStackTraceRepository::create_leak_profiler();
   return _stack_trace_repository_leak_profiler != NULL; // Removed call to initialize()
 }
 

@@ -40,6 +40,8 @@ class JfrStackTraceRepository : public JfrCHeapObj {
   friend class ObjectSampleCheckpoint;
   friend class ObjectSampler;
   friend class StackTraceBlobInstaller;
+  friend class StackTraceBlobWriter;
+  friend class ObjectSamplerStackTraceRepository;
   friend class StackTraceRepository;
 
  private:
@@ -76,7 +78,7 @@ class JfrStackTraceRepository : public JfrCHeapObj {
   static JfrStackTraceRepository& instance();
   static JfrStackTraceRepository& leak_profiler_instance();
   traceid record(Thread* thread, int skip = 0);
-  void record_and_cache(instance, JavaThread* thread, int skip = 0);
+  void record_and_cache(JavaThread* thread, int skip = 0);
 };
 
 #endif // SHARE_JFR_RECORDER_STACKTRACE_JFRSTACKTRACEREPOSITORY_HPP

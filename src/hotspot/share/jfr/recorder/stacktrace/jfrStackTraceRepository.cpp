@@ -23,6 +23,8 @@
  */
 
 #include "precompiled.hpp"
+#include "jfr/leakprofiler/sampling/objectSample.hpp"
+#include "jfr/leakprofiler/sampling/objectSampler.hpp"
 #include "jfr/metadata/jfrSerializer.hpp"
 #include "jfr/recorder/checkpoint/jfrCheckpointWriter.hpp"
 #include "jfr/recorder/repository/jfrChunkWriter.hpp"
@@ -165,7 +167,7 @@ traceid JfrStackTraceRepository::record(Thread* thread, int skip /* 0 */) {
   }
   assert(frames != NULL, "invariant");
   assert(tl->stackframes() == frames, "invariant");
-  return instance.record_for(thread->as_Java_thread(), skip, frames, tl->stackdepth());
+  return record_for(thread->as_Java_thread(), skip, frames, tl->stackdepth());
 }
 
 traceid JfrStackTraceRepository::record_for(JavaThread* thread, int skip, JfrStackFrame *frames, u4 max_frames) {
@@ -173,17 +175,17 @@ traceid JfrStackTraceRepository::record_for(JavaThread* thread, int skip, JfrSta
   return stacktrace.record_safe(thread, skip) ? add(stacktrace) : 0;
 }
 
-traceid JfrStackTraceRepository::add(JfrStackTraceRepository& instance, const JfrStackTrace& stacktrace) {
-  traceid tid = instance.add_trace(stacktrace);
+traceid JfrStackTraceRepository::add(const JfrStackTrace& stacktrace) {
+  traceid tid = add_trace(stacktrace);
   if (tid == 0) {
     stacktrace.resolve_linenos();
-    tid = instance.add_trace(stacktrace);
+    tid = add_trace(stacktrace);
   }
   assert(tid != 0, "invariant");
   return tid;
 }
 
-void JfrStackTraceRepository::record_and_cache(JfrStackTraceRepository& instance, JavaThread* thread, int skip /* 0 */) {
+void JfrStackTraceRepository::record_and_cache(JavaThread* thread, int skip /* 0 */) {
   assert(thread != NULL, "invariant");
   JfrThreadLocal* const tl = thread->jfr_thread_local();
   assert(tl != NULL, "invariant");
@@ -192,7 +194,7 @@ void JfrStackTraceRepository::record_and_cache(JfrStackTraceRepository& instance
   stacktrace.record_safe(thread, skip);
   const unsigned int hash = stacktrace.hash();
   if (hash != 0) {
-    tl->set_cached_stack_trace_id(instance.add(stacktrace), hash);
+    tl->set_cached_stack_trace_id(add(stacktrace), hash);
   }
 }
 

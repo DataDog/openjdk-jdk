@@ -166,7 +166,7 @@ static void record_stacktrace(JavaThread* thread) {
     // - Set the stack trace id (traceid) and hash in JfrThreadLocal (thread->jfr_thread_local()) 
     // (done by using set_cached_stack_trace_id(traceid, hash))
     // TODO: Register stack trace to another table
-    JfrStackTraceRepository::record_and_cache(JfrStackTraceRepository::instance(), thread);
+    JfrStackTraceRepository::leak_profiler_instance().record_and_cache(thread);
   }
 }
 

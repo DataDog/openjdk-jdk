@@ -264,6 +264,47 @@ static u4 invoke_with_flush_event(Functor& f) {
   return elements;
 }
 
+////////////////////////////////////////////////////////////////////
+class ObjectSamplerStackTraceRepository : public StackObj {
+ private:
+  JfrStackTraceRepository& _repo;
+  const ObjectSampler* _sampler;
+  JfrChunkWriter& _cw;
+  size_t _elements;
+  bool _clear;
+
+ public:
+  ObjectSamplerStackTraceRepository(JfrStackTraceRepository& repo, ObjectSampler* sampler, JfrChunkWriter& cw, bool clear) :
+    _repo(repo), _sampler(sampler), _cw(cw), _elements(0), _clear(clear) {}
+  bool process() {
+    _elements = ObjectSampleCheckpoint::write_objectsampler_stacktraces(_sampler, _repo, _cw); //_repo.write(_cw, _clear);
+    tty->print_cr("Managed to print %lu ST to chunkwriter", _elements);
+    if (_clear) {
+      _repo.clear();
+    }
+    return true;
+  }
+  size_t elements() const { return _elements; }
+  void reset() { _elements = 0; }
+};
+
+typedef WriteCheckpointEvent<ObjectSamplerStackTraceRepository> WriteObjectSamplerStackTrace;
+
+static u4 flush_object_sampler_stacktrace(JfrStackTraceRepository& stack_trace_repo, ObjectSampler* sampler, JfrChunkWriter& chunkwriter) {
+  ObjectSamplerStackTraceRepository str(stack_trace_repo, sampler, chunkwriter, false);
+  WriteObjectSamplerStackTrace wst(chunkwriter, str, TYPE_STACKTRACE);
+  u4 result = invoke(wst);
+  tty->print_cr(" Written %u STs", result);
+  return result;
+}
+
+static u4 write_object_sampler_stacktrace(JfrStackTraceRepository& stack_trace_repo, ObjectSampler* sampler, JfrChunkWriter& chunkwriter, bool clear) {
+  ObjectSamplerStackTraceRepository str(stack_trace_repo, sampler, chunkwriter, clear);
+  WriteObjectSamplerStackTrace wst(chunkwriter, str, TYPE_STACKTRACE);
+  return invoke(wst);
+}
+////////////////////////////////////////////////////////////////////
+
 class StackTraceRepository : public StackObj {
  private:
   JfrStackTraceRepository& _repo;
@@ -388,7 +429,7 @@ JfrRecorderService::JfrRecorderService() :
   _chunkwriter(JfrRepository::chunkwriter()),
   _repository(JfrRepository::instance()),
   _stack_trace_repository(JfrStackTraceRepository::instance()),
-  _leak_profiler_stack_trace_repository(JfrStackTraceRepository::instance_leak_profiler()),
+  _leak_profiler_stack_trace_repository(JfrStackTraceRepository::leak_profiler_instance()),
   _storage(JfrStorage::instance()),
   _string_pool(JfrStringPool::instance()) {}
 
@@ -550,8 +591,8 @@ void JfrRecorderService::pre_safepoint_write() {
   if (LeakProfiler::is_running()) {
     // Exclusive access to the object sampler instance.
     // The sampler is released (unlocked) later in post_safepoint_write.
-    ObjectSampleCheckpoint::on_rotation(ObjectSampler::acquire(), _stack_trace_repository);
     // FLO: not sure about this
+    // ObjectSampleCheckpoint::on_rotation(ObjectSampler::acquire(), _stack_trace_repository);
     ObjectSampleCheckpoint::on_rotation(ObjectSampler::acquire(), _leak_profiler_stack_trace_repository);
   }
   if (_string_pool.is_modified()) {
@@ -562,8 +603,12 @@ void JfrRecorderService::pre_safepoint_write() {
     write_stacktrace(_stack_trace_repository, _chunkwriter, false);
   }
   // FLO: write stack trace from the old object sample hashtable
-  if (_leak_profiler_stack_trace_repository.is_modified()) {
-    write_stacktrace(_leak_profiler_stack_trace_repository, _chunkwriter, false);
+  if (LeakProfiler::is_running()) {
+    if (_leak_profiler_stack_trace_repository.is_modified()) {
+      tty->print_cr("Starting write_object_sampler_stacktrace");
+      write_object_sampler_stacktrace(_leak_profiler_stack_trace_repository, ObjectSampler::sampler(), _chunkwriter, false);
+      tty->print_cr("Ending write_object_sampler_stacktrace");
+    }
   }
 }
 
@@ -585,7 +630,9 @@ void JfrRecorderService::safepoint_write() {
   _chunkwriter.set_time_stamp();
   // FL0: write stack trace from the old object sample hashtable
   write_stacktrace(_stack_trace_repository, _chunkwriter, true);
-  write_stacktrace(_leak_profiler_stack_trace_repository, _chunkwriter, true);
+  if (LeakProfiler::is_running()) {
+    write_object_sampler_stacktrace(_leak_profiler_stack_trace_repository, ObjectSampler::sampler(), _chunkwriter, true);
+  }
   _checkpoint_manager.end_epoch_shift();
 }
 
@@ -644,7 +691,11 @@ size_t JfrRecorderService::flush() {
     total_elements += flush_stacktrace(_stack_trace_repository, _chunkwriter);
   }
   if (_leak_profiler_stack_trace_repository.is_modified()) {
-    total_elements += flush_stacktrace(_leak_profiler_stack_trace_repository, _chunkwriter);
+    // FLO: lock the object sampler ?
+    tty->print("LeakProfilerSTR flush |");
+    total_elements += flush_object_sampler_stacktrace(_leak_profiler_stack_trace_repository, ObjectSampler::sampler(), _chunkwriter);
+  } else {
+    tty->print_cr("LeakProfilerSTR flush | Nothing to write");
   }
   return flush_typeset(_checkpoint_manager, _chunkwriter) + total_elements;
 }
