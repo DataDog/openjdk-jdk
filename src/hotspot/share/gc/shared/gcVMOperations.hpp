@@ -158,11 +158,11 @@ class VM_GC_Operation: public VM_GC_Sync_Operation {
   static void notify_gc_end();
 };
 
-
 class VM_GC_HeapInspection: public VM_GC_Operation {
  private:
   outputStream* _out;
   bool _full_gc;
+ protected:
   uint _parallel_thread_num;
  public:
   VM_GC_HeapInspection(outputStream* out, bool request_full_gc,
@@ -179,6 +179,21 @@ class VM_GC_HeapInspection: public VM_GC_Operation {
   virtual void doit();
  protected:
   bool collect();
+  virtual void do_inspection();
+};
+
+class VM_GC_HeapLiveset: public VM_GC_HeapInspection {
+ public:
+  VM_GC_HeapLiveset(bool request_full_gc) : 
+    VM_GC_HeapInspection(NULL, request_full_gc) {}
+  ~VM_GC_HeapLiveset() {}
+  virtual VMOp_Type type() const { return VMOp_GC_HeapLiveset; }
+  virtual void do_inspection();
+  virtual void on_summary(HeapSummary* summary) {};
+  virtual bool evaluate_at_safepoint() const { return false; }
+  virtual bool skip_thread_oop_barriers() const { return true; }
+  virtual bool doit_prologue()                   { return true; };
+  virtual void doit_epilogue()                   {};
 };
 
 class VM_CollectForAllocation : public VM_GC_Operation {

@@ -324,6 +324,31 @@ TRACE_REQUEST_FUNC(StringFlag) {
   SEND_FLAGS_OF_TYPE(StringFlag, ccstr);
 }
 
+class ObjectCountEventSenderClosure : public KlassInfoClosure {
+  const double _size_threshold_percentage;
+  const size_t _total_size_in_words;
+  const Ticks _timestamp;
+
+ public:
+  ObjectCountEventSenderClosure(size_t total_size_in_words, const Ticks& timestamp) :
+    _size_threshold_percentage(ObjectCountCutOffPercent / 100),
+    _total_size_in_words(total_size_in_words),
+    _timestamp(timestamp)
+  {}
+
+  virtual void do_cinfo(KlassInfoEntry* entry) {
+    if (should_send_event(entry)) {
+      ObjectCountEventSender::send(entry, _timestamp);
+    }
+  }
+
+ private:
+  bool should_send_event(const KlassInfoEntry* entry) const {
+    double percentage_of_heap = ((double) entry->words()) / _total_size_in_words;
+    return percentage_of_heap >= _size_threshold_percentage;
+  }
+};
+
 class VM_GC_SendObjectCountEvent : public VM_GC_HeapInspection {
  public:
   VM_GC_SendObjectCountEvent() : VM_GC_HeapInspection(NULL, true) {}
@@ -334,8 +359,29 @@ class VM_GC_SendObjectCountEvent : public VM_GC_HeapInspection {
   }
 };
 
+class VM_GC_SendLiveSetEvent : public VM_GC_HeapLiveset {
+ private:
+   EventLiveSet _event;
+ public:
+  VM_GC_SendLiveSetEvent() : VM_GC_HeapLiveset(false) {}
+  virtual void do_inspection() {
+    if (_event.is_enabled()) {
+      VM_GC_HeapLiveset::do_inspection();
+    }
+  }
+
+  virtual void on_summary(HeapSummary* summary) {
+    _event.commit(summary->total_elements_count, summary->total_elements_size_in_words * HeapWordSize);
+  }
+};
+
 TRACE_REQUEST_FUNC(ObjectCount) {
   VM_GC_SendObjectCountEvent op;
+  VMThread::execute(&op);
+}
+
+TRACE_REQUEST_FUNC(LiveSet) {
+  VM_GC_SendLiveSetEvent op;
   VMThread::execute(&op);
 }
 

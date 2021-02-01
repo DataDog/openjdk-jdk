@@ -164,10 +164,22 @@ void VM_GC_HeapInspection::doit() {
       log_warning(gc)("GC locker is held; pre-dump GC was skipped");
     }
   }
+  do_inspection();
+}  
+
+void VM_GC_HeapInspection::do_inspection() {
   HeapInspection inspect;
-  inspect.heap_inspection(_out, _parallel_thread_num);
+  inspect.print_heap_inspection(_out, _parallel_thread_num);
 }
 
+void VM_GC_HeapLiveset::do_inspection() {
+  ResourceMark rm;
+  HeapInspection inspect;
+  HeapSummary summary;
+  if (inspect.heap_summary(&summary, _parallel_thread_num)) {
+    on_summary(&summary);
+  }
+}
 
 void VM_GenCollectForAllocation::doit() {
   SvcGCMarker sgcm(SvcGCMarker::MINOR);

@@ -207,6 +207,14 @@ class KlassInfoHisto : public StackObj {
   void sort();
 };
 
+class HeapSummary : public StackObj {
+ public:
+  uint64_t total_elements_count;
+  uint64_t total_elements_size_in_words;
+
+  HeapSummary() : total_elements_count(0), total_elements_size_in_words(0) {}
+};
+
 #endif // INCLUDE_SERVICES
 
 // These declarations are needed since the declaration of KlassInfoTable and
@@ -216,7 +224,9 @@ class KlassInfoClosure;
 
 class HeapInspection : public StackObj {
  public:
-  void heap_inspection(outputStream* st, uint parallel_thread_num = 1) NOT_SERVICES_RETURN;
+  uintx heap_inspection(KlassInfoClosure* op, uint parallel_thread_num = 1) NOT_SERVICES_RETURN_(0);
+  void print_heap_inspection(outputStream* st, uint parallel_thread_num = 1) NOT_SERVICES_RETURN;
+  uintx heap_summary(HeapSummary* summary, uint parallel_thread_num = 1) NOT_SERVICES_RETURN_(0);
   uintx populate_table(KlassInfoTable* cit, BoolObjectClosure* filter = NULL, uint parallel_thread_num = 1) NOT_SERVICES_RETURN_(0);
   static void find_instances_at_safepoint(Klass* k, GrowableArray<oop>* result) NOT_SERVICES_RETURN;
  private:

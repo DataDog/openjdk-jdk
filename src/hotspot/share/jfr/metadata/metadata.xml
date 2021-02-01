@@ -952,6 +952,11 @@
     <Field type="ulong" contentType="bytes" name="totalSize" label="Total Size" />
   </Event>
 
+  <Event name="LiveSet" category="Java Virtual Machine, GC" startTime="true" period="everyChunk" label="Live Set Estimate">
+    <Field type="long" name="totalCount" label="Total Instances Count" />
+    <Field type="ulong" contentType="bytes" name="totalSize" label="Total Instances Size" />
+  </Event>
+
   <Event name="G1HeapRegionInformation" category="Java Virtual Machine, GC, Detailed" label="G1 Heap Region Information" description="Information about a specific heap region in the G1 GC"
     period="everyChunk">
     <Field type="uint" name="index" label="Index" />

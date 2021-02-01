@@ -55,6 +55,7 @@
   template(DeoptimizeTheWorld)                    \
   template(CollectForMetadataAllocation)          \
   template(GC_HeapInspection)                     \
+  template(GC_HeapLiveset)                        \
   template(GenCollectFull)                        \
   template(GenCollectFullConcurrent)              \
   template(GenCollectForAllocation)               \

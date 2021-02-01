@@ -212,10 +212,11 @@ KlassInfoEntry* KlassInfoTable::lookup(Klass* k) {
 }
 
 // Return false if the entry could not be recorded on account
-// of running out of space required to create a new entry.
+// of running out of space required to create a new entry
+// or 'klass' not being resolvable (for concurrent inspection).
 bool KlassInfoTable::record_instance(const oop obj) {
   Klass*        k = obj->klass();
-  KlassInfoEntry* elt = lookup(k);
+  KlassInfoEntry* elt = k == NULL ? NULL : lookup(k);
   // elt may be NULL if it's a new klass for which we
   // could not allocate space for a new entry in the hashtable.
   if (elt != NULL) {
@@ -516,6 +517,18 @@ class HistoClosure : public KlassInfoClosure {
   }
 };
 
+class SummaryClosure : public KlassInfoClosure {
+ private:
+  HeapSummary* _summary;
+ public:
+  SummaryClosure(HeapSummary* summary) : _summary(summary) {}
+
+  void do_cinfo(KlassInfoEntry* cie) {
+    _summary->total_elements_count += cie->count();
+    _summary->total_elements_size_in_words += cie->words();
+  }
+};
+
 class RecordInstanceClosure : public ObjectClosure {
  private:
   KlassInfoTable* _cit;
@@ -607,7 +620,9 @@ uintx HeapInspection::populate_table(KlassInfoTable* cit, BoolObjectClosure *fil
   return ric.missed_count();
 }
 
-void HeapInspection::heap_inspection(outputStream* st, uint parallel_thread_num) {
+uintx HeapInspection::heap_inspection(KlassInfoClosure* op, uint parallel_thread_num) {
+  assert(op != NULL);
+
   ResourceMark rm;
 
   KlassInfoTable cit(false);
@@ -620,18 +635,56 @@ void HeapInspection::heap_inspection(outputStream* st, uint parallel_thread_num)
                                missed_count);
     }
 
-    // Sort and print klass instance info
+    cit.iterate(op);
+  } else {
+    log_info(gc, classhisto)("WARNING: Ran out of C-heap; histogram not generated");
+    return 0;
+  }
+  return 1;
+}
+
+
+void HeapInspection::print_heap_inspection(outputStream* st, uint parallel_thread_num) {
+  ResourceMark rm;
+
+  KlassInfoTable cit(false);
+  if (!cit.allocation_failed()) {
+    // populate table with object allocation info
+    uintx missed_count = populate_table(&cit, NULL, parallel_thread_num);
+    if (missed_count != 0) {
+      log_info(gc, classhisto)("WARNING: Ran out of C-heap; undercounted " UINTX_FORMAT
+                               " total instances in data below",
+                               missed_count);
+    }
+
     KlassInfoHisto histo(&cit);
     HistoClosure hc(&histo);
 
     cit.iterate(&hc);
-
     histo.sort();
     histo.print_histo_on(st);
   } else {
+    log_info(gc, classhisto)("WARNING: Ran out of C-heap; histogram not generated");
     st->print_cr("ERROR: Ran out of C-heap; histogram not generated");
   }
-  st->flush();
+  // ResourceMark rm;
+
+  // KlassInfoHisto histo;
+  // HistoClosure hc(&histo);
+
+  // if (heap_inspection(&hc, parallel_thread_num)) {
+  //   histo.sort();
+  //   histo.print_histo_on(st);
+  // } else {
+  //   st->print_cr("ERROR: Ran out of C-heap; histogram not generated");
+  // }
+  // st->flush();
+}
+
+uintx HeapInspection::heap_summary(HeapSummary* summary, uint parallel_thread_num) {
+  SummaryClosure op(summary);
+
+  return heap_inspection(&op, parallel_thread_num);
 }
 
 class FindInstanceClosure : public ObjectClosure {
