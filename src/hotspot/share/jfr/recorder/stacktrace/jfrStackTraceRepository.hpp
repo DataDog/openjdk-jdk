@@ -53,8 +53,6 @@ class JfrStackTraceRepository : public JfrCHeapObj {
   traceid _last_id;
 
   JfrStackTraceRepository();
-  static JfrStackTraceRepository& instance();
-  static JfrStackTraceRepository& leak_profiler_instance();
   static JfrStackTraceRepository* create();
   static JfrStackTraceRepository* create_leak_profiler();
   static void destroy();
