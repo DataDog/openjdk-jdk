@@ -201,6 +201,7 @@ class StackTraceBlobInstaller {
  private:
   const JfrStackTraceRepository& _stack_trace_repo;
   BlobCache _cache;
+  int _count;
   const JfrStackTrace* resolve(const ObjectSample* sample);
   void install(ObjectSample* sample);
  public:
@@ -208,12 +209,16 @@ class StackTraceBlobInstaller {
   void sample_do(ObjectSample* sample) {
     if (stack_trace_precondition(sample)) {
       install(sample);
+      _count++;
     }
+  }
+  int elements() {
+    return _count;
   }
 };
 
 StackTraceBlobInstaller::StackTraceBlobInstaller(const JfrStackTraceRepository& stack_trace_repo) :
-  _stack_trace_repo(stack_trace_repo), _cache(JfrOptionSet::old_object_queue_size()) {
+  _stack_trace_repo(stack_trace_repo), _cache(JfrOptionSet::old_object_queue_size()), _count(0) {
   prepare_for_resolution();
 }
 
@@ -255,6 +260,7 @@ static void install_stack_traces(const ObjectSampler* sampler, JfrStackTraceRepo
     JfrKlassUnloading::sort();
     StackTraceBlobInstaller installer(stack_trace_repo);
     iterate_samples(installer);
+    tty->print_cr("ObjectSampleCheckpoint::on_rotation | Rotated %d elements", installer.elements());
   }
 }
 

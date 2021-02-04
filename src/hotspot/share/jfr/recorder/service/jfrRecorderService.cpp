@@ -287,13 +287,17 @@ typedef WriteCheckpointEvent<StackTraceRepository> WriteStackTrace;
 static u4 flush_stacktrace(JfrStackTraceRepository& stack_trace_repo, JfrChunkWriter& chunkwriter) {
   StackTraceRepository str(stack_trace_repo, chunkwriter, false);
   WriteStackTrace wst(chunkwriter, str, TYPE_STACKTRACE);
-  return invoke(wst);
+  u4 result = invoke(wst);
+  tty->print_cr(" Written %u STs", result);
+  return result;
 }
 
 static u4 write_stacktrace(JfrStackTraceRepository& stack_trace_repo, JfrChunkWriter& chunkwriter, bool clear) {
   StackTraceRepository str(stack_trace_repo, chunkwriter, clear);
   WriteStackTrace wst(chunkwriter, str, TYPE_STACKTRACE);
-  return invoke(wst);
+  u4 result = invoke(wst);
+  tty->print_cr(" Written %u STs", result);
+  return result;
 }
 
 typedef Content<JfrStorage, &JfrStorage::write> Storage;
@@ -554,7 +558,10 @@ void JfrRecorderService::pre_safepoint_write() {
   }
   write_storage(_storage, _chunkwriter);
   if (_stack_trace_repository.is_modified()) {
+    tty->print("StackTraceRepo pre_safepoint_write |");
     write_stacktrace(_stack_trace_repository, _chunkwriter, false);
+  } else {
+    tty->print_cr("StackTraceRepo pre_safepoint_write | Nothing to write");
   }
 }
 
@@ -574,6 +581,7 @@ void JfrRecorderService::safepoint_write() {
   _checkpoint_manager.on_rotation();
   _storage.write_at_safepoint();
   _chunkwriter.set_time_stamp();
+  tty->print("StackTraceRepo safepoint_write |");
   write_stacktrace(_stack_trace_repository, _chunkwriter, true);
   _checkpoint_manager.end_epoch_shift();
 }
@@ -630,7 +638,10 @@ size_t JfrRecorderService::flush() {
     total_elements += flush_stringpool(_string_pool, _chunkwriter);
   }
   if (_stack_trace_repository.is_modified()) {
+    tty->print("StackTraceRepo flush |");
     total_elements += flush_stacktrace(_stack_trace_repository, _chunkwriter);
+  } else {
+    tty->print_cr("StackTraceRepo flush | Nothing to write");
   }
   return flush_typeset(_checkpoint_manager, _chunkwriter) + total_elements;
 }
