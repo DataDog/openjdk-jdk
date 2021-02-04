@@ -44,6 +44,7 @@ class ObjectSampler : public CHeapObj<mtTracing> {
   friend class ObjectSample;
   friend class StartOperation;
   friend class StopOperation;
+  friend class ObjectSampleCheckpoint; // TODO: Remove
  private:
   SamplePriorityQueue* _priority_queue;
   SampleList* _list;

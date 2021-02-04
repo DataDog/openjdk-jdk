@@ -72,6 +72,7 @@ class JfrStackTraceRepository : public JfrCHeapObj {
   static JfrStackTraceRepository& instance();
   static JfrStackTraceRepository& leak_profiler_instance();
   traceid record(Thread* thread, int skip = 0);
+  size_t count();
   void record_and_cache(JavaThread* thread, int skip = 0);
 };
 
