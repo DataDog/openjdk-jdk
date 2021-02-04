@@ -363,7 +363,7 @@ class VM_GC_SendLiveSetEvent : public VM_GC_HeapLiveset {
  private:
    EventLiveSet _event;
  public:
-  VM_GC_SendLiveSetEvent() : VM_GC_HeapLiveset(false) {}
+  VM_GC_SendLiveSetEvent() : VM_GC_HeapLiveset(false, 4) {}
   virtual void do_inspection() {
     if (_event.is_enabled()) {
       VM_GC_HeapLiveset::do_inspection();

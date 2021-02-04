@@ -171,6 +171,7 @@ public:
 
 KlassInfoTable::KlassInfoTable(bool add_all_classes) {
   _size_of_instances_in_words = 0;
+  _number_of_instances = 0;
   _ref = (HeapWord*) Universe::boolArrayKlassObj();
   _buckets =
     (KlassInfoBucket*)  AllocateHeap(sizeof(KlassInfoBucket) * _num_buckets,
@@ -517,15 +518,15 @@ class HistoClosure : public KlassInfoClosure {
   }
 };
 
-class SummaryClosure : public KlassInfoClosure {
+class HeapSummaryClosure : public ObjectClosure {
  private:
   HeapSummary* _summary;
  public:
-  SummaryClosure(HeapSummary* summary) : _summary(summary) {}
+  HeapSummaryClosure(HeapSummary* summary) : _summary(summary) {}
 
-  void do_cinfo(KlassInfoEntry* cie) {
-    _summary->total_elements_count += cie->count();
-    _summary->total_elements_size_in_words += cie->words();
+  void do_object(oop obj) {
+    _summary->total_elements_count += 1;
+    _summary->total_elements_size_in_words += obj->size();
   }
 };
 
@@ -580,6 +581,25 @@ void ParHeapInspectTask::work(uint worker_id) {
   if (merge_success) {
     Atomic::add(&_missed_count, missed_count);
   } else {
+    Atomic::store(&_success, false);
+  }
+}
+
+void ParHeapSummaryTask::work(uint worker_id) {
+  bool merge_success = true;
+  if (!Atomic::load(&_success)) {
+    // other worker has failed on parallel iteration.
+    return;
+  }
+
+  HeapSummary summary;
+  HeapSummaryClosure closure(&summary);
+  _poi->object_iterate(&closure, worker_id);
+  {
+    MutexLocker x(&_mutex);
+    merge_success = _shared_summary->merge(&summary);
+  }
+  if (!merge_success) {
     Atomic::store(&_success, false);
   }
 }
@@ -667,24 +687,49 @@ void HeapInspection::print_heap_inspection(outputStream* st, uint parallel_threa
     log_info(gc, classhisto)("WARNING: Ran out of C-heap; histogram not generated");
     st->print_cr("ERROR: Ran out of C-heap; histogram not generated");
   }
-  // ResourceMark rm;
-
-  // KlassInfoHisto histo;
-  // HistoClosure hc(&histo);
-
-  // if (heap_inspection(&hc, parallel_thread_num)) {
-  //   histo.sort();
-  //   histo.print_histo_on(st);
-  // } else {
-  //   st->print_cr("ERROR: Ran out of C-heap; histogram not generated");
-  // }
-  // st->flush();
 }
 
-uintx HeapInspection::heap_summary(HeapSummary* summary, uint parallel_thread_num) {
-  SummaryClosure op(summary);
+void HeapSummary::record_object(oop obj) {
+  total_elements_count += 1;
+  total_elements_size_in_words += obj->size();
+}
 
-  return heap_inspection(&op, parallel_thread_num);
+bool HeapSummary::merge(HeapSummary* other) {
+  total_elements_count += other->total_elements_count;
+  total_elements_size_in_words += other->total_elements_size_in_words;
+  return true;
+}
+
+bool HeapInspection::heap_summary(HeapSummary* summary, uint parallel_thread_num) {
+  // Try parallel first.
+  if (parallel_thread_num > 1) {
+    ResourceMark rm;
+
+    WorkGang* gang = Universe::heap()->safepoint_workers();
+    if (gang != NULL) {
+      // The GC provided a WorkGang to be used during a safepoint.
+
+      // Can't run with more threads than provided by the WorkGang.
+      WithUpdatedActiveWorkers update_and_restore(gang, parallel_thread_num);
+
+      ParallelObjectIterator* poi = Universe::heap()->parallel_object_iterator(gang->active_workers());
+      if (poi != NULL) {
+        // The GC supports parallel object iteration.
+        ParHeapSummaryTask task(poi, summary);
+        // Run task with the active workers.
+        gang->run_task(&task);
+
+        delete poi;
+        return task.success();
+      }
+    }
+  }
+
+  ResourceMark rm;
+  // If no parallel iteration available, run serially.
+  HeapSummaryClosure closure(summary);
+  Universe::heap()->object_iterate(&closure);
+  return true;
 }
 
 class FindInstanceClosure : public ObjectClosure {

@@ -176,7 +176,7 @@ void VM_GC_HeapLiveset::do_inspection() {
   ResourceMark rm;
   HeapInspection inspect;
   HeapSummary summary;
-  if (inspect.heap_summary(&summary, _parallel_thread_num)) {
+  if (inspect.heap_summary(&summary)) {
     on_summary(&summary);
   }
 }

@@ -106,6 +106,7 @@ class KlassInfoTable: public StackObj {
  private:
   static const int _num_buckets = 20011;
   size_t _size_of_instances_in_words;
+  size_t _number_of_instances;
 
   // An aligned reference address (typically the least
   // address in the perm gen) used for hashing klass
@@ -125,6 +126,7 @@ class KlassInfoTable: public StackObj {
   void iterate(KlassInfoClosure* cic);
   bool allocation_failed() { return _buckets == NULL; }
   size_t size_of_instances_in_words() const;
+  size_t number_of_instances() const;
   bool merge(KlassInfoTable* table);
   bool merge_entry(const KlassInfoEntry* cie);
 
@@ -209,10 +211,13 @@ class KlassInfoHisto : public StackObj {
 
 class HeapSummary : public StackObj {
  public:
-  uint64_t total_elements_count;
-  uint64_t total_elements_size_in_words;
+  size_t total_elements_count;
+  size_t total_elements_size_in_words;
 
   HeapSummary() : total_elements_count(0), total_elements_size_in_words(0) {}
+
+  void record_object(const oop obj);
+  bool merge(HeapSummary* other);
 };
 
 #endif // INCLUDE_SERVICES
@@ -226,7 +231,7 @@ class HeapInspection : public StackObj {
  public:
   uintx heap_inspection(KlassInfoClosure* op, uint parallel_thread_num = 1) NOT_SERVICES_RETURN_(0);
   void print_heap_inspection(outputStream* st, uint parallel_thread_num = 1) NOT_SERVICES_RETURN;
-  uintx heap_summary(HeapSummary* summary, uint parallel_thread_num = 1) NOT_SERVICES_RETURN_(0);
+  bool heap_summary(HeapSummary* summary, uint parallel_thread_num = 1) NOT_SERVICES_RETURN_(0);
   uintx populate_table(KlassInfoTable* cit, BoolObjectClosure* filter = NULL, uint parallel_thread_num = 1) NOT_SERVICES_RETURN_(0);
   static void find_instances_at_safepoint(Klass* k, GrowableArray<oop>* result) NOT_SERVICES_RETURN;
  private:
@@ -260,6 +265,30 @@ class ParHeapInspectTask : public AbstractGangTask {
   uintx missed_count() const {
     return _missed_count;
   }
+
+  bool success() {
+    return _success;
+  }
+
+  virtual void work(uint worker_id);
+};
+
+// Parallel heap summary task.
+class ParHeapSummaryTask : public AbstractGangTask {
+ private:
+  ParallelObjectIterator* _poi;
+  HeapSummary* _shared_summary;
+  bool _success;
+  Mutex _mutex;
+
+ public:
+  ParHeapSummaryTask(ParallelObjectIterator* poi,
+                     HeapSummary* shared_summary) :
+      AbstractGangTask("Iterating heap"),
+      _poi(poi),
+      _shared_summary(shared_summary),
+      _success(true),
+      _mutex(Mutex::leaf, "Parallel heap iteration data merge lock") {}
 
   bool success() {
     return _success;

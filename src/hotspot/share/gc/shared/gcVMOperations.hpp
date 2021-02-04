@@ -184,8 +184,8 @@ class VM_GC_HeapInspection: public VM_GC_Operation {
 
 class VM_GC_HeapLiveset: public VM_GC_HeapInspection {
  public:
-  VM_GC_HeapLiveset(bool request_full_gc) : 
-    VM_GC_HeapInspection(NULL, request_full_gc) {}
+  VM_GC_HeapLiveset(bool request_full_gc, uint parallel_thread_num = 1) : 
+    VM_GC_HeapInspection(NULL, request_full_gc, parallel_thread_num) {}
   ~VM_GC_HeapLiveset() {}
   virtual VMOp_Type type() const { return VMOp_GC_HeapLiveset; }
   virtual void do_inspection();
