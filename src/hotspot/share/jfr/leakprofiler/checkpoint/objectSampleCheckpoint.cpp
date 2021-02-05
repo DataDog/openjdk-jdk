@@ -213,7 +213,7 @@ class StackTraceBlobWriter {
       const JfrStackTrace* const stack_trace = resolve(sample);
 
       if (stack_trace->should_write()) {
-        tty->print_cr("PRINTED A ST \\o/");
+        // tty->print_cr("PRINTED A ST \\o/");
         stack_trace->write(_chunkwriter);
         _count++;
       }
@@ -271,7 +271,7 @@ static int do_write_stacktraces(const ObjectSampler* sampler, JfrStackTraceRepos
     // FLO: inject new stack trace repo instead of 'stack_trace_repo'
     StackTraceBlobWriter writer(stack_trace_repo, chunkwriter);
     iterate_samples(writer);
-    tty->print_cr("Count() gives %d STs", writer.count());
+    // tty->print_cr("Count() gives %d STs", writer.count());
     return writer.count();
   }
   return 0;
@@ -295,6 +295,7 @@ class StackTraceBlobInstaller {
  private:
   const JfrStackTraceRepository& _stack_trace_repo;
   BlobCache _cache;
+  int _count;
   const JfrStackTrace* resolve(const ObjectSample* sample);
   void install(ObjectSample* sample);
  public:
@@ -302,12 +303,16 @@ class StackTraceBlobInstaller {
   void sample_do(ObjectSample* sample) {
     if (stack_trace_precondition(sample)) {
       install(sample);
+      _count++;
     }
+  }
+  int elements() {
+    return _count;
   }
 };
 
 StackTraceBlobInstaller::StackTraceBlobInstaller(const JfrStackTraceRepository& stack_trace_repo) :
-  _stack_trace_repo(stack_trace_repo), _cache(JfrOptionSet::old_object_queue_size()) {
+  _stack_trace_repo(stack_trace_repo), _cache(JfrOptionSet::old_object_queue_size()), _count(0) {
   prepare_for_resolution();
 }
 
@@ -350,6 +355,7 @@ static void install_stack_traces(const ObjectSampler* sampler, JfrStackTraceRepo
     // FLO: inject new stack trace repo instead of 'stack_trace_repo'
     StackTraceBlobInstaller installer(stack_trace_repo);
     iterate_samples(installer);
+    tty->print_cr("ObjectSampleCheckpoint::on_rotation | Rotated %d elements", installer.elements());
   }
 }
 
