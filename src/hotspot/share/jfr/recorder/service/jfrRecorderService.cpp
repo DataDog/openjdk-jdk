@@ -612,6 +612,7 @@ void JfrRecorderService::pre_safepoint_write() {
   }
   // FLO: write stack trace from the old object sample hashtable
   if (LeakProfiler::is_running()) {
+    tty->print_cr("LeakProfilerSTR last_id:%lu next_id:%lu", _leak_profiler_stack_trace_repository.last_id(), _leak_profiler_stack_trace_repository.next_id());
     if (_leak_profiler_stack_trace_repository.is_modified()) {
       tty->print("LeakProfilerSTR pre_safepoint_write |");
       write_object_sampler_stacktrace(_leak_profiler_stack_trace_repository, ObjectSampler::sampler(), _chunkwriter, false);
@@ -643,6 +644,7 @@ void JfrRecorderService::safepoint_write() {
   write_stacktrace(_stack_trace_repository, _chunkwriter, true);
 
   if (LeakProfiler::is_running()) {
+    tty->print_cr("LeakProfilerSTR last_id:%lu next_id:%lu", _leak_profiler_stack_trace_repository.last_id(), _leak_profiler_stack_trace_repository.next_id());
     tty->print("LeakProfilerSTR safepoint_write |");
     write_object_sampler_stacktrace(_leak_profiler_stack_trace_repository, ObjectSampler::sampler(), _chunkwriter, true);
   }
@@ -711,6 +713,7 @@ size_t JfrRecorderService::flush() {
     if (_leak_profiler_stack_trace_repository.is_modified()) {
       // FLO: lock the object sampler ?
       ObjectSampler::acquire();
+      tty->print_cr("LeakProfilerSTR last_id:%lu next_id:%lu", _leak_profiler_stack_trace_repository.last_id(), _leak_profiler_stack_trace_repository.next_id());
       tty->print("LeakProfilerSTR flush |");
       total_elements += flush_object_sampler_stacktrace(_leak_profiler_stack_trace_repository, ObjectSampler::sampler(), _chunkwriter);
       ObjectSampler::release();
