@@ -31,6 +31,15 @@
 
 #include OS_HEADER_INLINE(os)
 
+static const jlong (*_time_function)() = (const jlong (*)())JfrTime::time_function();
+
+// Export this symbol so that it may be used from eg. JVMTI agents.
+extern "C" 
+JNIEXPORT jlong JFR_Ticks() {
+  JfrTime::initialize();
+  return (*_time_function)();
+}
+
 bool JfrTime::_ft_enabled = false;
 
 bool JfrTime::initialize() {
