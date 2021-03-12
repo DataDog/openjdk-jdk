@@ -28,16 +28,9 @@
 #include "jfr/support/jfrThreadLocal.hpp"
 #include "runtime/thread.hpp"
 
-JfrAllocationTracer::JfrAllocationTracer(HeapWord* obj, size_t alloc_size, Thread* thread) : _tl(NULL) {
+JfrAllocationTracer::JfrAllocationTracer(HeapWord* obj, size_t alloc_size, Thread* thread) {
   if (LeakProfiler::is_running()) {
     assert(thread->is_Java_thread(), "invariant");
-    _tl = thread->jfr_thread_local();
     LeakProfiler::sample(obj, alloc_size, (JavaThread*)thread);
-  }
-}
-
-JfrAllocationTracer::~JfrAllocationTracer() {
-  if (_tl != NULL) {
-    _tl->clear_cached_stack_trace();
   }
 }

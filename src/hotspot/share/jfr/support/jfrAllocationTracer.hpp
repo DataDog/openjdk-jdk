@@ -30,8 +30,6 @@
 class JfrThreadLocal;
 
 class JfrAllocationTracer : public StackObj {
- private:
-  JfrThreadLocal* _tl;
  public:
   JfrAllocationTracer(HeapWord* obj, size_t alloc_size, Thread* thread);
   ~JfrAllocationTracer();

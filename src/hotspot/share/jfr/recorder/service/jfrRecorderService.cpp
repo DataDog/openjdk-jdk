@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -268,9 +268,9 @@ void JfrRecorderService::clear() {
 }
 
 void JfrRecorderService::pre_safepoint_clear() {
-  _stack_trace_repository.clear();
   _string_pool.clear();
   _storage.clear();
+  JfrStackTraceRepository::clear();
 }
 
 void JfrRecorderService::invoke_safepoint_clear() {
@@ -289,7 +289,7 @@ void JfrRecorderService::invoke_safepoint_clear() {
 //
 void JfrRecorderService::safepoint_clear() {
   assert(SafepointSynchronize::is_at_safepoint(), "invariant");
-  _stack_trace_repository.clear();
+  JfrStackTraceRepository::clear();
   _string_pool.clear();
   _storage.clear();
   _checkpoint_manager.shift_epoch();
@@ -431,7 +431,7 @@ void JfrRecorderService::pre_safepoint_write() {
   if (LeakProfiler::is_running()) {
     // Exclusive access to the object sampler instance.
     // The sampler is released (unlocked) later in post_safepoint_write.
-    ObjectSampleCheckpoint::on_rotation(ObjectSampler::acquire(), _stack_trace_repository);
+    ObjectSampleCheckpoint::on_rotation(ObjectSampler::acquire());
   }
   _storage.write();
 }
