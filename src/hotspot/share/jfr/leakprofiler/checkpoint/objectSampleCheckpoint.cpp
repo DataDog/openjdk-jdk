@@ -284,7 +284,6 @@ static void install_stack_traces(const ObjectSampler* sampler) {
   const ObjectSample* const last = sampler->last();
   if (last != sampler->last_resolved()) {
     ResourceMark rm;
-    JfrKlassUnloading::sort();
     StackTraceBlobInstaller installer;
     iterate_samples(installer);
   }
