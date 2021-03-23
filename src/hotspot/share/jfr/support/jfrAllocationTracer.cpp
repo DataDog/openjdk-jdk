@@ -34,3 +34,5 @@ JfrAllocationTracer::JfrAllocationTracer(HeapWord* obj, size_t alloc_size, Threa
     LeakProfiler::sample(obj, alloc_size, (JavaThread*)thread);
   }
 }
+
+JfrAllocationTracer::~JfrAllocationTracer() { }
