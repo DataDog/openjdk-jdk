@@ -296,7 +296,7 @@ void ObjectSampleCheckpoint::on_rotation(const ObjectSampler* sampler) {
   DEBUG_ONLY(JfrJavaSupport::check_java_thread_in_native(thread);)
   // can safepoint here
   ThreadInVMfromNative transition(thread);
-  MutexLocker lock(ClassLoaderDataGraph_lock);
+  // MutexLocker lock(ClassLoaderDataGraph_lock); // TODO: do we keep this since the lock dos not exist yet ?
   // the lock is needed to ensure the unload lists do not grow in the middle of inspection.
   install_stack_traces(sampler);
 }
