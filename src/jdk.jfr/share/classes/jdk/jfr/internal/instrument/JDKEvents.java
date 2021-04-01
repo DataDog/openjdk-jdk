@@ -174,6 +174,7 @@ public final class JDKEvents {
 
     private static void emitContainerConfiguration() {
         if (containerMetrics != null) {
+            long ts = System.nanoTime();
             ContainerConfigurationEvent t = new ContainerConfigurationEvent();
             t.cpuSlicePeriod = containerMetrics.getCpuPeriod();
             t.cpuQuota = containerMetrics.getCpuQuota();
@@ -183,50 +184,57 @@ public final class JDKEvents {
             t.memoryLimit = containerMetrics.getMemoryLimit();
             t.swapMemoryLimit = containerMetrics.getMemoryAndSwapLimit();
             t.commit();
+            System.err.println("=== emitting container config: " + ((System.nanoTime() - ts) / 1_000L) + "us");
         }
     }
 
     private static void emitContainerCPUUsage() {
         if (containerMetrics != null) {
+            long ts = System.nanoTime();
             ContainerCPUUsageEvent event = new ContainerCPUUsageEvent();
 
             event.cpuTime = containerMetrics.getCpuUsage();
             event.cpuSystemTime = containerMetrics.getCpuSystemUsage();
             event.cpuUserTime = containerMetrics.getCpuUserUsage();
             event.commit();
+            System.err.println("=== emitting container CPU usage: " + ((System.nanoTime() - ts) / 1_000L) + "us");
         }
     }
     private static void emitContainerMemoryUsage() {
         if (containerMetrics != null) {
+            long ts = System.nanoTime();
             ContainerMemoryUsageEvent event = new ContainerMemoryUsageEvent();
 
-            if (event.shouldCommit()) {
-                event.memoryFailCount = containerMetrics.getMemoryFailCount();
-                event.memoryUsage = containerMetrics.getMemoryUsage();
-                event.swapMemoryUsage = containerMetrics.getMemoryAndSwapUsage();
-                event.commit();
-            }
+            event.memoryFailCount = containerMetrics.getMemoryFailCount();
+            event.memoryUsage = containerMetrics.getMemoryUsage();
+            event.swapMemoryUsage = containerMetrics.getMemoryAndSwapUsage();
+            event.commit();
+            System.err.println("=== emitting container memory usage: " + ((System.nanoTime() - ts) / 1_000L) + "us");
         }
     }
 
     private static void emitContainerIOUsage() {
         if (containerMetrics != null) {
+            long ts = System.nanoTime();
             ContainerIOUsageEvent event = new ContainerIOUsageEvent();
 
             event.serviceRequests = containerMetrics.getBlkIOServiceCount();
             event.dataTransferred = containerMetrics.getBlkIOServiced();
             event.commit();
+            System.err.println("=== emitting container io usage: " + ((System.nanoTime() - ts) / 1_000L) + "us");
         }
     }
 
     private static void emitContainerCPUThrottling() {
         if (containerMetrics != null) {
+            long ts = System.nanoTime();
             ContainerCPUThrottlingEvent event = new ContainerCPUThrottlingEvent();
 
             event.cpuElapsedSlices = containerMetrics.getCpuNumPeriods();
             event.cpuThrottledSlices = containerMetrics.getCpuNumThrottled();
             event.cpuThrottledTime = containerMetrics.getCpuThrottledTime();
             event.commit();
+            System.err.println("=== emitting container cpu throttling: " + ((System.nanoTime() - ts) / 1_000L) + "us");
         }
     }
 
