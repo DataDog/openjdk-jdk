@@ -32,14 +32,89 @@
 #include "oops/instanceKlass.inline.hpp"
 #include "runtime/vframe.inline.hpp"
 
-static void copy_frames(JfrStackFrame** lhs_frames, u4 length, const JfrStackFrame* rhs_frames) {
+template <typename StackFrame>
+static void copy_frames(StackFrame** lhs_frames, u4 length, const StackFrame* rhs_frames) {
   assert(lhs_frames != NULL, "invariant");
   assert(rhs_frames != NULL, "invariant");
   if (length > 0) {
-    *lhs_frames = NEW_C_HEAP_ARRAY(JfrStackFrame, length, mtTracing);
-    memcpy(*lhs_frames, rhs_frames, length * sizeof(JfrStackFrame));
+    *lhs_frames = NEW_C_HEAP_ARRAY(StackFrame, length, mtTracing);
+    memcpy(*lhs_frames, rhs_frames, length * sizeof(StackFrame));
   }
 }
+
+template <typename Writer, typename StackFrame>
+static void write_stacktrace(Writer& w, traceid id, bool reached_root, u4 nr_of_frames, const StackFrame* frames) {
+  w.write((u8)id);
+  w.write((u1)!reached_root);
+  w.write(nr_of_frames);
+  for (u4 i = 0; i < nr_of_frames; ++i) {
+    frames[i].write(w);
+  }
+}
+
+JfrOSStackTrace::JfrOSStackTrace(JfrOSStackFrame* frames, u4 nof_frames) :
+  _next(NULL),
+  _frames(frames),
+  _id(0),
+  _hash(0),
+  _nr_of_frames(nof_frames),
+  _written(false) {
+    for (u4 i = 0; i < nof_frames; i++) {
+      _hash = (_hash * 31) + frames[i].hash();
+    }
+  }
+
+JfrOSStackTrace::JfrOSStackTrace(traceid id, const JfrOSStackTrace& trace, const JfrOSStackTrace* next) :
+  _next(next),
+  _frames(NULL),
+  _id(id),
+  _hash(trace._hash),
+  _nr_of_frames(trace._nr_of_frames),
+  _written(false) {
+  copy_frames<JfrOSStackFrame>(&_frames, trace._nr_of_frames, trace._frames);
+}
+
+JfrOSStackTrace::~JfrOSStackTrace() {
+  FREE_C_HEAP_ARRAY(JfrOSStackFrame, _frames);
+}
+
+void JfrOSStackTrace::write(JfrChunkWriter& sw) const {
+  assert(!_written, "invariant");
+  write_stacktrace(sw, _id, true, _nr_of_frames, _frames);
+  _written = true;
+}
+
+void JfrOSStackTrace::write(JfrCheckpointWriter& cpw) const {
+  write_stacktrace(cpw, _id, true, _nr_of_frames, _frames);
+}
+
+JfrOSStackFrame::JfrOSStackFrame(const char* content) : _frame(content) {}
+
+bool JfrOSStackFrame::equals(const JfrOSStackFrame& rhs) const {
+  return strcmp(_frame, rhs._frame) == 0;
+}
+
+bool JfrOSStackTrace::equals(const JfrOSStackTrace& rhs) const {
+  if (_nr_of_frames != rhs._nr_of_frames || _hash != rhs._hash) {
+    return false;
+  }
+  for (u4 i = 0; i < _nr_of_frames; ++i) {
+    if (!_frames[i].equals(rhs._frames[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void JfrOSStackFrame::write(JfrChunkWriter& cw) const {
+  cw.write(_frame);
+}
+
+void JfrOSStackFrame::write(JfrCheckpointWriter& cpw) const {
+  cpw.write(_frame);
+}
+
+// ---
 
 JfrStackFrame::JfrStackFrame(const traceid& id, int bci, int type, const InstanceKlass* ik) :
   _klass(ik), _methodid(id), _line(0), _bci(bci), _type(type) {}
@@ -70,22 +145,12 @@ JfrStackTrace::JfrStackTrace(traceid id, const JfrStackTrace& trace, const JfrSt
   _reached_root(trace._reached_root),
   _lineno(trace._lineno),
   _written(false) {
-  copy_frames(&_frames, trace._nr_of_frames, trace._frames);
+  copy_frames<JfrStackFrame>(&_frames, trace._nr_of_frames, trace._frames);
 }
 
 JfrStackTrace::~JfrStackTrace() {
   if (_frames_ownership) {
     FREE_C_HEAP_ARRAY(JfrStackFrame, _frames);
-  }
-}
-
-template <typename Writer>
-static void write_stacktrace(Writer& w, traceid id, bool reached_root, u4 nr_of_frames, const JfrStackFrame* frames) {
-  w.write((u8)id);
-  w.write((u1)!reached_root);
-  w.write(nr_of_frames);
-  for (u4 i = 0; i < nr_of_frames; ++i) {
-    frames[i].write(w);
   }
 }
 

@@ -825,6 +825,12 @@
     <Field type="ThreadState" name="state" label="Thread State" />
   </Event>
 
+  <Event name="OSSample" category="Java Virtual Machine, Profiling" label="OS Level Profiling Sample" description="Snapshot of a thread state"
+    period="everyChunk">
+    <Field type="ulong" name="sampledThread" label="Thread ID" />
+    <Field type="OSStackTrace" name="stackTrace" label="Stack Trace" />
+  </Event>
+
   <Event name="ThreadDump" category="Java Virtual Machine, Runtime" label="Thread Dump" period="everyChunk">
     <Field type="string" name="result" label="Thread Dump" />
   </Event>
@@ -1249,6 +1255,11 @@
 
   <Type name="FrameType" label="Frame type">
     <Field type="string" name="description" label="Description" />
+  </Type>
+
+  <Type name="OSStackTrace" label="Stacktrace">
+    <Field type="boolean" name="truncate" label="Truncated" />
+    <Field type="string" array="true" struct="true" name="frames" label="Stack Frames" />
   </Type>
 
   <Type name="OldObjectRootSystem" label="GC Root System">

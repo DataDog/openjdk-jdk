@@ -39,7 +39,10 @@
 
 static JfrStackTraceRepository* _instance = NULL;
 static JfrStackTraceRepository* _leak_profiler_instance = NULL;
+JfrStackTraceRepository* JfrStackTraceRepository::_os_instance = NULL;
+
 static traceid _next_id = 0;
+static traceid _next_os_id = 0;
 
 JfrStackTraceRepository& JfrStackTraceRepository::instance() {
   assert(_instance != NULL, "invariant");
@@ -53,6 +56,7 @@ static JfrStackTraceRepository& leak_profiler_instance() {
 
 JfrStackTraceRepository::JfrStackTraceRepository() : _last_entries(0), _entries(0) {
   memset(_table, 0, sizeof(_table));
+  memset(_os_table, 0, sizeof(_os_table));
 }
 
 JfrStackTraceRepository* JfrStackTraceRepository::create() {
@@ -63,6 +67,9 @@ JfrStackTraceRepository* JfrStackTraceRepository::create() {
     return NULL;
   }
   _instance = new JfrStackTraceRepository();
+  _os_instance = new JfrStackTraceRepository();
+
+  register_serializers();
   return _instance;
 }
 
@@ -120,6 +127,35 @@ size_t JfrStackTraceRepository::write(JfrChunkWriter& sw, bool clear) {
   }
   if (clear) {
     memset(_table, 0, sizeof(_table));
+    _entries = 0;
+  }
+  _last_entries = _entries;
+  return count;
+}
+
+size_t JfrStackTraceRepository::os_write(JfrChunkWriter& sw, bool clear) {
+  if (_entries == 0) {
+    return 0;
+  }
+  MutexLocker lock(JfrStacktrace_lock, Mutex::_no_safepoint_check_flag);
+  assert(_entries > 0, "invariant");
+  int count = 0;
+  for (u4 i = 0; i < TABLE_SIZE; ++i) {
+    JfrOSStackTrace* stacktrace = _os_table[i];
+    while (stacktrace != NULL) {
+      JfrOSStackTrace* next = const_cast<JfrOSStackTrace*>(stacktrace->next());
+      if (stacktrace->should_write()) {
+        stacktrace->write(sw);
+        ++count;
+      }
+      if (clear) {
+        delete stacktrace;
+      }
+      stacktrace = next;
+    }
+  }
+  if (clear) {
+    memset(_os_table, 0, sizeof(_os_table));
     _entries = 0;
   }
   _last_entries = _entries;
@@ -219,6 +255,28 @@ traceid JfrStackTraceRepository::add_trace(const JfrStackTrace& stacktrace) {
   return id;
 }
 
+traceid JfrStackTraceRepository::add_trace(const JfrOSStackTrace& stacktrace) {
+  MutexLocker lock(JfrStacktrace_lock, Mutex::_no_safepoint_check_flag);
+  const size_t index = stacktrace._hash % TABLE_SIZE;
+  const JfrOSStackTrace* table_entry = _os_table[index];
+
+  while (table_entry != NULL) {
+    if (table_entry->equals(stacktrace)) {
+      return table_entry->id();
+    }
+    table_entry = table_entry->next();
+  }
+
+  traceid id = ++_next_os_id;
+  _os_table[index] = new JfrOSStackTrace(id, stacktrace, _os_table[index]);
+  ++_entries;
+  return id;
+}
+
+traceid JfrStackTraceRepository::add(const JfrOSStackTrace& stacktrace) {
+  return JfrStackTraceRepository::_os_instance->add_trace(stacktrace);
+}
+
 // invariant is that the entry to be resolved actually exists in the table
 const JfrStackTrace* JfrStackTraceRepository::lookup_for_leak_profiler(unsigned int hash, traceid id) {
   const size_t index = (hash % TABLE_SIZE);
@@ -239,4 +297,11 @@ void JfrStackTraceRepository::clear_leak_profiler() {
 size_t JfrStackTraceRepository::clear() {
   clear_leak_profiler();
   return clear(instance());
+}
+
+void JfrStackTraceRepository::register_serializers() {
+  static bool is_registered = false;
+  if (!is_registered) {
+    is_registered = true;
+  }
 }

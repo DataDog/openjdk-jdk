@@ -25,7 +25,9 @@
 #ifndef SHARE_JFR_RECORDER_STACKTRACE_JFRSTACKTRACE_HPP
 #define SHARE_JFR_RECORDER_STACKTRACE_JFRSTACKTRACE_HPP
 
+#include "jfr/recorder/repository/jfrChunkWriter.hpp"
 #include "jfr/utilities/jfrAllocation.hpp"
+#include "jfr/utilities/jfrHashtable.hpp"
 #include "jfr/utilities/jfrTypes.hpp"
 
 class frame;
@@ -33,6 +35,62 @@ class InstanceKlass;
 class JavaThread;
 class JfrCheckpointWriter;
 class JfrChunkWriter;
+
+typedef HashTableHost<const char*, traceid, JfrHashtableEntry> StackFrameTable;
+
+class JfrOSStackFrame : public JfrCHeapObj {
+ private:
+  const char* _frame;
+ public:
+  JfrOSStackFrame(const char* content);
+
+  void write(JfrChunkWriter& cw) const;
+  void write(JfrCheckpointWriter& cpw) const;
+  bool equals(const JfrOSStackFrame& rhs) const;
+  unsigned int hash() {
+    uint32_t h(3323198485ul);
+    const char* key = _frame;
+    for (;*key;++key) {
+      h ^= *key;
+      h *= 0x5bd1e995;
+      h ^= h >> 15;
+    }
+    return h;
+  }
+};
+
+class JfrOSStackTrace : public JfrCHeapObj {
+ friend class JfrStackTraceRepository;
+
+ private:
+  const JfrOSStackTrace* _next;
+  JfrOSStackFrame* _frames;
+  traceid _id;
+  unsigned int _hash;
+  u4 _nr_of_frames;
+  mutable bool _written;
+
+  const JfrOSStackTrace* next() const { return _next; }
+
+  bool should_write() const { return !_written; }
+  void write(JfrChunkWriter& cw) const;
+  void write(JfrCheckpointWriter& cpw) const;
+  bool equals(const JfrOSStackTrace& rhs) const;
+
+  void set_id(traceid id) { _id = id; }
+  void set_nr_of_frames(u4 nr_of_frames) { _nr_of_frames = nr_of_frames; }
+  void set_hash(unsigned int hash) { _hash = hash; }
+
+  JfrOSStackTrace(traceid id, const JfrOSStackTrace& trace, const JfrOSStackTrace* next);
+
+ public:
+  JfrOSStackTrace(JfrOSStackFrame* frames, u4 nof_frames);
+  ~JfrOSStackTrace();
+  unsigned int hash() const { return _hash; }
+  traceid id() const { return _id; }
+};
+
+// ---
 
 class JfrStackFrame {
   friend class ObjectSampleCheckpoint;

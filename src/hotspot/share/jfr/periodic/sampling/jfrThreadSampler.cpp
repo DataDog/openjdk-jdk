@@ -302,6 +302,17 @@ void JfrThreadSampleClosure::commit_events(JfrSampleType type) {
     for (uint i = 0; i < _added_native; ++i) {
       _events_native[i].commit();
     }
+    JfrOSStackFrame* frames = NEW_C_HEAP_ARRAY(JfrOSStackFrame, 3, mtTracing);;
+    frames[0] = JfrOSStackFrame("root node");
+    frames[1] = JfrOSStackFrame("level 1");
+    frames[2] = JfrOSStackFrame("level 2");
+    JfrOSStackTrace strace(frames, 3);
+    traceid tid = JfrStackTraceRepository::add(strace);
+
+    EventOSSample ev;
+    ev.set_sampledThread(-1);
+    ev.set_stackTrace(tid);
+    ev.commit();
   }
 }
 

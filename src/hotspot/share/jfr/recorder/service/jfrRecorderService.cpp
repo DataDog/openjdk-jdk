@@ -282,18 +282,54 @@ class StackTraceRepository : public StackObj {
   void reset() { _elements = 0; }
 };
 
+class OSStackTraceRepository : public StackObj {
+ private:
+  JfrStackTraceRepository& _repo;
+  JfrChunkWriter& _cw;
+  size_t _elements;
+  bool _clear;
+
+ public:
+  OSStackTraceRepository(JfrStackTraceRepository& repo, JfrChunkWriter& cw, bool clear) :
+    _repo(repo), _cw(cw), _elements(0), _clear(clear) {}
+  bool process() {
+    _elements = _repo.os_write(_cw, _clear);
+    return true;
+  }
+  size_t elements() const { return _elements; }
+  void reset() { _elements = 0; }
+};
+
 typedef WriteCheckpointEvent<StackTraceRepository> WriteStackTrace;
+typedef WriteCheckpointEvent<OSStackTraceRepository> WriteOSStackTrace;
 
 static u4 flush_stacktrace(JfrStackTraceRepository& stack_trace_repo, JfrChunkWriter& chunkwriter) {
   StackTraceRepository str(stack_trace_repo, chunkwriter, false);
   WriteStackTrace wst(chunkwriter, str, TYPE_STACKTRACE);
-  return invoke(wst);
+  u4 orig_elements = invoke(wst);
+  u4 os_elements = 0;
+  JfrStackTraceRepository os_instance = JfrStackTraceRepository::os_instance();
+  if (os_instance.is_modified()) {
+    OSStackTraceRepository os_str(JfrStackTraceRepository::os_instance(), chunkwriter, false);
+    WriteOSStackTrace os_wst(chunkwriter, os_str, TYPE_OSSTACKTRACE);
+    os_elements = invoke(os_wst);
+  }
+  return orig_elements + os_elements;
 }
 
 static u4 write_stacktrace(JfrStackTraceRepository& stack_trace_repo, JfrChunkWriter& chunkwriter, bool clear) {
   StackTraceRepository str(stack_trace_repo, chunkwriter, clear);
+  OSStackTraceRepository os_str(JfrStackTraceRepository::os_instance(), chunkwriter, clear);
   WriteStackTrace wst(chunkwriter, str, TYPE_STACKTRACE);
-  return invoke(wst);
+  WriteOSStackTrace os_wst(chunkwriter, os_str, TYPE_OSSTACKTRACE);
+  u4 orig_elements = invoke(wst);
+  u4 os_elements = 0;
+  if (JfrStackTraceRepository::os_instance().is_modified()) {
+    OSStackTraceRepository os_str(JfrStackTraceRepository::os_instance(), chunkwriter, true);
+    WriteOSStackTrace os_wst(chunkwriter, os_str, TYPE_OSSTACKTRACE);
+    os_elements = invoke(os_wst);
+  }
+  return orig_elements + os_elements;
 }
 
 typedef Content<JfrStorage, &JfrStorage::write> Storage;
