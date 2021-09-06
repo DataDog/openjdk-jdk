@@ -57,7 +57,8 @@ JfrThreadLocal::JfrThreadLocal() :
   _stackdepth(0),
   _entering_suspend_flag(0),
   _excluded(false),
-  _dead(false) {
+  _dead(false),
+  _last_tick(0) {
   Thread* thread = Thread::current_or_null();
   _parent_trace_id = thread != NULL ? thread->jfr_thread_local()->trace_id() : (traceid)0;
 }
