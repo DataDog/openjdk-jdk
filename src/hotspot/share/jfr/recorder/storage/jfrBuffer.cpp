@@ -35,7 +35,8 @@ JfrBuffer::JfrBuffer() : _next(NULL),
                          _size(0),
                          _header_size(0),
                          _flags(0),
-                         _context(0) {}
+                         _context(0),
+                         _last_tick(0) {}
 
 bool JfrBuffer::initialize(size_t header_size, size_t size) {
   assert(_next == NULL, "invariant");
@@ -200,6 +201,7 @@ inline void clear(u1* dest, u1 data) {
   assert(dest != NULL, "invariant");
   OrderAccess::storestore();
   *dest ^= data;
+  _last_tick = 0;
 }
 
 inline bool test(const u1* dest, u1 data) {
