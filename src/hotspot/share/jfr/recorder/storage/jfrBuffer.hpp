@@ -147,7 +147,7 @@ class JfrBuffer {
     return Atomic::load_acquire(&_identity);
   }
 
-  const jlong get_and_set_last_tick(jlong last_tick) {
+  jlong get_and_set_last_tick(jlong last_tick) {
     jlong previous = _last_tick;
     _last_tick = last_tick;
     return previous;

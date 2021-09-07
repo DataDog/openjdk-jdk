@@ -40,6 +40,7 @@ final class TimeConverter {
     private final long startNanos;
     private final double divisor;
     private final ZoneOffset zoneOffset;
+    private long startTicksBase = 0L;
 
     TimeConverter(ChunkHeader chunkHeader, int rawOffset) {
         this.startTicks = chunkHeader.getStartTicks();
@@ -54,6 +55,14 @@ final class TimeConverter {
 
     public long convertTimespan(long ticks) {
         return (long) (ticks / divisor);
+    }
+
+    public long unpackStartTicks(long eventStartTicks) {
+        if (eventStartTicks > startTicks) {
+            startTicksBase = eventStartTicks;
+            return eventStartTicks;
+        }
+        return eventStartTicks + startTicksBase;
     }
 
     public ZoneOffset getZoneOffset() {

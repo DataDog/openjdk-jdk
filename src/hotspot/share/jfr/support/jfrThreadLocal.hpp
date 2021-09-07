@@ -55,7 +55,6 @@ class JfrThreadLocal {
   bool _excluded;
   bool _dead;
   traceid _parent_trace_id;
-  mutable jlong _last_tick;
 
   JfrBuffer* install_native_buffer() const;
   JfrBuffer* install_java_buffer() const;
@@ -218,12 +217,6 @@ class JfrThreadLocal {
 
   bool is_dead() const {
     return _dead;
-  }
-
-  jlong get_and_set_last_tick(jlong last_tick) {
-    jlong previous = _last_tick;
-    _last_tick = last_tick;
-    return previous;
   }
 
   bool has_thread_blob() const;
