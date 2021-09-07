@@ -35,7 +35,8 @@ JfrBuffer::JfrBuffer() : _next(NULL),
                          _size(0),
                          _header_size(0),
                          _flags(0),
-                         _context(0) {}
+                         _context(0),
+                         _last_tick(0) {}
 
 bool JfrBuffer::initialize(size_t header_size, size_t size) {
   assert(_next == NULL, "invariant");
@@ -270,6 +271,7 @@ void JfrBuffer::set_retired() {
 
 void JfrBuffer::clear_retired() {
   if (retired()) {
+      _last_tick = 0;
     clear(&_flags, RETIRED);
   }
 }

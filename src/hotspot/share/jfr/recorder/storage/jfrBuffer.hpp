@@ -74,6 +74,7 @@ class JfrBuffer {
   u2 _header_size;
   u1 _flags;
   u1 _context;
+  mutable jlong _last_tick;
 
   const u1* stable_top() const;
 
@@ -144,6 +145,12 @@ class JfrBuffer {
 
   const void* identity() const {
     return Atomic::load_acquire(&_identity);
+  }
+
+  const jlong get_and_set_last_tick(jlong last_tick) {
+    jlong previous = _last_tick;
+    _last_tick = last_tick;
+    return previous;
   }
 
   // use only if implied owner already

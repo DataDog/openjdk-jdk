@@ -214,7 +214,7 @@ class JfrEvent {
     writer.begin_event_write(large_size);
     writer.write<u8>(T::eventId);
     assert(_start_time != 0, "invariant");
-    jlong last_tick = tl->get_and_set_last_tick(_start_time);
+    jlong last_tick = buffer->get_and_set_last_tick(_start_time);
     jlong start_tick = _start_time > last_tick ? _start_time - last_tick : 0;
     // fprintf(stderr, "===> thrd: %s, id: %d, start_ts: %ll\n", event_thread->name(), id(), start_tick);
     writer.write(start_tick);
