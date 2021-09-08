@@ -40,6 +40,7 @@ final class TimeConverter {
     private final long startNanos;
     private final double divisor;
     private final ZoneOffset zoneOffset;
+    private final boolean hasCompressedTicks;
     private long startTicksBase = 0L;
 
     TimeConverter(ChunkHeader chunkHeader, int rawOffset) {
@@ -47,6 +48,7 @@ final class TimeConverter {
         this.startNanos = chunkHeader.getStartNanos();
         this.divisor = chunkHeader.getTicksPerSecond() / 1000_000_000L;
         this.zoneOffset = zoneOfSet(rawOffset);
+        this.hasCompressedTicks = chunkHeader.hasCompressedTicks();
     }
 
     public long convertTimestamp(long ticks) {
@@ -58,11 +60,14 @@ final class TimeConverter {
     }
 
     public long unpackStartTicks(long eventStartTicks) {
-        if (eventStartTicks > startTicks) {
-            startTicksBase = eventStartTicks;
-            return eventStartTicks;
+        if (hasCompressedTicks) {
+            if (eventStartTicks > startTicks) {
+                startTicksBase = eventStartTicks;
+                return eventStartTicks;
+            }
+            return eventStartTicks + startTicksBase;
         }
-        return eventStartTicks + startTicksBase;
+        return eventStartTicks;
     }
 
     public ZoneOffset getZoneOffset() {
