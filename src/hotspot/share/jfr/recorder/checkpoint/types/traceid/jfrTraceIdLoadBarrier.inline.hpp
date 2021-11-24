@@ -46,7 +46,7 @@ inline bool is_not_tagged(traceid value) {
     fprintf(stderr, "===> [1] :: %lu, %lu, %lu, %lu, %lu, %lu, %d\n", value, value >> META_SHIFT, (value >> META_SHIFT), (value >> META_SHIFT) | value, this_epoch_bit, ((value >> META_SHIFT | value) & this_epoch_bit), rslt1);
     fprintf(stderr, "===> [2] :: %lu, %lu, %lu, %lu, %lu, %d\n", value, this_epoch_bit, value & this_epoch_bit, this_epoch_bit << META_SHIFT, value & (this_epoch_bit << META_SHIFT), rslt);
   }
-  return rlst;
+  return rslt;
 }
 
 template <typename T>
