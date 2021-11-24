@@ -40,6 +40,11 @@
 
 inline bool is_not_tagged(traceid value) {
   const traceid this_epoch_bit = JfrTraceIdEpoch::this_epoch_bit();
+  bool rslt = (value & this_epoch_bit != 0) || (value & (this_epoch_bit << META_SHIFT) != 0);
+  bool rslt1 = ((value >> META_SHIFT | value) & this_epoch_bit) != this_epoch_bit;
+  if (rslt != rslt1) {
+    fprintf(stderr, "===> %d != %d\n", rslt, rslt1);
+  }
   return ((value >> META_SHIFT | value) & this_epoch_bit) != this_epoch_bit;
 }
 
