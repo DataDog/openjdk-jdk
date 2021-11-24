@@ -40,13 +40,13 @@
 
 inline bool is_not_tagged(traceid value) {
   const traceid this_epoch_bit = JfrTraceIdEpoch::this_epoch_bit();
-  bool rslt = (value & this_epoch_bit == 0) || (value & (this_epoch_bit << META_SHIFT) == 0);
+  bool rslt = (value & this_epoch_bit) == 0 || (value & (this_epoch_bit << META_SHIFT)) != 0;
   bool rslt1 = (((value >> META_SHIFT) | value) & this_epoch_bit) == 0;
   if (rslt != rslt1) {
-    fprintf(stderr, "===> [1] :: %lu, %lu, %lu, %lu, %lu, %d\n", value, value >> META_SHIFT, (value >> META_SHIFT) | value, this_epoch_bit, (((value >> META_SHIFT) | value) & this_epoch_bit), rslt1);
-    fprintf(stderr, "===> [2] :: %lu, %lu, %lu, %lu, %lu, %d\n", value, this_epoch_bit, value & this_epoch_bit, this_epoch_bit << META_SHIFT, value & (this_epoch_bit << META_SHIFT), rslt);
+    fprintf(stderr, "===> [1] :: %llu, %llu, %llu, %llu, %llu, %d\n", value, value >> META_SHIFT, (value >> META_SHIFT) | value, this_epoch_bit, (((value >> META_SHIFT) | value) & this_epoch_bit), rslt1);
+    fprintf(stderr, "===> [2] :: %llu, %llu, %llu, %llu, %llu, %d\n", value, this_epoch_bit, value & this_epoch_bit, this_epoch_bit << META_SHIFT, value & (this_epoch_bit << META_SHIFT), rslt);
   }
-  return rslt1;
+  return rslt;
 }
 
 template <typename T>
