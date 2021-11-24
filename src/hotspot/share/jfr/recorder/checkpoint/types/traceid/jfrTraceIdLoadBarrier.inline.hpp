@@ -40,7 +40,7 @@
 
 inline bool is_not_tagged(traceid value) {
   const traceid this_epoch_bit = JfrTraceIdEpoch::this_epoch_bit();
-  return ((value & ((this_epoch_bit << META_SHIFT) | this_epoch_bit)) != this_epoch_bit);
+  return ((value >> META_SHIFT | value) & this_epoch_bit) != this_epoch_bit;
 }
 
 template <typename T>
@@ -52,6 +52,8 @@ inline bool should_tag(const T* t) {
 template <>
 inline bool should_tag<Method>(const Method* method) {
   assert(method != NULL, "invariant");
+  const traceid this_epoch_bit = JfrTraceIdEpoch::this_epoch_bit();
+  const traceid value = (traceid) method->trace_flags();
   return is_not_tagged((traceid)method->trace_flags());
 }
 
