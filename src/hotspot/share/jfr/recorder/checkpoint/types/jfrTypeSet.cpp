@@ -398,7 +398,7 @@ static bool write_klasses() {
     CompositeKlassWriterRegistration ckwr(&ckw, &reg);
     CompositeKlassCallback callback(&_subsystem_callback, &ckwr);
     do_klasses();
-    fprintf(stderr, "===> count: %d\n" + lkw.count());
+    fprintf(stderr, "===> count: %d\n", lkw.count());
   }
   if (is_initial_typeset_for_chunk()) {
     // Because the set of primitives is written outside the callback,
