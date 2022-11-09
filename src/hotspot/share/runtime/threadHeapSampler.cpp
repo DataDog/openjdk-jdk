@@ -399,7 +399,7 @@ void ThreadHeapSampler::pick_next_geometric_sample() {
   _bytes_until_sample = interval;
 }
 
-void ThreadHeapSampler::pick_next_sample(size_t overflowed_bytes) {
+void ThreadHeapSampler::pick_next_sample() {
 #ifndef PRODUCT
   if (!log_table_checked) {
     verify_or_generate_log_table();
@@ -424,10 +424,10 @@ void ThreadHeapSampler::check_for_sampling(oop obj, size_t allocation_size, size
     return;
   }
 
-  JvmtiExport::sampled_object_alloc_event_collector(obj);
-
-  size_t overflow_bytes = total_allocated_bytes - _bytes_until_sample;
-  pick_next_sample(overflow_bytes);
+  do {
+    JvmtiExport::sampled_object_alloc_event_collector(obj);
+    pick_next_sample();
+  } while (total_allocated_bytes - _bytes_until_sample > 0);
 }
 
 int ThreadHeapSampler::get_sampling_interval() {
