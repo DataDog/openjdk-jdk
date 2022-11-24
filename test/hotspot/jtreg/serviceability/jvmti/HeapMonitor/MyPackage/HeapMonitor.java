@@ -285,4 +285,38 @@ public class HeapMonitor {
   public static void setAllocationIterations(int iterations) {
     allocationIterations = iterations;
   }
+
+  public static int arrayAllocationSize(int elements) {
+    if (oneElementSize == 0) {
+      throw new RuntimeException("Size of a 1-element array was not calculated.");
+    }
+    return (int) oneElementSize + (elements - 1) * 4;
+  }
+
+  public static long[] allocateSizeByStep(int totalSize, int stepSize) {
+    if (oneElementSize == 0) {
+      throw new RuntimeException("Size of a 1-element array was not calculated.");
+    }
+
+    long bytes = 0L;
+    long sum = 0;
+    int allocationSize = (int) oneElementSize + (stepSize - 1) * 4;
+    int iterations = (int) (totalSize / allocationSize);
+
+    if (arrays == null || arrays.length < iterations) {
+      arrays = new int[iterations][];
+    }
+
+    // System.out.println("Allocating " + stepSize + " bytes chunk for " + iterations + " times");
+    for (int i = 0; i < iterations; i++) {
+      int tmp[] = new int[stepSize];
+
+      // Force it to be kept and, at the same time, wipe out any previous data.
+      arrays[i] = tmp;
+      sum += arrays[0][0];
+      bytes += allocationSize;
+    }
+
+    return new long[]{bytes, sum};
+  }
 }
