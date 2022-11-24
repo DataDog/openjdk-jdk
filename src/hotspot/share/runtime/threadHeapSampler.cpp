@@ -417,7 +417,7 @@ void ThreadHeapSampler::pick_next_sample(size_t overflowed_bytes) {
 
 void ThreadHeapSampler::check_for_sampling(oop obj, size_t allocation_size, size_t bytes_since_allocation) {
   size_t total_allocated_bytes = bytes_since_allocation + allocation_size;
-
+  
   // If not yet time for a sample, skip it.
   if (total_allocated_bytes < _bytes_until_sample) {
     _bytes_until_sample -= total_allocated_bytes;
@@ -428,6 +428,17 @@ void ThreadHeapSampler::check_for_sampling(oop obj, size_t allocation_size, size
 
   size_t overflow_bytes = total_allocated_bytes - _bytes_until_sample;
   pick_next_sample(overflow_bytes);
+
+  if (_bytes_until_sample > 0) {
+    // fprintf(stdout, "After sampling: overflow=%lu, target=%lu\n", overflow_bytes, _bytes_until_sample);
+    while (overflow_bytes > _bytes_until_sample) {
+      JvmtiExport::sampled_object_alloc_event_collector(obj);
+      overflow_bytes -= _bytes_until_sample;
+      pick_next_sample(overflow_bytes);
+    }
+    _bytes_until_sample -= overflow_bytes;
+  }
+  // fprintf(stdout, "After sampling[1]: overflow=%lu, target=%lu\n", overflow_bytes, _bytes_until_sample);
 }
 
 int ThreadHeapSampler::get_sampling_interval() {
