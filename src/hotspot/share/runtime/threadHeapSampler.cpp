@@ -424,14 +424,14 @@ void ThreadHeapSampler::check_for_sampling(oop obj, size_t allocation_size, size
     return;
   }
 
-  JvmtiExport::sampled_object_alloc_event_collector(obj);
-
   size_t overflow_bytes = total_allocated_bytes - _bytes_until_sample;
+  JvmtiExport::sampled_object_alloc_event_collector(obj);
+  
   pick_next_sample(overflow_bytes);
 
   if (_bytes_until_sample > 0) {
     // fprintf(stdout, "After sampling: overflow=%lu, target=%lu\n", overflow_bytes, _bytes_until_sample);
-    while (overflow_bytes > _bytes_until_sample) {
+    while (overflow_bytes >= _bytes_until_sample) {
       JvmtiExport::sampled_object_alloc_event_collector(obj);
       overflow_bytes -= _bytes_until_sample;
       pick_next_sample(overflow_bytes);
