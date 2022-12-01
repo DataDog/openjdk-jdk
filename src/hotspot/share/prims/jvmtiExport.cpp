@@ -2603,7 +2603,7 @@ void JvmtiExport::record_vm_internal_object_allocation(oop obj) {
 }
 
 // Collect all the sampled allocated objects.
-void JvmtiExport::record_sampled_internal_object_allocation(oop obj) {
+void JvmtiExport::record_sampled_internal_object_allocation(oop obj, size_t sampled_size) {
   Thread* thread = Thread::current_or_null();
   if (thread != NULL && thread->is_Java_thread())  {
     // Can not take safepoint here.
@@ -2617,7 +2617,7 @@ void JvmtiExport::record_sampled_internal_object_allocation(oop obj) {
       collector = state->get_sampled_object_alloc_event_collector();
 
       if (collector != NULL && collector->is_enabled()) {
-        collector->record_allocation(obj);
+        collector->record_allocation(obj, sampled_size);
       }
     }
   }
@@ -2851,7 +2851,7 @@ void JvmtiExport::post_vm_object_alloc(JavaThread *thread, oop object) {
   }
 }
 
-void JvmtiExport::post_sampled_object_alloc(JavaThread *thread, oop object) {
+void JvmtiExport::post_sampled_object_alloc(JavaThread *thread, oop object, size_t sampled_size) {
   JvmtiThreadState *state = thread->jvmti_thread_state();
   if (state == NULL) {
     return;
@@ -2882,7 +2882,7 @@ void JvmtiExport::post_sampled_object_alloc(JavaThread *thread, oop object) {
       jvmtiEventSampledObjectAlloc callback = env->callbacks()->SampledObjectAlloc;
       if (callback != NULL) {
         (*callback)(env->jvmti_external(), jem.jni_env(), jem.jni_thread(),
-                    jem.jni_jobject(), jem.jni_class(), jem.size());
+                    jem.jni_jobject(), jem.jni_class(), jem.size(), sampled_size);
       }
     }
   }
@@ -3202,6 +3202,16 @@ JvmtiVMObjectAllocEventCollector::~JvmtiVMObjectAllocEventCollector() {
   unset_jvmti_thread_state();
 }
 
+void JvmtiSampledObjectAllocEventCollector::record_allocation(oop obj, size_t sampled_size) {
+  assert(is_enabled(), "Sampled object alloc event collector is not enabled");
+  if (_allocated == NULL) {
+    _allocated = new (mtServiceability) GrowableArray<ObjectAllocSample>(1, mtServiceability);
+  }
+  OopHandle handle(JvmtiExport::jvmti_oop_storage(), obj);
+  ObjectAllocSample sample(handle, sampled_size);
+  _allocated->push(sample);
+}
+
 bool JvmtiSampledObjectAllocEventCollector::object_alloc_is_safe_to_sample() {
   Thread* thread = Thread::current();
   // Really only sample allocations if this is a JavaThread and not the compiler
@@ -3226,6 +3236,22 @@ void JvmtiSampledObjectAllocEventCollector::start() {
     _enable = true;
     setup_jvmti_thread_state();
     _post_callback = JvmtiExport::post_sampled_object_alloc;
+  }
+}
+
+// Post vm_object_alloc event for vm allocated object samples visible to java
+// world.
+void JvmtiSampledObjectAllocEventCollector::generate_call_for_allocated() {
+  if (_allocated) {
+    set_enabled(false);
+    for (int i = 0; i < _allocated->length(); i++) {
+      ObjectAllocSample sample = _allocated->at(i);
+      _post_callback(JavaThread::current(), sample.handle().resolve(), sample.size());
+      // Release the sample OopHandle
+      sample.handle().release(JvmtiExport::jvmti_oop_storage());
+
+    }
+    delete _allocated, _allocated = NULL;
   }
 }
 

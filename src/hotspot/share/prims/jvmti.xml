@@ -14110,6 +14110,12 @@ myInit() {
           Size of the object (in bytes). See <functionlink id="GetObjectSize"/>.
         </description>
       </param>
+      <param id="sampled_size">
+        <jlong/>
+        <description>
+          Sampled size of the object (in bytes). It will be at most <paramlink id="size"/> bytes.
+        </description>
+      </param>
     </parameters>
   </event>
 

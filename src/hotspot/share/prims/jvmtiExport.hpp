@@ -398,14 +398,14 @@ class JvmtiExport : public AllStatic {
     }
   }
 
-  static void record_sampled_internal_object_allocation(oop object) NOT_JVMTI_RETURN;
+  static void record_sampled_internal_object_allocation(oop object, size_t sampled_size) NOT_JVMTI_RETURN;
   // Post objects collected by sampled_object_alloc_event_collector.
-  static void post_sampled_object_alloc(JavaThread *thread, oop object) NOT_JVMTI_RETURN;
+  static void post_sampled_object_alloc(JavaThread *thread, oop object, size_t sampled_size) NOT_JVMTI_RETURN;
 
   // Collects vm internal objects for later event posting.
-  inline static void sampled_object_alloc_event_collector(oop object) {
+  inline static void sampled_object_alloc_event_collector(oop object, size_t sampled_size) {
     if (should_post_sampled_object_alloc()) {
-      record_sampled_internal_object_allocation(object);
+      record_sampled_internal_object_allocation(object, sampled_size);
     }
   }
 
@@ -549,6 +549,19 @@ class JvmtiVMObjectAllocEventCollector : public JvmtiObjectAllocEventCollector {
   virtual bool is_vm_object_alloc_event()   { return true; }
 };
 
+
+class ObjectAllocSample : public CHeapObj<mtServiceability> {
+ private:
+  OopHandle  _oop_handle;
+  size_t     _sampled_size;
+ public:
+  ObjectAllocSample() : _oop_handle(NULL), _sampled_size(0) {}
+  ObjectAllocSample(OopHandle& oop_handle, size_t size) : _oop_handle(oop_handle), _sampled_size(size) {}
+  inline OopHandle handle() { return _oop_handle; }
+  inline size_t size() { return _sampled_size; }
+
+};
+
 // Used to record sampled allocated object oops and post
 // sampled object alloc event.
 // Constructor enables JvmtiThreadState flag and all sampled allocated
@@ -556,15 +569,30 @@ class JvmtiVMObjectAllocEventCollector : public JvmtiObjectAllocEventCollector {
 // called the sampled object alloc event is posted for each sampled object.
 // See jvm.cpp file for its usage.
 //
-class JvmtiSampledObjectAllocEventCollector : public JvmtiObjectAllocEventCollector {
+class JvmtiSampledObjectAllocEventCollector : public JvmtiEventCollector {
+ private:
+  GrowableArray<ObjectAllocSample>* _allocated;      // field to record collected allocated object oop.
+  bool _enable;                   // This flag is enabled in constructor if set up in the thread state
+                                  // and disabled in destructor before posting event. To avoid
+                                  // collection of objects allocated while running java code inside
+                                  // agent post_X_object_alloc() event handler.
+  void (*_post_callback)(JavaThread*, oop, size_t); // what callback to use when destroying the collector.
+
+  friend class JvmtiExport;
+  // Record allocated object oop.
+  inline void record_allocation(oop obj, size_t sampled_siez);
  public:
-  JvmtiSampledObjectAllocEventCollector(bool should_start = true) {
+  JvmtiSampledObjectAllocEventCollector(bool should_start = true) : _allocated(NULL), _enable(false), _post_callback(NULL) {
     JVMTI_ONLY(if (should_start) start();)
   }
   ~JvmtiSampledObjectAllocEventCollector()  NOT_JVMTI_RETURN;
   bool is_sampled_object_alloc_event()    { return true; }
   void start() NOT_JVMTI_RETURN;
   static bool object_alloc_is_safe_to_sample() NOT_JVMTI_RETURN_(false);
+  void generate_call_for_allocated();
+
+  bool is_enabled()                 { return _enable; }
+  void set_enabled(bool on)         { _enable = on; }
 };
 
 // Marker class to disable the posting of VMObjectAlloc events

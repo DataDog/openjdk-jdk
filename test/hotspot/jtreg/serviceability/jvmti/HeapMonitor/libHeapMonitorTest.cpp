@@ -770,7 +770,8 @@ void JNICALL SampledObjectAlloc(jvmtiEnv *jvmti_env,
                                 jthread thread,
                                 jobject object,
                                 jclass object_klass,
-                                jlong size) {
+                                jlong size,
+                                jlong sampled_size) {
   add_thread_count(thread);
 
   if (event_storage_get_compaction_required(&global_event_storage)) {
@@ -1048,7 +1049,8 @@ void JNICALL SampledObjectAlloc2(jvmtiEnv *jvmti_env,
                                  jthread thread,
                                  jobject object,
                                  jclass object_klass,
-                                 jlong size) {
+                                 jlong size,
+                                 jlong sampled_size) {
   // Nop for now, two agents are not yet implemented.
   assert(0);
 }
@@ -1130,7 +1132,8 @@ void JNICALL RecursiveSampledObjectAlloc(jvmtiEnv *jvmti_env,
                                          jthread thread,
                                          jobject object,
                                          jclass object_klass,
-                                         jlong size) {
+                                         jlong size,
+                                         jlong sampled_size) {
   // Basically ensure that if we were to allocate objects, we would not have an
   // infinite recursion here.
   int i;
