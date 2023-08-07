@@ -536,6 +536,13 @@ void InstanceKlass::deallocate_methods(ClassLoaderData* loader_data,
       // Only want to delete methods that are not executing for RedefineClasses.
       // The previous version will point to them so they're not totally dangling
       assert (!method->on_stack(), "shouldn't be called with methods on stack");
+      // Clean up the corresponding jmethodID (if there is any)
+      // to prevent accidentaly accessing freed memory when using
+      // a jmethodID pointing to a freed method.
+      jmethodID jid = method->find_jmethod_id_or_null();
+      if (jid != NULL) {
+        Method::destroy_jmethod_id(loader_data, jid);
+      }
       MetadataFactory::free_metadata(loader_data, method);
     }
     MetadataFactory::free_array<Method*>(loader_data, methods);
