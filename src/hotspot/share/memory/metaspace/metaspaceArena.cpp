@@ -366,6 +366,7 @@ void MetaspaceArena::deallocate_locked(MetaWord* p, size_t word_size) {
       p2i(p), word_size);
 
   size_t raw_word_size = get_raw_word_size_for_requested_word_size(word_size);
+  memset(p, 0, raw_word_size);
   add_allocation_to_fbl(p, raw_word_size);
 
   SOMETIMES(verify_locked();)
