@@ -159,6 +159,10 @@ jlong JNICALL jfr_host_total_memory(JNIEnv* env, jclass jvm);
 
 void JNICALL jfr_emit_data_loss(JNIEnv* env, jclass jvm, jlong bytes);
 
+void JNICALL jfr_set_used_context_size(JNIEnv* env, jclass jvm, jint size);
+jboolean JNICALL jfr_is_context_enabled(JNIEnv* env, jclass jvm);
+jobject JNICALL jfr_get_thread_context_buffer(JNIEnv* env, jclass jvm);
+
 #ifdef __cplusplus
 }
 #endif

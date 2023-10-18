@@ -62,7 +62,7 @@ import jdk.jfr.internal.periodic.PeriodicEvents;
 import jdk.jfr.internal.util.Utils;
 
 public final class PlatformRecorder {
-
+    private static volatile boolean hasRecordings = false;
 
     private final ArrayList<PlatformRecording> recordings = new ArrayList<>();
     private static final List<SecureRecorderListener> changeListeners = new ArrayList<>();
@@ -125,6 +125,7 @@ public final class PlatformRecorder {
             recording.setSettings(settings);
         }
         recordings.add(recording);
+        hasRecordings = true;
         return recording;
     }
 
@@ -133,10 +134,15 @@ public final class PlatformRecorder {
             recording.stop("Recording closed");
         }
         recordings.remove(recording);
+        hasRecordings = !recordings.isEmpty();
     }
 
     public synchronized List<PlatformRecording> getRecordings() {
         return Collections.unmodifiableList(new ArrayList<PlatformRecording>(recordings));
+    }
+
+    public static boolean hasRecordings() {
+        return hasRecordings;
     }
 
     public static synchronized void addListener(FlightRecorderListener changeListener) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,18 +23,15 @@
  * questions.
  */
 
-/**
- * Defines the API for JDK Flight Recorder.
- *
- * @moduleGraph
- * @since 9
- */
-module jdk.jfr {
-    exports jdk.jfr;
-    exports jdk.jfr.consumer;
+package jdk.test.lib.jfr;
 
-    exports jdk.jfr.internal.context to jdk.jfr;
-    exports jdk.jfr.internal.management to jdk.management.jfr;
+import jdk.jfr.ContextAware;
+import jdk.jfr.Event;
 
-    uses jdk.jfr.ContextType.Registration;
+@ContextAware
+public class ContextAwareEvent extends Event {
+    public ContextAwareEvent(int id) {
+        this.id = id;
+    }
+    public int id;
 }

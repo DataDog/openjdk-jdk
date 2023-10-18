@@ -91,6 +91,8 @@ public class SharedSecrets {
     private static JavaxCryptoSpecAccess javaxCryptoSpecAccess;
     private static JavaTemplateAccess javaTemplateAccess;
 
+    private static JFRContextAccess jfrContextAccess;
+
     public static void setJavaUtilCollectionAccess(JavaUtilCollectionAccess juca) {
         javaUtilCollectionAccess = juca;
     }
@@ -530,6 +532,14 @@ public class SharedSecrets {
             } catch (ClassNotFoundException e) {}
         }
         return access;
+    }
+
+    public static void setJFRContextAccess(JFRContextAccess jca) {
+        jfrContextAccess = jca;
+    }
+
+    public static JFRContextAccess getJFRContextAccess() {
+        return jfrContextAccess;
     }
 
     private static void ensureClassInitialized(Class<?> c) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -47,8 +47,8 @@ import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
-
 import jdk.jfr.AnnotationElement;
+import jdk.jfr.ContextAware;
 import jdk.jfr.Description;
 import jdk.jfr.Label;
 import jdk.jfr.MetadataDefinition;
@@ -58,6 +58,8 @@ import jdk.jfr.SettingDescriptor;
 import jdk.jfr.Timespan;
 import jdk.jfr.Timestamp;
 import jdk.jfr.ValueDescriptor;
+import jdk.jfr.internal.util.Utils;
+import jdk.jfr.internal.context.ContextRepository;
 
 public final class TypeLibrary {
     private static boolean implicitFieldTypes;
@@ -265,7 +267,8 @@ public final class TypeLibrary {
         Type type = getType(clazz);
 
         if (eventType) {
-            addImplicitFields(type, true, true, true, true ,false);
+            ContextAware ctxAware = clazz.getAnnotation(ContextAware.class);            
+            addImplicitFields(type, true, true, true, true , false, ctxAware != null);
             addUserFields(clazz, type, dynamicFields);
             type.trimFields();
         }
@@ -327,17 +330,17 @@ public final class TypeLibrary {
     }
 
     // By convention all events have these fields.
-    public synchronized static void addImplicitFields(Type type, boolean requestable, boolean hasDuration, boolean hasThread, boolean hasStackTrace, boolean hasCutoff) {
+    public synchronized static void addImplicitFields(Type type, boolean requestable, boolean hasDuration, boolean hasThread, boolean hasStackTrace, boolean hasCutoff, boolean hasContext) {
         if (!implicitFieldTypes) {
             createAnnotationType(Timespan.class);
             createAnnotationType(Timestamp.class);
             createAnnotationType(Label.class);
             implicitFieldTypes = true;
         }
-        addFields(type, requestable, hasDuration, hasThread, hasStackTrace, hasCutoff);
+        addFields(type, requestable, hasDuration, hasThread, hasStackTrace, hasCutoff, hasContext);
     }
 
-    private static void addFields(Type type, boolean requestable, boolean hasDuration, boolean hasThread, boolean hasStackTrace, boolean hasCutoff) {
+    private static void addFields(Type type, boolean requestable, boolean hasDuration, boolean hasThread, boolean hasStackTrace, boolean hasCutoff, boolean hasContext) {
         type.add(START_TIME_FIELD);
         if (hasDuration || hasCutoff) {
             type.add(DURATION_FIELD);
@@ -348,12 +351,31 @@ public final class TypeLibrary {
         if (hasStackTrace) {
             type.add(STACK_TRACE_FIELD);
         }
+        if (hasContext) {
+            var fldSuffix = 1;
+            for (var descriptor : ContextRepository.registrations()) {
+                String name = descriptor.holderId() + "_" + descriptor.name();
+                var annos = createStandardAnnotations(name, descriptor.holderId() + ":" + descriptor.label(), descriptor.description());
+                type.add(PrivateAccess.getInstance().newValueDescriptor(name, Type.STRING, annos, 0, true, name));
+                fldSuffix++;
+            }
+        }
     }
 
     private static List<AnnotationElement> createStandardAnnotations(String name, String description) {
         List<AnnotationElement> annotationElements = new ArrayList<>(2);
         annotationElements.add(new jdk.jfr.AnnotationElement(Label.class, name));
         if (description != null) {
+            annotationElements.add(new jdk.jfr.AnnotationElement(Description.class, description));
+        }
+        return annotationElements;
+    }
+
+    private static List<AnnotationElement> createStandardAnnotations(String name, String label, String description) {
+        List<AnnotationElement> annotationElements = new ArrayList<>(3);
+        annotationElements.add(new jdk.jfr.AnnotationElement(Name.class, name));
+        annotationElements.add(new jdk.jfr.AnnotationElement(Label.class, label));
+        if (description != null && !description.isEmpty()) {
             annotationElements.add(new jdk.jfr.AnnotationElement(Description.class, description));
         }
         return annotationElements;

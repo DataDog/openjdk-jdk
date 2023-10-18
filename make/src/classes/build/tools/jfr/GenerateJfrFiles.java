@@ -204,6 +204,7 @@ public class GenerateJfrFiles {
         boolean isEvent;
         boolean isRelation;
         boolean supportStruct = false;
+        boolean withContext = false;
         String commitState;
         public boolean primitive;
 
@@ -227,6 +228,7 @@ public class GenerateJfrFiles {
             pos.writeLong(id);
             pos.writeBoolean(isEvent);
             pos.writeBoolean(isRelation);
+            pos.writeBoolean(withContext);
         }
     }
 
@@ -524,6 +526,7 @@ public class GenerateJfrFiles {
                 currentType.commitState = getString(attributes, "commitState");
                 currentType.isEvent = "Event".equals(qName);
                 currentType.isRelation = "Relation".equals(qName);
+                currentType.withContext = getBoolean(attributes, "withContext", false);
                 break;
             case "Field":
                 currentField = new FieldElement(metadata);
@@ -655,7 +658,8 @@ public class GenerateJfrFiles {
             out.write("  u1     stacktrace;");
             out.write("  u1     enabled;");
             out.write("  u1     large;");
-            out.write("  u1     pad[5]; // Because GCC on linux ia32 at least tries to pack this.");
+            out.write("  u1     context;");
+            out.write("  u1     pad[4]; // Because GCC on linux ia32 at least tries to pack this.");
             out.write("};");
             out.write("");
             out.write("union JfrNativeSettings {");
@@ -860,6 +864,7 @@ public class GenerateJfrFiles {
             out.write("  static const bool isInstant = " + !event.startTime + ";");
             out.write("  static const bool hasCutoff = " + event.cutoff + ";");
             out.write("  static const bool hasThrottle = " + event.throttle + ";");
+            out.write("  static const bool hasContext = " + event.withContext + ";");
             out.write("  static const bool isRequestable = " + !event.period.isEmpty() + ";");
             out.write("  static const JfrEventId eventId = Jfr" + event.name + "Event;");
             out.write("");

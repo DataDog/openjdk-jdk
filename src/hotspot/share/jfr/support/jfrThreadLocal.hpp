@@ -72,6 +72,8 @@ class JfrThreadLocal {
   bool _vthread;
   bool _notified;
   bool _dead;
+  uint64_t _context[8] {0};
+  uint8_t _context_size = 0;
 
   JfrBuffer* install_native_buffer() const;
   JfrBuffer* install_java_buffer() const;
@@ -265,6 +267,28 @@ class JfrThreadLocal {
 
   bool is_dead() const {
     return _dead;
+  }
+
+  // context operations
+  void set_context(uint64_t* context, uint8_t len, uint8_t offset) {
+    assert(len > 0, "setting empty context");
+    assert(len + offset < 8, "context capacity");
+    memcpy(_context + offset, context, len * sizeof(uint64_t));
+    uint8_t new_size = len + offset;
+    _context_size = new_size > _context_size ? new_size : _context_size;
+  }
+
+  uint8_t get_context(uint64_t* context, uint8_t len, uint8_t offset) {
+    int limit = (len + offset < 8) ? len : (len - offset);
+    len = limit < 0 ? 0 : limit;
+    assert(len >= 0, "getting empty context");
+    assert(len + offset <= 8, "context capacity");
+    memcpy(context, _context + offset, len * sizeof(uint64_t));
+    return len;
+  }
+
+  uint64_t* get_context_buffer() {
+    return _context;
   }
 
   bool is_excluded() const;

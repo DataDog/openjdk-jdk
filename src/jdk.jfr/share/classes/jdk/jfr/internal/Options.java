@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -60,6 +60,7 @@ public final class Options {
     private static int stackDepth;
     private static long maxChunkSize;
     private static boolean preserveRepository;
+    private static boolean contextEnabled;
 
     static {
         final long pageSize = Unsafe.getUnsafe().pageSize();
@@ -147,6 +148,10 @@ public final class Options {
         return preserveRepository;
     }
 
+    public static boolean isContextEnabled() {
+        return contextEnabled;
+    }
+
     private static synchronized void reset() {
         setMaxChunkSize(DEFAULT_MAX_CHUNK_SIZE);
         setMemorySize(DEFAULT_MEMORY_SIZE);
@@ -160,6 +165,7 @@ public final class Options {
         setStackDepth(DEFAULT_STACK_DEPTH);
         setThreadBufferSize(DEFAULT_THREAD_BUFFER_SIZE);
         setPreserveRepository(DEFAULT_PRESERVE_REPOSITORY);
+        contextEnabled = true;
     }
 
     static synchronized long getWaitInterval() {

@@ -89,20 +89,20 @@
     <Field type="Thread" name="thread" label="Java Thread" />
   </Event>
 
-  <Event name="ThreadPark" category="Java Application" label="Java Thread Park" thread="true" stackTrace="true">
+  <Event name="ThreadPark" category="Java Application" label="Java Thread Park" thread="true" stackTrace="true" withContext="true">
     <Field type="Class" name="parkedClass" label="Class Parked On" />
     <Field type="long" contentType="nanos" name="timeout" label="Park Timeout" />
     <Field type="long" contentType="epochmillis" name="until" label="Park Until" />
     <Field type="ulong" contentType="address" name="address" label="Address of Object Parked" relation="JavaMonitorAddress" />
   </Event>
 
-  <Event name="JavaMonitorEnter" category="Java Application" label="Java Monitor Blocked" thread="true" stackTrace="true">
+  <Event name="JavaMonitorEnter" category="Java Application" label="Java Monitor Blocked" thread="true" stackTrace="true" withContext="true">
     <Field type="Class" name="monitorClass" label="Monitor Class" />
     <Field type="Thread" name="previousOwner" label="Previous Monitor Owner" />
     <Field type="ulong" contentType="address" name="address" label="Monitor Address" relation="JavaMonitorAddress" />
   </Event>
 
-  <Event name="JavaMonitorWait" category="Java Application" label="Java Monitor Wait" description="Waiting on a Java monitor" thread="true" stackTrace="true">
+  <Event name="JavaMonitorWait" category="Java Application" label="Java Monitor Wait" description="Waiting on a Java monitor" thread="true" stackTrace="true" withContext="true">
     <Field type="Class" name="monitorClass" label="Monitor Class" description="Class of object waited on" />
     <Field type="Thread" name="notifier" label="Notifier Thread" description="Notifying Thread" />
     <Field type="long" contentType="millis" name="timeout" label="Timeout" description="Maximum wait time" />
@@ -110,7 +110,7 @@
     <Field type="ulong" contentType="address" name="address" label="Monitor Address" description="Address of object waited on" relation="JavaMonitorAddress" />
   </Event>
 
-  <Event name="JavaMonitorInflate" category="Java Application" label="Java Monitor Inflated" thread="true" stackTrace="true">
+  <Event name="JavaMonitorInflate" category="Java Application" label="Java Monitor Inflated" thread="true" stackTrace="true" withContext="true">
     <Field type="Class" name="monitorClass" label="Monitor Class" />
     <Field type="ulong" contentType="address" name="address" label="Monitor Address" relation="JavaMonitorAddress" />
     <Field type="InflateCause" name="cause" label="Monitor Inflation Cause" description="Cause of inflation" />
@@ -727,7 +727,7 @@
     <Field type="ulong" contentType="bytes" name="allocationSize" label="Allocation Size" />
   </Event>
 
-  <Event name="ObjectAllocationSample" category="Java Application" label="Object Allocation Sample" thread="true" stackTrace="true" startTime="false" throttle="true">
+  <Event name="ObjectAllocationSample" category="Java Application" label="Object Allocation Sample" thread="true" stackTrace="true" startTime="false" throttle="true" withContext="true">
     <Field type="Class" name="objectClass" label="Object Class" description="Class of allocated object" />
     <Field type="long" contentType="bytes" name="weight" label="Sample Weight"
       description="The relative weight of the sample. Aggregating the weights for a large number of samples, for a particular class, thread or stack trace, gives a statistically accurate representation of the allocation pressure" />
@@ -915,7 +915,7 @@
   </Event>
 
   <Event name="ExecutionSample" category="Java Virtual Machine, Profiling" label="Method Profiling Sample" description="Snapshot of a threads state"
-    period="everyChunk">
+    period="everyChunk" withContext="true">
     <Field type="Thread" name="sampledThread" label="Thread" />
     <Field type="StackTrace" name="stackTrace" label="Stack Trace" />
     <Field type="ThreadState" name="state" label="Thread State" />

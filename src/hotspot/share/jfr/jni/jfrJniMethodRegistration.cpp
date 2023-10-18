@@ -97,7 +97,10 @@ JfrJniMethodRegistration::JfrJniMethodRegistration(JNIEnv* env) {
       (char*)"isInstrumented", (char*)"(Ljava/lang/Class;)Z", (void*) jfr_is_class_instrumented,
       (char*)"isContainerized", (char*)"()Z", (void*) jfr_is_containerized,
       (char*)"hostTotalMemory", (char*)"()J", (void*) jfr_host_total_memory,
-      (char*)"emitDataLoss", (char*)"(J)V", (void*)jfr_emit_data_loss
+      (char*)"emitDataLoss", (char*)"(J)V", (void*)jfr_emit_data_loss,
+      (char*)"setUsedContextSize", (char*)"(I)V", (void*)jfr_set_used_context_size,
+      (char*)"isContextEnabled", (char*)"()Z", (void*)jfr_is_context_enabled,
+      (char*)"getThreadContextBuffer0", (char*)"()Ljava/lang/Object;", (void*)jfr_get_thread_context_buffer
     };
 
     const size_t method_array_length = sizeof(method) / sizeof(JNINativeMethod);

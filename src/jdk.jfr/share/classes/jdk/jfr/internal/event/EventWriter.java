@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,7 @@ package jdk.jfr.internal.event;
 
 import jdk.internal.misc.Unsafe;
 import jdk.jfr.internal.Bits;
+import jdk.jfr.internal.context.ContextEventWriter;
 import jdk.jfr.internal.EventWriterKey;
 import jdk.jfr.internal.StringPool;
 import jdk.jfr.internal.JVM;
@@ -192,6 +193,10 @@ public final class EventWriter {
         } else {
             putLong(0L);
         }
+    }
+
+    public void putContext() {
+        ContextEventWriter.putContext(this);
     }
 
     private void reserveEventSizeField() {

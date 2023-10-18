@@ -43,6 +43,7 @@
 #include "jfr/instrumentation/jfrEventClassTransformer.hpp"
 #include "jfr/instrumentation/jfrJvmtiAgent.hpp"
 #include "jfr/leakprofiler/leakProfiler.hpp"
+#include "jfr/support/jfrContext.hpp"
 #include "jfr/support/jfrJdkJfrEvent.hpp"
 #include "jfr/support/jfrKlassUnloading.hpp"
 #include "jfr/utilities/jfrJavaLog.hpp"
@@ -397,3 +398,17 @@ JVM_END
 JVM_ENTRY_NO_ENV(void, jfr_emit_data_loss(JNIEnv* env, jclass jvm, jlong bytes))
   EventDataLoss::commit(bytes, min_jlong);
 JVM_END
+
+NO_TRANSITION(void, jfr_set_used_context_size(JNIEnv* env, jclass jvm, jint size))
+  JfrContext::set_used_context_size(size);
+NO_TRANSITION_END
+
+NO_TRANSITION(jboolean, jfr_is_context_enabled(JNIEnv* env, jclass jvmf))
+  return JfrOptionSet::is_context_enabled();
+NO_TRANSITION_END
+
+NO_TRANSITION(jobject, jfr_get_thread_context_buffer(JNIEnv* env, jclass jvm))
+  uint64_t* data;
+  uint8_t size = JfrContext::get_context(&data);
+  return env->NewDirectByteBuffer((void*)data, (jlong) size * 8);
+NO_TRANSITION_END

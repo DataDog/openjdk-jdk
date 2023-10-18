@@ -27,6 +27,7 @@ package jdk.jfr.internal;
 
 import jdk.internal.org.objectweb.asm.commons.Method;
 import jdk.jfr.internal.EventInstrumentation.FieldInfo;
+import jdk.jfr.internal.context.ContextEventWriter;
 import jdk.jfr.internal.event.EventConfiguration;
 
 public enum EventWriterMethod {
@@ -45,7 +46,8 @@ public enum EventWriterMethod {
     PUT_CLASS("(Ljava/lang/Class;)V", Type.CLASS.getName(), "putClass"),
     PUT_STRING("(Ljava/lang/String;)V", Type.STRING.getName(), "putString"),
     PUT_EVENT_THREAD("()V", Type.THREAD.getName(), "putEventThread"),
-    PUT_STACK_TRACE("()V", Type.TYPES_PREFIX + "StackTrace", "putStackTrace");
+    PUT_STACK_TRACE("()V", Type.TYPES_PREFIX + "StackTrace", "putStackTrace"),
+    PUT_CONTEXT_FIELDS("()V", ContextEventWriter.class.getName(), "putContext");
 
     final Method asmMethod;
     final String typeDescriptor;

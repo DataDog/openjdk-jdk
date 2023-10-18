@@ -47,6 +47,7 @@ class JfrOptionSet : public AllStatic {
   static u4 _stack_depth;
   static jboolean _retransform;
   static jboolean _sample_protection;
+  static jboolean _context;
 
   static bool initialize(JavaThread* thread);
   static bool configure(TRAPS);
@@ -74,6 +75,12 @@ class JfrOptionSet : public AllStatic {
   static bool allow_event_retransforms();
   static bool sample_protection();
   DEBUG_ONLY(static void set_sample_protection(jboolean protection);)
+  static void enable_context() {
+    _context = true;
+  }
+  static bool is_context_enabled() {
+    return true; // _context;
+  }
 
   static bool parse_flight_recorder_option(const JavaVMOption** option, char* delimiter);
   static bool parse_start_flight_recording_option(const JavaVMOption** option, char* delimiter);

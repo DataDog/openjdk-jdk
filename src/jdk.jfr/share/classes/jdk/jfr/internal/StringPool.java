@@ -110,11 +110,15 @@ public final class StringPool {
      * of the EventWriter ensures that committed strings are in the correct generation.
      */
     public static long addString(String s) {
+        return addString(s, true);
+    }
+
+    public static long addString(String s, boolean usePrecache) {
         Long lsid = cache.get(s);
         if (lsid != null) {
             return ensureCurrentGeneration(s, lsid);
         }
-        if (!preCache(s)) {
+        if (usePrecache && !preCache(s)) {
             /* we should not pool this string */
             return DO_NOT_POOL;
         }
@@ -123,6 +127,10 @@ public final class StringPool {
             reset();
         }
         return storeString(s);
+    }
+
+    public static boolean hasString(String s) {
+        return cache.containsKey(s);
     }
 
     private static boolean preCache(String s) {

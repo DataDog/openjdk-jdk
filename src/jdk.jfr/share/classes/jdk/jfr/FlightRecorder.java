@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,19 +25,23 @@
 
 package jdk.jfr;
 
-import static jdk.jfr.internal.LogLevel.DEBUG;
-import static jdk.jfr.internal.LogLevel.INFO;
-import static jdk.jfr.internal.LogTag.JFR;
-
 import java.security.AccessControlContext;
 import java.security.AccessController;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.ServiceLoader;
+import java.util.StringTokenizer;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 import jdk.jfr.internal.JVM;
 import jdk.jfr.internal.JVMSupport;
+import static jdk.jfr.internal.LogLevel.DEBUG;
+import static jdk.jfr.internal.LogLevel.INFO;
+import static jdk.jfr.internal.LogTag.JFR;
 import jdk.jfr.internal.Logger;
 import jdk.jfr.internal.MetadataRepository;
 import jdk.jfr.internal.Options;
@@ -45,8 +49,9 @@ import jdk.jfr.internal.PlatformRecorder;
 import jdk.jfr.internal.PlatformRecording;
 import jdk.jfr.internal.Repository;
 import jdk.jfr.internal.SecuritySupport;
-import jdk.jfr.internal.Utils;
+import jdk.jfr.internal.context.ContextRepository;
 import jdk.jfr.internal.periodic.PeriodicEvents;
+import jdk.jfr.internal.util.Utils;
 
 /**
  * Class for accessing, controlling, and managing Flight Recorder.
@@ -169,6 +174,11 @@ public final class FlightRecorder {
             JVMSupport.ensureWithIllegalStateException();
             if (platformRecorder == null) {
                 try {
+                    Logger.log(JFR, DEBUG, "Automatically registering available context types");
+                    for (ContextType.Registration reg : ServiceLoader.load( ContextType.Registration.class)) {
+                        reg.types().forEach(ContextRepository::getOrRegister);
+                    }
+
                     platformRecorder = new FlightRecorder(new PlatformRecorder());
                 } catch (IllegalStateException ise) {
                     throw ise;
@@ -244,6 +254,16 @@ public final class FlightRecorder {
             return false;
         }
         return PeriodicEvents.removeEvent(hook);
+    }
+
+    @SuppressWarnings("unchecked")
+    public static boolean registerContext(Class<? extends ContextType> ctxType) {
+        Name typeNameAnnot = ctxType.getAnnotation(Name.class);
+        if (typeNameAnnot == null) {
+            throw new IllegalArgumentException("Context type must be annotated by @Name");
+        }
+        String id = typeNameAnnot.value();
+        return ContextRepository.getOrRegister(ctxType).isActive();
     }
 
     /**

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,7 +33,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
-
 import jdk.internal.org.objectweb.asm.ClassReader;
 import jdk.internal.org.objectweb.asm.ClassWriter;
 import jdk.internal.org.objectweb.asm.Label;
@@ -45,6 +44,7 @@ import jdk.internal.org.objectweb.asm.tree.AnnotationNode;
 import jdk.internal.org.objectweb.asm.tree.ClassNode;
 import jdk.internal.org.objectweb.asm.tree.FieldNode;
 import jdk.internal.org.objectweb.asm.tree.MethodNode;
+import jdk.jfr.ContextAware;
 import jdk.jfr.Enabled;
 import jdk.jfr.Event;
 import jdk.jfr.Name;
@@ -77,6 +77,7 @@ public final class EventInstrumentation {
     private static final String ANNOTATION_NAME_DESCRIPTOR = Type.getDescriptor(Name.class);
     private static final String ANNOTATION_REGISTERED_DESCRIPTOR = Type.getDescriptor(Registered.class);
     private static final String ANNOTATION_ENABLED_DESCRIPTOR = Type.getDescriptor(Enabled.class);
+    private static final String ANNOTATION_CONTEXT_AWARE_DESCRIPTOR = Type.getDescriptor(ContextAware.class);
     private static final Type TYPE_EVENT_CONFIGURATION = Type.getType(EventConfiguration.class);
     private static final Type TYPE_EVENT_WRITER = Type.getType(EventWriter.class);
     private static final Type TYPE_EVENT_WRITER_FACTORY = Type.getType("Ljdk/jfr/internal/event/EventWriterFactory;");
@@ -190,8 +191,23 @@ public final class EventInstrumentation {
         return true;
     }
 
+    boolean isContextAware() {
+        if (hasAnnotation(classNode, ANNOTATION_CONTEXT_AWARE_DESCRIPTOR)) {
+            return true;
+        }
+        if (superClass != null) {
+            return superClass.getAnnotation(ContextAware.class) != null;
+        }
+        return false;
+    }
+
+
+    private static <T> T annotationValue(ClassNode classNode, String typeDescriptor, Class<T> type) {
+        return annotationValue(classNode, typeDescriptor, type, null);
+    }
+
     @SuppressWarnings("unchecked")
-    private static <T> T annotationValue(ClassNode classNode, String typeDescriptor, Class<?> type) {
+    private static <T> T annotationValue(ClassNode classNode, String typeDescriptor, Class<T> type,  T dfltValue) {
         if (classNode.visibleAnnotations != null) {
             for (AnnotationNode a : classNode.visibleAnnotations) {
                 if (typeDescriptor.equals(a.desc)) {
@@ -206,11 +222,25 @@ public final class EventInstrumentation {
                                 }
                             }
                         }
+                    } else {
+                        // use the default value
+                        return dfltValue;
                     }
                 }
             }
         }
         return null;
+    }
+
+    private static boolean hasAnnotation(ClassNode classNode, String typeDescriptor) {
+        if (classNode.visibleAnnotations != null) {
+            for (AnnotationNode a : classNode.visibleAnnotations) {
+                if (typeDescriptor.equals(a.desc)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static List<SettingInfo> buildSettingInfos(Class<?> superClass, ClassNode classNode) {
@@ -326,6 +356,8 @@ public final class EventInstrumentation {
     }
 
     private void makeInstrumented() {
+        boolean contextAware = isContextAware();
+
         // MyEvent#isEnabled()
         updateEnabledMethod(METHOD_IS_ENABLED);
 
@@ -407,6 +439,13 @@ public final class EventInstrumentation {
                 mv.visitInsn(Opcodes.DUP);
                 // stack: [EW], [EW]
                 visitMethod(mv, Opcodes.INVOKEVIRTUAL, TYPE_EVENT_WRITER, EventWriterMethod.PUT_STACK_TRACE.asASM());
+                // stack: [EW]
+                if (contextAware) {
+                    // write _ctx_*
+                    mv.visitInsn(Opcodes.DUP);
+                    // stack: [EW], [EW]
+                    visitMethod(mv, Opcodes.INVOKEVIRTUAL, TYPE_EVENT_WRITER, EventWriterMethod.PUT_CONTEXT_FIELDS.asASM());
+                }
                 // stack: [EW]
                 // write custom fields
                 while (fieldIndex < fieldInfos.size()) {
@@ -554,6 +593,13 @@ public final class EventInstrumentation {
                 methodVisitor.visitInsn(Opcodes.DUP);
                 // stack: [EW] [EW]
                 invokeVirtual(methodVisitor, TYPE_EVENT_WRITER, EventWriterMethod.PUT_STACK_TRACE.asASM());
+                // stack: [EW]
+                if (contextAware) {
+                    // write _ctx_*
+                    methodVisitor.visitInsn(Opcodes.DUP);
+                    // stack: [EW], [EW]
+                    visitMethod(methodVisitor, Opcodes.INVOKEVIRTUAL, TYPE_EVENT_WRITER, EventWriterMethod.PUT_CONTEXT_FIELDS.asASM());
+                }
                 // stack: [EW]
                 while (fieldIndex < fieldInfos.size()) {
                     FieldInfo field = fieldInfos.get(fieldIndex);

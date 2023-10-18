@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,10 +25,15 @@
 
 package jdk.jfr.internal;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.LongBuffer;
 import java.util.List;
-
+import jdk.internal.access.JFRContextAccess;
+import jdk.internal.access.SharedSecrets;
 import jdk.internal.vm.annotation.IntrinsicCandidate;
 import jdk.jfr.Event;
+import jdk.jfr.internal.context.ContextRepository;
 import jdk.jfr.internal.event.EventConfiguration;
 import jdk.jfr.internal.event.EventWriter;
 
@@ -50,7 +55,7 @@ public final class JVM {
      */
     public static final Object CHUNK_ROTATION_MONITOR = new ChunkRotationMonitor();
 
-    private volatile boolean nativeOK;
+    private volatile static boolean nativeOK;
 
     private static native void registerNatives();
 
@@ -60,6 +65,17 @@ public final class JVM {
             subscribeLogLevel(tag, tag.id);
         }
         Options.ensureInitialized();
+
+        if (Options.isContextEnabled()) {
+            SharedSecrets.setJFRContextAccess(new JFRContextAccess() {
+                public int getAllContext(long[] data, int size) {
+                    return JVM.getAllContext(data, size);
+                }
+                public void setAllContext(long[] data) {
+                    JVM.setAllContext(data);
+                }
+            });
+        }
     }
 
     /**
@@ -628,4 +644,27 @@ public final class JVM {
      * @param bytes number of bytes that were lost
      */
     public static native void emitDataLoss(long bytes);
+
+    public static native void setUsedContextSize(int size);
+    public static int getAllContext(long[] context, int length) {
+        LongBuffer buffer = getThreadContextBuffer();
+        int toCopy = Math.min(buffer.limit(), length);
+        buffer.rewind().get(0, context, 0, toCopy);
+        return toCopy;
+    }
+    public static void setAllContext(long[] context) {
+        LongBuffer buffer = getThreadContextBuffer();
+        int toCopy = Math.min(buffer.limit(), context.length);
+        buffer.put(0, context, 0, toCopy).rewind();
+    }
+    public static native boolean isContextEnabled();
+
+    private static final ThreadLocal<LongBuffer> threadContextBufferRef = ThreadLocal.withInitial(JVM::initializeContextBuffer);
+    public static LongBuffer getThreadContextBuffer() {
+        return threadContextBufferRef.get();
+    }
+    private static final LongBuffer initializeContextBuffer() {
+        return ((ByteBuffer)getThreadContextBuffer0()).order(ByteOrder.LITTLE_ENDIAN).asLongBuffer();
+    }
+    private static native Object getThreadContextBuffer0();
 }

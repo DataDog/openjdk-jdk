@@ -28,6 +28,7 @@
 #include "jfr/recorder/jfrEventSetting.inline.hpp"
 #include "jfr/recorder/service/jfrEventThrottler.hpp"
 #include "jfr/recorder/stacktrace/jfrStackTraceRepository.hpp"
+#include "jfr/support/jfrContext.hpp"
 #include "jfr/utilities/jfrTime.hpp"
 #include "jfr/utilities/jfrTypes.hpp"
 #include "jfr/writers/jfrNativeEventWriter.hpp"
@@ -242,6 +243,13 @@ class JfrEvent {
     }
     if (T::hasStackTrace) {
       writer.write(sid);
+    }
+    if (T::hasContext) {
+      uint64_t* data;
+      uint8_t ctx_len = JfrContext::get_context(&data);
+      for (uint8_t i = 0; i < ctx_len; i++) {
+        writer.write(data[i]);
+      }
     }
     // Payload.
     static_cast<T*>(this)->writeData(writer);
