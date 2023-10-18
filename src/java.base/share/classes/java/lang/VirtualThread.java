@@ -24,6 +24,7 @@
  */
 package java.lang;
 
+import java.lang.ref.Reference;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.Locale;
@@ -304,7 +305,7 @@ final class VirtualThread extends BaseVirtualThread {
             event.commit();
         }
 
-        Object bindings = Thread.scopedValueBindings();
+        Object bindings = scopedValueBindings();
         try {
             runWith(bindings, task);
         } catch (Throwable exc) {
