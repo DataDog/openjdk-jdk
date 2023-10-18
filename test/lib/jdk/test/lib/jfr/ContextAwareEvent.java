@@ -27,8 +27,10 @@ package jdk.test.lib.jfr;
 
 import jdk.jfr.ContextAware;
 import jdk.jfr.Event;
+import jdk.jfr.Name;
 
 @ContextAware
+@Name("test.ContextAware")
 public class ContextAwareEvent extends Event {
     public ContextAwareEvent(int id) {
         this.id = id;

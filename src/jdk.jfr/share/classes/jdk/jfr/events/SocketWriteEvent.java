@@ -26,6 +26,7 @@
 package jdk.jfr.events;
 
 import jdk.jfr.Category;
+import jdk.jfr.ContextAware;
 import jdk.jfr.Description;
 import jdk.jfr.Label;
 import jdk.jfr.DataAmount;
@@ -36,6 +37,7 @@ import jdk.jfr.internal.Type;
 @Label("Socket Write")
 @Category("Java Application")
 @Description("Writing data to a socket")
+@ContextAware
 public final class SocketWriteEvent extends AbstractJDKEvent {
 
     // The order of these fields must be the same as the parameters in

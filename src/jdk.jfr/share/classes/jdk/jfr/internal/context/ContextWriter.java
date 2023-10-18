@@ -1,17 +1,19 @@
 package jdk.jfr.internal.context;
 
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.VarHandle;
 import java.nio.LongBuffer;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import jdk.jfr.ContextType;
+import jdk.jfr.ContextAccess;
 import jdk.jfr.internal.JVM;
 import jdk.jfr.internal.StringPool;
 
-public final class ContextWriter implements ContextType.Setter {
-    static final ContextWriter NULL = new ContextWriter(-1, null);
+public final class ContextWriter<T> implements ContextAccess<T> {
+    static final ContextWriter<?> NULL = new ContextWriter<>(-1, null);
     private final int offset;
     private final Set<ContextDescriptor> descriptors;
     private final Map<String, ContextDescriptor> attributeIndexMap;
@@ -26,7 +28,8 @@ public final class ContextWriter implements ContextType.Setter {
         return offset != -1;
     }
 
-    void write(BaseContextType target) {
+    @Override
+    public void set(T target) {
         if (offset == -1 || descriptors == null) {
             return;
         }
@@ -36,13 +39,47 @@ public final class ContextWriter implements ContextType.Setter {
         }
         for (ContextDescriptor cd : descriptors) {
             if (cd.order() < 8) {
-                String value = (String) cd.access().get(target);
-                context.put(offset + cd.order(), value != null ? StringPool.addString(value, false) : 0);
+                VarHandle fAccess = cd.fAccess();
+                if (fAccess != null) {
+                    Class<?> vType = fAccess.varType();
+                    if (vType == String.class) {
+                        String value = (String) fAccess.get(target);
+                        context.put(offset + cd.order(), value != null ? StringPool.addString(value, false) : 0);
+                    } else if (vType == boolean.class) {
+                        context.put(offset + cd.order(), ((boolean) fAccess.get(target) ? 0 : 1));
+                    } else {
+                        context.put(offset + cd.order(), (long) fAccess.get(target));
+                    }
+                } else {
+                    MethodHandle mAccess = cd.mAccess();
+                    if (mAccess != null) {
+                        Class<?> vType = mAccess.type().returnType();
+                        try {
+                            if (vType.isAssignableFrom(String.class)) {
+                                String value = (String) mAccess.invoke(target);
+                                context.put(offset + cd.order(), value != null ? StringPool.addString(value, false) : 0);
+                            } else if (vType == boolean.class) {
+                                context.put(offset + cd.order(), ((boolean) mAccess.invoke(target) ? 0 : 1));
+                            } else {
+                                context.put(offset + cd.order(), (long) mAccess.invoke(target));
+                            }
+                        } catch (Throwable t) {
+                            throw new RuntimeException(t);
+                        }
+                    } else {
+                        throw new IllegalStateException("Invalid context field descriptor: neither field nor method");
+                    }
+                }
             }
         }
     }
 
-    void clear(BaseContextType target) {
+    @Override
+    public void unset() {
+        unset(null);
+    }
+
+    public void unset(T target) {
         if (offset == -1 || descriptors == null) {
             return;
         }
@@ -53,61 +90,17 @@ public final class ContextWriter implements ContextType.Setter {
         for (ContextDescriptor cd : descriptors) {
             if (cd.order() < 8) {
                 context.put(offset + cd.order(), 0L);
-                cd.access().set(target, null);
+                if (target != null) {
+                    VarHandle access = cd.fAccess();
+                    if (access != null) {
+                        if (access.varType() == String.class) {
+                            access.set(target, null);
+                        } else {
+                            access.set(target, 0);
+                        }
+                    }
+                }
             }
         }
-    }
-
-    @Override
-    public void clearAll() {
-        if (offset == -1 || descriptors == null) {
-            return;
-        }
-        LongBuffer context = JVM.getThreadContextBuffer();
-        if (context == null) {
-            return;
-        }
-        for (ContextDescriptor cd : descriptors) {
-            context.put(offset + cd.order(), 0L);
-        }
-    }
-
-    @Override
-    public void setAttribute(String name, String value) {
-        LongBuffer context = JVM.getThreadContextBuffer();
-        if (context == null) {
-            return;
-        }
-        int pos = getContextIndex(name, String.class);
-        if (pos < 0) {
-            System.err.println("===> set err: " + name + ": " + pos);
-            return;
-        }
-        context.put(pos, StringPool.addString(value, false));
-    }
-
-    @Override
-    public void clearAttribute(String name) {
-        LongBuffer context = JVM.getThreadContextBuffer();
-        if (context == null) {
-            return;
-        }
-        int pos = getContextIndex(name, String.class);
-        if (pos < 0) {
-            System.err.println("===> clear err: " + name + ": " + pos);
-            return;
-        }
-        context.put(pos, 0);
-    }
-
-    private int getContextIndex(String name, Class<?> type) {
-        ContextDescriptor cd = attributeIndexMap.get(name);
-        if (cd == null) {
-            return -1;
-        }
-        if (cd.access().varType() != type) {
-            return -2;
-        }
-        return offset + cd.order();
     }
 }

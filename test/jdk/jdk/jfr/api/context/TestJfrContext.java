@@ -54,7 +54,10 @@ public class TestJfrContext {
 
         @Name("result")
         @Description("TRUE/FALSE")
-        public String result; 
+        public boolean result;
+
+        @Name("value")
+        public byte value;
     }
 
     @Name("too_large")
@@ -99,7 +102,8 @@ public class TestJfrContext {
 
         TestContextType captured = new TestContextType();
         captured.state = "enabled";
-        captured.result = "FALSE";
+        captured.result = false;
+        captured.value = -1;
         captured.set();
 
         ClassLoader classLoader = TestJfrContext.class.getClassLoader();
@@ -115,7 +119,8 @@ public class TestJfrContext {
         }
         r.enable(eventClass).withThreshold(Duration.ofMillis(0)).withoutStackTrace();
         captured.state = "disabled";
-        captured.result = "TRUE";
+        captured.result = true;
+        captured.value = 1;
         captured.set();
         synchronized (captured) {
             TooLargeContextType tlct = new TooLargeContextType();

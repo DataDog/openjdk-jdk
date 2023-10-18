@@ -352,12 +352,24 @@ public final class TypeLibrary {
             type.add(STACK_TRACE_FIELD);
         }
         if (hasContext) {
-            var fldSuffix = 1;
             for (var descriptor : ContextRepository.registrations()) {
                 String name = descriptor.holderId() + "_" + descriptor.name();
                 var annos = createStandardAnnotations(name, descriptor.holderId() + ":" + descriptor.label(), descriptor.description());
-                type.add(PrivateAccess.getInstance().newValueDescriptor(name, Type.STRING, annos, 0, true, name));
-                fldSuffix++;
+                Class<?> varType = null;
+                if (descriptor.fAccess() != null) {
+                    varType = descriptor.fAccess().varType();
+                } else if (descriptor.mAccess() != null) {
+                    varType = descriptor.mAccess().type().returnType();
+                } else {
+                    throw new IllegalStateException("A context field descriptor must have associated type field or method");
+                }
+                Type fType = Type.LONG;
+                if (varType.isAssignableFrom(String.class)) {
+                    fType = Type.STRING;
+                } else if (varType == boolean.class) {
+                    fType = Type.BOOLEAN;
+                }
+                type.add(PrivateAccess.getInstance().newValueDescriptor(name, fType, annos, 0, fType == Type.STRING, name));
             }
         }
     }

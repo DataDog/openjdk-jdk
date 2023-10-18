@@ -26,6 +26,7 @@
 package jdk.jfr.events;
 
 import jdk.jfr.Category;
+import jdk.jfr.ContextAware;
 import jdk.jfr.Label;
 import jdk.jfr.Name;
 import jdk.jfr.Timespan;
@@ -35,6 +36,7 @@ import jdk.jfr.internal.MirrorEvent;
 @Label("Java Thread Sleep")
 @Name("jdk.ThreadSleep")
 @MirrorEvent(className = "jdk.internal.event.ThreadSleepEvent")
+@ContextAware
 public final class ThreadSleepEvent extends AbstractJDKEvent {
     @Label("Sleep Time")
     @Timespan(Timespan.NANOSECONDS)

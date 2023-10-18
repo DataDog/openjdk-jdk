@@ -26,6 +26,7 @@
 package jdk.jfr.events;
 
 import jdk.jfr.Category;
+import jdk.jfr.ContextAware;
 import jdk.jfr.Description;
 import jdk.jfr.Label;
 import jdk.jfr.DataAmount;
@@ -37,6 +38,7 @@ import jdk.jfr.internal.Type;
 @Label("Socket Read")
 @Category("Java Application")
 @Description("Reading data from a socket")
+@ContextAware
 public final class SocketReadEvent extends AbstractJDKEvent {
 
     // The order of these fields must be the same as the parameters in

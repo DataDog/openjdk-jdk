@@ -359,7 +359,7 @@
     <Field type="Tickspan" name="longestPause" label="Longest Pause" description="Longest individual pause during the garbage collection" />
   </Event>
 
-  <Event name="SystemGC" category="Java Virtual Machine, GC, Collector" label="System GC" stackTrace="true" startTime="true" thread="true">
+  <Event name="SystemGC" category="Java Virtual Machine, GC, Collector" label="System GC" stackTrace="true" startTime="true" thread="true" withContext="true">
     <Field type="boolean" name="invokedConcurrent" label="Invoked Concurrent" />
   </Event>
 
@@ -715,14 +715,14 @@
   </Event>
 
   <Event name="ObjectAllocationInNewTLAB" category="Java Application" label="Allocation in new TLAB" description="Allocation in new Thread Local Allocation Buffer"
-    thread="true" stackTrace="true" startTime="false">
+    thread="true" stackTrace="true" startTime="false" withContext="true">
     <Field type="Class" name="objectClass" label="Object Class" description="Class of allocated object" />
     <Field type="ulong" contentType="bytes" name="allocationSize" label="Allocation Size" />
     <Field type="ulong" contentType="bytes" name="tlabSize" label="TLAB Size" />
   </Event>
 
   <Event name="ObjectAllocationOutsideTLAB" category="Java Application" label="Allocation outside TLAB" description="Allocation outside Thread Local Allocation Buffers"
-    thread="true" stackTrace="true" startTime="false">
+    thread="true" stackTrace="true" startTime="false" withContext="true">
     <Field type="Class" name="objectClass" label="Object Class" description="Class of allocated object" />
     <Field type="ulong" contentType="bytes" name="allocationSize" label="Allocation Size" />
   </Event>
@@ -922,7 +922,7 @@
   </Event>
 
   <Event name="NativeMethodSample" category="Java Virtual Machine, Profiling" label="Method Profiling Sample Native" description="Snapshot of a threads state when in native"
-    period="everyChunk">
+    period="everyChunk" withContext="true">
     <Field type="Thread" name="sampledThread" label="Thread" />
     <Field type="StackTrace" name="stackTrace" label="Stack Trace" />
     <Field type="ThreadState" name="state" label="Thread State" />
@@ -1118,7 +1118,7 @@
     <Field type="uint" name="gcId" label="GC Identifier" relation="GcId" />
   </Event>
 
-  <Event name="ZAllocationStall" category="Java Virtual Machine, GC, Detailed" label="ZGC Allocation Stall" description="Time spent waiting for memory to become available" thread="true">
+  <Event name="ZAllocationStall" category="Java Virtual Machine, GC, Detailed" label="ZGC Allocation Stall" description="Time spent waiting for memory to become available" thread="true" withContext="true">
     <Field type="ZPageTypeType" name="type" label="Type" />
     <Field type="ulong" contentType="bytes" name="size" label="Size" />
   </Event>
