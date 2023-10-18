@@ -6,7 +6,9 @@ import java.lang.invoke.MethodType;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import jdk.jfr.ContextType;
@@ -48,12 +50,13 @@ public final class ContextRepository {
         return contextWriters.get(contextTypeClass);
     }
 
-    private static <T extends BaseContextType> List<ContextDescriptor> descriptorsOf(Class<T> contextTypeClass) {
+    private static <T extends BaseContextType> Set<ContextDescriptor> descriptorsOf(Class<T> contextTypeClass) {
         try {
-            List<ContextDescriptor> ctxDescriptors = new ArrayList<>(8);
+            Set<ContextDescriptor> ctxDescriptors = new HashSet<>(8);
             Name typeNameAnnot = contextTypeClass.getAnnotation(Name.class);
             String id = typeNameAnnot.value();
             MethodHandles.Lookup lookup = MethodHandles.publicLookup();
+            int order = 0;
             for (Field f : contextTypeClass.getFields()) {
                 Name nameAnnot = f.getAnnotation(Name.class);
                 Label labelAnnot = f.getAnnotation(Label.class);
@@ -62,7 +65,7 @@ public final class ContextRepository {
                     String name = nameAnnot != null ? nameAnnot.value() : f.getName();
                     String label = labelAnnot != null ? labelAnnot.value() : name;
                     String desc = descAnnot != null ? descAnnot.value() : "";
-                    ctxDescriptors.add(new ContextDescriptor(id, name, label, desc, lookup.unreflectVarHandle(f)));
+                    ctxDescriptors.add(new ContextDescriptor(order++, id, name, label, desc, lookup.unreflectVarHandle(f)));
                 }
             }
             return ctxDescriptors;
@@ -72,7 +75,7 @@ public final class ContextRepository {
     }
 
     private static <T extends BaseContextType> ContextWriter writerFor(Class<T> type) {
-        List<ContextDescriptor> ctxDescriptors = descriptorsOf(type);
+        Set<ContextDescriptor> ctxDescriptors = descriptorsOf(type);
         int offset = register(ctxDescriptors);
         if (offset == -2) {
             Logger.log(JFR, INFO,
@@ -85,7 +88,7 @@ public final class ContextRepository {
         return offset > -1 ? new ContextWriter(offset, ctxDescriptors) : ContextWriter.NULL;
     }
 
-    private static int register(List<ContextDescriptor> descriptors) {
+    private static int register(Set<ContextDescriptor> descriptors) {
         if (!shouldCaptureState()) {
             return -1;
         }
@@ -96,12 +99,12 @@ public final class ContextRepository {
             return -3;
         }
         final int offset = slotPointer;
-        int idx = 0;
+        int top = 0;
         for (var descriptor : descriptors) {
-            allDescriptors[idx + slotPointer] = descriptor;
-            idx++;
+            allDescriptors[descriptor.order() + slotPointer] = descriptor;
+            top = Math.max(top, descriptor.order());
         }
-        slotPointer += idx;
+        slotPointer += top + 1;
         JVM.setUsedContextSize(slotPointer);
         return offset;
     }

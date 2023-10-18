@@ -1,5 +1,6 @@
 package jdk.jfr.internal.context;
 
+import jdk.jfr.ContextType;
 import jdk.jfr.FlightRecorder;
 import jdk.jfr.internal.JVM;
 import jdk.jfr.internal.PlatformRecorder;
@@ -23,5 +24,9 @@ public abstract class BaseContextType {
 
     private static boolean shouldCaptureState() {
         return FlightRecorder.isInitialized() && PlatformRecorder.hasRecordings() && JVM.isContextEnabled();
+    }
+
+    public static ContextType.Setter setterFor(Class<? extends ContextType> type) {
+        return ContextRepository.getOrRegister(type);
     }
 }

@@ -15,8 +15,14 @@ import jdk.jfr.internal.context.BaseContextType;
 import jdk.jfr.internal.context.ContextRepository;
 
 public abstract class ContextType extends BaseContextType {
-    public static interface Registration {
+    public interface Registration {
         Stream<Class<? extends ContextType>> types();
+    }
+
+    public interface Setter {
+        void setAttribute(String name, String value);
+        void clearAttribute(String name);
+        void clearAll();
     }
 
     public static final class Captured<T extends ContextType.Capturable<T>> implements Closeable, AutoCloseable {
@@ -55,4 +61,8 @@ public abstract class ContextType extends BaseContextType {
     }
 
     protected ContextType() {}
+
+    public static Setter setterFor(Class<? extends ContextType> type) {
+        return BaseContextType.setterFor(type);
+    }
 }
