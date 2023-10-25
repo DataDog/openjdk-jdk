@@ -237,6 +237,11 @@ class Method : public Metadata {
 
   // constant pool for Klass* holding this method
   ConstantPool* constants() const              { return constMethod()->constants(); }
+  // constant pool for Klass* holding this method or nullptr if it can't be accessed safely
+  ConstantPool* constants_safe() const              {
+     ConstMethod* method = constMethod();
+     return os::is_readable_pointer(method) ? method->constants() : nullptr; 
+  }
   void set_constants(ConstantPool* c)          { constMethod()->set_constants(c); }
 
   // max stack
@@ -485,6 +490,11 @@ public:
 
   // method holder (the Klass* holding this method)
   InstanceKlass* method_holder() const         { return constants()->pool_holder(); }
+  // method holder (the Klass* holding this method) or nullptr if can't be accessed safely
+  InstanceKlass* method_holder_safe() const         { 
+    ConstantPool* cp = constants_safe();
+    return os::is_readable_pointer(cp) ? cp->pool_holder() : nullptr; 
+  }
 
   Symbol* klass_name() const;                    // returns the name of the method holder
   BasicType result_type() const                  { return constMethod()->result_type(); }

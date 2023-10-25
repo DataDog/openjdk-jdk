@@ -682,6 +682,7 @@ protected:
   virtual MetaspaceObj::Type type() const { return ClassType; }
 
   inline bool is_loader_alive() const;
+  inline bool is_loader_alive_safe() const;
 
   void clean_subklass();
 

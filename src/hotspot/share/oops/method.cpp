@@ -125,6 +125,10 @@ Method::Method(ConstMethod* xconst, AccessFlags access_flags, Symbol* name) {
 // Release Method*.  The nmethod will be gone when we get here because
 // we've walked the code cache.
 void Method::deallocate_contents(ClassLoaderData* loader_data) {
+  // jmethodID mid = jmethod_id();
+  // if (!(mid == nullptr || *((Method**)mid) == nullptr)){
+  //   fprintf(stdout, "!!! jmethodid not cleared out\n");
+  // }
   MetadataFactory::free_metadata(loader_data, constMethod());
   set_constMethod(nullptr);
   MetadataFactory::free_metadata(loader_data, method_data());
@@ -137,6 +141,10 @@ void Method::deallocate_contents(ClassLoaderData* loader_data) {
 
 void Method::release_C_heap_structures() {
   if (method_data()) {
+    // jmethodID mid = jmethod_id();
+    // if (!(mid == nullptr || *((Method**)mid) == nullptr)){
+    //   fprintf(stdout, "!!! jmethodid not cleared out\n");
+    // }
     method_data()->release_C_heap_structures();
 
     // Destroy MethodData embedded lock
@@ -2231,12 +2239,16 @@ Method* Method::checked_resolve_jmethod_id(jmethodID mid) {
   if (o == nullptr || o == JNIMethodBlock::_free_method) {
     return nullptr;
   }
+  InstanceKlass* method_holder = o->method_holder_safe();
+  if (method_holder == nullptr || !os::is_readable_pointer(method_holder)) {
+    return nullptr;
+  }
   // Method should otherwise be valid. Assert for testing.
   assert(is_valid_method(o), "should be valid jmethodid");
   // If the method's class holder object is unreferenced, but not yet marked as
   // unloaded, we need to return null here too because after a safepoint, its memory
   // will be reclaimed.
-  return o->method_holder()->is_loader_alive() ? o : nullptr;
+  return method_holder->is_loader_alive_safe() ? o : nullptr;
 };
 
 void Method::set_on_stack(const bool value) {

@@ -52,6 +52,11 @@ inline bool Klass::is_loader_alive() const {
   return class_loader_data()->is_alive();
 }
 
+inline bool Klass::is_loader_alive_safe() const {
+  ClassLoaderData* cld = class_loader_data();
+  return os::is_readable_pointer(cld) ? cld->is_alive() : false;
+}
+
 inline oop Klass::java_mirror() const {
   return _java_mirror.resolve();
 }
