@@ -528,7 +528,7 @@ InstanceKlass::InstanceKlass(const ClassFileParser& parser, KlassKind kind, Refe
 }
 
 void InstanceKlass::deallocate_methods(ClassLoaderData* loader_data,
-                                       Array<Method*>* methods) {
+                                       Array<Method*>* methods, InstanceKlass* klass) {
   if (methods != nullptr && methods != Universe::the_empty_method_array() &&
       !methods->is_shared()) {
     for (int i = 0; i < methods->length(); i++) {
@@ -537,6 +537,17 @@ void InstanceKlass::deallocate_methods(ClassLoaderData* loader_data,
       // Only want to delete methods that are not executing for RedefineClasses.
       // The previous version will point to them so they're not totally dangling
       assert (!method->on_stack(), "shouldn't be called with methods on stack");
+      if (klass) {
+        jmethodID jmid = method->find_jmethod_id_or_null();
+        // Do the pointer maintenance before releasing the metadata, just in case
+        // We need to make sure that jmethodID actually resolves to this method
+        // - multiple redefined versions may share jmethodID slots and if a method
+        //   has already been rewired to a newer version we could be removing reference
+        //   to a still existing method instance
+        if (jmid != nullptr && *((Method**)jmid) == method) {
+          *((Method**)jmid) = nullptr;
+        }
+      }
       MetadataFactory::free_metadata(loader_data, method);
     }
     MetadataFactory::free_array<Method*>(loader_data, methods);
@@ -604,7 +615,7 @@ void InstanceKlass::deallocate_contents(ClassLoaderData* loader_data) {
   // redefine classes.  MethodData can also be released separately.
   release_C_heap_structures(/* release_sub_metadata */ false);
 
-  deallocate_methods(loader_data, methods());
+  deallocate_methods(loader_data, methods(), this);
   set_methods(nullptr);
 
   deallocate_record_components(loader_data, record_components());
