@@ -26,6 +26,7 @@
 package com.sun.jmx.interceptor;
 
 
+import com.sun.jmx.annotations.AnnotatedMBeanIntrospector;
 // JMX RI
 import static com.sun.jmx.defaults.JmxProperties.MBEANSERVER_LOGGER;
 import com.sun.jmx.mbeanserver.DynamicMBean2;
@@ -292,6 +293,8 @@ public class DefaultMBeanServerInterceptor implements MBeanServerInterceptor {
         Object moi= instantiator.instantiate(theClass, params,  signature,
                                              server.getClass().getClassLoader());
 
+        moi = wrapAnnotatedMBean(moi);
+
         final String infoClassName = getNewMBeanClassName(moi);
 
         return registerObject(infoClassName, moi, name);
@@ -306,6 +309,8 @@ public class DefaultMBeanServerInterceptor implements MBeanServerInterceptor {
         Class<?> theClass = object.getClass();
 
         Introspector.checkCompliance(theClass);
+
+        object = wrapAnnotatedMBean(object);
 
         final String infoClassName = getNewMBeanClassName(object);
 
@@ -2014,5 +2019,23 @@ public class DefaultMBeanServerInterceptor implements MBeanServerInterceptor {
                 return instantiator != null ? instantiator.getClassLoaderRepository() : null;
             }
         });
+    }
+
+    /**
+     * Will try to wrap the instance of an annotated MBean class as a DynamicMBean instance
+     * @param moi The instance to be wrapped
+     * @return Returns the DynamicMBean wrapper or the original instance if the class is not properly annotated
+     * @throws MBeanException Any exceptions raised during building the wrapper are propagated as {@linkplain MBeanException}
+     */
+    private Object wrapAnnotatedMBean(Object moi) throws NotCompliantMBeanException {
+        try {
+            DynamicMBean annotatedBean = AnnotatedMBeanIntrospector.toMBean(moi);
+            if (annotatedBean != null) {
+                moi = annotatedBean;
+            }
+        } catch (IntrospectionException ex) {
+            throw new NotCompliantMBeanException(ex.getMessage());
+        }
+        return moi;
     }
 }

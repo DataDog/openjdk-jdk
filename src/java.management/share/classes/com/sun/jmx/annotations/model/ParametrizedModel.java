@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2003, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,35 +22,27 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+package com.sun.jmx.annotations.model;
 
-package javax.management;
-
-
-import sun.management.counter.perf.InstrumentationException;
+import java.lang.reflect.Parameter;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
- * An exception occurred during the introspection of an MBean.
- *
- * @since 1.5
+ * An abstract superclass for models being able to handle parameters.
  */
-public class IntrospectionException extends OperationsException   {
+abstract class ParametrizedModel extends DescribedModel {
 
-    /* Serial version */
-    private static final long serialVersionUID = 1054516935875481725L;
+    protected final List<ParameterModel> parameters = new ArrayList<>();
 
-    /**
-     * Default constructor.
-     */
-    public IntrospectionException() {
-        super();
+    public ParametrizedModel(Parameter[] params) {
+        for (Parameter p : params) {
+            parameters.add(new ParameterModel(p));
+        }
     }
 
-    /**
-     * Constructor that allows a specific error message to be specified.
-     *
-     * @param message the detail message.
-     */
-    public IntrospectionException(String message) {
-        super(message);
+    final public List<ParameterModel> getParameters() {
+        return Collections.unmodifiableList(parameters);
     }
 }

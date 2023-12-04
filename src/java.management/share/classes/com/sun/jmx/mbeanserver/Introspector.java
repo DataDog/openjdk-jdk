@@ -54,6 +54,7 @@ import java.lang.reflect.Array;
 import java.lang.reflect.InvocationTargetException;
 import java.security.AccessController;
 import javax.management.AttributeNotFoundException;
+import javax.management.annotations.ManagedService;
 import javax.management.openmbean.CompositeData;
 
 import sun.reflect.misc.MethodUtil;
@@ -148,6 +149,10 @@ public class Introspector {
 
     public static void checkCompliance(Class<?> mbeanClass)
     throws NotCompliantMBeanException {
+        if (mbeanClass.getAnnotation(ManagedService.class) != null) {
+            // annotated MBean
+            return;
+        }
         // Is DynamicMBean?
         //
         if (DynamicMBean.class.isAssignableFrom(mbeanClass))

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2003, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,34 +23,26 @@
  * questions.
  */
 
-package javax.management;
+package javax.management.annotations;
 
-
-import sun.management.counter.perf.InstrumentationException;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 
 /**
- * An exception occurred during the introspection of an MBean.
- *
- * @since 1.5
+ * This annotation may be used for a field of type {@linkplain NotificationSender}.
+ * It is a holder for multiple {@linkplain NotificationInfo} annotations.
+ * The annotated field can then be used to emit annotations of the declared types.
  */
-public class IntrospectionException extends OperationsException   {
-
-    /* Serial version */
-    private static final long serialVersionUID = 1054516935875481725L;
-
+@Target(ElementType.FIELD)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface NotificationInfos {
     /**
-     * Default constructor.
-     */
-    public IntrospectionException() {
-        super();
-    }
-
-    /**
-     * Constructor that allows a specific error message to be specified.
+     * The enclosed {@link NotificationInfo} values used to publish the information
+     * about the emitted notifications.
      *
-     * @param message the detail message.
+     * @return The enclosed {@linkplain NotificationInfo} values
      */
-    public IntrospectionException(String message) {
-        super(message);
-    }
+    NotificationInfo[] value();
 }

@@ -141,7 +141,7 @@ public abstract class MXBeanMapping {
      * <p>The Java type that was supplied to the constructor.</p>
      * @return the Java type that was supplied to the constructor.
      */
-    public final Type getJavaType() {
+    public Type getJavaType() {
         return javaType;
     }
 
@@ -149,7 +149,7 @@ public abstract class MXBeanMapping {
      * <p>The Open Type that was supplied to the constructor.</p>
      * @return the Open Type that was supplied to the constructor.
      */
-    public final OpenType<?> getOpenType() {
+    public OpenType<?> getOpenType() {
         return openType;
     }
 
@@ -160,7 +160,7 @@ public abstract class MXBeanMapping {
      * Open Type for this mapping.
      * @see OpenType#getClassName
      */
-    public final Class<?> getOpenClass() {
+    public Class<?> getOpenClass() {
         return openClass;
     }
 

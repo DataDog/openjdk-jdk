@@ -39,6 +39,7 @@ module java.management {
 
     exports java.lang.management;
     exports javax.management;
+    exports javax.management.annotations;
     exports javax.management.loading;
     exports javax.management.modelmbean;
     exports javax.management.monitor;
@@ -70,7 +71,11 @@ module java.management {
     uses javax.management.remote.JMXConnectorProvider;
     uses javax.management.remote.JMXConnectorServerProvider;
     uses sun.management.spi.PlatformMBeanProvider;
+    uses com.sun.jmx.annotations.ModelBuilder;
 
     provides javax.security.auth.spi.LoginModule with
         com.sun.jmx.remote.security.FileLoginModule;
+
+    provides com.sun.jmx.annotations.ModelBuilder with
+            com.sun.jmx.annotations.model.MXBeanModelBuilder;
 }
