@@ -444,6 +444,9 @@ public final class JVM {
     @IntrinsicCandidate
     public static native long commit(long nextPosition);
 
+//    @IntrinsicCandidate
+    public static native long committed();
+
     /**
      * Flushes all thread buffers to disk and the constant pool data needed to read
      * them.

@@ -625,6 +625,13 @@ void JfrThreadSampler::task_stacktrace(JfrSampleType type, JavaThread** last_thr
         }
         assert(enqueue_buffer->free_size() >= _min_size, "invariant");
         if (sample_task.do_sample_thread(current, _frames, _max_frames, type)) {
+          JfrThreadLocal* const tl = current->jfr_thread_local();
+          assert(tl != nullptr, "invariant");
+          if (tl->has_native_buffer()) {
+            tl->native_buffer()->impersonate();
+          } else if (tl->has_java_buffer()) {
+            tl->java_buffer()->impersonate();
+          }
           num_samples++;
         }
         enqueue_buffer = renew_if_full(enqueue_buffer);

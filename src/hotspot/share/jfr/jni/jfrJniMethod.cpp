@@ -305,6 +305,10 @@ NO_TRANSITION(jlong, jfr_commit(JNIEnv* env, jclass jvm, jlong next_position))
   return JfrJavaEventWriter::commit(next_position);
 NO_TRANSITION_END
 
+NO_TRANSITION(jlong, jfr_committed(JNIEnv* env, jclass jvm))
+  return JfrJavaEventWriter::committed();
+NO_TRANSITION_END
+
 JVM_ENTRY_NO_ENV(void, jfr_flush(JNIEnv* env, jclass jvm))
   JfrRepository::flush(thread);
 JVM_END

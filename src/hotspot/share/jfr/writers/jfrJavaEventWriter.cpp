@@ -166,6 +166,18 @@ jlong JfrJavaEventWriter::commit(jlong next_position) {
   return 0; // signals that the buffer lease was returned.
 }
 
+jlong JfrJavaEventWriter::committed() {
+  JavaThread* const jt = JavaThread::current();
+  assert(jt != nullptr, "invariant");
+  DEBUG_ONLY(JfrJavaSupport::check_java_thread_in_native(jt));
+  JfrThreadLocal* const tl = jt->jfr_thread_local();
+  assert(tl != nullptr, "invariant");
+  assert(tl->has_java_event_writer(), "invariant");
+  u4 java_mark = tl->has_java_buffer() ? tl->java_buffer()->mark() : 0;
+  u4 native_mark = tl->has_native_buffer() ? tl->native_buffer()->mark() : 0;
+  return ((jlong)java_mark & 0xffffffff) | (((jlong)native_mark) & 0xffffffff) << 32;
+}
+
 class JfrJavaEventWriterNotificationClosure : public ThreadClosure {
  public:
    void do_thread(Thread* t) {

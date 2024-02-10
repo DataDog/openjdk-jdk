@@ -31,6 +31,7 @@ static const u1* const TOP_CRITICAL_SECTION = nullptr;
 JfrBuffer::JfrBuffer() : _next(nullptr),
                          _identity(nullptr),
                          _pos(nullptr),
+                         _impersonated(0),
                          _top(nullptr),
                          _size(0),
                          _header_size(0),

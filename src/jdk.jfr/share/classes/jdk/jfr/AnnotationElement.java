@@ -37,6 +37,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.StringJoiner;
 
+import jdk.jfr.experimental.ContextProvider;
 import jdk.jfr.internal.SecuritySupport;
 import jdk.jfr.internal.Type;
 import jdk.jfr.internal.TypeLibrary;
@@ -377,6 +378,9 @@ public final class AnnotationElement {
             return true;
         }
         if (annotationType == Enabled.class) {
+            return true;
+        }
+        if (annotationType == ContextProvider.class) {
             return true;
         }
         return false;

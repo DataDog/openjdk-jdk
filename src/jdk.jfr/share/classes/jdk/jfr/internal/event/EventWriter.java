@@ -296,6 +296,10 @@ public final class EventWriter {
         return false;
     }
 
+    public long committed() {
+        return JVM.committed();
+    }
+
     private EventWriter(long startPos, long maxPos, long threadID, boolean valid, boolean excluded) {
         startPosition = currentPosition = startPos;
         maxPosition = maxPos;

@@ -37,6 +37,7 @@ public final class ImplicitFields {
     public static final String DURATION = "duration";
     public static final String EVENT_THREAD = "eventThread";
     public static final String STACK_TRACE = "stackTrace";
+    public static final String BUFFER_OFFSET = "bufferOffset";
 
     private final List<String> fields = new ArrayList<>(4);
 
@@ -45,6 +46,7 @@ public final class ImplicitFields {
         fields.add(DURATION);
         fields.add(STACK_TRACE);
         fields.add(EVENT_THREAD);
+        fields.add(BUFFER_OFFSET);
         for (Class<?> c = eventClass; jdk.internal.event.Event.class != c; c = c.getSuperclass()) {
             RemoveFields rf = c.getAnnotation(RemoveFields.class);
             if (rf != null) {

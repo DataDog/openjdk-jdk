@@ -26,8 +26,10 @@
 package jdk.jfr.internal;
 
 import java.lang.constant.ClassDesc;
+import java.lang.constant.ConstantDesc;
 import java.lang.constant.MethodTypeDesc;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -51,6 +53,8 @@ import java.lang.classfile.MethodModel;
 import java.lang.classfile.Opcode;
 import java.lang.classfile.TypeKind;
 import java.lang.classfile.attribute.RuntimeVisibleAnnotationsAttribute;
+
+import jdk.jfr.experimental.ContextProvider;
 import jdk.jfr.internal.event.EventConfiguration;
 import jdk.jfr.internal.event.EventWriter;
 import jdk.jfr.Enabled;
@@ -82,14 +86,17 @@ final class EventInstrumentation {
     private static final FieldDesc FIELD_DURATION = FieldDesc.of(long.class, ImplicitFields.DURATION);
     private static final FieldDesc FIELD_EVENT_CONFIGURATION = FieldDesc.of(Object.class, "eventConfiguration");;
     private static final FieldDesc FIELD_START_TIME = FieldDesc.of(long.class, ImplicitFields.START_TIME);
+    private static final FieldDesc FIELD_BUFFER_OFFSET = FieldDesc.of(long.class, ImplicitFields.BUFFER_OFFSET);
     private static final ClassDesc ANNOTATION_ENABLED = classDesc(Enabled.class);
     private static final ClassDesc ANNOTATION_NAME = classDesc(Name.class);
     private static final ClassDesc ANNOTATION_REGISTERED = classDesc(Registered.class);
+    private static final ClassDesc ANNOTATION_CONTEXT_PROVIDER = classDesc(ContextProvider.class);
     private static final ClassDesc ANNOTATION_REMOVE_FIELDS = classDesc(RemoveFields.class);
     private static final ClassDesc TYPE_EVENT_CONFIGURATION = classDesc(EventConfiguration.class);
     private static final ClassDesc TYPE_ISE = Bytecode.classDesc(IllegalStateException.class);
     private static final ClassDesc TYPE_EVENT_WRITER = classDesc(EventWriter.class);
     private static final ClassDesc TYPE_EVENT_WRITER_FACTORY = ClassDesc.of("jdk.jfr.internal.event.EventWriterFactory");
+    private static final ClassDesc TYPE_JVM = ClassDesc.of("jdk.jfr.internal.JVM");
     private static final ClassDesc TYPE_MIRROR_EVENT = Bytecode.classDesc(MirrorEvent.class);
     private static final ClassDesc TYPE_OBJECT = Bytecode.classDesc(Object.class);
     private static final ClassDesc TYPE_SETTING_DEFINITION = Bytecode.classDesc(SettingDefinition.class);
@@ -106,6 +113,7 @@ final class EventInstrumentation {
     private static final MethodDesc METHOD_RESET = MethodDesc.of("reset", "()V");
     private static final MethodDesc METHOD_SHOULD_COMMIT_LONG = MethodDesc.of("shouldCommit", "(J)Z");
     private static final MethodDesc METHOD_TIME_STAMP = MethodDesc.of("timestamp", "()J");
+    private static final MethodDesc METHOD_COMMITTED = MethodDesc.of("committed", "()J");
 
     private final ClassModel classModel;
     private final List<SettingDesc> settingDescs;
@@ -207,6 +215,17 @@ final class EventInstrumentation {
         return true;
     }
 
+    boolean isContextProvider() {
+        if (!hasAnnotation(classModel, ANNOTATION_CONTEXT_PROVIDER)) {
+            if (superClass != null) {
+                ContextProvider cp = superClass.getAnnotation(ContextProvider.class);
+                return cp != null;
+            }
+            return false;
+        }
+        return true;
+    }
+
     boolean isEnabled() {
         Boolean result = annotationValue(classModel, ANNOTATION_ENABLED, Boolean.class);
         if (result != null) {
@@ -271,6 +290,20 @@ final class EventInstrumentation {
             }
         }
         return null;
+    }
+
+    private static boolean hasAnnotation(ClassModel classModel, ClassDesc classDesc) {
+        String typeDescriptor = classDesc.descriptorString();
+        for (ClassElement ce : classModel.elements()) {
+            if (ce instanceof RuntimeVisibleAnnotationsAttribute rvaa) {
+                for (Annotation a : rvaa.annotations()) {
+                    if (a.className().equalsString(typeDescriptor)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private static List<SettingDesc> buildSettingDescs(Class<?> superClass, ClassModel classModel) {
@@ -425,6 +458,12 @@ final class EventInstrumentation {
         Bytecode.throwException(codeBuilder, TYPE_ISE, message);
     }
 
+    private void println(CodeBuilder codeBuilder) {
+        codeBuilder.getstatic(ClassDesc.of("java.lang.System"), "out", ClassDesc.of("java.io.PrintStream"));
+        codeBuilder.swap();
+        codeBuilder.invokevirtual(ClassDesc.of("java.io.PrintStream"), "println", MethodTypeDesc.ofDescriptor("(Ljava/lang/String;)V"));
+    }
+
     private void makeInstrumented() {
         // MyEvent#isEnabled()
         updateEnabledMethod(METHOD_IS_ENABLED);
@@ -437,6 +476,13 @@ final class EventInstrumentation {
                 codeBuilder.aload(0);
                 invokestatic(codeBuilder, TYPE_EVENT_CONFIGURATION, METHOD_TIME_STAMP);
                 putfield(codeBuilder, getEventClassDesc(), FIELD_START_TIME);
+                if (isContextProvider()) {
+                    System.out.println("===> updating begin: " + getEventName());
+                    codeBuilder.aload(0);
+                    getEventWriter(codeBuilder);
+                    invokevirtual(codeBuilder, TYPE_EVENT_WRITER, METHOD_COMMITTED);
+                    putfield(codeBuilder, getEventClassDesc(), FIELD_BUFFER_OFFSET);
+                }
                 codeBuilder.return_();
             }
         });
@@ -451,6 +497,17 @@ final class EventInstrumentation {
                 getfield(codeBuilder, getEventClassDesc(), FIELD_START_TIME);
                 invokestatic(codeBuilder, TYPE_EVENT_CONFIGURATION, METHOD_DURATION);
                 putfield(codeBuilder, getEventClassDesc(), FIELD_DURATION);
+                if (isContextProvider()) {
+                    System.out.println("===> updating end: " + getEventName());
+                    codeBuilder.aload(0).dup();
+                    getfield(codeBuilder, getEventClassDesc(), FIELD_BUFFER_OFFSET);
+                    getEventWriter(codeBuilder);
+                    invokevirtual(codeBuilder, TYPE_EVENT_WRITER, METHOD_COMMITTED);
+                    codeBuilder.lsub();
+                    codeBuilder.dup2().invokestatic(ClassDesc.of(Long.class.getName()), "toString", MethodTypeDesc.ofDescriptor("(J)Ljava/lang/String;"), false);
+                    println(codeBuilder);
+                    putfield(codeBuilder, getEventClassDesc(), FIELD_BUFFER_OFFSET);
+                }
                 codeBuilder.return_();
             }
         });
@@ -501,6 +558,13 @@ final class EventInstrumentation {
         // MyEvent#shouldCommit()
         updateMethod(METHOD_EVENT_SHOULD_COMMIT, codeBuilder -> {
             Label fail = codeBuilder.newLabel();
+            if (isContextProvider()) {
+                System.out.println("===> updating shouldCommit: " + getEventName());
+                codeBuilder.aload(0);
+                getfield(codeBuilder, getEventClassDesc(), FIELD_BUFFER_OFFSET);
+                codeBuilder.ldc(0L).lcmp();
+                codeBuilder.ifeq(fail);
+            }
             if (guardEventConfiguration) {
                 getEventConfiguration(codeBuilder);
                 codeBuilder.if_null(fail);

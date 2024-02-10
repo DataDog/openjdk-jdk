@@ -70,6 +70,7 @@ class JfrBuffer {
  private:
   const void* _identity;
   u1* _pos;
+  u4 _impersonated;
   mutable const u1* _top;
   size_t _size;
   u2 _header_size;
@@ -180,6 +181,14 @@ class JfrBuffer {
   static ByteSize pos_offset();
   static ByteSize flags_offset();
 
+  // Context support
+  void impersonate() {
+    Atomic::inc(&_impersonated);
+  }
+
+  u4 mark() {
+    return (_pos - start()) + _impersonated;
+  }
 };
 
 #endif // SHARE_JFR_RECORDER_STORAGE_JFRBUFFER_HPP
