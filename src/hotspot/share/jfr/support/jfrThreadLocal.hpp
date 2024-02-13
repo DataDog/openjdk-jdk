@@ -26,6 +26,7 @@
 #define SHARE_JFR_SUPPORT_JFRTHREADLOCAL_HPP
 
 #include "jfr/utilities/jfrBlob.hpp"
+#include "jfr/utilities/jfrContextStack.hpp"
 #include "jfr/utilities/jfrTypes.hpp"
 
 class Arena;
@@ -72,6 +73,7 @@ class JfrThreadLocal {
   bool _vthread;
   bool _notified;
   bool _dead;
+  mutable JfrContextStack* _context_stack;
 
   JfrBuffer* install_native_buffer() const;
   JfrBuffer* install_java_buffer() const;
@@ -265,6 +267,13 @@ class JfrThreadLocal {
 
   bool is_dead() const {
     return _dead;
+  }
+
+  JfrContextStack* get_context_stack() {
+    if (_context_stack == nullptr) {
+      _context_stack = new JfrContextStack();
+    }
+    return _context_stack;
   }
 
   bool is_excluded() const;

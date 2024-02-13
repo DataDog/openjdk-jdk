@@ -25,6 +25,7 @@
 #include "precompiled.hpp"
 #include "jfr/jni/jfrJniMethod.hpp"
 #include "jfr/jni/jfrJniMethodRegistration.hpp"
+#include "jfr/support/jfrContext.hpp"
 #include "logging/log.hpp"
 #include "runtime/interfaceSupport.inline.hpp"
 #include "runtime/javaThread.inline.hpp"
@@ -99,7 +100,10 @@ JfrJniMethodRegistration::JfrJniMethodRegistration(JNIEnv* env) {
       (char*)"hostTotalMemory", (char*)"()J", (void*) jfr_host_total_memory,
       (char*)"emitDataLoss", (char*)"(J)V", (void*)jfr_emit_data_loss,
       (char*)"registerStackFilter", (char*)"([Ljava/lang/String;[Ljava/lang/String;)J", (void*)jfr_register_stack_filter,
-      (char*)"unregisterStackFilter", (char*)"(J)V", (void*)jfr_unregister_stack_filter
+      (char*)"unregisterStackFilter", (char*)"(J)V", (void*)jfr_unregister_stack_filter,
+      (char*)"pushContext", (char*)"(J)V", (void*)jfr_push_context,
+      (char*)"popContext", (char*)"(J)Z", (void*)jfr_pop_context,
+      (char*)"markContext", (char*)"(J)V", (void*)jfr_mark_context
     };
 
     const size_t method_array_length = sizeof(method) / sizeof(JNINativeMethod);

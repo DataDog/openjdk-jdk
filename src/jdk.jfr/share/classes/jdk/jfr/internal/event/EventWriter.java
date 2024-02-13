@@ -255,6 +255,8 @@ public final class EventWriter {
     }
 
     public boolean endEvent() {
+        markContext(eventType.getId());
+
         if (!valid) {
             reset();
             valid = true;
@@ -294,6 +296,18 @@ public final class EventWriter {
         // Reset the writer and return false to restart the write attempt.
         currentPosition = nextPosition;
         return false;
+    }
+
+    public void pushContext(long ctxType) {
+        JVM.pushContext(ctxType);
+    }
+
+    public boolean popContext(long ctxType) {
+        return JVM.popContext(ctxType);
+    }
+
+    public void markContext(long eventType) {
+        JVM.markContext(eventType);
     }
 
     private EventWriter(long startPos, long maxPos, long threadID, boolean valid, boolean excluded) {

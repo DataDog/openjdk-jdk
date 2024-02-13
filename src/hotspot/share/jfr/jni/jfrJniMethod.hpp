@@ -163,6 +163,12 @@ jlong JNICALL jfr_register_stack_filter(JNIEnv* env, jobject classes, jobject me
 
 jlong JNICALL jfr_unregister_stack_filter(JNIEnv* env, jlong start_filter_id);
 
+void JNICALL jfr_push_context(JNIEnv* env, jclass cls, jlong context_id);
+
+jboolean JNICALL jfr_pop_context(JNIEnv* env, jclass cls, jlong context_id);
+
+void JNICALL jfr_mark_context(JNIEnv* env, jclass cls, jlong event_type_id);
+
 #ifdef __cplusplus
 }
 #endif
