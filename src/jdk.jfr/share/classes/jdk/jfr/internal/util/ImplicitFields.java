@@ -37,6 +37,7 @@ public final class ImplicitFields {
     public static final String DURATION = "duration";
     public static final String EVENT_THREAD = "eventThread";
     public static final String STACK_TRACE = "stackTrace";
+    public static final String SHOULD_COMMIT = "shouldCommitFld";
 
     private final List<String> fields = new ArrayList<>(4);
 

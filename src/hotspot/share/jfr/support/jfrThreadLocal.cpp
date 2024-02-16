@@ -77,7 +77,8 @@ JfrThreadLocal::JfrThreadLocal() :
   _jvm_thread_excluded(false),
   _vthread(false),
   _notified(false),
-  _dead(false) {
+  _dead(false),
+  _context_stack(nullptr) {
   Thread* thread = Thread::current_or_null();
   _parent_trace_id = thread != nullptr ? jvm_thread_id(thread) : (traceid)0;
 }

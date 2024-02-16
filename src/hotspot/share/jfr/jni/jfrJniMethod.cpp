@@ -46,6 +46,7 @@
 #include "jfr/instrumentation/jfrEventClassTransformer.hpp"
 #include "jfr/instrumentation/jfrJvmtiAgent.hpp"
 #include "jfr/leakprofiler/leakProfiler.hpp"
+#include "jfr/support/jfrContext.hpp"
 #include "jfr/support/jfrDeprecationManager.hpp"
 #include "jfr/support/jfrJdkJfrEvent.hpp"
 #include "jfr/support/jfrKlassUnloading.hpp"
@@ -423,3 +424,18 @@ JVM_END
 JVM_ENTRY_NO_ENV(void, jfr_unregister_stack_filter(JNIEnv* env,  jclass jvm, jlong id))
   JfrStackFilterRegistry::remove(id);
 JVM_END
+
+NO_TRANSITION(void, jfr_push_context(JNIEnv* env, jclass jvm, jlong context_id))
+  return JfrContext::push(context_id);
+NO_TRANSITION_END
+
+NO_TRANSITION(jboolean, jfr_pop_context(JNIEnv* env, jclass jvm, jlong context_id))
+  return JfrContext::pop(context_id);
+NO_TRANSITION_END
+
+NO_TRANSITION(void, jfr_mark_context(JNIEnv* env, jclass jvm, jlong event_type_id))
+  u1* mask = JfrContext::peek();
+  if (mask != nullptr) {
+    *(mask) = 1;
+  }
+NO_TRANSITION_END

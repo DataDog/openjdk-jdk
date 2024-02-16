@@ -57,7 +57,7 @@ import java.lang.ref.WeakReference;
  *
  * - create the appropriate ReentrantContextProvider:
  *
- * private static final ReentrantContextProvider<ReentrantContextImpl> contextProvider =
+ * private static final ReentrantContextProvider<ReentrantContextImpl> ContextCarrier =
  *     new ReentrantContextProviderTL<ReentrantContextImpl>(ReentrantContextProvider.REF_WEAK)
  *     {
  *         @Override
@@ -67,11 +67,11 @@ import java.lang.ref.WeakReference;
  *     };
  * ...
  * void someMethod() {
- *     ReentrantContextImpl ctx = contextProvider.acquire();
+ *     ReentrantContextImpl ctx = ContextCarrier.acquire();
  *     try {
  *         // use the context
  *     } finally {
- *         contextProvider.release(ctx);
+ *         ContextCarrier.release(ctx);
  *     }
  * }
  *
