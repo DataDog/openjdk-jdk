@@ -119,6 +119,26 @@ final class FieldBuilder {
     }
 
     private boolean configureSyntheticFields() {
+        if (fieldName.equals("stackTrace.topApplicationFrame")) {
+            configureTopApplicationFrameField();
+            return true;
+        }
+        if (fieldName.equals("stackTrace.notInit")) {
+            configureNotInitFrameField();
+            return true;
+        }
+        if (fieldName.equals("stackTrace.topFrame.class")) {
+            configureTopFrameClassField();
+            return true;
+        }
+        if (fieldName.equals("stackTrace.topFrame")) {
+            configureTopFrameField();
+            return true;
+        }
+        if (fieldName.equals("stackTrace.isNull")) {
+            configureStackTraceIsNullField();
+            return true;
+        }
         if (fieldName.equals("id") && field.type.getName().equals("jdk.ActiveSetting")) {
             configureEventTypeIdField();
             return true;
@@ -221,6 +241,73 @@ final class FieldBuilder {
             map.put(eventType.getId(), label);
         }
         return map;
+    }
+
+    private void configureTopFrameField() {
+        field.alignLeft = true;
+        field.label = "Method";
+        field.dataType = "jdk.types.Method";
+        field.valueGetter = e -> {
+            RecordedStackTrace t = e.getStackTrace();
+            return t != null ? t.getFrames().getFirst() : null;
+        };
+        field.lexicalSort = true;
+    }
+
+    private void configureTopFrameClassField() {
+        field.alignLeft = true;
+        field.label = "Class";
+        field.dataType = "java.lang.Class";
+        field.valueGetter = e -> {
+            RecordedStackTrace t = e.getStackTrace();
+            if (t == null) {
+                return null;
+            }
+            return t.getFrames().getFirst().getMethod().getType();
+        };
+        field.lexicalSort = true;
+    }
+
+    private void configureCustomFrame(Predicate<RecordedFrame> condition) {
+        field.alignLeft = true;
+        field.dataType = "jdk.types.Frame";
+        field.label = "Method";
+        field.lexicalSort = true;
+        field.valueGetter = e -> {
+            RecordedStackTrace t = e.getStackTrace();
+            if (t != null) {
+                for (RecordedFrame f : t.getFrames()) {
+                    if (f.isJavaFrame()) {
+                        if (condition.test(f)) {
+                            return f;
+                        }
+                    }
+                }
+            }
+            return null;
+        };
+    }
+
+    private void configureNotInitFrameField() {
+        configureCustomFrame(frame -> {
+            return !frame.getMethod().getName().equals("<init>");
+        });
+    }
+
+    private void configureTopApplicationFrameField() {
+        configureCustomFrame(frame -> {
+            RecordedClass cl = frame.getMethod().getType();
+            RecordedClassLoader classLoader = cl.getClassLoader();
+            return classLoader != null && !"bootstrap".equals(classLoader.getName());
+        });
+    }
+
+    private void configureStackTraceIsNullField() {
+        field.alignLeft = true;
+        field.dataType = "boolean";
+        field.label = "Has no Stack Trace";
+        field.lexicalSort = true;
+        field.valueGetter = e -> e.getStackTrace() == null;
     }
 
     private void configureEventType(Function<RecordedEvent, Object> retriever) {
