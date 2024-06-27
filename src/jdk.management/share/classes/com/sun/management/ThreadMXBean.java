@@ -25,6 +25,7 @@
 
 package com.sun.management;
 
+import javax.management.MXBean;
 import java.util.Map;
 
 /**
@@ -38,6 +39,7 @@ import java.util.Map;
  * @since   6u25
  */
 
+@MXBean(false)
 public interface ThreadMXBean extends java.lang.management.ThreadMXBean {
     /**
      * Returns the total CPU time for each thread whose ID is

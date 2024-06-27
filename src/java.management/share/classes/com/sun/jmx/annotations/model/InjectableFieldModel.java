@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2003, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,35 +22,28 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+package com.sun.jmx.annotations.model;
 
-package javax.management;
+import java.lang.reflect.Field;
+import javax.management.IntrospectionException;
 
+public class InjectableFieldModel {
+    private final Field fld;
 
-import sun.management.counter.perf.InstrumentationException;
-
-/**
- * An exception occurred during the introspection of an MBean.
- *
- * @since 1.5
- */
-public class IntrospectionException extends OperationsException   {
-
-    /* Serial version */
-    private static final long serialVersionUID = 1054516935875481725L;
-
-    /**
-     * Default constructor.
-     */
-    public IntrospectionException() {
-        super();
+    public InjectableFieldModel(Field fld) {
+        this.fld = fld;
+        this.fld.setAccessible(true);
     }
 
-    /**
-     * Constructor that allows a specific error message to be specified.
-     *
-     * @param message the detail message.
-     */
-    public IntrospectionException(String message) {
-        super(message);
+    public Class<?> getType() {
+        return this.fld.getType();
+    }
+
+    public void inject(Object owner, Object val) throws IntrospectionException {
+        try {
+            this.fld.set(owner, val);
+        } catch (IllegalArgumentException | IllegalAccessException e) {
+            throw new IntrospectionException(e.getMessage());
+        }
     }
 }
