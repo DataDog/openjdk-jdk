@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2003, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,34 +23,17 @@
  * questions.
  */
 
-package javax.management;
+package javax.management.annotations;
 
-
-import sun.management.counter.perf.InstrumentationException;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 
 /**
- * An exception occurred during the introspection of an MBean.
- *
- * @since 1.5
+ * Marks a method as an MBean registration lifecycle hook.
  */
-public class IntrospectionException extends OperationsException   {
-
-    /* Serial version */
-    private static final long serialVersionUID = 1054516935875481725L;
-
-    /**
-     * Default constructor.
-     */
-    public IntrospectionException() {
-        super();
-    }
-
-    /**
-     * Constructor that allows a specific error message to be specified.
-     *
-     * @param message the detail message.
-     */
-    public IntrospectionException(String message) {
-        super(message);
-    }
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface RegistrationHandler {
 }

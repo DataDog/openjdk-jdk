@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2003, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,35 +22,22 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
-
-package javax.management;
-
-
-import sun.management.counter.perf.InstrumentationException;
+package javax.management.annotations;
 
 /**
- * An exception occurred during the introspection of an MBean.
- *
- * @since 1.5
+ * Attribute access policy
  */
-public class IntrospectionException extends OperationsException   {
-
-    /* Serial version */
-    private static final long serialVersionUID = 1054516935875481725L;
-
+public enum AttributeAccess {
     /**
-     * Default constructor.
+     * Read-only attribute
      */
-    public IntrospectionException() {
-        super();
-    }
-
+    READ,
     /**
-     * Constructor that allows a specific error message to be specified.
-     *
-     * @param message the detail message.
+     * Write-only attribute
      */
-    public IntrospectionException(String message) {
-        super(message);
-    }
+    WRITE,
+    /**
+     * Read-write attribute
+     */
+    READWRITE
 }

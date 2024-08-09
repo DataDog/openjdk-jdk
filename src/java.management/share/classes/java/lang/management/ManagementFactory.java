@@ -57,6 +57,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.management.JMX;
 import sun.management.Util;
+import javax.management.annotations.ManagedService;
 import sun.management.spi.PlatformMBeanProvider;
 import sun.management.spi.PlatformMBeanProvider.PlatformComponent;
 
@@ -896,11 +897,13 @@ public class ManagementFactory {
             ObjectName oname = ObjectName.getInstance(name);
             // Make DynamicMBean out of MXBean by wrapping it with a StandardMBean
             AccessController.doPrivileged((PrivilegedExceptionAction<Void>) () -> {
-                final DynamicMBean dmbean;
+                final Object dmbean;
                 if (pmo instanceof DynamicMBean) {
                     dmbean = DynamicMBean.class.cast(pmo);
                 } else if (pmo instanceof NotificationEmitter) {
                     dmbean = new StandardEmitterMBean(pmo, null, true, (NotificationEmitter) pmo);
+                } else if (pmo.getClass().isAnnotationPresent(ManagedService.class)) {
+                    dmbean = pmo;
                 } else {
                     dmbean = new StandardMBean(pmo, null, true);
                 }

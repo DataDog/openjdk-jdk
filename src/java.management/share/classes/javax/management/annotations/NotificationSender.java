@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2003, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,35 +22,28 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
-
-package javax.management;
-
-
-import sun.management.counter.perf.InstrumentationException;
+package javax.management.annotations;
 
 /**
- * An exception occurred during the introspection of an MBean.
+ * <p>Interface for marking a class as being able to send notifications</p>
  *
- * @since 1.5
+ * @since 1.9
  */
-public class IntrospectionException extends OperationsException   {
-
-    /* Serial version */
-    private static final long serialVersionUID = 1054516935875481725L;
-
+public interface NotificationSender {
     /**
-     * Default constructor.
+     * <p>Sends a standard notification.</p>
+     * 
+     * @param type The notification type.
+     * @param message The notification message.
+     * @param userData The user data. It is used for whatever data
+     * the notification source wishes to communicate to its consumers.
      */
-    public IntrospectionException() {
-        super();
-    }
+    void sendNotification(String type, String message, Object userData);
 
     /**
-     * Constructor that allows a specific error message to be specified.
+     * Sends a custom notification.
      *
-     * @param message the detail message.
+     * @param notification The notification to send.
      */
-    public IntrospectionException(String message) {
-        super(message);
-    }
+    void sendNotification(javax.management.Notification notification);
 }
