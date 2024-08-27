@@ -6,6 +6,10 @@ on:
     - cron: '22 14 * * *' # Runs every day at 14:15 UTC
   workflow_dispatch:
 
+permissions:
+  contents: write
+  actions: read
+
 jobs:
   sync:
     runs-on: ubuntu-latest
