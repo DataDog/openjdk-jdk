@@ -309,7 +309,7 @@ final class FieldBuilder {
         field.lexicalSort = true;
         field.valueGetter = e -> e.getStackTrace() == null;
     }
-    
+
     private void configureEventType(Function<RecordedEvent, Object> retriever) {
         field.alignLeft = true;
         field.dataType = String.class.getName();
