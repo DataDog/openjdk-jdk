@@ -502,8 +502,8 @@ void JfrCPUTimeThreadSampler::run() {
     int ignored = Atomic::xchg(&_ignore_because_queue_full, 0);
     if (ignored != 0) {
       log_info(jfr)("CPU thread sampler ignored %d elements because of full queue (sum %d)\n", ignored, _ignore_because_queue_full_sum);
-      if (EventCPUTimeExecutionSampleThrottles::is_enabled()) {
-        EventCPUTimeExecutionSampleThrottles event;
+      if (EventCPUTimeExecutionSampleLoss::is_enabled()) {
+        EventCPUTimeExecutionSampleLoss event;
         event.set_starttime(JfrTicks::now());
         event.set_droppedSamples(ignored);
         event.commit();

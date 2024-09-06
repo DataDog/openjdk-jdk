@@ -195,7 +195,7 @@
       <setting name="period" control="method-sampling-java-interval">20 ms</setting>
     </event>
 
-    <event name="jdk.CPUTimeExecutionSampleThrottles">
+    <event name="jdk.CPUTimeExecutionSampleLoss">
       <setting name="enabled" control="method-sampling-enabled">true</setting>
     </event>
 
