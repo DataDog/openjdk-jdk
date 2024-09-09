@@ -505,7 +505,7 @@ void JfrCPUTimeThreadSampler::run() {
       if (EventCPUTimeExecutionSampleLoss::is_enabled()) {
         EventCPUTimeExecutionSampleLoss event;
         event.set_starttime(JfrTicks::now());
-        event.set_droppedSamples(ignored);
+        event.set_lostSamples(ignored);
         event.commit();
       }
     }
@@ -640,7 +640,7 @@ void assert_periods(const JfrCPUTimeThreadSampler* sampler, int64_t period_milli
 void JfrCPUTimeThreadSampling::create_sampler(int64_t period_millis) {
   assert(_sampler == nullptr, "invariant");
   // factor of 20 seems to be a sweet spot between memory consumption
-  // and dropped samples for 1ms interval, we additionally keep in a
+  // and lost samples for 1ms interval, we additionally keep in a
   // predetermined range to avoid adverse effects with too many
   // or too little elements in the queue, as we only have
   // one thread that processes the queue

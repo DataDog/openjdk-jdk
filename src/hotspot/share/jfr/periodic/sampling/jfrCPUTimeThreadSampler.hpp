@@ -26,11 +26,11 @@
 #define SHARE_JFR_PERIODIC_SAMPLING_JFRCPUTIMETHREADSAMPLER_HPP
 
 #include "jfr/utilities/jfrAllocation.hpp"
-#include "runtime/javaThread.hpp"
+
+class JavaThread;
 
 #if defined(LINUX)
 
-class JavaThread;
 class JfrCPUTimeThreadSampler;
 
 class JfrCPUTimeThreadSampling : public JfrCHeapObj {
