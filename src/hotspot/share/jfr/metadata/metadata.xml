@@ -948,9 +948,9 @@
     <Field type="StackTrace" name="stackTrace" label="Stack Trace" />
   </Event>
 
-  <Event name="CPUTimeExecutionSampleLoss" category="Java Virtual Machine, Profiling" label="CPU Time Method Profiling Lost Samples" description="Records that the CPU time lost samples because of internal throttling"
+  <Event name="CPUTimeExecutionSampleLoss" category="Java Virtual Machine, Profiling" label="CPU Time Method Profiling Lost Samples" description="Records that the CPU time sampler lost samples because of internal throttling"
     thread="false" stackTrace="false" startTime="false" experimental="true">
-    <Field type="int" name="lostSamples" label="Lost Samples since last event" />
+    <Field type="int" name="lostSamples" label="Lost samples since last event" />
   </Event>
 
   <Event name="ThreadDump" category="Java Virtual Machine, Runtime" label="Thread Dump" period="everyChunk">
