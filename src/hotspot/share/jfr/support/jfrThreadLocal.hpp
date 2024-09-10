@@ -28,6 +28,11 @@
 #include "jfr/utilities/jfrBlob.hpp"
 #include "jfr/utilities/jfrTypes.hpp"
 
+#ifdef LINUX
+// required for timer_t type
+#include <signal.h>
+#endif
+
 class Arena;
 class JavaThread;
 class JfrBuffer;
