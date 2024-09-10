@@ -28,8 +28,7 @@
 #include "jfr/recorder/repository/jfrChunkWriter.hpp"
 #include "jfr/recorder/storage/jfrBuffer.hpp"
 #include "runtime/threadCrashProtection.hpp"
-
-
+#include "runtime/vframe.inline.hpp"
 
 JfrAsyncStackFrame::JfrAsyncStackFrame(const Method* method, int bci, u1 type, int lineno, const InstanceKlass* ik) :
   _klass(ik), _method(method), _line(lineno), _bci(bci), _type(type) {}

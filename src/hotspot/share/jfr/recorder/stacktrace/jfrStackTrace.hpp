@@ -27,7 +27,7 @@
 
 #include "jfr/utilities/jfrAllocation.hpp"
 #include "jfr/utilities/jfrTypes.hpp"
-#include "runtime/vframe.inline.hpp"
+#include "runtime/vframe.hpp"
 
 class frame;
 class InstanceKlass;
