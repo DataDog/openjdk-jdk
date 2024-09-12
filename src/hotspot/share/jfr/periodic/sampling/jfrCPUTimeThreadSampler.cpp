@@ -99,8 +99,7 @@ static bool thread_state_in_native(JavaThread* thread) {
 }
 
 static bool is_excluded(JavaThread* thread) {
-  return thread->is_hidden_from_external_view() ||
-    (os::is_readable_pointer(thread->jfr_thread_local()) && thread->jfr_thread_local()->is_excluded());
+  return thread->is_hidden_from_external_view() || thread->jfr_thread_local()->is_excluded();
 }
 
 static JavaThread* get_java_thread_if_valid() {
