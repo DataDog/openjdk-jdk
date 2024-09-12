@@ -74,7 +74,7 @@ public final class PlatformEventType extends Type {
         this.dynamicSettings = dynamicSettings;
         this.isJVM = Type.isDefinedByJVM(id);
         this.isMethodSampling = isJVM && (name.equals(Type.EVENT_NAME_PREFIX + "ExecutionSample") || name.equals(Type.EVENT_NAME_PREFIX + "NativeMethodSample"));
-        this.isCPUTimeMethodSampling = isJVM && name.equals(Type.EVENT_NAME_PREFIX + "CPUTimeExecutionSample");
+        this.isCPUTimeMethodSampling = isJVM && name.equals(Type.EVENT_NAME_PREFIX + "CPUTimeSample");
         this.isJDK = isJDK;
         this.stackTraceOffset = stackTraceOffset(name, isJDK);
     }

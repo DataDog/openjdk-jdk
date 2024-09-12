@@ -46,7 +46,7 @@ public class TestNative {
     static volatile boolean alive = true;
 
     public static void main(String[] args) throws Exception {
-        nativeEvent = args[0].equals("wall-clock") ? EventNames.NativeMethodSample : EventNames.CPUTimeExecutionSample;
+        nativeEvent = args[0].equals("wall-clock") ? EventNames.NativeMethodSample : EventNames.CPUTimeSample;
         try (RecordingStream rs = new RecordingStream()) {
             rs.enable(nativeEvent).withPeriod(Duration.ofMillis(1));
             rs.onEvent(nativeEvent, e -> {

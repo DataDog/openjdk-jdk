@@ -49,7 +49,7 @@ public class TestFullStackTrace {
     private final static int MAX_DEPTH = 64; // currently hardcoded in jvm
 
     public static void main(String[] args) throws Throwable {
-        eventName = args[0].equals("wall-clock") ? EventNames.ExecutionSample : EventNames.CPUTimeExecutionSample;
+        eventName = args[0].equals("wall-clock") ? EventNames.ExecutionSample : EventNames.CPUTimeSample;
         RecurseThread[] threads = new RecurseThread[3];
         for (int i = 0; i < threads.length; ++i) {
             int depth = MAX_DEPTH - 1 + i;

@@ -290,7 +290,7 @@ JVM_ENTRY_NO_ENV(void, jfr_set_cpu_time_method_sampling_period(JNIEnv* env, jcla
     periodMillis = 0;
   }
   JfrEventId typed_event_id = (JfrEventId)type;
-  assert(EventCPUTimeExecutionSample::eventId == typed_event_id, "invariant");
+  assert(EventCPUTimeSample::eventId == typed_event_id, "invariant");
   JfrEventSetting::set_enabled(typed_event_id, periodMillis > 0);
   JfrCPUTimeThreadSampling::set_sample_period(periodMillis);
 JVM_END

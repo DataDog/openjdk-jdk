@@ -192,10 +192,7 @@ private:
     frame topframe;
     if (trace.get_topframe(ucontext, topframe)) {
       _error = _stacktrace.record_async(jt, topframe) ? NO_ERROR : ERROR_JAVA_WALK_FAILED;
-    } else {
-      _error = ERROR_NO_TOPFRAME;
-      return;
-     }
+    }
   }
 
   void record_native_trace(JavaThread* jt, void* ucontext) {
@@ -497,8 +494,8 @@ void JfrCPUTimeThreadSampler::run() {
     int ignored = Atomic::xchg(&_ignore_because_queue_full, 0);
     if (ignored != 0) {
       log_info(jfr)("CPU thread sampler ignored %d elements because of full queue (sum %d)\n", ignored, _ignore_because_queue_full_sum);
-      if (EventCPUTimeExecutionSampleLoss::is_enabled()) {
-        EventCPUTimeExecutionSampleLoss event;
+      if (EventCPUTimeSampleLoss::is_enabled()) {
+        EventCPUTimeSampleLoss event;
         event.set_starttime(JfrTicks::now());
         event.set_lostSamples(ignored);
         event.commit();
@@ -540,7 +537,7 @@ void JfrCPUTimeThreadSampler::process_trace_queue() {
     // we can't do the conversion in the signal handler,
     // as this causes segmentation faults related to the
     // enqueue buffers
-    EventCPUTimeExecutionSample event;
+    EventCPUTimeSample event;
     if (trace->successful() && trace->stacktrace().nr_of_frames() > 0) {
       JfrStackTrace jfrTrace(_jfrFrames, _max_frames_per_trace);
 
@@ -556,7 +553,7 @@ void JfrCPUTimeThreadSampler::process_trace_queue() {
     event.set_starttime(trace->start_time());
     event.set_endtime(trace->end_time());
 
-    if (EventCPUTimeExecutionSample::is_enabled()) {
+    if (EventCPUTimeSample::is_enabled()) {
       JFRRecordSampledThreadCallback cb(trace->sampled_thread());
       ThreadCrashProtection crash_protection;
       if (crash_protection.call(cb)) {

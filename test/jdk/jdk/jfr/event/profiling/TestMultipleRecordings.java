@@ -47,7 +47,7 @@ public class TestMultipleRecordings {
     static volatile boolean alive = true;
 
     public static void main(String[] args) throws Exception {
-        nativeEvent = args[0].equals("wall-clock") ? EventNames.NativeMethodSample : EventNames.CPUTimeExecutionSample;
+        nativeEvent = args[0].equals("wall-clock") ? EventNames.NativeMethodSample : EventNames.CPUTimeSample;
         Thread t = new Thread(TestMultipleRecordings::nativeMethod);
         t.setDaemon(true);
         t.start();

@@ -45,7 +45,7 @@ public class TestSamplingLongPeriod {
     // The period is set to 1100 ms to provoke the 1000 ms
     // threshold in the JVM for os::naked_short_sleep().
     public static void main(String[] args) throws Exception {
-        sampleEvent = args[0].equals("wall-clock") ? EventNames.ExecutionSample : EventNames.CPUTimeExecutionSample;
+        sampleEvent = args[0].equals("wall-clock") ? EventNames.ExecutionSample : EventNames.CPUTimeSample;
         RecurseThread t = new RecurseThread(50);
         t.setDaemon(true);
         try (RecordingStream rs = new RecordingStream()) {
