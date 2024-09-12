@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2024, SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -19,16 +19,15 @@
  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
  * or visit www.oracle.com if you need additional information or have any
  * questions.
- *
  */
 
 #include "precompiled.hpp"
 #include "jfr/recorder/stacktrace/jfrAsyncStackTrace.hpp"
+#include "jfr/recorder/stacktrace/jfrStackTrace.hpp"
 #include "jfr/utilities/jfrTypes.hpp"
 #include "jfr/recorder/repository/jfrChunkWriter.hpp"
 #include "jfr/recorder/storage/jfrBuffer.hpp"
 #include "runtime/threadCrashProtection.hpp"
-#include "runtime/vframe.inline.hpp"
 
 JfrAsyncStackFrame::JfrAsyncStackFrame(const Method* method, int bci, u1 type, int lineno, const InstanceKlass* ik) :
   _klass(ik), _method(method), _line(lineno), _bci(bci), _type(type) {}

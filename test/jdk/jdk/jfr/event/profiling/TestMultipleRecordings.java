@@ -31,6 +31,7 @@ import jdk.jfr.internal.JVM;
 import jdk.test.lib.jfr.EventNames;
 
 /*
+ * Tests that creating multiple recordings after another is possible.
  * @test
  * @key jfr
  * @requires vm.hasJFR
