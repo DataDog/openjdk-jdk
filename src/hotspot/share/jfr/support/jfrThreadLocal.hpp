@@ -26,6 +26,7 @@
 #define SHARE_JFR_SUPPORT_JFRTHREADLOCAL_HPP
 
 #include "jfr/utilities/jfrBlob.hpp"
+#include "jfr/utilities/jfrTypes.hpp"
 
 #ifdef LINUX
 // required for timer_t type
