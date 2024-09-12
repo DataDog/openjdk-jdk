@@ -31,12 +31,12 @@ import jdk.test.lib.jfr.EventNames;
  * @requires vm.hasJFR
  * @library /test/lib
  * @build jdk.jfr.event.profiling.BaseTestFullStackTrace
- * @run main/othervm jdk.jfr.event.profiling.TestFullStackTrace
+ * @run main/othervm jdk.jfr.event.profiling.TestCPUTimeFullStackTrace
  */
-public class TestFullStackTrace {
+public class TestCPUTimeFullStackTrace {
 
     public static void main(String[] args) throws Throwable {
-        BaseTestFullStackTrace.run(EventNames.ExecutionSample);
+        BaseTestFullStackTrace.run(EventNames.CPUTimeSample);
     }
 
 }
