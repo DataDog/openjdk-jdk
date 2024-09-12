@@ -379,7 +379,6 @@ class JfrCPUTimeThreadSampler : public NonJavaThread {
   volatile int _ignore_because_queue_full_sum = 0;
 
   const JfrBuffer* get_enqueue_buffer();
-  const JfrBuffer* renew_if_full(const JfrBuffer* enqueue_buffer);
 
   void task_stacktrace(JfrSampleType type, JavaThread** last_thread);
   JfrCPUTimeThreadSampler(int64_t period_millis, u4 max_traces, u4 max_frames_per_trace);
@@ -546,7 +545,6 @@ void JfrCPUTimeThreadSampler::process_trace_queue() {
     // as this causes segmentation faults related to the
     // enqueue buffers
     EventCPUTimeExecutionSample event;
-    const JfrBuffer* enqueue_buffer = get_enqueue_buffer();
     if (trace->successful() && trace->stacktrace().nr_of_frames() > 0) {
       JfrStackTrace jfrTrace(_jfrFrames, _max_frames_per_trace);
       const JfrBuffer* enqueue_buffer = get_enqueue_buffer();
@@ -587,20 +585,11 @@ void JfrCPUTimeThreadSampler::post_run() {
 
 const JfrBuffer* JfrCPUTimeThreadSampler::get_enqueue_buffer() {
   const JfrBuffer* buffer = JfrTraceIdLoadBarrier::get_sampler_enqueue_buffer(this);
-  if (buffer == nullptr) {
-    JfrBuffer* buffer = JfrTraceIdLoadBarrier::renew_sampler_enqueue_buffer(this, _min_jfr_buffer_size * 2);
+  if (buffer == nullptr || buffer->free_size() < _min_jfr_buffer_size) {
+    JfrBuffer* buffer = JfrTraceIdLoadBarrier::renew_sampler_enqueue_buffer(this);
     return buffer;
   }
-  return renew_if_full(buffer);
-}
-
-const JfrBuffer* JfrCPUTimeThreadSampler::renew_if_full(const JfrBuffer* enqueue_buffer) {
-  assert(enqueue_buffer != nullptr, "invariant");
-  if (enqueue_buffer->free_size() < _min_jfr_buffer_size) {
-    JfrBuffer* buffer = JfrTraceIdLoadBarrier::renew_sampler_enqueue_buffer(this, _min_jfr_buffer_size * 2);
-    return buffer;
-  }
-  return enqueue_buffer;
+  return buffer;
 }
 
 static JfrCPUTimeThreadSampling* _instance = nullptr;
