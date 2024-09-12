@@ -24,7 +24,6 @@
  */
 
 #include "precompiled.hpp"
-#include "jfr/periodic/sampling/jfrCPUTimeThreadSampler.hpp"
 #include "cds/dynamicArchive.hpp"
 #include "ci/ciEnv.hpp"
 #include "classfile/javaClasses.inline.hpp"
@@ -775,8 +774,6 @@ void JavaThread::thread_main_inner() {
       this->set_native_thread_name(this->name());
     }
 
-    JFR_ONLY(JfrCPUTimeThreadSampling::on_javathread_create(this));
-
     HandleMark hm(this);
     this->entry_point()(this, this);
   }
@@ -821,8 +818,6 @@ static bool is_daemon(oop threadObj) {
 void JavaThread::exit(bool destroy_vm, ExitType exit_type) {
   assert(this == JavaThread::current(), "thread consistency check");
   assert(!is_exiting(), "should not be exiting or terminated already");
-
-  JFR_ONLY(JfrCPUTimeThreadSampling::on_javathread_terminate(this));
 
   elapsedTimer _timer_exit_phase1;
   elapsedTimer _timer_exit_phase2;
