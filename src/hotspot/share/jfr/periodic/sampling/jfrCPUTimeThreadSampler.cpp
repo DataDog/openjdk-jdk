@@ -151,7 +151,7 @@ public:
   JfrTicks start_time() const { return _start_time; }
   void set_end_time(JfrTicks end_time) { _end_time = end_time; }
   JfrTicks end_time() const { return _end_time; }
-  void set_sampled_thread(JavaThread* thread) { Atomic::store(&_sampled_thread, thread); }
+  void set_sampled_thread(JavaThread* thread) { _sampled_thread = thread; }
   JavaThread* sampled_thread() const { return _sampled_thread; }
 
   JfrAsyncStackTrace& stacktrace() { return _stacktrace; }
