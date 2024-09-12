@@ -22,6 +22,8 @@
  *
  */
 
+#include "jfr/recorder/checkpoint/types/traceid/jfrTraceId.hpp"
+#include "jfr/recorder/checkpoint/types/traceid/jfrTraceIdLoadBarrier.hpp"
 #include "jfr/recorder/service/jfrOptionSet.hpp"
 #include "precompiled.hpp"
 #include "jfr/periodic/sampling/jfrCPUTimeThreadSampler.hpp"
@@ -31,7 +33,6 @@
 #include "classfile/javaThreadStatus.hpp"
 #include "jfr/recorder/jfrRecorder.hpp"
 #include "jfr/periodic/sampling/jfrCallTrace.hpp"
-#include "jfr/recorder/storage/jfrBuffer.hpp"
 #include "jfr/utilities/jfrTime.hpp"
 #include "jfrfiles/jfrEventClasses.hpp"
 #include "runtime/mutexLocker.hpp"
@@ -369,16 +370,13 @@ class JfrCPUTimeThreadSampler : public NonJavaThread {
   Thread* _sampler_thread;
   JfrTraceQueues _queues;
   int64_t _period_millis;
-  const size_t _max_frames_per_trace; // for enqueue buffer monitoring
+  const size_t _max_frames_per_trace;
   volatile bool _disenrolled;
   volatile bool _stop_signals = false;
   volatile int _active_signal_handlers;
   JfrStackFrame *_jfrFrames;
-  const size_t _min_jfr_buffer_size;
   volatile int _ignore_because_queue_full = 0;
   volatile int _ignore_because_queue_full_sum = 0;
-
-  const JfrBuffer* get_enqueue_buffer();
 
   void task_stacktrace(JfrSampleType type, JavaThread** last_thread);
   JfrCPUTimeThreadSampler(int64_t period_millis, u4 max_traces, u4 max_frames_per_trace);
@@ -418,8 +416,7 @@ JfrCPUTimeThreadSampler::JfrCPUTimeThreadSampler(int64_t period_millis, u4 max_t
   _period_millis(period_millis),
   _max_frames_per_trace(max_frames_per_trace),
   _disenrolled(true),
-  _jfrFrames(JfrCHeapObj::new_array<JfrStackFrame>(_max_frames_per_trace)),
-  _min_jfr_buffer_size(_max_frames_per_trace * 2 * wordSize * (_queues.max_traces() + 1)) {
+  _jfrFrames(JfrCHeapObj::new_array<JfrStackFrame>(_max_frames_per_trace)) {
   assert(_period_millis >= 0, "invariant");
 }
 
@@ -547,8 +544,8 @@ void JfrCPUTimeThreadSampler::process_trace_queue() {
     EventCPUTimeExecutionSample event;
     if (trace->successful() && trace->stacktrace().nr_of_frames() > 0) {
       JfrStackTrace jfrTrace(_jfrFrames, _max_frames_per_trace);
-      const JfrBuffer* enqueue_buffer = get_enqueue_buffer();
-      if (trace->stacktrace().store(&jfrTrace, enqueue_buffer) && jfrTrace.nr_of_frames() > 0) {
+
+      if (trace->stacktrace().store(&jfrTrace) && jfrTrace.nr_of_frames() > 0) {
         traceid id = JfrStackTraceRepository::add(jfrTrace);
         event.set_stackTrace(id);
       } else {
@@ -581,15 +578,6 @@ void JfrCPUTimeThreadSampler::process_trace_queue() {
 void JfrCPUTimeThreadSampler::post_run() {
   this->NonJavaThread::post_run();
   delete this;
-}
-
-const JfrBuffer* JfrCPUTimeThreadSampler::get_enqueue_buffer() {
-  const JfrBuffer* buffer = JfrTraceIdLoadBarrier::get_sampler_enqueue_buffer(this);
-  if (buffer == nullptr || buffer->free_size() < _min_jfr_buffer_size) {
-    JfrBuffer* buffer = JfrTraceIdLoadBarrier::renew_sampler_enqueue_buffer(this);
-    return buffer;
-  }
-  return buffer;
 }
 
 static JfrCPUTimeThreadSampling* _instance = nullptr;
