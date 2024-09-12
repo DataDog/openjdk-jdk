@@ -68,11 +68,6 @@ bool JfrAsyncStackTrace::record_async(JavaThread* jt, const frame& frame) {
       // none of it is safe
       return false;
     }
-    if (!Method::is_valid_method(method)) {
-      // we throw away everything we've gathered in this sample since
-      // none of it is safe
-      return false;
-    }
     u1 type = vfs.is_interpreted_frame() ? JfrStackFrame::FRAME_INTERPRETER : JfrStackFrame::FRAME_JIT;
     int bci = 0;
     if (method->is_native()) {
