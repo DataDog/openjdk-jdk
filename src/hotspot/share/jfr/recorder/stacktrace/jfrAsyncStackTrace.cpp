@@ -41,6 +41,13 @@ JfrAsyncStackTrace::JfrAsyncStackTrace(JfrAsyncStackFrame* frames, u4 max_frames
   _reached_root(false)
   {}
 
+
+static const size_t min_valid_free_size_bytes = 16;
+
+static inline bool is_full(const JfrBuffer* enqueue_buffer) {
+  return enqueue_buffer->free_size() < min_valid_free_size_bytes;
+}
+
 bool JfrAsyncStackTrace::record_async(JavaThread* jt, const frame& frame) {
   NoHandleMark nhm;
 
@@ -92,24 +99,25 @@ bool JfrAsyncStackTrace::record_async(JavaThread* jt, const frame& frame) {
 
 class JfrAsyncStackTraceStoreCallback : public CrashProtectionCallback {
  public:
-  JfrAsyncStackTraceStoreCallback(const JfrAsyncStackTrace* asyncTrace, JfrStackTrace* trace) :
-  _asyncTrace(asyncTrace), _trace(trace), _success(false) {}
+  JfrAsyncStackTraceStoreCallback(const JfrAsyncStackTrace* asyncTrace, JfrStackTrace* trace, const JfrBuffer* const enqueue_buffer) :
+  _asyncTrace(asyncTrace), _trace(trace), _enqueue_buffer(enqueue_buffer), _success(false) {}
   virtual void call() {
-    _success = _asyncTrace->inner_store(_trace);
+    _success = _asyncTrace->inner_store(_trace, _enqueue_buffer);
   }
   bool success() { return _success; }
 
  private:
   const JfrAsyncStackTrace* _asyncTrace;
   JfrStackTrace* _trace;
+  const JfrBuffer* const _enqueue_buffer;
   bool _success;
 };
 
-bool JfrAsyncStackTrace::inner_store(JfrStackTrace* trace) const {
+bool JfrAsyncStackTrace::inner_store(JfrStackTrace* trace, const JfrBuffer* const enqueue_buffer) const {
   traceid hash = 1;
   for (u4 i = 0; i < _nr_of_frames; i++) {
     const JfrAsyncStackFrame& frame = _frames[i];
-    if (!Method::is_valid_method(frame._method)) {
+    if (!Method::is_valid_method(frame._method) || is_full(enqueue_buffer)) {
       // we throw away everything we've gathered in this sample since
       // none of it is safe
       return false;
@@ -124,14 +132,14 @@ bool JfrAsyncStackTrace::inner_store(JfrStackTrace* trace) const {
   return true;
 }
 
-bool JfrAsyncStackTrace::store(JfrStackTrace* trace) const {
+bool JfrAsyncStackTrace::store(JfrStackTrace* trace, const JfrBuffer* const enqueue_buffer) const {
   assert(trace != nullptr, "invariant");
   Thread* current_thread = Thread::current();
   assert(current_thread->is_JfrSampler_thread() || current_thread->in_asgct(), "invariant");
   trace->set_nr_of_frames(_nr_of_frames);
   trace->set_reached_root(_reached_root);
 
-  JfrAsyncStackTraceStoreCallback cb(this, trace);
+  JfrAsyncStackTraceStoreCallback cb(this, trace, enqueue_buffer);
   ThreadCrashProtection crash_protection;
   if (!crash_protection.call(cb)) {
     log_warning(jfr)("JFR CPU time method resolver crashed");
