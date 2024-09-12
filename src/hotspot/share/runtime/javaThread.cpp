@@ -773,7 +773,6 @@ void JavaThread::thread_main_inner() {
       ResourceMark rm(this);
       this->set_native_thread_name(this->name());
     }
-
     HandleMark hm(this);
     this->entry_point()(this, this);
   }
