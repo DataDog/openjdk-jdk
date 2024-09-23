@@ -109,6 +109,7 @@ class JfrAsyncStackTraceStoreCallback : public CrashProtectionCallback {
 };
 
 bool JfrAsyncStackTrace::inner_store(JfrStackTrace* trace) const {
+  printf("########################## start: %d\n", __LINE__);
   traceid hash = 1;
   for (u4 i = 0; i < _nr_of_frames; i++) {
     const JfrAsyncStackFrame& frame = _frames[i];
@@ -124,6 +125,7 @@ bool JfrAsyncStackTrace::inner_store(JfrStackTrace* trace) const {
     trace->_frames[i] = JfrStackFrame(mid, frame._bci, frame._type, frame._line, frame._klass);
   }
   trace->set_hash(hash);
+  printf("########################## end: %d\n", __LINE__);
   return true;
 }
 
@@ -134,6 +136,7 @@ bool JfrAsyncStackTrace::store(JfrStackTrace* trace) const {
   trace->set_nr_of_frames(_nr_of_frames);
   trace->set_reached_root(_reached_root);
 
+ // this->inner_store(trace);
   JfrAsyncStackTraceStoreCallback cb(this, trace);
   ThreadCrashProtection crash_protection;
   if (!crash_protection.call(cb)) {

@@ -535,7 +535,7 @@ void JfrCPUTimeThreadSampler::process_trace_queue() {
   JfrCPUTimeTrace* trace;
   while ((trace = _queues.filled().dequeue()) != nullptr) {
     // make sure we have enough space in the JFR enqueue buffer
-    renew_enqueue_buffer_if_needed();
+    //renew_enqueue_buffer_if_needed();
     // create event, convert frames (resolve method ids)
     // we can't do the conversion in the signal handler,
     // as this causes segmentation faults related to the

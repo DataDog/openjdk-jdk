@@ -37,17 +37,15 @@ import jdk.test.lib.jfr.EventNames;
  * @requires vm.hasJFR
  * @library /test/lib
  * @modules jdk.jfr/jdk.jfr.internal
- * @run main jdk.jfr.event.profiling.TestMultipleRecordings wall-clock
- * @run main jdk.jfr.event.profiling.TestMultipleRecordings cpu-time
+ * @run main jdk.jfr.event.profiling.TestMultipleRecordings
  */
 public class TestMultipleRecordings {
 
-    static String nativeEvent;
+    static String nativeEvent = EventNames.NativeMethodSample;
 
     static volatile boolean alive = true;
 
     public static void main(String[] args) throws Exception {
-        nativeEvent = args[0].equals("wall-clock") ? EventNames.NativeMethodSample : EventNames.CPUTimeSample;
         Thread t = new Thread(TestMultipleRecordings::nativeMethod);
         t.setDaemon(true);
         t.start();

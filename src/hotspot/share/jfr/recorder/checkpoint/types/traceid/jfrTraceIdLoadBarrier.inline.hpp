@@ -38,6 +38,7 @@
 #include "oops/method.hpp"
 #include "runtime/javaThread.hpp"
 #include "utilities/debug.hpp"
+#include <cstdio>
 
 inline bool is_not_tagged(traceid value) {
   const traceid this_epoch_bit = JfrTraceIdEpoch::this_epoch_bit();
@@ -87,19 +88,32 @@ inline traceid JfrTraceIdLoadBarrier::load(const Klass* klass) {
 }
 
 inline traceid JfrTraceIdLoadBarrier::load(const Method* method) {
-  return load(method->method_holder(), method);
+  printf("LINE %d\n", __LINE__);
+  auto holder = method->method_holder();
+  printf("LINE %d\n", __LINE__);
+  auto res = load(holder, method);
+  printf("LINE %d\n", __LINE__);
+  return res;
 }
 
 inline traceid JfrTraceIdLoadBarrier::load(const Klass* klass, const Method* method) {
    assert(klass != nullptr, "invariant");
    assert(method != nullptr, "invariant");
+   printf("LINE %d\n", __LINE__);
    if (should_tag(method)) {
+     printf("LINE %d\n", __LINE__);
      SET_METHOD_AND_CLASS_USED_THIS_EPOCH(klass);
+     printf("LINE %d\n", __LINE__);
      SET_METHOD_FLAG_USED_THIS_EPOCH(method);
+     printf("LINE %d\n", __LINE__);
      assert(METHOD_AND_CLASS_USED_THIS_EPOCH(klass), "invariant");
+     printf("LINE %d\n", __LINE__);
      assert(METHOD_FLAG_USED_THIS_EPOCH(method), "invariant");
+     printf("LINE %d\n", __LINE__);
      enqueue(klass);
+     printf("LINE %d\n", __LINE__);
      JfrTraceIdEpoch::set_changed_tag_state();
+     printf("LINE %d\n", __LINE__);
    }
    return (METHOD_ID(klass, method));
 }
