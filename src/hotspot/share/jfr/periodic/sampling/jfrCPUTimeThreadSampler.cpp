@@ -535,17 +535,19 @@ void JfrCPUTimeThreadSampler::process_trace_queue() {
   JfrCPUTimeTrace* trace;
   while ((trace = _queues.filled().dequeue()) != nullptr) {
     // make sure we have enough space in the JFR enqueue buffer
-    //renew_enqueue_buffer_if_needed();
+    renew_enqueue_buffer_if_needed();
     // create event, convert frames (resolve method ids)
     // we can't do the conversion in the signal handler,
     // as this causes segmentation faults related to the
     // enqueue buffers
     EventCPUTimeSample event;
+    event.set_failed(true);
     if (trace->successful() && trace->stacktrace().nr_of_frames() > 0) {
       JfrStackTrace jfrTrace(_jfrFrames, _max_frames_per_trace);
       if (trace->stacktrace().store(&jfrTrace) && jfrTrace.nr_of_frames() > 0) {
         traceid id = JfrStackTraceRepository::add(jfrTrace);
         event.set_stackTrace(id);
+        event.set_failed(false);
       } else {
         event.set_stackTrace(0);
       }
