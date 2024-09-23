@@ -62,6 +62,7 @@ public final class PlatformEventType extends Type {
     private boolean hasPeriod = true;
     private boolean hasCutoff = false;
     private boolean hasThrottle = false;
+    private boolean hasMaxRate = true;
     private boolean isInstrumented;
     private boolean markForInstrumentation;
     private boolean registered = true;
@@ -142,6 +143,10 @@ public final class PlatformEventType extends Type {
         this.hasThrottle = hasThrottle;
     }
 
+    public void setHasMaxRate(boolean hasMaxRate) {
+        this.hasMaxRate = hasMaxRate;
+    }
+
     public void setCutoff(long cutoffNanos) {
         if (isJVM) {
             long cutoffTicks = JVMSupport.nanosToTicks(cutoffNanos);
@@ -162,6 +167,12 @@ public final class PlatformEventType extends Type {
     public void setThrottle(long eventSampleSize, long period_ms) {
         if (isJVM) {
             JVM.setThrottle(getId(), eventSampleSize, period_ms);
+        }
+    }
+
+    public void setMaxRate(double maxEventsPerSecond) {
+        if (isJVM) {
+            JVM.setMaxRate(getId(), maxEventsPerSecond);
         }
     }
 
@@ -199,6 +210,10 @@ public final class PlatformEventType extends Type {
 
     public boolean hasThrottle() {
         return this.hasThrottle;
+    }
+
+    public boolean hasMaxRate() {
+        return this.hasMaxRate;
     }
 
     public boolean isEnabled() {

@@ -51,6 +51,7 @@ class JfrEventThrottler : public JfrAdaptiveSampler {
 
  public:
   static void configure(JfrEventId event_id, int64_t event_sample_size, int64_t period_ms);
+  static void configure_max_rate(JfrEventId event_id, double max_events_per_second);
   static bool accept(JfrEventId event_id, int64_t timestamp = 0);
 };
 

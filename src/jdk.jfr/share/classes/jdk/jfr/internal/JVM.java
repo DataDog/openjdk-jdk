@@ -535,6 +535,17 @@ public final class JVM {
     public static native boolean setThrottle(long eventTypeId, long eventSampleSize, long period_ms);
 
     /**
+     * Sets an upper bound for the event emission rate.
+     *
+     * Determines the minimal interval for emitting events.
+     *
+     * @param eventTypeId the id of the event type
+     * @param maxEventsPerSecond max events per second, {@link Double#MAX_VALUE} for no limit
+     * @return true, if it could be set
+     */
+    public static native boolean setMaxRate(long eventTypeId, double maxEventsPerSecond);
+
+    /**
      * Emit old object sample events.
      *
      * @param cutoff the cutoff in ticks

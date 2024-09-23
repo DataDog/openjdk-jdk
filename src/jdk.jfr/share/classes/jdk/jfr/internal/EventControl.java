@@ -53,6 +53,7 @@ import jdk.jfr.internal.settings.PeriodSetting;
 import jdk.jfr.internal.settings.StackTraceSetting;
 import jdk.jfr.internal.settings.ThresholdSetting;
 import jdk.jfr.internal.settings.ThrottleSetting;
+import jdk.jfr.internal.settings.MaxRateSetting;
 import jdk.jfr.internal.util.Utils;
 
 // This class can't have a hard reference from PlatformEventType, since it
@@ -68,6 +69,7 @@ public final class EventControl {
     private static final Type TYPE_PERIOD = TypeLibrary.createType(PeriodSetting.class);
     private static final Type TYPE_CUTOFF = TypeLibrary.createType(CutoffSetting.class);
     private static final Type TYPE_THROTTLE = TypeLibrary.createType(ThrottleSetting.class);
+    private static final Type TYPE_MAX_RATE = TypeLibrary.createType(MaxRateSetting.class);
     private static final long STACK_FILTER_ID = Type.getTypeId(StackFilter.class);
     private static final Type TYPE_LEVEL = TypeLibrary.createType(LevelSetting.class);
 
@@ -92,6 +94,9 @@ public final class EventControl {
         if (eventType.hasThrottle()) {
             addControl(Throttle.NAME, defineThrottle(eventType));
         }
+        if (eventType.hasMaxRate()) {
+            addControl("maxRate", defineMaxRate(eventType));
+        }
         if (eventType.hasLevel()) {
             addControl(Level.NAME, defineLevel(eventType));
         }
@@ -105,6 +110,7 @@ public final class EventControl {
         remove(eventType, aes, StackTrace.class);
         remove(eventType, aes, Cutoff.class);
         remove(eventType, aes, Throttle.class);
+        remove(eventType, aes, MaxRate.class);
         remove(eventType, aes, StackFilter.class);
         eventType.setAnnotations(aes);
         this.type = eventType;
@@ -320,6 +326,12 @@ public final class EventControl {
         String def = type.getAnnotationValue(Throttle.class, ThrottleSetting.DEFAULT_VALUE);
         type.add(PrivateAccess.getInstance().newSettingDescriptor(TYPE_THROTTLE, Throttle.NAME, def, Collections.emptyList()));
         return new Control(new ThrottleSetting(type), def);
+    }
+
+    private static Control defineMaxRate(PlatformEventType type) {
+        String def = type.getAnnotationValue(MaxRate.class, MaxRateSetting.DEFAULT_VALUE);
+        type.add(PrivateAccess.getInstance().newSettingDescriptor(TYPE_MAX_RATE, MaxRate.NAME, def, Collections.emptyList()));
+        return new Control(new MaxRateSetting(type), def);
     }
 
     private static Control defineLevel(PlatformEventType type) {

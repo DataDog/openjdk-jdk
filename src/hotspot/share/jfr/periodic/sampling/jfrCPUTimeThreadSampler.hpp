@@ -37,9 +37,10 @@ class JfrCPUTimeThreadSampling : public JfrCHeapObj {
   friend class JfrRecorder;
  private:
   JfrCPUTimeThreadSampler* _sampler;
-  void create_sampler(int64_t period_millis);
-  void update_run_state(int64_t period_millis);
+  void create_sampler(int64_t period_millis, double max_events_per_second);
+  void update_run_state(int64_t period_millis, double max_events_per_second);
   void set_sampling_period(int64_t period_millis);
+  void set_max_event_rate(double max_events_per_second);
 
   JfrCPUTimeThreadSampling();
   ~JfrCPUTimeThreadSampling();
@@ -52,6 +53,7 @@ class JfrCPUTimeThreadSampling : public JfrCHeapObj {
   static void set_sample_period(int64_t period_millis);
   static void on_javathread_create(JavaThread* thread);
   static void on_javathread_terminate(JavaThread* thread);
+  static void set_max_rate(double max_events_per_second);
   void handle_timer_signal(void* context);
 };
 
