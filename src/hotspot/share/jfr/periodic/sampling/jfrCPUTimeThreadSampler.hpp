@@ -73,6 +73,7 @@ private:
   static void set_sample_period(int64_t period_millis);
   static void on_javathread_create(JavaThread* thread);
   static void on_javathread_terminate(JavaThread* thread);
+  static void set_max_rate(double max_events_per_second);
 };
 
 #endif // defined(LINUX)

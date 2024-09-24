@@ -72,7 +72,7 @@
               <xs:attribute name="period" type="periodType" use="optional" />
               <xs:attribute name="cutoff" type="xs:boolean" use="optional" />
               <xs:attribute name="throttle" type="xs:boolean" use="optional" />
-              <xs:attribute name="maxRate" type="xs:boolean" use="optional"></xs:attribute>
+              <xs:attribute name="maxRate" type="xs:boolean" use="optional" />
               <xs:attribute name="level" type="xs:string" use="optional" />
             </xs:complexType>
           </xs:element>
