@@ -81,6 +81,7 @@ public final class MetadataLoader {
         private final boolean stackTrace;
         private final boolean cutoff;
         private final boolean throttle;
+        private final boolean maxRate;
         private final String level;
         private final boolean isEvent;
         private final boolean isRelation;
@@ -322,6 +323,9 @@ public final class MetadataLoader {
                 }
                 if (t.throttle) {
                     aes.add(new AnnotationElement(Throttle.class, Throttle.DEFAULT));
+                }
+                if (t.maxRate) {
+                    aes.add(new AnnotationElement(MaxRate.class, MaxRate.DEFAULT));
                 }
             }
             if (t.experimental) {
