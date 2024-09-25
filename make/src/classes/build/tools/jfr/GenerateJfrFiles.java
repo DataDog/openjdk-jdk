@@ -224,7 +224,7 @@ public class GenerateJfrFiles {
             pos.writeUTF(period);
             pos.writeBoolean(cutoff);
             pos.writeBoolean(throttle);
-            //pos.writeBoolean(maxRate);
+            pos.writeBoolean(maxRate);
             pos.writeUTF(level);
             pos.writeBoolean(experimental);
             pos.writeBoolean(internal);

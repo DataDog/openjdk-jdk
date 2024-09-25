@@ -104,6 +104,7 @@ public final class MetadataLoader {
             period = dis.readUTF();
             cutoff = dis.readBoolean();
             throttle = dis.readBoolean();
+            maxRate = dis.readBoolean();
             level = dis.readUTF();
             experimental = dis.readBoolean();
             internal = dis.readBoolean();
