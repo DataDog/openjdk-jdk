@@ -95,7 +95,7 @@ public final class EventControl {
             addControl(Throttle.NAME, defineThrottle(eventType));
         }
         if (eventType.hasMaxRate()) {
-            addControl("maxRate", defineMaxRate(eventType));
+            addControl(MaxRate.NAME, defineMaxRate(eventType));
         }
         if (eventType.hasLevel()) {
             addControl(Level.NAME, defineLevel(eventType));

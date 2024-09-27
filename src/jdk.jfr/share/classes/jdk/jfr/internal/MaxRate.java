@@ -57,20 +57,9 @@ public @interface MaxRate {
      * Max rate, for example {@code "100/s"}.
      * <p>
      * String representation of a non-negative {@code Long} value followed by a slash ("/")
-     * and one of the following units<br>
-     * {@code "ns"} (nanoseconds)<br>
-     * {@code "us"} (microseconds)<br>
-     * {@code "ms"} (milliseconds)<br>
-     * {@code "s"} (seconds)<br>
-     * {@code "m"} (minutes)<br>
-     * {@code "h"} (hours)<br>
-     * {@code "d"} (days)<br>
-     * <p>
-     * Example values, {@code "6000/m"}, {@code "10/ms"} and {@code "200/s"}.
-     * When zero is specified, for example {@code "0/s"}, no events are emitted.
-     * When {@code "off"} is specified, all events are emitted.
+     * and a time unit see {@link jdk.jfr.internal.Throttle}
      *
-     * @return the throttle value, default {@code "off"} not {@code null}
+     * @return the max rate, default {@code "off"} to emit all events
      *
      */
     String value() default DEFAULT;

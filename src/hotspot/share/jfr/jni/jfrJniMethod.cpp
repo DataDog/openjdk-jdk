@@ -171,7 +171,11 @@ NO_TRANSITION(jboolean, jfr_set_throttle(JNIEnv* env, jclass jvm, jlong event_ty
 NO_TRANSITION_END
 
 JVM_ENTRY_NO_ENV(jboolean, jfr_set_max_rate(JNIEnv* env, jclass jvm, jlong event_type_id, jdouble max_events_per_second))
-  JfrEventThrottler::configure_max_rate(static_cast<JfrEventId>(event_type_id), max_events_per_second);
+  JfrEventId event_id = static_cast<JfrEventId>(event_type_id);
+  if (event_id != JfrCPUTimeSampleEvent) {
+    return JNI_FALSE;
+  }
+  JfrCPUTimeThreadSampling::set_max_rate(max_events_per_second);
   return JNI_TRUE;
 JVM_END
 

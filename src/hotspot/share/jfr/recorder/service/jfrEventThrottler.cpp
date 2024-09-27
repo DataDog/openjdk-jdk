@@ -27,7 +27,6 @@
 #include "jfr/recorder/service/jfrEventThrottler.hpp"
 #include "jfr/utilities/jfrSpinlockHelper.hpp"
 #include "logging/log.hpp"
-#include "jfr/periodic/sampling/jfrCPUTimeThreadSampler.hpp"
 
 constexpr static const JfrSamplerParams _disabled_params = {
                                                              0, // sample points per window
@@ -73,13 +72,6 @@ void JfrEventThrottler::configure(JfrEventId event_id, int64_t sample_size, int6
   }
   assert(_throttler != nullptr, "JfrEventThrottler has not been properly initialized");
   _throttler->configure(sample_size, period_ms);
-}
-
-void JfrEventThrottler::configure_max_rate(JfrEventId event_id, double max_events_per_second) {
-  if (event_id != JfrCPUTimeSampleEvent) {
-    return;
-  }
-  JfrCPUTimeThreadSampling::set_max_rate(max_events_per_second);
 }
 
 /*

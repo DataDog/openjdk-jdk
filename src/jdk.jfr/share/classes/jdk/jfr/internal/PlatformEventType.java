@@ -62,7 +62,7 @@ public final class PlatformEventType extends Type {
     private boolean hasPeriod = true;
     private boolean hasCutoff = false;
     private boolean hasThrottle = false;
-    private boolean hasMaxRate = true;
+    private boolean hasMaxRate = false;
     private boolean isInstrumented;
     private boolean markForInstrumentation;
     private boolean registered = true;

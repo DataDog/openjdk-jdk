@@ -87,17 +87,7 @@ public final class MaxRateSetting extends JDKSettingControl {
             long millis = 1000;
             long samples = rate.amount();
             TimespanUnit unit = rate.unit();
-            // if unit is more than 1 s, set millis
-            if (unit.nanos > SECONDS.nanos) {
-                millis = unit.nanos / MILLISECONDS.nanos;
-            }
-            // if unit is less than 1 s, scale samples
-            if (unit.nanos < SECONDS.nanos) {
-                long perSecond = SECONDS.nanos / unit.nanos;
-                samples *= Utils.multiplyOverflow(samples, perSecond, Long.MAX_VALUE);
-            }
-            System.out.println("MaxRateSetting: samples=" + samples + " millis=" + millis);
-            eventType.setMaxRate(samples * 1.0 / millis * 1000);
+            eventType.setMaxRate(samples * 1.0 / millis * 1000 / MILLISECONDS.nanos * unit.nanos);
             this.value = value;
         }
     }
