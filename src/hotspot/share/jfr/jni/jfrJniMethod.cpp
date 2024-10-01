@@ -165,17 +165,8 @@ NO_TRANSITION(jdouble, jfr_time_conv_factor(JNIEnv* env, jclass jvm))
   return (jdouble)JfrTimeConverter::nano_to_counter_multiplier();
 NO_TRANSITION_END
 
-NO_TRANSITION(jboolean, jfr_set_throttle(JNIEnv* env, jclass jvm, jlong event_type_id, jlong event_sample_size, jlong period_ms))
+JVM_ENTRY_NO_ENV(jboolean, jfr_set_throttle(JNIEnv* env, jclass jvm, jlong event_type_id, jlong event_sample_size, jlong period_ms))
   JfrEventThrottler::configure(static_cast<JfrEventId>(event_type_id), event_sample_size, period_ms);
-  return JNI_TRUE;
-NO_TRANSITION_END
-
-JVM_ENTRY_NO_ENV(jboolean, jfr_set_max_rate(JNIEnv* env, jclass jvm, jlong event_type_id, jdouble max_events_per_second))
-  JfrEventId event_id = static_cast<JfrEventId>(event_type_id);
-  if (event_id != JfrCPUTimeSampleEvent) {
-    return JNI_FALSE;
-  }
-  JfrCPUTimeThreadSampling::set_max_rate(max_events_per_second);
   return JNI_TRUE;
 JVM_END
 

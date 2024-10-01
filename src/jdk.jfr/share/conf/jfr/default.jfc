@@ -193,7 +193,7 @@
     <event name="jdk.CPUTimeSample">
       <setting name="enabled" control="method-sampling-enabled">false</setting>
       <setting name="period" control="method-sampling-java-interval">20 ms</setting>
-      <setting name="maxRate">500/s</setting>
+      <setting name="throttle">500/s</setting>
     </event>
 
     <event name="jdk.CPUTimeSampleLoss">
