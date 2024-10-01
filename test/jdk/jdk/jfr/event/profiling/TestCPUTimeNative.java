@@ -36,11 +36,11 @@ import jdk.test.lib.jfr.EventNames;
  * @requires vm.hasJFR
  * @library /test/lib
  * @modules jdk.jfr/jdk.jfr.internal
- * @run main jdk.jfr.event.profiling.TestNative
+ * @run main jdk.jfr.event.profiling.TestCPUTimeNative
  */
-public class TestNative {
+public class TestCPUTimeNative {
 
-    static String nativeEvent = EventNames.NativeMethodSample;
+    static String nativeEvent = EventNames.CPUTimeSample;
 
     static volatile boolean alive = true;
 
@@ -51,7 +51,7 @@ public class TestNative {
                 alive = false;
                 rs.close();
             });
-            Thread t = new Thread(TestNative::nativeMethod);
+            Thread t = new Thread(TestCPUTimeNative::nativeMethod);
             t.setDaemon(true);
             t.start();
             rs.start();

@@ -783,7 +783,7 @@ void JfrCPUTimeThreadSampler::set_timer_time(timer_t timerid, int64_t period_mil
   }
   its.it_value = its.it_interval;
   if (timer_settime(timerid, 0, &its, NULL) == -1) {
-    warning("Failed to set timer for thread sampling");
+    warning("Failed to set timer for thread sampling: %s", os::strerror(os::get_last_error()));
   }
 }
 
