@@ -22,6 +22,7 @@
  *
  */
 
+#include "jfrfiles/jfrEventIds.hpp"
 #include "precompiled.hpp"
 #include "jfr/jfr.hpp"
 #include "jfr/jfrEvents.hpp"
@@ -285,13 +286,11 @@ JVM_ENTRY_NO_ENV(void, jfr_set_method_sampling_period(JNIEnv* env, jclass jvm, j
   }
 JVM_END
 
-JVM_ENTRY_NO_ENV(void, jfr_set_cpu_time_method_sampling_period(JNIEnv* env, jclass jvm, jlong type, jlong periodMillis))
+JVM_ENTRY_NO_ENV(void, jfr_set_cpu_time_method_sampling_period(JNIEnv* env, jclass jvm, jlong periodMillis))
   if (periodMillis < 0) {
     periodMillis = 0;
   }
-  JfrEventId typed_event_id = (JfrEventId)type;
-  assert(EventCPUTimeSample::eventId == typed_event_id, "invariant");
-  JfrEventSetting::set_enabled(typed_event_id, periodMillis > 0);
+  JfrEventSetting::set_enabled(JfrCPUTimeSampleEvent, periodMillis > 0);
   JfrCPUTimeThreadSampling::set_sample_period(periodMillis);
 JVM_END
 
