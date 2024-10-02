@@ -453,9 +453,9 @@ bool JfrCPUTimeThreadSampler::recompute_actual_sampling_period() {
   double throttle = Atomic::load(&_throttle);
   int64_t old_value = get_actual_sampling_period();
   int64_t new_value = 0;
-  if (throttle < 0) { // off
+  if (throttle < 0 && period_millis >= 0) { // off
     new_value = period_millis;
-  } else if (throttle == 0 || period_millis == 0) {
+  } else if (throttle == 0 || period_millis <= 0) {
     new_value = 0;
   } else {
     int64_t min_value = (int64_t) (os::processor_count() / throttle);
