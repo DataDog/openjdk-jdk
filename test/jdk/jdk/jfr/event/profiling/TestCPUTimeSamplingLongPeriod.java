@@ -35,11 +35,11 @@ import jdk.test.lib.jfr.RecurseThread;
  * @requires vm.hasJFR
  * @library /test/lib
  * @modules jdk.jfr/jdk.jfr.internal
- * @run main jdk.jfr.event.profiling.TestSamplingLongPeriod
+ * @run main jdk.jfr.event.profiling.TestCPUTimeSamplingLongPeriod
  */
-public class TestSamplingLongPeriod {
+public class TestCPUTimeSamplingLongPeriod {
 
-    static String sampleEvent = EventNames.ExecutionSample;
+    static String sampleEvent = EventNames.CPUTimeSample;
 
     // The period is set to 1100 ms to provoke the 1000 ms
     // threshold in the JVM for os::naked_short_sleep().
