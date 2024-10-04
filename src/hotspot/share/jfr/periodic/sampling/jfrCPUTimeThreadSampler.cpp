@@ -41,6 +41,46 @@
 #if defined(LINUX)
 #include "signals_posix.hpp"
 
+class JfrCPUTimeBuilderState {
+private:
+  // max events per second, < 0 for no throttling
+  // 0 for no emitted events, > 0 for throttling
+  double _throttle = -1;
+  int64_t _sample_period = 0;
+public:
+  // returns the computed actual sample period
+  int64_t update_sample_period(int64_t period_millis);
+  int64_t update_throttle(double throttle);
+
+  int64_t compute_actual_sample_period();
+};
+
+int64_t JfrCPUTimeBuilderState::update_sample_period(int64_t period_millis) {
+  _sample_period = period_millis;
+  return compute_actual_sample_period();
+}
+
+int64_t JfrCPUTimeBuilderState::update_throttle(double throttle) {
+  _throttle = throttle;
+  return compute_actual_sample_period();
+}
+
+int64_t JfrCPUTimeBuilderState::compute_actual_sample_period() {
+  if (_sample_period < 0) {
+    return 0;
+  }
+  if (_throttle < 0) {
+    return _sample_period;
+  }
+  if (_throttle == 0) {
+    return 0;
+  }
+  int64_t min_period_value = (int64_t) (os::processor_count() / _throttle);
+  return _sample_period > min_period_value ? _sample_period : min_period_value;
+}
+
+static JfrCPUTimeBuilderState _builder_state;
+
 enum JfrSampleType {
   // no sample, because thread not in walkable state
   NO_SAMPLE = 0,
@@ -364,10 +404,6 @@ class JfrCPUTimeThreadSampler : public NonJavaThread {
   Thread* _sampler_thread;
   JfrTraceQueues _queues;
   int64_t _period_millis;
-  // max events per second, < 0 for no throttling
-  // 0 for no emitted events, > 0 for throttling
-  double _throttle = -1;
-  int64_t _actual_period_millis = 0;
   const size_t _max_frames_per_trace;
   volatile bool _disenrolled;
   volatile bool _stop_signals = false;
@@ -379,7 +415,7 @@ class JfrCPUTimeThreadSampler : public NonJavaThread {
   void renew_enqueue_buffer_if_needed();
 
   void task_stacktrace(JfrSampleType type, JavaThread** last_thread);
-  JfrCPUTimeThreadSampler(int64_t period_millis, double throttle, u4 max_traces, u4 max_frames_per_trace);
+  JfrCPUTimeThreadSampler(int64_t period_millis, u4 max_traces, u4 max_frames_per_trace);
   ~JfrCPUTimeThreadSampler();
 
   void start_thread();
@@ -388,37 +424,33 @@ class JfrCPUTimeThreadSampler : public NonJavaThread {
   void disenroll();
   void update_all_thread_timers();
   void set_sampling_period(int64_t period_millis);
-  void set_throttle(double throttle);
 
   void process_trace_queue();
 
- protected:
-    virtual void post_run();
-   public:
-    virtual const char* name() const { return "JFR CPU Time Thread Sampler"; }
-    virtual const char* type_name() const { return "JfrCPUTimeThreadSampler"; }
-    bool is_JfrSampler_thread() const { return true; }
-    void run();
-    void on_javathread_create(JavaThread* thread);
-    bool create_timer_for_thread(JavaThread* thread, timer_t &timerid);
-    void set_timer_time(timer_t timerid, int64_t period_millis);
-    void on_javathread_terminate(JavaThread* thread);
-    int64_t get_sampling_period() const { return Atomic::load(&_period_millis); };
-    int64_t get_actual_sampling_period() const { return Atomic::load(&_actual_period_millis); };
-    bool recompute_actual_sampling_period();
+protected:
+  virtual void post_run();
+public:
+  virtual const char* name() const { return "JFR CPU Time Thread Sampler"; }
+  virtual const char* type_name() const { return "JfrCPUTimeThreadSampler"; }
+  bool is_JfrSampler_thread() const { return true; }
+  void run();
+  void on_javathread_create(JavaThread* thread);
+  bool create_timer_for_thread(JavaThread* thread, timer_t &timerid);
+  void set_timer_time(timer_t timerid, int64_t period_millis);
+  void on_javathread_terminate(JavaThread* thread);
+  int64_t get_sampling_period() const { return Atomic::load(&_period_millis); };
 
-    void handle_timer_signal(void* context);
-    void init_timers();
-    void stop_timer();
+  void handle_timer_signal(void* context);
+  void init_timers();
+  void stop_timer();
 };
 
 
-JfrCPUTimeThreadSampler::JfrCPUTimeThreadSampler(int64_t period_millis, double throttle, u4 max_traces, u4 max_frames_per_trace) :
+JfrCPUTimeThreadSampler::JfrCPUTimeThreadSampler(int64_t period_millis, u4 max_traces, u4 max_frames_per_trace) :
   _sample(),
   _sampler_thread(nullptr),
   _queues(max_traces, max_frames_per_trace),
   _period_millis(period_millis),
-  _throttle(throttle),
   _max_frames_per_trace(max_frames_per_trace),
   _disenrolled(true),
   _jfrFrames(JfrCHeapObj::new_array<JfrStackFrame>(_max_frames_per_trace)) {
@@ -446,26 +478,6 @@ void JfrCPUTimeThreadSampler::on_javathread_terminate(JavaThread* thread) {
     timer_delete(thread->jfr_thread_local()->timerid());
     thread->jfr_thread_local()->unset_timerid();
   }
-}
-
-bool JfrCPUTimeThreadSampler::recompute_actual_sampling_period() {
-  int64_t period_millis = get_sampling_period();
-  double throttle = Atomic::load(&_throttle);
-  int64_t old_value = get_actual_sampling_period();
-  int64_t new_value = 0;
-  if (throttle < 0 && period_millis >= 0) { // off
-    new_value = period_millis;
-  } else if (throttle == 0 || period_millis <= 0) {
-    new_value = 0;
-  } else {
-    int64_t min_value = (int64_t) (os::processor_count() / throttle);
-    new_value = period_millis > min_value ? period_millis : min_value;
-  }
-  if (new_value == old_value) {
-    return false;
-  }
-  Atomic::store(&_actual_period_millis, new_value);
-  return true;
 }
 
 void JfrCPUTimeThreadSampler::start_thread() {
@@ -512,7 +524,7 @@ void JfrCPUTimeThreadSampler::run() {
     }
     _sample.signal();
 
-    int64_t period_millis = get_actual_sampling_period();
+    int64_t period_millis = get_sampling_period();
     period_millis = period_millis == 0 ? max_jlong : MAX2<int64_t>(period_millis, 1);
     // If both periods are max_jlong, it implies the sampler is in the process of
     // disenrolling. Loop back for graceful disenroll by means of the semaphore.
@@ -641,7 +653,7 @@ JfrCPUTimeThreadSampling::~JfrCPUTimeThreadSampling() {
   }
 }
 
-void JfrCPUTimeThreadSampling::create_sampler(int64_t period_millis, double throttle) {
+void JfrCPUTimeThreadSampling::create_sampler(int64_t period_millis) {
   assert(_sampler == nullptr, "invariant");
   // factor of 20 seems to be a sweet spot between memory consumption
   // and lost samples for 1ms interval, we additionally keep in a
@@ -659,28 +671,16 @@ void JfrCPUTimeThreadSampling::create_sampler(int64_t period_millis, double thro
   } else if (queue_size > max_size) {
     queue_size = max_size;
   }
-  log_info(jfr)("Creating CPU thread sampler for java: with interval of " INT64_FORMAT " ms and a queue size of %d", period_millis, queue_size);
-  _sampler = new JfrCPUTimeThreadSampler(period_millis, throttle, queue_size, JfrOptionSet::stackdepth());
+  _sampler = new JfrCPUTimeThreadSampler(period_millis, queue_size, JfrOptionSet::stackdepth());
   _sampler->start_thread();
   _sampler->enroll();
 }
 
-volatile double current_throttle = -1;
-
-void JfrCPUTimeThreadSampling::update_run_state(int64_t period_millis, double throttle) {
-  if (throttle == -1) {
-    throttle = current_throttle;
-  } else {
-    current_throttle = throttle;
-  }
+void JfrCPUTimeThreadSampling::update_run_state(int64_t period_millis) {
   if (period_millis != 0) {
     if (_sampler == nullptr) {
-      create_sampler(period_millis, throttle);
+      create_sampler(period_millis);
     } else {
-      if (period_millis != -1) {
-        _sampler->set_sampling_period(period_millis);
-      }
-      _sampler->set_throttle(current_throttle);
       _sampler->enroll();
     }
     return;
@@ -691,46 +691,34 @@ void JfrCPUTimeThreadSampling::update_run_state(int64_t period_millis, double th
   }
 }
 
+
 void JfrCPUTimeThreadSampling::set_sampling_period(int64_t period_millis) {
-  if (_sampler != nullptr) {
+  if (_sampler != nullptr && _sampler->get_sampling_period() != period_millis) {
     _sampler->set_sampling_period(period_millis);
   }
-  update_run_state(period_millis, -1);
+  update_run_state(period_millis);
 }
 
-long JfrCPUTimeThreadSampling::get_actual_sampling_period() {
-  if (_sampler != nullptr) {
-    return _sampler->get_actual_sampling_period();
-  }
-  return 0;
-}
-
-void JfrCPUTimeThreadSampling::set_sample_period(int64_t period_millis) {
+void JfrCPUTimeThreadSampling::set_actual_sample_period(int64_t period_millis) {
   assert(period_millis >= 0, "invariant");
-  if (_instance == nullptr && 0 == period_millis) {
+  if (_instance == nullptr) {
     return;
   }
   instance().set_sampling_period(period_millis);
+}
+
+void JfrCPUTimeThreadSampling::set_sample_period(int64_t period_millis) {
+  set_actual_sample_period(_builder_state.update_sample_period(period_millis));
+}
+
+void JfrCPUTimeThreadSampling::set_throttle(double throttle) {
+  set_actual_sample_period(_builder_state.update_throttle(throttle));
 }
 
 void JfrCPUTimeThreadSampling::on_javathread_create(JavaThread *thread) {
   if (_instance != nullptr && _instance->_sampler != nullptr) {
     _instance->_sampler->on_javathread_create(thread);
   }
-}
-
-void JfrCPUTimeThreadSampling::set_throttle_rate(double throttle) {
-  if (_sampler != nullptr) {
-    _sampler->set_throttle(throttle);
-  }
-  update_run_state(-1, throttle);
-}
-
-void JfrCPUTimeThreadSampling::set_throttle(double throttle) {
-  if (_instance == nullptr) {
-    return;
-  }
-  instance().set_throttle_rate(throttle);
 }
 
 void JfrCPUTimeThreadSampling::on_javathread_terminate(JavaThread *thread) {
@@ -807,9 +795,9 @@ bool JfrCPUTimeThreadSampler::create_timer_for_thread(JavaThread* thread, timer_
   if (timer_create(clock, &sev, &t) < 0) {
     return false;
   }
-  int64_t actual_millis = get_actual_sampling_period();
-  if (actual_millis != 0) {
-    set_timer_time(t, actual_millis);
+  int64_t period = get_sampling_period();
+  if (period != 0) {
+    set_timer_time(t, period);
   }
   timerid = t;
   return true;
@@ -841,10 +829,7 @@ void JfrCPUTimeThreadSampler::stop_timer() {
 }
 
 void JfrCPUTimeThreadSampler::update_all_thread_timers() {
-  if (!recompute_actual_sampling_period()) {
-    return;
-  }
-  int64_t period_millis = get_actual_sampling_period();
+  int64_t period_millis = get_sampling_period();
   MutexLocker tlock(Threads_lock);
   ThreadsListHandle tlh;
   for (size_t i = 0; i < tlh.length(); i++) {
@@ -858,11 +843,6 @@ void JfrCPUTimeThreadSampler::update_all_thread_timers() {
 
 void JfrCPUTimeThreadSampler::set_sampling_period(int64_t period_millis) {
   Atomic::store(&_period_millis, period_millis);
-  update_all_thread_timers();
-}
-
-void JfrCPUTimeThreadSampler::set_throttle(double throttle) {
-  Atomic::store(&_throttle, throttle);
   update_all_thread_timers();
 }
 

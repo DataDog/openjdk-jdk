@@ -43,7 +43,6 @@ public class TestCPUTimeEventThrottling {
     public static void main(String[] args) throws Exception {
         testZeroPerSecond();
         testThrottleSettings();
-         System.out.println("testThrottleSettingsOff\n\n");
         testThrottleSettingsOff();
     }
 

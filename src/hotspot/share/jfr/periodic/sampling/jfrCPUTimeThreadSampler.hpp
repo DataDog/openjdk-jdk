@@ -31,17 +31,17 @@ class JavaThread;
 
 #if defined(LINUX)
 
+
 class JfrCPUTimeThreadSampler;
 
 class JfrCPUTimeThreadSampling : public JfrCHeapObj {
   friend class JfrRecorder;
  private:
+
   JfrCPUTimeThreadSampler* _sampler;
-  void create_sampler(int64_t period_millis, double throttle);
-  void update_run_state(int64_t period_millis, double throttle);
+
+  void create_sampler(int64_t period_millis);
   void set_sampling_period(int64_t period_millis);
-  void set_throttle_rate(double throttle);
-  long get_actual_sampling_period();
 
   JfrCPUTimeThreadSampling();
   ~JfrCPUTimeThreadSampling();
@@ -50,11 +50,15 @@ class JfrCPUTimeThreadSampling : public JfrCHeapObj {
   static JfrCPUTimeThreadSampling* create();
   static void destroy();
 
+  static void set_actual_sample_period(int64_t period_millis);
+  void update_run_state(int64_t period_millis);
+
  public:
   static void set_sample_period(int64_t period_millis);
+  static void set_throttle(double throttle);
+
   static void on_javathread_create(JavaThread* thread);
   static void on_javathread_terminate(JavaThread* thread);
-  static void set_throttle(double throttle);
   void handle_timer_signal(void* context);
 };
 
@@ -72,9 +76,10 @@ private:
 
  public:
   static void set_sample_period(int64_t period_millis);
+  static void set_throttle(double throttle);
+
   static void on_javathread_create(JavaThread* thread);
   static void on_javathread_terminate(JavaThread* thread);
-  static void set_throttle(double throttle);
 };
 
 #endif // defined(LINUX)
