@@ -30,6 +30,9 @@ import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
 import java.util.stream.Stream;
 import javax.management.ObjectName;
+import javax.management.annotations.ManagedAttribute;
+import javax.management.annotations.ManagedService;
+import javax.management.annotations.ManagedOperation;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -40,6 +43,10 @@ import java.util.Objects;
  * jdk.management in the future.
  */
 
+@ManagedService(
+        service = ThreadMXBean.class,
+        description = "The management interface for the thread system of " +
+                "the Java virtual machine.")
 public class ThreadImpl implements ThreadMXBean {
     private final VMManagement jvm;
 
@@ -58,31 +65,37 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedAttribute
     public int getThreadCount() {
         return jvm.getLiveThreadCount();
     }
 
     @Override
+    @ManagedAttribute
     public int getPeakThreadCount() {
         return jvm.getPeakThreadCount();
     }
 
     @Override
+    @ManagedAttribute
     public long getTotalStartedThreadCount() {
         return jvm.getTotalThreadCount();
     }
 
     @Override
+    @ManagedAttribute
     public int getDaemonThreadCount() {
         return jvm.getDaemonThreadCount();
     }
 
     @Override
+    @ManagedAttribute
     public boolean isThreadContentionMonitoringSupported() {
         return jvm.isThreadContentionMonitoringSupported();
     }
 
     @Override
+    @ManagedAttribute
     public synchronized boolean isThreadContentionMonitoringEnabled() {
        if (!isThreadContentionMonitoringSupported()) {
             throw new UnsupportedOperationException(
@@ -92,11 +105,13 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedAttribute
     public boolean isThreadCpuTimeSupported() {
         return jvm.isOtherThreadCpuTimeSupported();
     }
 
     @Override
+    @ManagedAttribute
     public boolean isCurrentThreadCpuTimeSupported() {
         return jvm.isCurrentThreadCpuTimeSupported();
     }
@@ -106,6 +121,7 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedAttribute
     public boolean isThreadCpuTimeEnabled() {
         if (!isThreadCpuTimeSupported() &&
             !isCurrentThreadCpuTimeSupported()) {
@@ -128,6 +144,7 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedAttribute
     public long[] getAllThreadIds() {
         Util.checkMonitorAccess();
         Thread[] threads = getThreads();
@@ -135,17 +152,20 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedOperation
     public ThreadInfo getThreadInfo(long id) {
         return getThreadInfo(id, 0);
     }
 
     @Override
+    @ManagedOperation
     public ThreadInfo getThreadInfo(long id, int maxDepth) {
         long[] ids = new long[] { id };
         return getThreadInfo(ids, maxDepth)[0];
     }
 
     @Override
+    @ManagedOperation
     public ThreadInfo[] getThreadInfo(long[] ids) {
         return getThreadInfo(ids, 0);
     }
@@ -166,6 +186,7 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedOperation
     public ThreadInfo[] getThreadInfo(long[] ids, int maxDepth) {
         verifyThreadIds(ids);
 
@@ -173,10 +194,6 @@ public class ThreadImpl implements ThreadMXBean {
             throw new IllegalArgumentException(
                 "Invalid maxDepth parameter: " + maxDepth);
         }
-
-        // ids has been verified to be non-null
-        // an empty array of ids should return an empty array of ThreadInfos
-        if (ids.length == 0) return new ThreadInfo[0];
 
         Util.checkMonitorAccess();
 
@@ -190,6 +207,7 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedAttribute
     public void setThreadContentionMonitoringEnabled(boolean enable) {
         if (!isThreadContentionMonitoringSupported()) {
             throw new UnsupportedOperationException(
@@ -215,6 +233,7 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     private boolean verifyCurrentThreadCpuTime() {
+        // check if Thread CPU time measurement is supported.
         if (!isCurrentThreadCpuTimeSupported()) {
             throw new UnsupportedOperationException(
                 "Current thread CPU time measurement is not supported.");
@@ -223,6 +242,7 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedAttribute(units = "ns")
     public long getCurrentThreadCpuTime() {
         if (verifyCurrentThreadCpuTime() && !Thread.currentThread().isVirtual()) {
             return getThreadTotalCpuTime0(0);
@@ -231,6 +251,7 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedOperation(units = "ns")
     public long getThreadCpuTime(long id) {
         long[] ids = new long[1];
         ids[0] = id;
@@ -286,6 +307,7 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedAttribute(units = "ns")
     public long getCurrentThreadUserTime() {
         if (verifyCurrentThreadCpuTime() && !Thread.currentThread().isVirtual()) {
             return getThreadUserCpuTime0(0);
@@ -294,6 +316,7 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedOperation(units = "ns")
     public long getThreadUserTime(long id) {
         long[] ids = new long[1];
         ids[0] = id;
@@ -325,6 +348,7 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedAttribute
     public void setThreadCpuTimeEnabled(boolean enable) {
         if (!isThreadCpuTimeSupported() &&
             !isCurrentThreadCpuTimeSupported()) {
@@ -425,6 +449,7 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedOperation
     public long[] findMonitorDeadlockedThreads() {
         Util.checkMonitorAccess();
         Thread[] threads = findMonitorDeadlockedThreads0();
@@ -432,6 +457,7 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedOperation
     public long[] findDeadlockedThreads() {
         if (!isSynchronizerUsageSupported()) {
             throw new UnsupportedOperationException(
@@ -445,17 +471,20 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedOperation
     public void resetPeakThreadCount() {
         Util.checkControlAccess();
         resetPeakThreadCount0();
     }
 
     @Override
+    @ManagedOperation
     public boolean isObjectMonitorUsageSupported() {
         return jvm.isObjectMonitorUsageSupported();
     }
 
     @Override
+    @ManagedOperation
     public boolean isSynchronizerUsageSupported() {
         return jvm.isSynchronizerUsageSupported();
     }
@@ -476,6 +505,7 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedOperation
     public ThreadInfo[] getThreadInfo(long[] ids,
                                       boolean lockedMonitors,
                                       boolean lockedSynchronizers) {
@@ -483,6 +513,7 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedOperation
     public ThreadInfo[] getThreadInfo(long[] ids,
                                       boolean lockedMonitors,
                                       boolean lockedSynchronizers,
@@ -501,12 +532,14 @@ public class ThreadImpl implements ThreadMXBean {
     }
 
     @Override
+    @ManagedOperation
     public ThreadInfo[] dumpAllThreads(boolean lockedMonitors,
                                        boolean lockedSynchronizers) {
         return dumpAllThreads(lockedMonitors, lockedSynchronizers, Integer.MAX_VALUE);
     }
 
     @Override
+    @ManagedOperation
     public ThreadInfo[] dumpAllThreads(boolean lockedMonitors,
                                        boolean lockedSynchronizers,
                                        int maxDepth) {

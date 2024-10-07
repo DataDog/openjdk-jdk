@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2003, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,35 +22,38 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+package com.sun.jmx.annotations.model;
 
-package javax.management;
-
-
-import sun.management.counter.perf.InstrumentationException;
+import java.lang.reflect.Parameter;
+import javax.management.annotations.ParameterInfo;
+import javax.management.annotations.Tag;
 
 /**
- * An exception occurred during the introspection of an MBean.
- *
- * @since 1.5
+ * Represents an operation/constructor parameter
  */
-public class IntrospectionException extends OperationsException   {
+public final class ParameterModel extends DescribedModel {
+    private final Parameter param;
 
-    /* Serial version */
-    private static final long serialVersionUID = 1054516935875481725L;
+    public ParameterModel(Parameter param) {
+        this.param = param;
+        ParameterInfo pa = param.getAnnotation(ParameterInfo.class);
 
-    /**
-     * Default constructor.
-     */
-    public IntrospectionException() {
-        super();
+        setName(param.getName());
+        if (pa != null) {
+            if (!pa.name().isEmpty()) {
+                setName(pa.name());
+            }
+            setDescription(pa.description());
+            for(Tag t : pa.tags()) {
+                addTag(t.name(), t.value());
+            }
+            if (!pa.units().isEmpty())  {
+                addTag(UNITS_KEY, pa.units());
+            }
+        }
     }
 
-    /**
-     * Constructor that allows a specific error message to be specified.
-     *
-     * @param message the detail message.
-     */
-    public IntrospectionException(String message) {
-        super(message);
+    public Class<?> getType() {
+        return param.getType();
     }
 }

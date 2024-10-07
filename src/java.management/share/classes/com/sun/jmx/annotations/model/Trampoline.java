@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2003, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,34 +23,34 @@
  * questions.
  */
 
-package javax.management;
+package com.sun.jmx.annotations.model;
 
-
-import sun.management.counter.perf.InstrumentationException;
+import java.lang.reflect.Field;
+import java.lang.reflect.ReflectPermission;
 
 /**
- * An exception occurred during the introspection of an MBean.
+ * A trampoline for generating artificial getters/setters for non-public fields.
  *
- * @since 1.5
  */
-public class IntrospectionException extends OperationsException   {
+class Trampoline {
+    private static final ReflectPermission ACCESS_CHECKS = new ReflectPermission("suppressAccessChecks");
 
-    /* Serial version */
-    private static final long serialVersionUID = 1054516935875481725L;
-
-    /**
-     * Default constructor.
-     */
-    public IntrospectionException() {
-        super();
+    @SuppressWarnings("unchecked")
+    static <T> T getField(Field fld, Object instance) {
+        try {
+            fld.setAccessible(true);
+            return (T) fld.get(instance);
+        } catch (Exception exception) {
+            return null;
+        }
     }
 
-    /**
-     * Constructor that allows a specific error message to be specified.
-     *
-     * @param message the detail message.
-     */
-    public IntrospectionException(String message) {
-        super(message);
+    @SuppressWarnings("unchecked")
+    static <T> void setField(Field fld, Object instance, T value) {
+        try {
+            fld.setAccessible(true);
+            fld.set(instance, value);
+        } catch (Exception exception) {
+        }
     }
 }

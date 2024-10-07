@@ -25,6 +25,7 @@
 
 package java.lang.management;
 
+import javax.management.MXBean;
 import java.util.Map;
 
 /**
@@ -126,6 +127,7 @@ import java.util.Map;
  * @since   1.5
  */
 
+@MXBean(false)
 public interface ThreadMXBean extends PlatformManagedObject {
     /**
      * Returns the current number of live platform threads including both
