@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Objects;
 
 import jdk.jfr.SettingDescriptor;
+import jdk.jfr.events.ActiveSettingEvent;
 import jdk.jfr.internal.periodic.PeriodicEvents;
 import jdk.jfr.internal.util.ImplicitFields;
 import jdk.jfr.internal.util.Utils;
@@ -162,6 +163,14 @@ public final class PlatformEventType extends Type {
     public void setThrottle(long eventSampleSize, long period_ms) {
         if (isJVM) {
             JVM.setThrottle(getId(), eventSampleSize, period_ms);
+            writeActualPeriodIfNeeded(JVM.counterTime());
+        }
+    }
+
+    public void writeActualPeriodIfNeeded(long timestamp) {
+        if (isEnabled() && isCPUTimeMethodSampling && ActiveSettingEvent.enabled()) {
+            ActiveSettingEvent.commit(timestamp, getId(), "actual-period",
+                JVM.getCPUTimeMethodSamplingActualPeriod() + " ms");
         }
     }
 
@@ -252,6 +261,7 @@ public final class PlatformEventType extends Type {
         if (changed) {
             PeriodicEvents.setChanged();
         }
+        writeActualPeriodIfNeeded(JVM.counterTime());
     }
 
     public void setStackTraceEnabled(boolean stackTraceEnabled) {

@@ -294,6 +294,10 @@ JVM_ENTRY_NO_ENV(void, jfr_set_cpu_time_method_sampling_period(JNIEnv* env, jcla
   JfrCPUTimeThreadSampling::set_sample_period(periodMillis);
 JVM_END
 
+NO_TRANSITION(long, jfr_get_cpu_time_method_sampling_actual_period(JNIEnv* env, jclass jvm))
+  return JfrCPUTimeThreadSampling::get_actual_sample_period();
+NO_TRANSITION_END
+
 
 JVM_ENTRY_NO_ENV(void, jfr_store_metadata_descriptor(JNIEnv* env, jclass jvm, jbyteArray descriptor))
   JfrMetadataEvent::update(descriptor);

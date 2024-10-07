@@ -55,6 +55,7 @@ class JfrCPUTimeThreadSampling : public JfrCHeapObj {
 
  public:
   static void set_sample_period(int64_t period_millis);
+  static int64_t get_actual_sample_period();
   static void set_throttle(double throttle);
 
   static void on_javathread_create(JavaThread* thread);
@@ -76,6 +77,7 @@ private:
 
  public:
   static void set_sample_period(int64_t period_millis);
+  static int64_t get_actual_sample_period();
   static void set_throttle(double throttle);
 
   static void on_javathread_create(JavaThread* thread);

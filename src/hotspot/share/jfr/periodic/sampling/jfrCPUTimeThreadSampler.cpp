@@ -711,6 +711,13 @@ void JfrCPUTimeThreadSampling::set_sample_period(int64_t period_millis) {
   set_actual_sample_period(_builder_state.update_sample_period(period_millis));
 }
 
+int64_t JfrCPUTimeThreadSampling::get_actual_sample_period() {
+  if (_instance == nullptr || _instance->_sampler == nullptr) {
+    return 0;
+  }
+  return _instance->_sampler->get_sampling_period();
+}
+
 void JfrCPUTimeThreadSampling::set_throttle(double throttle) {
   set_actual_sample_period(_builder_state.update_throttle(throttle));
 }
@@ -877,6 +884,11 @@ void JfrCPUTimeThreadSampling::set_sample_period(int64_t period_millis) {
   if (period_millis != 0) {
     warn();
   }
+}
+
+int64_t JfrCPUTimeThreadSampling::get_actual_sample_period() {
+  warn();
+  return 0;
 }
 
 void JfrCPUTimeThreadSampling::on_javathread_create(JavaThread* thread) {

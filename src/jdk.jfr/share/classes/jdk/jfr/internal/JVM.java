@@ -280,6 +280,14 @@ public final class JVM {
     public static native void setCPUTimeMethodSamplingPeriod(long periodMillis);
 
     /**
+     * Returns the actual sampling period in milliseconds, computed from the
+     * throttle and the sampling period for CPUTimeSample events.
+     *
+     * @return the actual sampling period
+     */
+    public static native long getCPUTimeMethodSamplingActualPeriod();
+
+    /**
      * Sets the file where data should be written.
      *
      * Requires that JFR has been started with {@link #createNativeJFR()}
