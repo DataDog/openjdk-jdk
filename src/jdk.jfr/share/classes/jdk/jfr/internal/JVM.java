@@ -271,13 +271,14 @@ public final class JVM {
     public static native void setMethodSamplingPeriod(long type, long periodMillis);
 
     /**
-     * Set period for CPU time sampler method samples, in milliseconds.
+     * Set the maximum event emission rate for the CPU time sampler
      *
-     * Setting period to 0 turns off the CPU time method sampler.
+     * Setting rate to 0 turns off the CPU time method sampler.
      *
-     * @param periodMillis the sampling period
+     * @param rate the new rate in events per second
+     * @param autoadapt true if the rate should be adapted automatically
      */
-    public static native void setCPUTimeMethodSamplingPeriod(long periodMillis);
+    public static native boolean setRate(long type, double rate, boolean autoadapt);
 
     /**
      * Returns the actual sampling period in milliseconds, computed from the

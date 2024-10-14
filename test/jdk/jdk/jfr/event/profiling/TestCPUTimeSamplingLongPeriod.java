@@ -47,7 +47,7 @@ public class TestCPUTimeSamplingLongPeriod {
         RecurseThread t = new RecurseThread(50);
         t.setDaemon(true);
         try (RecordingStream rs = new RecordingStream()) {
-            rs.enable(sampleEvent).withPeriod(Duration.ofMillis(1100));
+            rs.enable(sampleEvent).with("rate", "1100ms");
             rs.onEvent(sampleEvent, e -> {
                 t.quit();
                 rs.close();

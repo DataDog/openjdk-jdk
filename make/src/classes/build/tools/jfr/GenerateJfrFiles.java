@@ -198,6 +198,7 @@ public class GenerateJfrFiles {
         String period = "";
         boolean cutoff;
         boolean throttle;
+        boolean rate;
         String level = "";
         boolean experimental;
         boolean internal;
@@ -223,6 +224,7 @@ public class GenerateJfrFiles {
             pos.writeUTF(period);
             pos.writeBoolean(cutoff);
             pos.writeBoolean(throttle);
+            pos.writeBoolean(rate);
             pos.writeUTF(level);
             pos.writeBoolean(experimental);
             pos.writeBoolean(internal);
@@ -524,6 +526,7 @@ public class GenerateJfrFiles {
                 currentType.cutoff = getBoolean(attributes, "cutoff", false);
                 currentType.level = getString(attributes, "level");
                 currentType.throttle = getBoolean(attributes, "throttle", false);
+                currentType.rate = getBoolean(attributes, "rate", false);
                 currentType.commitState = getString(attributes, "commitState");
                 currentType.isEvent = "Event".equals(qName);
                 currentType.isRelation = "Relation".equals(qName);
@@ -863,6 +866,7 @@ public class GenerateJfrFiles {
             out.write("  static const bool isInstant = " + !event.startTime + ";");
             out.write("  static const bool hasCutoff = " + event.cutoff + ";");
             out.write("  static const bool hasThrottle = " + event.throttle + ";");
+            out.write("  static const bool hasRate = " + event.rate + ";");
             out.write("  static const bool isRequestable = " + !event.period.isEmpty() + ";");
             out.write("  static const JfrEventId eventId = Jfr" + event.name + "Event;");
             out.write("");

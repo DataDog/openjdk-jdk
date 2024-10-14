@@ -166,8 +166,18 @@ NO_TRANSITION(jdouble, jfr_time_conv_factor(JNIEnv* env, jclass jvm))
   return (jdouble)JfrTimeConverter::nano_to_counter_multiplier();
 NO_TRANSITION_END
 
-JVM_ENTRY_NO_ENV(jboolean, jfr_set_throttle(JNIEnv* env, jclass jvm, jlong event_type_id, jlong event_sample_size, jlong period_ms))
+NO_TRANSITION(jboolean, jfr_set_throttle(JNIEnv* env, jclass jvm, jlong event_type_id, jlong event_sample_size, jlong period_ms))
   JfrEventThrottler::configure(static_cast<JfrEventId>(event_type_id), event_sample_size, period_ms);
+  return JNI_TRUE;
+NO_TRANSITION_END
+
+JVM_ENTRY_NO_ENV(jboolean, jfr_set_rate(JNIEnv* env, jclass jvm, jlong event_type_id, jdouble rate, jboolean autoadapt))
+  JfrEventId event_id = static_cast<JfrEventId>(event_type_id);
+  if (event_id != JfrCPUTimeSampleEvent) {
+    return JNI_FALSE;
+  }
+  JfrEventSetting::set_enabled(JfrCPUTimeSampleEvent, rate > 0);
+  JfrCPUTimeThreadSampling::set_rate(rate, autoadapt == JNI_TRUE);
   return JNI_TRUE;
 JVM_END
 
@@ -285,19 +295,6 @@ JVM_ENTRY_NO_ENV(void, jfr_set_method_sampling_period(JNIEnv* env, jclass jvm, j
     JfrThreadSampling::set_native_sample_period(periodMillis);
   }
 JVM_END
-
-JVM_ENTRY_NO_ENV(void, jfr_set_cpu_time_method_sampling_period(JNIEnv* env, jclass jvm, jlong periodMillis))
-  if (periodMillis < 0) {
-    periodMillis = 0;
-  }
-  JfrEventSetting::set_enabled(JfrCPUTimeSampleEvent, periodMillis > 0);
-  JfrCPUTimeThreadSampling::set_sample_period(periodMillis);
-JVM_END
-
-NO_TRANSITION(long, jfr_get_cpu_time_method_sampling_actual_period(JNIEnv* env, jclass jvm))
-  return JfrCPUTimeThreadSampling::get_actual_sample_period();
-NO_TRANSITION_END
-
 
 JVM_ENTRY_NO_ENV(void, jfr_store_metadata_descriptor(JNIEnv* env, jclass jvm, jbyteArray descriptor))
   JfrMetadataEvent::update(descriptor);

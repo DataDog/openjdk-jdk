@@ -40,8 +40,8 @@ class JfrCPUTimeThreadSampling : public JfrCHeapObj {
 
   JfrCPUTimeThreadSampler* _sampler;
 
-  void create_sampler(int64_t period_millis);
-  void set_sampling_period(int64_t period_millis);
+  void create_sampler(double rate, bool autoadapt);
+  void set_rate_value(double rate, bool autoadapt);
 
   JfrCPUTimeThreadSampling();
   ~JfrCPUTimeThreadSampling();
@@ -50,13 +50,10 @@ class JfrCPUTimeThreadSampling : public JfrCHeapObj {
   static JfrCPUTimeThreadSampling* create();
   static void destroy();
 
-  static void set_actual_sample_period(int64_t period_millis);
-  void update_run_state(int64_t period_millis);
+  void update_run_state(double rate, bool autoadapt);
 
  public:
-  static void set_sample_period(int64_t period_millis);
-  static int64_t get_actual_sample_period();
-  static void set_throttle(double throttle);
+  static void set_rate(double rate, bool autoadapt);
 
   static void on_javathread_create(JavaThread* thread);
   static void on_javathread_terminate(JavaThread* thread);
@@ -76,9 +73,7 @@ private:
   static void destroy();
 
  public:
-  static void set_sample_period(int64_t period_millis);
-  static int64_t get_actual_sample_period();
-  static void set_throttle(double throttle);
+  static void set_rate(double rate, bool autoadapt);
 
   static void on_javathread_create(JavaThread* thread);
   static void on_javathread_terminate(JavaThread* thread);

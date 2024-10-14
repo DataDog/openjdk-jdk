@@ -63,11 +63,10 @@ public class TestCPUTimeEventThrottling {
     }
 
 
-    private static int countEvents(int timeMs, String throttle) throws Exception {
+    private static int countEvents(int timeMs, String rate) throws Exception {
         Recording recording = new Recording();
         recording.enable(EventNames.CPUTimeSample)
-            .withPeriod(Duration.ofMillis(100))
-            .with("throttle", throttle);
+            .with("rate", rate);
 
         recording.start();
 
