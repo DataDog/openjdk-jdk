@@ -81,7 +81,6 @@ public final class MetadataLoader {
         private final boolean stackTrace;
         private final boolean cutoff;
         private final boolean throttle;
-        private final boolean rate;
         private final String level;
         private final boolean isEvent;
         private final boolean isRelation;
@@ -105,7 +104,6 @@ public final class MetadataLoader {
             period = dis.readUTF();
             cutoff = dis.readBoolean();
             throttle = dis.readBoolean();
-            rate = dis.readBoolean();
             level = dis.readUTF();
             experimental = dis.readBoolean();
             internal = dis.readBoolean();
@@ -323,9 +321,6 @@ public final class MetadataLoader {
                 }
                 if (t.throttle) {
                     aes.add(new AnnotationElement(Throttle.class, Throttle.DEFAULT));
-                }
-                if (t.rate) {
-                    aes.add(new AnnotationElement(Rate.class, Rate.DEFAULT));
                 }
             }
             if (t.experimental) {

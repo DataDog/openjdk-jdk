@@ -56,8 +56,8 @@ public final class PlatformEventType extends Type {
     private boolean stackTraceEnabled = true;
     private long thresholdTicks = 0;
     private long period = 0;
-    private double rate = 0.0;
-    private boolean autoadapt = false;
+    private double cpuThrottle = 0.0;
+    private boolean cpuAutoadapt = false;
     private boolean hasHook;
 
     private boolean beginChunk;
@@ -65,7 +65,6 @@ public final class PlatformEventType extends Type {
     private boolean hasPeriod = true;
     private boolean hasCutoff = false;
     private boolean hasThrottle = false;
-    private boolean hasRate = false;
     private boolean isInstrumented;
     private boolean markForInstrumentation;
     private boolean registered = true;
@@ -146,10 +145,6 @@ public final class PlatformEventType extends Type {
         this.hasThrottle = hasThrottle;
     }
 
-    public void setHasRate(boolean hasRate) {
-        this.hasRate = hasRate;
-    }
-
     public void setCutoff(long cutoffNanos) {
         if (isJVM) {
             long cutoffTicks = JVMSupport.nanosToTicks(cutoffNanos);
@@ -173,11 +168,11 @@ public final class PlatformEventType extends Type {
         }
     }
 
-    public void setRate(double rate, boolean autoadapt) {
+    public void setCPUThrottle(double rate, boolean autoadapt) {
         if (isCPUTimeMethodSampling) {
-            this.rate = rate;
-            this.autoadapt = autoadapt;
-            JVM.setRate(getId(), rate, autoadapt);
+            this.cpuThrottle = rate;
+            this.cpuAutoadapt = autoadapt;
+            JVM.setCPUThrottle(rate, autoadapt);
         }
     }
 
@@ -217,10 +212,6 @@ public final class PlatformEventType extends Type {
         return this.hasThrottle;
     }
 
-    public boolean hasRate() {
-        return this.hasRate;
-    }
-
     public boolean isEnabled() {
         return enabled;
     }
@@ -246,8 +237,8 @@ public final class PlatformEventType extends Type {
                 long p = enabled ? period : 0;
                 JVM.setMethodSamplingPeriod(getId(), p);
             } else if (isCPUTimeMethodSampling) {
-                double r = enabled ? rate : 0;
-                JVM.setRate(getId(), r, autoadapt);
+                double r = enabled ? cpuThrottle : 0;
+                JVM.setCPUThrottle(r, cpuAutoadapt);
             } else {
                 JVM.setEnabled(getId(), enabled);
             }

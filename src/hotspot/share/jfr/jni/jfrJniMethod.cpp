@@ -171,11 +171,7 @@ NO_TRANSITION(jboolean, jfr_set_throttle(JNIEnv* env, jclass jvm, jlong event_ty
   return JNI_TRUE;
 NO_TRANSITION_END
 
-JVM_ENTRY_NO_ENV(jboolean, jfr_set_rate(JNIEnv* env, jclass jvm, jlong event_type_id, jdouble rate, jboolean autoadapt))
-  JfrEventId event_id = static_cast<JfrEventId>(event_type_id);
-  if (event_id != JfrCPUTimeSampleEvent) {
-    return JNI_FALSE;
-  }
+JVM_ENTRY_NO_ENV(jboolean, jfr_set_cpu_throttle(JNIEnv* env, jclass jvm, jdouble rate, jboolean autoadapt))
   JfrEventSetting::set_enabled(JfrCPUTimeSampleEvent, rate > 0);
   JfrCPUTimeThreadSampling::set_rate(rate, autoadapt == JNI_TRUE);
   return JNI_TRUE;

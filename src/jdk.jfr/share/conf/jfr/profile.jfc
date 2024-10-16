@@ -192,7 +192,7 @@
 
     <event name="jdk.CPUTimeSample">
       <setting name="enabled" control="method-sampling-enabled">false</setting>
-      <setting name="rate">10ms</setting>
+      <setting name="throttle">10ms</setting>
     </event>
 
     <event name="jdk.CPUTimeSampleLoss">

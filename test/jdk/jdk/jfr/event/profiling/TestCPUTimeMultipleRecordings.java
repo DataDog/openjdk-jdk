@@ -51,7 +51,7 @@ public class TestCPUTimeMultipleRecordings {
         t.start();
         for (int i = 0; i < 2; i++) {
             try (RecordingStream rs = new RecordingStream()) {
-                rs.enable(nativeEvent).with("rate", "1ms");
+                rs.enable(nativeEvent).with("throttle", "1ms");
                 rs.onEvent(nativeEvent, e -> {
                     alive = false;
                     rs.close();

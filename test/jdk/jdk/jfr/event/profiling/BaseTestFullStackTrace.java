@@ -67,7 +67,7 @@ public class BaseTestFullStackTrace {
         do {
             recording = new Recording();
             if (eventName.equals(EventNames.CPUTimeSample)) {
-                recording.enable(eventName).with("rate", "50ms");
+                recording.enable(eventName).with("throttle", "50ms");
             } else {
                 recording.enable(eventName).withPeriod(Duration.ofMillis(50));
             }

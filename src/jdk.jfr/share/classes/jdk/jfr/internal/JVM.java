@@ -278,15 +278,7 @@ public final class JVM {
      * @param rate the new rate in events per second
      * @param autoadapt true if the rate should be adapted automatically
      */
-    public static native boolean setRate(long type, double rate, boolean autoadapt);
-
-    /**
-     * Returns the actual sampling period in milliseconds, computed from the
-     * throttle and the sampling period for CPUTimeSample events.
-     *
-     * @return the actual sampling period
-     */
-    public static native long getCPUTimeMethodSamplingActualPeriod();
+    public static native boolean setCPUThrottle(double rate, boolean autoadapt);
 
     /**
      * Sets the file where data should be written.

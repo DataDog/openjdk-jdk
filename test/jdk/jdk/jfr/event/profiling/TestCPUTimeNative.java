@@ -46,7 +46,7 @@ public class TestCPUTimeNative {
 
     public static void main(String[] args) throws Exception {
         try (RecordingStream rs = new RecordingStream()) {
-            rs.enable(nativeEvent).with("rate", "1ms");
+            rs.enable(nativeEvent).with("throttle", "1ms");
             rs.onEvent(nativeEvent, e -> {
                 alive = false;
                 rs.close();

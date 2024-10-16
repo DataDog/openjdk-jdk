@@ -43,7 +43,7 @@ public class TestCPUTimeEventThrottling {
     public static void main(String[] args) throws Exception {
         testZeroPerSecond();
         testThrottleSettings();
-        testThrottleSettingsOff();
+        testThrottleSettingsPeriod();
     }
 
     private static void testZeroPerSecond() throws Exception {
@@ -57,16 +57,15 @@ public class TestCPUTimeEventThrottling {
             "Expected between 0 and 3 events, got " + count);
     }
 
-    private static void testThrottleSettingsOff() throws Exception {
-        int count = countEvents(1000, "");
-        Asserts.assertTrue(count > 0, "Expected events, got " + count);
+    private static void testThrottleSettingsPeriod() throws Exception {
+        int count = countEvents(1000, "1ms");
+        Asserts.assertTrue(count > 950 && count < 1050, "Expected events, got " + count);
     }
-
 
     private static int countEvents(int timeMs, String rate) throws Exception {
         Recording recording = new Recording();
         recording.enable(EventNames.CPUTimeSample)
-            .with("rate", rate);
+                 .with("throttle", rate);
 
         recording.start();
 
@@ -74,7 +73,10 @@ public class TestCPUTimeEventThrottling {
 
         recording.stop();
 
-        return Events.fromRecording(recording).size();
+        return (int) Events.fromRecording(recording).stream()
+                .filter(e -> e.getThread("sampledThread").getJavaName()
+                              .equals(Thread.currentThread().getName()))
+                .count();
     }
 
     private static void wasteCPU(int durationMs) {

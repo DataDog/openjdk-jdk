@@ -41,6 +41,8 @@
 #if defined(LINUX)
 #include "signals_posix.hpp"
 
+const int64_t AUTOADAPT_INTERVAL_MS = 100;
+
 enum JfrSampleType {
   // no sample, because thread not in walkable state
   NO_SAMPLE = 0,
@@ -489,13 +491,18 @@ void JfrCPUTimeThreadSampler::disenroll() {
 void JfrCPUTimeThreadSampler::run() {
   assert(_sampler_thread == nullptr, "invariant");
   _sampler_thread = this;
+  int64_t last_autoadapt_check = os::javaTimeMillis();
   while (true) {
     if (!_sample.trywait()) {
       // disenrolled
       _sample.wait();
     }
     _sample.signal();
-    autoadapt_period_if_needed(); // this is cheap to call when nothing changes
+
+    if (os::javaTimeMillis() - last_autoadapt_check > AUTOADAPT_INTERVAL_MS) {
+      autoadapt_period_if_needed();
+      last_autoadapt_check = os::javaTimeMillis();
+    }
 
     int64_t period_nanos = get_sampling_period();
     period_nanos = period_nanos == 0 ? max_jlong : period_nanos;
@@ -571,7 +578,7 @@ void JfrCPUTimeThreadSampler::process_trace_queue() {
     }
     event.set_starttime(trace->start_time());
     event.set_endtime(trace->end_time());
-    event.set_cpuTime(Ticks(trace->sampling_period() / 1000000000.0 * JfrTime::frequency()) - Ticks(0));
+    event.set_sampleTime(Ticks(trace->sampling_period() / 1000000000.0 * JfrTime::frequency()) - Ticks(0));
 
     if (EventCPUTimeSample::is_enabled()) {
       JFRRecordSampledThreadCallback cb(trace->sampled_thread());
@@ -659,6 +666,7 @@ void JfrCPUTimeThreadSampling::update_run_state(double rate, bool autoadapt) {
     if (_sampler == nullptr) {
       create_sampler(rate, autoadapt);
     } else {
+      _sampler->set_rate(rate, autoadapt);
       _sampler->enroll();
     }
     return;
@@ -802,7 +810,7 @@ int64_t compute_sampling_period(double rate) {
   if (rate == 0) {
     return 0;
   }
-  return os::processor_count() * 1000000000.0 / rate;
+  return os::active_processor_count() * 1000000000.0 / rate;
 }
 
 void JfrCPUTimeThreadSampler::autoadapt_period_if_needed() {
@@ -819,8 +827,10 @@ void JfrCPUTimeThreadSampler::autoadapt_period_if_needed() {
 void JfrCPUTimeThreadSampler::set_rate(double rate, bool autoadapt) {
   _rate = rate;
   _autoadapt = autoadapt;
-  if (_rate > 0) {
+  if (_rate > 0 && Atomic::load(&_disenrolled) == false) {
     autoadapt_period_if_needed();
+  } else {
+      Atomic::store(&_current_sampling_period_ns, compute_sampling_period(rate));
   }
 }
 

@@ -50,7 +50,7 @@ import jdk.jfr.internal.settings.CutoffSetting;
 import jdk.jfr.internal.settings.EnabledSetting;
 import jdk.jfr.internal.settings.LevelSetting;
 import jdk.jfr.internal.settings.PeriodSetting;
-import jdk.jfr.internal.settings.RateSetting;
+import jdk.jfr.internal.settings.CPUThrottleSetting;
 import jdk.jfr.internal.settings.StackTraceSetting;
 import jdk.jfr.internal.settings.ThresholdSetting;
 import jdk.jfr.internal.settings.ThrottleSetting;
@@ -69,7 +69,6 @@ public final class EventControl {
     private static final Type TYPE_PERIOD = TypeLibrary.createType(PeriodSetting.class);
     private static final Type TYPE_CUTOFF = TypeLibrary.createType(CutoffSetting.class);
     private static final Type TYPE_THROTTLE = TypeLibrary.createType(ThrottleSetting.class);
-    private static final Type TYPE_RATE = TypeLibrary.createType(RateSetting.class);
     private static final long STACK_FILTER_ID = Type.getTypeId(StackFilter.class);
     private static final Type TYPE_LEVEL = TypeLibrary.createType(LevelSetting.class);
 
@@ -94,9 +93,6 @@ public final class EventControl {
         if (eventType.hasThrottle()) {
             addControl(Throttle.NAME, defineThrottle(eventType));
         }
-        if (eventType.hasRate()) {
-            addControl(Rate.NAME, defineRate(eventType));
-        }
         if (eventType.hasLevel()) {
             addControl(Level.NAME, defineLevel(eventType));
         }
@@ -110,7 +106,6 @@ public final class EventControl {
         remove(eventType, aes, StackTrace.class);
         remove(eventType, aes, Cutoff.class);
         remove(eventType, aes, Throttle.class);
-        remove(eventType, aes, Rate.class);
         remove(eventType, aes, StackFilter.class);
         eventType.setAnnotations(aes);
         this.type = eventType;
@@ -325,13 +320,10 @@ public final class EventControl {
     private static Control defineThrottle(PlatformEventType type) {
         String def = type.getAnnotationValue(Throttle.class, ThrottleSetting.DEFAULT_VALUE);
         type.add(PrivateAccess.getInstance().newSettingDescriptor(TYPE_THROTTLE, Throttle.NAME, def, Collections.emptyList()));
+        if (type.getName().equals("jdk.CPUTimeSample")) {
+            return new Control(new CPUThrottleSetting(type), def);
+        }
         return new Control(new ThrottleSetting(type), def);
-    }
-
-    private static Control defineRate(PlatformEventType type) {
-        String def = type.getAnnotationValue(Rate.class, RateSetting.DEFAULT_VALUE);
-        type.add(PrivateAccess.getInstance().newSettingDescriptor(TYPE_RATE, Rate.NAME, def, Collections.emptyList()));
-        return new Control(new RateSetting(type), def);
     }
 
     private static Control defineLevel(PlatformEventType type) {
