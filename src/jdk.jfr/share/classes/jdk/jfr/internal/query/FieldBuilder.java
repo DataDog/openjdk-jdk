@@ -135,10 +135,6 @@ final class FieldBuilder {
             configureTopFrameField();
             return true;
         }
-        if (fieldName.equals("stackTrace.isNull")) {
-            configureStackTraceIsNullField();
-            return true;
-        }
         if (fieldName.equals("id") && field.type.getName().equals("jdk.ActiveSetting")) {
             configureEventTypeIdField();
             return true;
@@ -300,14 +296,6 @@ final class FieldBuilder {
             RecordedClassLoader classLoader = cl.getClassLoader();
             return classLoader != null && !"bootstrap".equals(classLoader.getName());
         });
-    }
-
-    private void configureStackTraceIsNullField() {
-        field.alignLeft = true;
-        field.dataType = "boolean";
-        field.label = "Has no Stack Trace";
-        field.lexicalSort = true;
-        field.valueGetter = e -> e.getStackTrace() == null;
     }
 
     private void configureEventType(Function<RecordedEvent, Object> retriever) {

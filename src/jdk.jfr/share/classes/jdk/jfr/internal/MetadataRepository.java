@@ -83,7 +83,7 @@ public final class MetadataRepository {
                 // annotations, such as Period and Threshold.
                 if (pEventType.hasPeriod()) {
                     pEventType.setEventHook(true);
-                    if (!pEventType.isMethodSampling() || !pEventType.isCPUTimeMethodSampling()) {
+                    if (!pEventType.isMethodSampling()) {
                         PeriodicEvents.addJVMEvent(pEventType);
                     }
                 }
