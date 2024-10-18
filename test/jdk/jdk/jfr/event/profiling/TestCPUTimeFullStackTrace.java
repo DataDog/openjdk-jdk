@@ -36,7 +36,7 @@ import jdk.test.lib.jfr.EventNames;
 public class TestCPUTimeFullStackTrace {
 
     public static void main(String[] args) throws Throwable {
-        BaseTestFullStackTrace.run(EventNames.CPUTimeSample);
+        new BaseTestFullStackTrace(EventNames.CPUTimeSample, "eventThread").run();
     }
 
 }

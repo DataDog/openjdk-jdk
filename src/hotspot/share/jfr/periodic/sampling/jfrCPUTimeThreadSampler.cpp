@@ -578,13 +578,13 @@ void JfrCPUTimeThreadSampler::process_trace_queue() {
     }
     event.set_starttime(trace->start_time());
     event.set_endtime(trace->end_time());
-    event.set_sampleTime(Ticks(trace->sampling_period() / 1000000000.0 * JfrTime::frequency()) - Ticks(0));
+    event.set_samplingPeriod(Ticks(trace->sampling_period() / 1000000000.0 * JfrTime::frequency()) - Ticks(0));
 
     if (EventCPUTimeSample::is_enabled()) {
       JFRRecordSampledThreadCallback cb(trace->sampled_thread());
       ThreadCrashProtection crash_protection;
       if (crash_protection.call(cb)) {
-        event.set_sampledThread(cb._thread_id);
+        event.set_eventThread(cb._thread_id);
         event.commit();
         count++;
         if (count % 10000 == 0) {

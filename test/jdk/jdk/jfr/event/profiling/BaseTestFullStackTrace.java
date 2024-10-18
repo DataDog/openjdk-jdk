@@ -39,7 +39,15 @@ import jdk.test.lib.jfr.RecurseThread;
 public class BaseTestFullStackTrace {
     private final static int MAX_DEPTH = 64; // currently hardcoded in jvm
 
-    public static void run(String eventName) throws Throwable {
+    private final String eventName;
+    private final String threadFieldName;
+
+    public BaseTestFullStackTrace(String eventName, String threadFieldName) {
+        this.eventName = eventName;
+        this.threadFieldName = threadFieldName;
+    }
+
+    public void run() throws Throwable {
         RecurseThread[] threads = new RecurseThread[3];
         for (int i = 0; i < threads.length; ++i) {
             int depth = MAX_DEPTH - 1 + i;
@@ -54,7 +62,7 @@ public class BaseTestFullStackTrace {
             }
         }
 
-        assertStackTraces(eventName, threads);
+        assertStackTraces(threads);
 
         for (RecurseThread thread : threads) {
             thread.quit();
@@ -62,8 +70,8 @@ public class BaseTestFullStackTrace {
         }
     }
 
-    private static void assertStackTraces(String eventName, RecurseThread[] threads) throws Throwable {
-        Recording recording= null;
+    private void assertStackTraces(RecurseThread[] threads) throws Throwable {
+        Recording recording = null;
         do {
             recording = new Recording();
             if (eventName.equals(EventNames.CPUTimeSample)) {
@@ -77,13 +85,13 @@ public class BaseTestFullStackTrace {
         } while (!hasValidStackTraces(recording, threads));
     }
 
-    private static boolean hasValidStackTraces(Recording recording, RecurseThread[] threads) throws Throwable {
+    private boolean hasValidStackTraces(Recording recording, RecurseThread[] threads) throws Throwable {
         boolean[] isEventFound = new boolean[threads.length];
 
         for (RecordedEvent event : Events.fromRecording(recording)) {
-            //System.out.println("Event: " + event);
-            String threadName = Events.assertField(event, "sampledThread.javaName").getValue();
-            long threadId = Events.assertField(event, "sampledThread.javaThreadId").getValue();
+            System.out.println("Event: " + event);
+            String threadName = Events.assertField(event, threadFieldName + ".javaName").getValue();
+            long threadId = Events.assertField(event, threadFieldName + ".javaThreadId").getValue();
 
             for (int threadIndex = 0; threadIndex < threads.length; ++threadIndex) {
                 RecurseThread currThread = threads[threadIndex];
@@ -114,13 +122,13 @@ public class BaseTestFullStackTrace {
         return true;
     }
 
-    public static String getTopMethodName(RecordedEvent event) {
+    public String getTopMethodName(RecordedEvent event) {
         List<RecordedFrame> frames = event.getStackTrace().getFrames();
         Asserts.assertFalse(frames.isEmpty(), "JavaFrames was empty");
         return frames.getFirst().getMethod().getName();
     }
 
-    private static void checkEvent(RecordedEvent event, int expectedDepth) throws Throwable {
+    private void checkEvent(RecordedEvent event, int expectedDepth) throws Throwable {
         RecordedStackTrace stacktrace = null;
         try {
             stacktrace = event.getStackTrace();
@@ -150,7 +158,7 @@ public class BaseTestFullStackTrace {
         }
     }
 
-    private static List<String> getExpectedMethods(int depth) {
+    private List<String> getExpectedMethods(int depth) {
         List<String> methods = new ArrayList<>();
         methods.add("recurseEnd");
         for (int i = 0; i < depth - 2; ++i) {

@@ -74,7 +74,7 @@ public class TestCPUTimeEventThrottling {
         recording.stop();
 
         return (int) Events.fromRecording(recording).stream()
-                .filter(e -> e.getThread("sampledThread").getJavaName()
+                .filter(e -> e.getThread().getJavaName()
                               .equals(Thread.currentThread().getName()))
                 .count();
     }
