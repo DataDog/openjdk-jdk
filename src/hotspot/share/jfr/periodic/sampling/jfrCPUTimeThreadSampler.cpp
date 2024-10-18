@@ -89,7 +89,7 @@ static bool thread_state_in_native(JavaThread* thread) {
     case _thread_in_native_trans:
     case _thread_blocked:
     case _thread_in_native:
-    case _thread_in_vm: // walking in vm causes weird bugs (assertions in G1 fail), so don't
+    case _thread_in_vm:
       return true;
     default:
       ShouldNotReachHere();

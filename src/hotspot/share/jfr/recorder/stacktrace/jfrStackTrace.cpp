@@ -150,7 +150,6 @@ static RegisterMap::WalkContinuation walk_continuation(JavaThread* jt) {
       : RegisterMap::WalkContinuation::include;
 }
 
-
 JfrVframeStream::JfrVframeStream(JavaThread* jt, const frame& fr, bool stop_at_java_call_stub, bool async_mode) :
   vframeStreamCommon(jt,
                      RegisterMap::UpdateMap::skip,

@@ -25,8 +25,12 @@ package jdk.jfr.event.profiling;
 
 
 import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Comparator;
 
 import jdk.jfr.Recording;
+import jdk.jfr.consumer.RecordedEvent;
 import jdk.test.lib.Asserts;
 import jdk.test.lib.jfr.EventNames;
 import jdk.test.lib.jfr.Events;
@@ -47,22 +51,28 @@ public class TestCPUTimeEventThrottling {
     }
 
     private static void testZeroPerSecond() throws Exception {
-        Asserts.assertEquals(0, countEvents(1000, "0/s"));
+        Asserts.assertEquals(0, countEvents(1000, "0/s").count());
     }
 
     private static void testThrottleSettings() throws Exception {
         int count = countEvents(1000,
-            Runtime.getRuntime().availableProcessors() * 2 + "/s");
+            Runtime.getRuntime().availableProcessors() * 2 + "/s").count();
         Asserts.assertTrue(count > 0 && count < 3,
             "Expected between 0 and 3 events, got " + count);
     }
 
     private static void testThrottleSettingsPeriod() throws Exception {
-        int count = countEvents(1000, "1ms");
-        Asserts.assertTrue(count > 950 && count < 1050, "Expected events, got " + count);
+        float rate = countEvents(1000, "1ms").rate();
+        Asserts.assertTrue(rate > 950 && rate < 1050, "Expected around 1000 events per second, got " + rate);
     }
 
-    private static int countEvents(int timeMs, String rate) throws Exception {
+    private record EventCount(int count, int timeMs) {
+        float rate() {
+            return (float) count / timeMs * 1000;
+        }
+    }
+
+    private static EventCount countEvents(int timeMs, String rate) throws Exception {
         Recording recording = new Recording();
         recording.enable(EventNames.CPUTimeSample)
                  .with("throttle", rate);
@@ -73,10 +83,18 @@ public class TestCPUTimeEventThrottling {
 
         recording.stop();
 
-        return (int) Events.fromRecording(recording).stream()
+        List<RecordedEvent> events = Events.fromRecording(recording).stream()
                 .filter(e -> e.getThread().getJavaName()
                               .equals(Thread.currentThread().getName()))
-                .count();
+                .sorted(Comparator.comparing(RecordedEvent::getStartTime))
+                .toList();
+        if (events.size() < 2) {
+            return new EventCount(events.size(), 0);
+        }
+
+        Instant start = events.get(0).getStartTime();
+        Instant end = events.get(events.size() - 1).getStartTime();
+        return new EventCount(events.size(), (int) Duration.between(start, end).toMillis());
     }
 
     private static void wasteCPU(int durationMs) {

@@ -947,13 +947,13 @@
     period="everyChunk" throttle="true" thread="false" experimental="true">
     <Field type="StackTrace" name="stackTrace" label="Stack Trace" />
     <Field type="Thread" name="eventThread" label="Thread" />
-    <Field type="boolean" name="failed" label="Failed" description="Failed to Obtain the Stack Trace" />
+    <Field type="boolean" name="failed" label="Failed" description="Failed to obtain the stack trace" />
     <Field type="Tickspan" name="samplingPeriod" label="CPU Time Sampling Period"/>
   </Event>
 
   <Event name="CPUTimeSampleLoss" category="Java Virtual Machine, Profiling" label="CPU Time Method Profiling Lost Samples" description="Records that the CPU time sampler lost samples because of internal throttling"
     thread="false" stackTrace="false" startTime="false" experimental="true">
-    <Field type="int" name="lostSamples" label="Lost samples since last event" />
+    <Field type="int" name="lostSamples" label="Lost Samples" />
   </Event>
 
   <Event name="ThreadDump" category="Java Virtual Machine, Runtime" label="Thread Dump" period="everyChunk">

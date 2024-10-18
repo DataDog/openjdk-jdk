@@ -22,7 +22,6 @@
  *
  */
 
-#include "jfrfiles/jfrEventIds.hpp"
 #include "precompiled.hpp"
 #include "jfr/jfr.hpp"
 #include "jfr/jfrEvents.hpp"
