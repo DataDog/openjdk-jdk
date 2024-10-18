@@ -886,7 +886,4 @@ void JfrCPUTimeThreadSampling::on_javathread_create(JavaThread* thread) {
 void JfrCPUTimeThreadSampling::on_javathread_terminate(JavaThread* thread) {
 }
 
-void JfrCPUTimeThreadSampling::set_throttle(double throttle) {
-}
-
 #endif // defined(LINUX) && defined(INCLUDE_JFR)
