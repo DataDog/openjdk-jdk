@@ -192,8 +192,8 @@ public final class PlatformEventType extends Type {
     }
 
     public boolean hasThreshold() {
-        if (hasCutoff) {
-            // Event has a duration, but not a threshold. Used by OldObjectSample
+        if (hasCutoff || isCPUTimeMethodSampling) {
+            // Event has a duration, but not a threshold. Used by OldObjectSample and CPUTimeSample
             return false;
         }
         return getField(ImplicitFields.DURATION) != null;
