@@ -39,8 +39,7 @@ import jdk.jfr.MetadataDefinition;
 import jdk.jfr.Name;
 import jdk.jfr.internal.PlatformEventType;
 import jdk.jfr.internal.Type;
-import jdk.jfr.internal.util.ParsedCPUThrottle;
-import jdk.jfr.internal.util.TimespanUnit;
+import jdk.jfr.internal.util.TimespanRate;
 import jdk.jfr.internal.util.Utils;
 
 @MetadataDefinition
@@ -58,19 +57,15 @@ public final class CPUThrottleSetting extends JDKSettingControl {
 
     @Override
     public String combine(Set<String> values) {
-        ParsedCPUThrottle max = null;
-        boolean autoadapt = false;
+        TimespanRate max = null;
         for (String value : values) {
-            ParsedCPUThrottle rate = ParsedCPUThrottle.of(value);
+            TimespanRate rate = TimespanRate.of(value);
             if (rate != null) {
                 if (max == null || rate.isHigher(max)) {
                     max = rate;
                 }
-                autoadapt |= rate instanceof ParsedCPUThrottle.ParsedRate;
+                max = new TimespanRate(max.rate(), max.autoadapt() || rate.autoadapt());
             }
-        }
-        if (autoadapt) {
-            max = max.toParsedRate();
         }
         // "off" is not supported
         return Objects.requireNonNullElse(max.toString(), DEFAULT_VALUE);
@@ -78,10 +73,9 @@ public final class CPUThrottleSetting extends JDKSettingControl {
 
     @Override
     public void setValue(String value) {
-        ParsedCPUThrottle rate = ParsedCPUThrottle.of(value);
-        System.out.println();
+        TimespanRate rate = TimespanRate.of(value);
         if (rate != null) {
-            eventType.setCPUThrottle(rate.rate(), rate instanceof ParsedCPUThrottle.ParsedRate);
+            eventType.setCPUThrottle(rate);
         }
     }
 

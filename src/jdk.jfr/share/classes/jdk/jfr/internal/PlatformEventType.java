@@ -33,6 +33,7 @@ import jdk.jfr.SettingDescriptor;
 import jdk.jfr.events.ActiveSettingEvent;
 import jdk.jfr.internal.periodic.PeriodicEvents;
 import jdk.jfr.internal.util.ImplicitFields;
+import jdk.jfr.internal.util.TimespanRate;
 import jdk.jfr.internal.util.Utils;
 /**
  * Implementation of event type.
@@ -56,8 +57,7 @@ public final class PlatformEventType extends Type {
     private boolean stackTraceEnabled = true;
     private long thresholdTicks = 0;
     private long period = 0;
-    private double cpuThrottle = 0.0;
-    private boolean cpuAutoadapt = false;
+    private TimespanRate cpuRate;
     private boolean hasHook;
 
     private boolean beginChunk;
@@ -168,11 +168,10 @@ public final class PlatformEventType extends Type {
         }
     }
 
-    public void setCPUThrottle(double rate, boolean autoadapt) {
+    public void setCPUThrottle(TimespanRate rate) {
         if (isCPUTimeMethodSampling) {
-            this.cpuThrottle = rate;
-            this.cpuAutoadapt = autoadapt;
-            JVM.setCPUThrottle(rate, autoadapt);
+            this.cpuRate = rate;
+            JVM.setCPUThrottle(rate.rate(), rate.autoadapt());
         }
     }
 
@@ -237,8 +236,8 @@ public final class PlatformEventType extends Type {
                 long p = enabled ? period : 0;
                 JVM.setMethodSamplingPeriod(getId(), p);
             } else if (isCPUTimeMethodSampling) {
-                double r = enabled ? cpuThrottle : 0;
-                JVM.setCPUThrottle(r, cpuAutoadapt);
+                TimespanRate r = enabled ? cpuRate : new TimespanRate(0, false);
+                JVM.setCPUThrottle(r.rate(), r.autoadapt());
             } else {
                 JVM.setEnabled(getId(), enabled);
             }
