@@ -23,7 +23,6 @@
 
 package jdk.jfr.event.profiling;
 
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -73,28 +72,29 @@ public class TestCPUTimeEventThrottling {
     }
 
     private static EventCount countEvents(int timeMs, String rate) throws Exception {
-        Recording recording = new Recording();
-        recording.enable(EventNames.CPUTimeSample)
-                 .with("throttle", rate);
+        try(Recording recording = new Recording()) {
+            recording.enable(EventNames.CPUTimeSample)
+                    .with("throttle", rate);
 
-        recording.start();
+            recording.start();
 
-        wasteCPU(timeMs);
+            wasteCPU(timeMs);
 
-        recording.stop();
+            recording.stop();
 
-        List<RecordedEvent> events = Events.fromRecording(recording).stream()
-                .filter(e -> e.getThread().getJavaName()
-                              .equals(Thread.currentThread().getName()))
-                .sorted(Comparator.comparing(RecordedEvent::getStartTime))
-                .toList();
-        if (events.size() < 2) {
-            return new EventCount(events.size(), 0);
+            List<RecordedEvent> events = Events.fromRecording(recording).stream()
+                    .filter(e -> e.getThread().getJavaName()
+                                .equals(Thread.currentThread().getName()))
+                    .sorted(Comparator.comparing(RecordedEvent::getStartTime))
+                    .toList();
+            if (events.size() < 2) {
+                return new EventCount(events.size(), 0);
+            }
+
+            Instant start = events.get(0).getStartTime();
+            Instant end = events.get(events.size() - 1).getStartTime();
+            return new EventCount(events.size(), (int) Duration.between(start, end).toMillis());
         }
-
-        Instant start = events.get(0).getStartTime();
-        Instant end = events.get(events.size() - 1).getStartTime();
-        return new EventCount(events.size(), (int) Duration.between(start, end).toMillis());
     }
 
     private static void wasteCPU(int durationMs) {

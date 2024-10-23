@@ -71,18 +71,21 @@ public class BaseTestFullStackTrace {
     }
 
     private void assertStackTraces(RecurseThread[] threads) throws Throwable {
-        Recording recording = null;
-        do {
-            recording = new Recording();
-            if (eventName.equals(EventNames.CPUTimeSample)) {
-                recording.enable(eventName).with("throttle", "50ms");
-            } else {
-                recording.enable(eventName).withPeriod(Duration.ofMillis(50));
+        while (true) {
+            try (Recording recording = new Recording()) {
+                if (eventName.equals(EventNames.CPUTimeSample)) {
+                    recording.enable(eventName).with("throttle", "50ms");
+                } else {
+                    recording.enable(eventName).withPeriod(Duration.ofMillis(50));
+                }
+                recording.start();
+                Thread.sleep(500);
+                recording.stop();
+                if (hasValidStackTraces(recording, threads)) {
+                    break;
+                }
             }
-            recording.start();
-            Thread.sleep(500);
-            recording.stop();
-        } while (!hasValidStackTraces(recording, threads));
+        };
     }
 
     private boolean hasValidStackTraces(Recording recording, RecurseThread[] threads) throws Throwable {
