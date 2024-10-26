@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2000, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -23,17 +21,13 @@
  * questions.
  */
 
-/**
- * This package provides a pluggable authentication framework.
- * <h2>Package Specification</h2>
- *
- * <ul>
- *   <li><a href="{@docRoot}/../specs/security/standard-names.html">
- *     <b>Java Security Standard Algorithm Names Specification
- *     </b></a></li>
- * </ul>
- *
- * @spec security/standard-names.html Java Security Standard Algorithm Names
- * @since 1.4
- */
-package javax.security.auth.login;
+#include "export.h"
+
+EXPORT void noop_params0() {}
+EXPORT void noop_params1(void *param0) {}
+EXPORT void noop_params2(void *param0, void *param1) {}
+EXPORT void noop_params3(void *param0, void *param1, void *param2) {}
+EXPORT void noop_params4(void *param0, void *param1, void *param2, void *param3) {}
+EXPORT void noop_params5(void *param0, void *param1, void *param2, void *param3, void *param4) {}
+EXPORT void noop_params10(void *param0, void *param1, void *param2, void *param3, void *param4,
+                          void *param5, void *param6, void *param7, void *param8, void *param9) {}
