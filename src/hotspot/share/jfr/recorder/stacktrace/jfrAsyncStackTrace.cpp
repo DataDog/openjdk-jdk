@@ -53,7 +53,6 @@ bool JfrAsyncStackTrace::record_async(JavaThread* jt, const frame& frame) {
     return false;
   }
   assert(current_thread->in_asgct(), "invariant");
-  assert(jt != current_thread || current_thread->in_asgct(), "invariant");
 
   u4 count = 0;
   _reached_root = true;

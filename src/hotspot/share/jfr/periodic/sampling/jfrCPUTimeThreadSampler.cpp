@@ -491,7 +491,7 @@ void JfrCPUTimeThreadSampler::disenroll() {
 void JfrCPUTimeThreadSampler::run() {
   assert(_sampler_thread == nullptr, "invariant");
   _sampler_thread = this;
-  int64_t last_autoadapt_check = os::javaTimeMillis();
+  int64_t last_autoadapt_check = os::javaTimeNanos();
   while (true) {
     if (!_sample.trywait()) {
       // disenrolled
@@ -499,9 +499,9 @@ void JfrCPUTimeThreadSampler::run() {
     }
     _sample.signal();
 
-    if (os::javaTimeMillis() - last_autoadapt_check > AUTOADAPT_INTERVAL_MS) {
+    if (os::javaTimeNanos() - last_autoadapt_check > AUTOADAPT_INTERVAL_MS * 1000000) {
       autoadapt_period_if_needed();
-      last_autoadapt_check = os::javaTimeMillis();
+      last_autoadapt_check = os::javaTimeNanos();
     }
 
     int64_t period_nanos = get_sampling_period();

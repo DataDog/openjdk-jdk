@@ -32,7 +32,7 @@ import jdk.test.lib.jfr.RecurseThread;
 /*
  * @test
  * @key jfr
- * @requires vm.hasJFR
+ * @requires vm.hasJFR & os.family == "linux"
  * @library /test/lib
  * @modules jdk.jfr/jdk.jfr.internal
  * @run main/timeout=30 jdk.jfr.event.profiling.TestCPUTimeAndExecutionSample
