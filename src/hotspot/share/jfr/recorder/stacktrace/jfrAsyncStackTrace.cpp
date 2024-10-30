@@ -41,9 +41,6 @@ JfrAsyncStackTrace::JfrAsyncStackTrace(JfrAsyncStackFrame* frames, u4 max_frames
   _reached_root(false)
   {}
 
-
-static const size_t min_valid_free_size_bytes = 16;
-
 bool JfrAsyncStackTrace::record_async(JavaThread* jt, const frame& frame) {
   NoHandleMark nhm;
 
