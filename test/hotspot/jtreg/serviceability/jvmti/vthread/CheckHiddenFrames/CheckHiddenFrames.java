@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -19,28 +19,38 @@
  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
  * or visit www.oracle.com if you need additional information or have any
  * questions.
- *
  */
 
-#ifndef SHARE_GC_SHARED_BARRIERSETCONFIG_INLINE_HPP
-#define SHARE_GC_SHARED_BARRIERSETCONFIG_INLINE_HPP
+/*
+ * @test
+ * @bug 8341273
+ * @summary Verifies JVMTI properly hides frames which are in VTMS transition
+ * @run main/othervm/native -agentlib:CheckHiddenFrames CheckHiddenFrames
+ */
 
-#include "gc/shared/barrierSetConfig.hpp"
+public class CheckHiddenFrames {
+    static native boolean checkHidden(Thread t);
 
-#include "gc/shared/modRefBarrierSet.inline.hpp"
-#include "gc/shared/cardTableBarrierSet.inline.hpp"
+    static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+        }
+    }
 
-#if INCLUDE_EPSILONGC
-#include "gc/epsilon/epsilonBarrierSet.hpp"
-#endif
-#if INCLUDE_G1GC
-#include "gc/g1/g1BarrierSet.inline.hpp"
-#endif
-#if INCLUDE_SHENANDOAHGC
-#include "gc/shenandoah/shenandoahBarrierSet.inline.hpp"
-#endif
-#if INCLUDE_ZGC
-#include "gc/z/zBarrierSet.inline.hpp"
-#endif
+    public static void main(String[] args) throws Exception {
+        Thread thread = Thread.startVirtualThread(CheckHiddenFrames::test);
+        System.out.println("Started virtual thread: " + thread);
 
-#endif // SHARE_GC_SHARED_BARRIERSETCONFIG_INLINE_HPP
+        if (!checkHidden(thread)) {
+            thread.interrupt();
+            throw new RuntimeException("CheckHiddenFrames failed!");
+        }
+        thread.interrupt();
+        thread.join();
+    }
+
+    static void test() {
+        sleep(1000000);
+    }
+}
