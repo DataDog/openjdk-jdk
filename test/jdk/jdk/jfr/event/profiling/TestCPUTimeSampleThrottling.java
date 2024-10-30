@@ -39,9 +39,9 @@ import jdk.test.lib.jfr.Events;
  * @key jfr
  * @requires vm.hasJFR & os.family == "linux"
  * @library /test/lib
- * @run main/othervm jdk.jfr.event.profiling.TestCPUTimeEventThrottling
+ * @run main/othervm jdk.jfr.event.profiling.TestCPUTimeSampleThrottling
  */
-public class TestCPUTimeEventThrottling {
+public class TestCPUTimeSampleThrottling {
 
     public static void main(String[] args) throws Exception {
         testZeroPerSecond();

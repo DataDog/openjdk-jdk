@@ -31,9 +31,9 @@ import jdk.test.lib.jfr.EventNames;
  * @requires vm.hasJFR & os.family == "linux"
  * @library /test/lib
  * @build jdk.jfr.event.profiling.BaseTestFullStackTrace
- * @run main/othervm jdk.jfr.event.profiling.TestCPUTimeFullStackTrace
+ * @run main/othervm jdk.jfr.event.profiling.TestCPUTimeSampleFullStackTrace
  */
-public class TestCPUTimeFullStackTrace {
+public class TestCPUTimeSampleFullStackTrace {
 
     public static void main(String[] args) throws Throwable {
         new BaseTestFullStackTrace(EventNames.CPUTimeSample, "eventThread").run();

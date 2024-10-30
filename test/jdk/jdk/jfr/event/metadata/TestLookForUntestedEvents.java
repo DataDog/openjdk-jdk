@@ -91,6 +91,9 @@ public class TestLookForUntestedEvents {
     private static final Set<String> experimentalEvents = Set.of(
         "Flush", "SyncOnValueBasedClass", "CPUTimeSample", "CPUTimeSampleLoss");
 
+    // Subset of the experimental events that should have tests
+    private static final Set<String> experimentalButTestedEvents = Set.of("CPUTimeSample");
+
     public static void main(String[] args) throws Exception {
         for (EventType type : FlightRecorder.getFlightRecorder().getEventTypes()) {
             if (type.getAnnotation(Experimental.class) == null) {
@@ -110,7 +113,9 @@ public class TestLookForUntestedEvents {
             .collect(Collectors.toList());
 
         Set<String> eventsNotCoveredByTest = new HashSet<>(jfrEventTypes);
-        for (String event : jfrEventTypes) {
+        Set<String> checkedEvents = new HashSet<>(jfrEventTypes);
+        checkedEvents.addAll(experimentalButTestedEvents);
+        for (String event : checkedEvents) {
             for (Path p : paths) {
                 if (findStringInFile(p, event)) {
                     eventsNotCoveredByTest.remove(event);

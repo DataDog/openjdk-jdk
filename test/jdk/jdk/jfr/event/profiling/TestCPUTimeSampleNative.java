@@ -36,9 +36,9 @@ import jdk.test.lib.jfr.EventNames;
  * @requires vm.hasJFR
  * @library /test/lib
  * @modules jdk.jfr/jdk.jfr.internal
- * @run main jdk.jfr.event.profiling.TestCPUTimeNative
+ * @run main jdk.jfr.event.profiling.TestCPUTimeSampleNative
  */
-public class TestCPUTimeNative {
+public class TestCPUTimeSampleNative {
 
     static String nativeEvent = EventNames.CPUTimeSample;
 
@@ -51,7 +51,7 @@ public class TestCPUTimeNative {
                 alive = false;
                 rs.close();
             });
-            Thread t = new Thread(TestCPUTimeNative::nativeMethod);
+            Thread t = new Thread(TestCPUTimeSampleNative::nativeMethod);
             t.setDaemon(true);
             t.start();
             rs.start();

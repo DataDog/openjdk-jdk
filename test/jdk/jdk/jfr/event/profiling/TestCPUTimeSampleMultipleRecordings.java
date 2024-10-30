@@ -37,16 +37,16 @@ import jdk.test.lib.jfr.EventNames;
  * @requires vm.hasJFR & os.family == "linux"
  * @library /test/lib
  * @modules jdk.jfr/jdk.jfr.internal
- * @run main jdk.jfr.event.profiling.TestCPUTimeMultipleRecordings
+ * @run main jdk.jfr.event.profiling.TestCPUTimeSampleMultipleRecordings
  */
-public class TestCPUTimeMultipleRecordings {
+public class TestCPUTimeSampleMultipleRecordings {
 
     static String nativeEvent = EventNames.CPUTimeSample;
 
     static volatile boolean alive = true;
 
     public static void main(String[] args) throws Exception {
-        Thread t = new Thread(TestCPUTimeMultipleRecordings::nativeMethod);
+        Thread t = new Thread(TestCPUTimeSampleMultipleRecordings::nativeMethod);
         t.setDaemon(true);
         t.start();
         for (int i = 0; i < 2; i++) {

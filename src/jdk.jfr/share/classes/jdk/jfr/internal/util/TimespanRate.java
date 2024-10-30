@@ -38,7 +38,10 @@ public record TimespanRate(double rate, boolean autoadapt) {
         }
         boolean isPeriod = !text.contains("/");
         if (isPeriod) {
-            var period = ValueParser.parseTimespanWithInfinity(text);
+            var period = ValueParser.parseTimespanWithInfinity(text, Long.MAX_VALUE);
+            if (period == Long.MAX_VALUE) {
+                return null;
+            }
             if (period == 0) {
                 return new TimespanRate(0, false);
             }
