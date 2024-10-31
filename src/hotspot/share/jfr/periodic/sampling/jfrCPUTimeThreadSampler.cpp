@@ -54,28 +54,11 @@ enum JfrSampleType {
 
 static bool thread_state_in_java(JavaThread* thread) {
   assert(thread != nullptr, "invariant");
-  switch(thread->thread_state()) {
-    case _thread_new:
-    case _thread_uninitialized:
-    case _thread_new_trans:
-    case _thread_in_vm_trans:
-    case _thread_blocked_trans:
-    case _thread_in_native_trans:
-    case _thread_blocked:
-    case _thread_in_vm:
-    case _thread_in_native:
-      break;
-    case _thread_in_Java_trans:
-    case _thread_in_Java:
-      return true;
-    default:
-      ShouldNotReachHere();
-      break;
-  }
-  return false;
+  JavaThreadState state = thread->thread_state();
+  return state == _thread_in_Java || state == _thread_in_Java_trans;
 }
 
-static bool thread_state_in_native(JavaThread* thread) {
+static bool thread_state_in_non_java(JavaThread* thread) {
   assert(thread != nullptr, "invariant");
   switch(thread->thread_state()) {
     case _thread_new:
@@ -181,7 +164,7 @@ public:
       ThreadInAsgct tia(jt);
       if (thread_state_in_java(jt)) {
         record_java_trace(jt, ucontext);
-      } else if (thread_state_in_native(jt)) {
+      } else if (thread_state_in_non_java(jt)) {
         record_native_trace(jt, ucontext);
       }
     }
