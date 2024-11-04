@@ -92,7 +92,15 @@ bool JfrAsyncStackTrace::record_async(JavaThread* jt, const frame& frame) {
       // frame, so this frame is inlined into the caller.
       type = JfrStackFrame::FRAME_INLINE;
     }
-    _frames[count] = JfrAsyncStackFrame(method, bci, type, method->line_number_from_bci(bci), method->method_holder());
+
+    // Tag the klass and the method, so that they are not GCd
+    const InstanceKlass* klass = method->method_holder();
+    SET_METHOD_AND_CLASS_USED_THIS_EPOCH(klass);
+    SET_METHOD_FLAG_USED_THIS_EPOCH(method);
+    assert(METHOD_AND_CLASS_USED_THIS_EPOCH(klass), "invariant");
+    assert(METHOD_FLAG_USED_THIS_EPOCH(method), "invariant");
+
+    _frames[count] = JfrAsyncStackFrame(method, bci, type, method->line_number_from_bci(bci));
     count++;
   }
   _nr_of_frames = count;
