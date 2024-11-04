@@ -28,6 +28,7 @@
 #include "jfr/utilities/jfrAllocation.hpp"
 
 class JavaThread;
+class NonJavaThread;
 
 #if defined(LINUX)
 
@@ -58,6 +59,8 @@ class JfrCPUTimeThreadSampling : public JfrCHeapObj {
   static void on_javathread_create(JavaThread* thread);
   static void on_javathread_terminate(JavaThread* thread);
   void handle_timer_signal(void* context);
+
+  static NonJavaThread* get_worker_thread_or_null();
 };
 
 #else
@@ -77,6 +80,8 @@ private:
 
   static void on_javathread_create(JavaThread* thread);
   static void on_javathread_terminate(JavaThread* thread);
+
+  static NonJavaThread* get_worker_thread_or_null();
 };
 
 #endif // defined(LINUX)

@@ -128,6 +128,9 @@
 #include "osContainer_linux.hpp"
 #include "os_linux.hpp"
 #endif
+#ifdef INCLUDE_JFR
+#include "jfr/periodic/sampling/jfrCPUTimeThreadSampler.hpp"
+#endif
 
 #define CHECK_JNI_EXCEPTION_(env, value)                               \
   do {                                                                 \
@@ -184,6 +187,16 @@ WB_ENTRY(jstring, WB_PrintString(JNIEnv* env, jobject wb, jstring str, jint max_
   java_lang_String::print(JNIHandles::resolve(str), &sb, max_length);
   oop result = java_lang_String::create_oop_from_str(sb.as_string(), THREAD);
   return (jstring) JNIHandles::make_local(THREAD, result);
+WB_END
+
+WB_ENTRY(jint, WB_GetCPUTimeSampleWorkerThreadId(JNIEnv* env, jobject o))
+#ifdef INCLUDE_JFR
+  NonJavaThread *worker = JfrCPUTimeThreadSampling::get_worker_thread_or_null();
+  if (worker != nullptr) {
+    return worker->osthread()->thread_id();
+  }
+#endif
+  return 0;
 WB_END
 
 WB_ENTRY(jint, WB_TakeLockAndHangInSafepoint(JNIEnv* env, jobject wb))
@@ -2998,6 +3011,7 @@ static JNINativeMethod methods[] = {
   {CC"lockAndStuckInSafepoint", CC"()V", (void*)&WB_TakeLockAndHangInSafepoint},
   {CC"wordSize", CC"()J",                             (void*)&WB_WordSize},
   {CC"rootChunkWordSize", CC"()J",                    (void*)&WB_RootChunkWordSize}
+  {CC"getCPUTimeSampleWorkerThreadId", CC"()I",       (void*)&WB_GetCPUTimeSampleWorkerThreadId},
 };
 
 

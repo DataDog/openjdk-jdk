@@ -369,7 +369,7 @@ class JfrCPUTimeThreadSampler : public NonJavaThread {
   friend class JfrCPUTimeFillCallback;
  private:
   Semaphore _sample;
-  Thread* _sampler_thread;
+  NonJavaThread* _sampler_thread;
   JfrTraceQueues _queues;
   double _rate;
   bool _autoadapt;
@@ -847,6 +847,13 @@ void JfrCPUTimeThreadSampler::update_all_thread_timers() {
   }
 }
 
+NonJavaThread* JfrCPUTimeThreadSampling::get_worker_thread_or_null() {
+  if (_instance != nullptr) {
+    return _instance->_sampler->_sampler_thread;
+  }
+  return nullptr;
+}
+
 #else
 
 static bool _showed_warning = false;
@@ -884,6 +891,10 @@ void JfrCPUTimeThreadSampling::on_javathread_create(JavaThread* thread) {
 }
 
 void JfrCPUTimeThreadSampling::on_javathread_terminate(JavaThread* thread) {
+}
+
+NonJavaThread* JfrCPUTimeThreadSampling::get_worker_thread_or_null() {
+  return nullptr;
 }
 
 #endif // defined(LINUX) && defined(INCLUDE_JFR)
