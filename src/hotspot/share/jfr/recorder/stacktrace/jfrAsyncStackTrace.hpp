@@ -37,16 +37,16 @@ class JavaThread;
 class JfrStackTrace;
 
 class JfrAsyncStackFrame {
-  friend class JfrAsyncStackTrace;
  private:
-  const InstanceKlass* _klass;
   const Method* _method;
-  int _line;
-  int _bci;
+  // line is a 16 bit value or -1, the -1 case is recorded in the type
+  u2 _line;
+  // top bit encodes whether _line is -1 or not
   u1 _type;
+  int _bci;
 
  public:
-  JfrAsyncStackFrame(const Method* _method, int bci, u1 type, int lineno, const InstanceKlass* klass);
+  JfrAsyncStackFrame(const Method* _method, int bci, u1 type, int lineno);
 
   enum : u1 {
     FRAME_INTERPRETER = 0,
@@ -55,6 +55,11 @@ class JfrAsyncStackFrame {
     FRAME_NATIVE,
     NUM_FRAME_TYPES
   };
+
+  const Method *method() const { return _method; }
+  int bci() const { return _bci; }
+  u1 type() const;
+  int lineno() const;
 };
 
 class JfrAsyncStackTraceStoreCallback;

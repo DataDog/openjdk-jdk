@@ -30,9 +30,19 @@
 #include "runtime/threadCrashProtection.hpp"
 #include "runtime/vframe.inline.hpp"
 
-JfrAsyncStackFrame::JfrAsyncStackFrame(const Method* method, int bci, u1 type, int lineno, const InstanceKlass* ik) :
-  _klass(ik), _method(method), _line(lineno), _bci(bci), _type(type) {}
+JfrAsyncStackFrame::JfrAsyncStackFrame(const Method* method, int bci, u1 type, int lineno) :
+  _method(method), _line(lineno), _type(type | ((lineno < 0) ? 0x80 : 0)), _bci(bci) {}
 
+int JfrAsyncStackFrame::lineno() const {
+  if (_type & 0x80) {
+    return -1;
+  }
+  return _line;
+}
+
+u1 JfrAsyncStackFrame::type() const {
+  return _type & 0x7F;
+}
 
 JfrAsyncStackTrace::JfrAsyncStackTrace(JfrAsyncStackFrame* frames, u4 max_frames) :
   _frames(frames),
@@ -108,16 +118,16 @@ bool JfrAsyncStackTrace::inner_store(JfrStackTrace* trace) const {
   traceid hash = 1;
   for (u4 i = 0; i < _nr_of_frames; i++) {
     const JfrAsyncStackFrame& frame = _frames[i];
-    if (!Method::is_valid_method(frame._method)) {
+    if (!Method::is_valid_method(frame.method())) {
       // we throw away everything we've gathered in this sample since
       // none of it is safe
       return false;
     }
-    const traceid mid = JfrTraceId::load(frame._method);
+    const traceid mid = JfrTraceId::load(frame.method());
     hash = (hash * 31) + mid;
-    hash = (hash * 31) + frame._bci;
-    hash = (hash * 31) + frame._type;
-    trace->_frames[i] = JfrStackFrame(mid, frame._bci, frame._type, frame._line, frame._klass);
+    hash = (hash * 31) + frame.bci();
+    hash = (hash * 31) + frame.type();
+    trace->_frames[i] = JfrStackFrame(mid, frame.bci(), frame.type(), frame.lineno(), frame.method()->method_holder());
   }
   trace->set_hash(hash);
   return true;
