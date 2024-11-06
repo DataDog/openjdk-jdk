@@ -46,8 +46,8 @@ public class TestNative {
 
     public static void main(String[] args) throws Exception {
         try (RecordingStream rs = new RecordingStream()) {
-            rs.enable(nativeEvent).withPeriod(Duration.ofMillis(1));
-            rs.onEvent(nativeEvent, e -> {
+            rs.enable(NATIVE_EVENT).withPeriod(Duration.ofMillis(1));
+            rs.onEvent(NATIVE_EVENT, e -> {
                 alive = false;
                 rs.close();
             });

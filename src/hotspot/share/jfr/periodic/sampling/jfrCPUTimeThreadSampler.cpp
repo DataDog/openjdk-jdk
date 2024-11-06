@@ -746,12 +746,11 @@ bool JfrCPUTimeThreadSampler::create_timer_for_thread(JavaThread* thread, timer_
     return false;
   }
   timer_t t;
-  OSThread::thread_id_t tid = thread->osthread()->thread_id();
   struct sigevent sev;
   sev.sigev_notify = SIGEV_THREAD_ID;
   sev.sigev_signo = SIG;
   sev.sigev_value.sival_ptr = &t;
-  ((int*)&sev.sigev_notify)[1] = tid;
+  ((int*)&sev.sigev_notify)[1] = thread->osthread()->thread_id();
   clockid_t clock;
   int err = pthread_getcpuclockid(thread->osthread()->pthread_id(), &clock);
   if (err != 0) {
