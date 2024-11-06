@@ -107,22 +107,12 @@ bool JfrAsyncStackTrace::record_async(JavaThread* jt, const frame& frame) {
   return count > 0;
 }
 
-class JfrAsyncStackTraceStoreCallback : public CrashProtectionCallback {
- public:
-  JfrAsyncStackTraceStoreCallback(const JfrAsyncStackTrace* asyncTrace, JfrStackTrace* trace) :
-  _asyncTrace(asyncTrace), _trace(trace), _success(false) {}
-  virtual void call() {
-    _success = _asyncTrace->inner_store(_trace);
-  }
-  bool success() { return _success; }
-
- private:
-  const JfrAsyncStackTrace* _asyncTrace;
-  JfrStackTrace* _trace;
-  bool _success;
-};
-
-bool JfrAsyncStackTrace::inner_store(JfrStackTrace* trace) const {
+bool JfrAsyncStackTrace::store(JfrStackTrace* trace) const {
+  assert(trace != nullptr, "invariant");
+  Thread* current_thread = Thread::current();
+  assert(current_thread->is_JfrSampler_thread() || current_thread->in_asgct(), "invariant");
+  trace->set_nr_of_frames(_nr_of_frames);
+  trace->set_reached_root(_reached_root);
   traceid hash = 1;
   for (u4 i = 0; i < _nr_of_frames; i++) {
     const JfrAsyncStackFrame& frame = _frames[i];
@@ -138,25 +128,6 @@ bool JfrAsyncStackTrace::inner_store(JfrStackTrace* trace) const {
     trace->_frames[i] = JfrStackFrame(mid, frame.bci(), frame.type(), frame.lineno(), frame.method()->method_holder());
   }
   trace->set_hash(hash);
-  return true;
-}
-
-bool JfrAsyncStackTrace::store(JfrStackTrace* trace) const {
-  assert(trace != nullptr, "invariant");
-  Thread* current_thread = Thread::current();
-  assert(current_thread->is_JfrSampler_thread() || current_thread->in_asgct(), "invariant");
-  trace->set_nr_of_frames(_nr_of_frames);
-  trace->set_reached_root(_reached_root);
-
-  JfrAsyncStackTraceStoreCallback cb(this, trace);
-  ThreadCrashProtection crash_protection;
-  if (!crash_protection.call(cb)) {
-    log_warning(jfr)("JFR CPU time method resolver crashed");
-  }
-  if (!cb.success()) {
-    return false;
-  }
-
   trace->_lineno = true;
   return true;
 }
