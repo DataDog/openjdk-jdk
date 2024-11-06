@@ -60,7 +60,7 @@ class JfrCPUTimeThreadSampling : public JfrCHeapObj {
   static void on_javathread_terminate(JavaThread* thread);
   void handle_timer_signal(void* context);
 
-  static NonJavaThread* get_worker_thread_or_null();
+  static void set_process_queue(bool process_queue);
 };
 
 #else
@@ -81,7 +81,7 @@ private:
   static void on_javathread_create(JavaThread* thread);
   static void on_javathread_terminate(JavaThread* thread);
 
-  static NonJavaThread* get_worker_thread_or_null();
+  static void set_process_queue(bool process_queue);
 };
 
 #endif // defined(LINUX)

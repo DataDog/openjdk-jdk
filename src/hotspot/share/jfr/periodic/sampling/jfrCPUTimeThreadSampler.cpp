@@ -364,6 +364,11 @@ class JfrCPUTimeThreadSampler : public NonJavaThread {
   JfrStackFrame *_jfrFrames;
   volatile int _ignore_because_queue_full = 0;
   volatile int _ignore_because_queue_full_sum = 0;
+  // This is required for testing purposes
+  // To ensure that the sampler works even when the worker
+  // thread is stopped for a while, with unloaded methods
+  // in the queue
+  volatile bool _process_queue = true;
 
   void renew_enqueue_buffer_if_needed();
 
@@ -538,7 +543,7 @@ static size_t count = 0;
 
 void JfrCPUTimeThreadSampler::process_trace_queue() {
   JfrCPUTimeTrace* trace;
-  while ((trace = _queues.filled().dequeue()) != nullptr) {
+  while (Atomic::load(&_process_queue) && (trace = _queues.filled().dequeue()) != nullptr) {
     // make sure we have enough space in the JFR enqueue buffer
     renew_enqueue_buffer_if_needed();
     // create event, convert frames (resolve method ids)
@@ -830,11 +835,10 @@ void JfrCPUTimeThreadSampler::update_all_thread_timers() {
   }
 }
 
-NonJavaThread* JfrCPUTimeThreadSampling::get_worker_thread_or_null() {
-  if (_instance != nullptr) {
-    return _instance->_sampler->_sampler_thread;
+void JfrCPUTimeThreadSampling::set_process_queue(bool process_queue) {
+  if (_instance != nullptr && _instance->_sampler != nullptr) {
+    Atomic::store(&_instance->_sampler->_process_queue, process_queue);
   }
-  return nullptr;
 }
 
 #else
@@ -876,8 +880,6 @@ void JfrCPUTimeThreadSampling::on_javathread_create(JavaThread* thread) {
 void JfrCPUTimeThreadSampling::on_javathread_terminate(JavaThread* thread) {
 }
 
-NonJavaThread* JfrCPUTimeThreadSampling::get_worker_thread_or_null() {
-  return nullptr;
-}
+void JfrCPUTimeThreadSampling::set_process_queue(bool process_queue) {}
 
 #endif // defined(LINUX) && defined(INCLUDE_JFR)
