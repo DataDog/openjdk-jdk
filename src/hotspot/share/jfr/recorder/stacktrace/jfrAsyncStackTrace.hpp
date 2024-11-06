@@ -84,8 +84,6 @@ class JfrAsyncStackTrace {
 
   JfrAsyncStackTrace(JfrAsyncStackFrame* frames, u4 max_frames);
 
-  bool inner_store(JfrStackTrace* trace) const;
-
  public:
 
   // store the trace in a JfrStackTrace object, resolving methods and line numbers
