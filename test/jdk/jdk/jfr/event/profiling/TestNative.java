@@ -40,7 +40,7 @@ import jdk.test.lib.jfr.EventNames;
  */
 public class TestNative {
 
-    static String nativeEvent = EventNames.NativeMethodSample;
+    final static String NATIVE_EVENT = EventNames.NativeMethodSample;
 
     static volatile boolean alive = true;
 
