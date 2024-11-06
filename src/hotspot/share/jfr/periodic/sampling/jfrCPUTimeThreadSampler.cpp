@@ -398,7 +398,6 @@ public:
   void run();
   void on_javathread_create(JavaThread* thread);
   bool create_timer_for_thread(JavaThread* thread, timer_t &timerid);
-  void set_timer_time(timer_t timerid, int64_t period_millis);
   void on_javathread_terminate(JavaThread* thread);
 
   void handle_timer_signal(void* context);
