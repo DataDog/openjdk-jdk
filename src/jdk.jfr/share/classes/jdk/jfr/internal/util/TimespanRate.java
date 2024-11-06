@@ -57,8 +57,8 @@ public record TimespanRate(double rate, boolean autoadapt) {
     @Override
     public String toString() {
         if (autoadapt) {
-            return String.format("%d/ns", rate * 1_000_000_000L);
+            return String.format("%d/ns", (long)(rate * 1_000_000_000L));
         }
-        return String.format("%dns", rate / Runtime.getRuntime().availableProcessors() * 1_000_000_000L);
+        return String.format("%dns", (long)(rate / Runtime.getRuntime().availableProcessors() * 1_000_000_000L));
     }
 }

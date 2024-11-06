@@ -85,6 +85,7 @@ class JfrMspaceRemoveRetrieval : AllStatic {
       Node* const node = iterator.next();
       if (node == nullptr) return nullptr;
       assert(node->free_size() >= size, "invariant");
+      assert(!node->retired(), "invariant");
       assert(node->identity() == nullptr, "invariant");
       node->set_identity(thread);
       return node;
