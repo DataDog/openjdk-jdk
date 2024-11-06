@@ -23,22 +23,27 @@
  */
 
 #include "precompiled.hpp"
-#include "jfr/recorder/service/jfrOptionSet.hpp"
 #include "jfr/periodic/sampling/jfrCPUTimeThreadSampler.hpp"
+
+#if defined(LINUX)
+
+#include "jfr/recorder/service/jfrOptionSet.hpp"
 #include "jfr/recorder/service/jfrEvent.hpp"
 #include "jfr/recorder/stacktrace/jfrAsyncStackTrace.hpp"
+#include "jfr/utilities/jfrThreadIterator.hpp"
 #include "jfr/utilities/jfrTypes.hpp"
 #include "jfr/recorder/jfrRecorder.hpp"
 #include "jfr/periodic/sampling/jfrCallTrace.hpp"
 #include "jfr/recorder/storage/jfrBuffer.hpp"
 #include "jfr/utilities/jfrTime.hpp"
 #include "jfrfiles/jfrEventClasses.hpp"
-#include "runtime/mutexLocker.hpp"
+#include "runtime/javaThread.hpp"
 #include "runtime/threadSMR.hpp"
 #include "runtime/threadCrashProtection.hpp"
 #include "runtime/osThread.hpp"
+#include "runtime/vmOperation.hpp"
+#include "runtime/vmThread.hpp"
 
-#if defined(LINUX)
 #include "signals_posix.hpp"
 
 static const int64_t AUTOADAPT_INTERVAL_MS = 100;
@@ -343,13 +348,10 @@ public:
   }
 };
 
-class JfrCPUTimeFillCallback;
-
 static int64_t compute_sampling_period(double rate);
 
 class JfrCPUTimeThreadSampler : public NonJavaThread {
   friend class JfrCPUTimeThreadSampling;
-  friend class JfrCPUTimeFillCallback;
  private:
   Semaphore _sample;
   NonJavaThread* _sampler_thread;
@@ -724,7 +726,7 @@ void JfrCPUTimeThreadSampler::handle_timer_signal(void* context) {
 
 static const int SIG = SIGPROF;
 
-void JfrCPUTimeThreadSampler::set_timer_time(timer_t timerid, int64_t period_nanos) {
+static void set_timer_time(timer_t timerid, int64_t period_nanos) {
   struct itimerspec its;
   if (period_nanos == 0) {
     its.it_interval.tv_sec = 0;
@@ -767,29 +769,56 @@ bool JfrCPUTimeThreadSampler::create_timer_for_thread(JavaThread* thread, timer_
   return true;
 }
 
+class VM_CPUTimeSamplerThreadInitializer : public VM_Operation {
+ private:
+  JfrCPUTimeThreadSampler *_sampler;
+ public:
+
+  VM_CPUTimeSamplerThreadInitializer(JfrCPUTimeThreadSampler* sampler) : _sampler(sampler) {
+  }
+
+  VMOp_Type type() const { return VMOp_CPUTimeSamplerThreadInitializer; }
+  void doit() {
+    JfrJavaThreadIterator iter;
+    while (iter.has_next()) {
+      _sampler->on_javathread_create(iter.next());
+    }
+  };
+};
+
 void JfrCPUTimeThreadSampler::init_timers() {
   // install sig handler for sig
   PosixSignals::install_generic_signal_handler(SIG, (void*)::handle_timer_signal);
 
-  // create timers for all existing threads
-  MutexLocker tlock(Threads_lock);
-  ThreadsListHandle tlh;
-  for (size_t i = 0; i < tlh.length(); i++) {
-    on_javathread_create(tlh.thread_at(i));
-  }
+  VM_CPUTimeSamplerThreadInitializer op(this);
+  VMThread::execute(&op);
 }
 
-void JfrCPUTimeThreadSampler::stop_timer() {
-  MutexLocker tlock(Threads_lock);
-  ThreadsListHandle tlh;
-  for (size_t i = 0; i < tlh.length(); i++) {
-    JavaThread* thread = tlh.thread_at(i);
-    JfrThreadLocal* jfr_thread_local = thread->jfr_thread_local();
-    if (jfr_thread_local != nullptr && jfr_thread_local->has_timerid()) {
-      timer_delete(jfr_thread_local->timerid());
-      thread->jfr_thread_local()->unset_timerid();
-    }
+class VM_CPUTimeSamplerThreadTerminator : public VM_Operation {
+ private:
+  JfrCPUTimeThreadSampler *_sampler;
+ public:
+
+  VM_CPUTimeSamplerThreadTerminator(JfrCPUTimeThreadSampler* sampler) : _sampler(sampler) {
   }
+
+  VMOp_Type type() const { return VMOp_CPUTimeSamplerThreadTerminator; }
+  void doit() {
+    JfrJavaThreadIterator iter;
+    while (iter.has_next()) {
+      JavaThread *thread = iter.next();
+      JfrThreadLocal* jfr_thread_local = thread->jfr_thread_local();
+      if (jfr_thread_local != nullptr && jfr_thread_local->has_timerid()) {
+        timer_delete(jfr_thread_local->timerid());
+        thread->jfr_thread_local()->unset_timerid();
+      }
+    }
+  };
+};
+
+void JfrCPUTimeThreadSampler::stop_timer() {
+  VM_CPUTimeSamplerThreadTerminator op(this);
+  VMThread::execute(&op);
 }
 
 

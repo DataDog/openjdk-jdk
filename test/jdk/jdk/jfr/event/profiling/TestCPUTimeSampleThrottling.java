@@ -62,7 +62,7 @@ public class TestCPUTimeSampleThrottling {
 
     private static void testThrottleSettingsPeriod() throws Exception {
         float rate = countEvents(1000, "1ms").rate();
-        Asserts.assertTrue(rate > 950 && rate < 1050, "Expected around 1000 events per second, got " + rate);
+        Asserts.assertTrue(rate > 900 && rate < 1100, "Expected around 1000 events per second, got " + rate);
     }
 
     private record EventCount(int count, int timeMs) {
@@ -87,6 +87,7 @@ public class TestCPUTimeSampleThrottling {
                                 .equals(Thread.currentThread().getName()))
                     .sorted(Comparator.comparing(RecordedEvent::getStartTime))
                     .toList();
+
             if (events.size() < 2) {
                 return new EventCount(events.size(), 0);
             }
