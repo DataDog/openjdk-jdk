@@ -189,14 +189,10 @@ WB_ENTRY(jstring, WB_PrintString(JNIEnv* env, jobject wb, jstring str, jint max_
   return (jstring) JNIHandles::make_local(THREAD, result);
 WB_END
 
-WB_ENTRY(jint, WB_GetCPUTimeSampleWorkerThreadId(JNIEnv* env, jobject o))
+WB_ENTRY(void, WB_SetCPUTimeSamplerProcessQueue(JNIEnv* env, jobject o, bool process_queue))
 #ifdef INCLUDE_JFR
-  NonJavaThread *worker = JfrCPUTimeThreadSampling::get_worker_thread_or_null();
-  if (worker != nullptr) {
-    return worker->osthread()->thread_id();
-  }
+  JfrCPUTimeThreadSampling::set_process_queue(process_queue);
 #endif
-  return 0;
 WB_END
 
 WB_ENTRY(jint, WB_TakeLockAndHangInSafepoint(JNIEnv* env, jobject wb))
@@ -3010,8 +3006,8 @@ static JNINativeMethod methods[] = {
   {CC"printString", CC"(Ljava/lang/String;I)Ljava/lang/String;", (void*)&WB_PrintString},
   {CC"lockAndStuckInSafepoint", CC"()V", (void*)&WB_TakeLockAndHangInSafepoint},
   {CC"wordSize", CC"()J",                             (void*)&WB_WordSize},
-  {CC"rootChunkWordSize", CC"()J",                    (void*)&WB_RootChunkWordSize}
-  {CC"getCPUTimeSampleWorkerThreadId", CC"()I",       (void*)&WB_GetCPUTimeSampleWorkerThreadId},
+  {CC"rootChunkWordSize", CC"()J",                    (void*)&WB_RootChunkWordSize},
+  {CC"setCPUTimeSamplerProcessQueue", CC"(Z)V",       (void*)&WB_SetCPUTimeSamplerProcessQueue},
 };
 
 

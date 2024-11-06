@@ -799,6 +799,6 @@ public class WhiteBox {
   public native void preTouchMemory(long addr, long size);
   public native long rss();
 
-  // OS id of the CPU time sampler working thread
-  public native int getCPUTimeSampleWorkerThreadId();
+  // enable and disable CPU time sampler queue processing
+  public native void setCPUTimeSamplerProcessQueue(boolean processQueue);
 }
