@@ -41,7 +41,7 @@
 #if defined(LINUX)
 #include "signals_posix.hpp"
 
-const int64_t AUTOADAPT_INTERVAL_MS = 100;
+static const int64_t AUTOADAPT_INTERVAL_MS = 100;
 
 enum JfrSampleType {
   // no sample, because thread not in walkable state
@@ -723,7 +723,7 @@ void JfrCPUTimeThreadSampler::handle_timer_signal(void* context) {
   }
 }
 
-const int SIG = SIGPROF;
+static const int SIG = SIGPROF;
 
 void JfrCPUTimeThreadSampler::set_timer_time(timer_t timerid, int64_t period_nanos) {
   struct itimerspec its;
@@ -845,7 +845,7 @@ void JfrCPUTimeThreadSampling::set_process_queue(bool process_queue) {
 
 static bool _showed_warning = false;
 
-void warn() {
+static void warn() {
   if (!_showed_warning) {
     warning("CPU time method sampling not supported in JFR on your platform");
     _showed_warning = true;
