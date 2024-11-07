@@ -188,18 +188,13 @@ private:
   }
 
   void record_native_trace(JavaThread* jt, void* ucontext) {
-    // When a thread is only attach it will be native without a last java frame
-   _type = NATIVE_SAMPLE;
+    _type = NATIVE_SAMPLE;
     _error = ERROR_NO_TRACE;
     if (!jt->has_last_Java_frame()) {
       _error = ERROR_NO_LAST_JAVA_FRAME;
       return;
     }
-    frame topframe;
-    if (!jt->pd_get_top_frame_for_signal_handler(&topframe, ucontext, false)) {
-      _error = ERROR_NO_TOPFRAME;
-      return;
-    }
+    frame topframe = jt->last_frame();
     frame first_java_frame;
     Method* method = nullptr;
     JfrGetCallTrace gct(false, jt);
