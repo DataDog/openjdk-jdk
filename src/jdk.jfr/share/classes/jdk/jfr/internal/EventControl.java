@@ -81,7 +81,7 @@ public final class EventControl {
         if (eventType.hasThreshold()) {
             addControl(Threshold.NAME, defineThreshold(eventType));
         }
-        if (eventType.hasStackTrace() && !eventType.isCPUTimeMethodSampling()) {
+        if (eventType.hasStackTrace()) {
             addControl(StackTrace.NAME, defineStackTrace(eventType));
         }
         if (eventType.hasPeriod()) {
