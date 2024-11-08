@@ -211,13 +211,29 @@ private:
   }
 };
 
-// Fixed size array-based MPMC queue for storing traces.
-// Does not own any frames
+// Fixed size async-signal-safe MPMC queue backed by an array.
+// Serves for passing traces from a thread being sampled (producer)
+// to a thread emitting JFR events (consumer).
+// Does not own any frames.
+//
+// _head and _tail of the queue are virtual (always increasing) positions modulo 2^32.
+// Actual index into the backing array is computed as (position % _capacity).
+// Generation G of an element at position P is the number of full wraps around the array:
+//   G = P / _capacity
+// Generation allows to disambiguate situations when _head and _tail point to the same element.
+//
+// Each element of the array is assigned a state, which encodes full/empty flag in bit 31
+// and the generation G of the element in bits 0..30:
+//   state (0,G): the element is empty and avaialble for enqueue() in generation G,
+//   state (1,G): the element is full and available for dequeue() in generation G.
+// Possible transitions are:
+//   (0,G) --enqueue--> (1,G) --dequeue--> (0,G+1)
 class JfrTraceQueue {
 
   struct Element {
-    // Encodes generation of the element (to solve ABA problem)
-    // along with full/empty flag in the highest bit
+    // Encodes full/empty flag along with generation of the element.
+    // Also, establishes happens-before relationship between producer and consumer.
+    // Update of this field "commits" enqueue/dequeue transaction.
     u4 _state;
     JfrCPUTimeTrace* _trace;
   };
@@ -234,16 +250,16 @@ class JfrTraceQueue {
   volatile u4 _tail;
   DEFINE_PAD_MINUS_SIZE(2, DEFAULT_PADDING_SIZE, sizeof(u4));
 
-  inline Element* element(u4 index) {
-    return &_data[index % _capacity];
+  inline Element* element(u4 position) {
+    return &_data[position % _capacity];
   }
 
-  inline u4 state_empty(u4 index) {
-    return (index / _capacity) & 0x7fffffff;
+  inline u4 state_empty(u4 position) {
+    return (position / _capacity) & 0x7fffffff;
   }
 
-  inline u4 state_full(u4 index) {
-    return (index / _capacity) | 0x80000000;
+  inline u4 state_full(u4 position) {
+    return (position / _capacity) | 0x80000000;
   }
 
 public:
@@ -264,10 +280,13 @@ public:
       if (state == state_empty(tail)) {
         if (Atomic::cmpxchg(&_tail, tail, tail + 1) == tail) {
             e->_trace = trace;
+            // Mark element as full in current generation
             Atomic::release_store(&e->_state, state_full(tail));
             return true;
         }
-      } else if (state != state_full(tail)) {
+      } else if (state == state_full(tail)) {
+        // Another thread has just filled the same position; retry operation
+      } else {
         return false;
       }
     }
@@ -281,11 +300,15 @@ public:
       if (state == state_full(head)) {
         if (Atomic::cmpxchg(&_head, head, head + 1) == head) {
             JfrCPUTimeTrace* trace = e->_trace;
+            // After taking an element, mark it as empty in the next generation,
+            // so we can reuse it again after completing the full circle
             Atomic::release_store(&e->_state, state_empty(head + _capacity));
             return trace;
         }
       } else if (state == state_empty(head)) {
-        return nullptr;
+        return nullptr; // Queue is empty
+      } else {
+        // Producer has not yet completed transaction
       }
     }
   }
