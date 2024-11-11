@@ -51,11 +51,9 @@ JfrAsyncStackTrace::JfrAsyncStackTrace(JfrAsyncStackFrame* frames, u4 max_frames
   _reached_root(false)
   {}
 
+
 bool JfrAsyncStackTrace::record_async(JavaThread* jt, const frame& frame) {
-  // Must use ResetNoHandleMark here to bypass if any NoHandleMark exist on stack.
-  // This is because RegisterMap uses Handles to support continuations.
-  ResetNoHandleMark rnhm;
-  HandleMark hm(jt);
+  NoHandleMark nhm;
 
   assert(jt != nullptr, "invariant");
   Thread* current_thread = Thread::current_or_null_safe();
@@ -67,7 +65,7 @@ bool JfrAsyncStackTrace::record_async(JavaThread* jt, const frame& frame) {
   u4 count = 0;
   _reached_root = true;
 
-  JfrVframeStream vfs(jt, frame, false, true);
+  JfrVframeStream vfs(jt, frame, false, true, false);
 
   while (!vfs.at_end()) {
     if (count >= _max_frames) {
