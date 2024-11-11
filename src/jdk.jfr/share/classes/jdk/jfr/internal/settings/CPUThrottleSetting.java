@@ -76,6 +76,7 @@ public final class CPUThrottleSetting extends JDKSettingControl {
         TimespanRate rate = TimespanRate.of(value);
         if (rate != null) {
             eventType.setCPUThrottle(rate);
+            this.value = value;
         }
     }
 
