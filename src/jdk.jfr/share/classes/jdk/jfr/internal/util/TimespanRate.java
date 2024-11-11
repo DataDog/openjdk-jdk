@@ -47,7 +47,11 @@ public record TimespanRate(double rate, boolean autoadapt) {
             }
             return new TimespanRate(Runtime.getRuntime().availableProcessors() / (period / 1_000_000_000.0), false);
         }
-        return new TimespanRate(Rate.of(text).perSecond(), true);
+        Rate r = Rate.of(text);
+        if (r == null) {
+            return null;
+        }
+        return new TimespanRate(r.perSecond(), true);
     }
 
     public boolean isHigher(TimespanRate that) {
