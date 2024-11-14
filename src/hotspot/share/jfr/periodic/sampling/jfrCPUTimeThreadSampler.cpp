@@ -45,6 +45,7 @@
 #include "runtime/vmThread.hpp"
 
 #include "signals_posix.hpp"
+#include <sys/utsname.h>
 
 static const int64_t AUTOADAPT_INTERVAL_MS = 100;
 
@@ -366,6 +367,12 @@ public:
   }
 };
 
+static const int64_t MINIMAL_PERIOD_NOT_FOUND = -1;
+static const int64_t MINIMAL_PERIOD_NOT_SET = -2;
+
+static int64_t _minimal_period = MINIMAL_PERIOD_NOT_SET;
+
+static int64_t get_minimal_period();
 static int64_t compute_sampling_period(double rate);
 
 class JfrCPUTimeThreadSampler : public NonJavaThread {
@@ -838,12 +845,64 @@ void JfrCPUTimeThreadSampler::stop_timer() {
   VMThread::execute(&op);
 }
 
+// obtain the maximum frequency of CPU time events
+static int64_t obtain_kernel_frequency() {
+  const int BUFFER_SIZE = 256;
+  struct utsname uname_data;
+  char filename[BUFFER_SIZE];
+  char buffer[BUFFER_SIZE];
+  char config_hz_prefix[] = "CONFIG_HZ=";
+  FILE *file;
+
+  // Get kernel version using uname
+  if (uname(&uname_data) != 0) {
+    return -1;
+  }
+
+  // Construct the filename: /boot/config-<kernel_version>
+  snprintf(filename, sizeof(filename), "/boot/config-%s", uname_data.release);
+
+  // Open the file
+  file = fopen(filename, "r");
+  if (!file) {
+    return -1;
+  }
+
+  // Read each line and look for the CONFIG_HZ setting
+  while (fgets(buffer, sizeof(buffer), file)) {
+    if (strncmp(buffer, config_hz_prefix, strlen(config_hz_prefix)) == 0) {
+      // Extract the value after "CONFIG_HZ="
+      char *value = buffer + strlen(config_hz_prefix);
+      int64_t hz_value = strtoll(value, NULL, 10);
+      fclose(file);
+      return hz_value;
+    }
+  }
+  fclose(file);
+  return -1;
+}
+
+int64_t get_minimal_period() {
+  if (_minimal_period == MINIMAL_PERIOD_NOT_SET) {
+    int64_t hz = obtain_kernel_frequency();
+    if (hz == 0) {
+      _minimal_period = -1;
+    } else if (hz != -1) {
+      _minimal_period = 1000000000 / hz;
+    }
+  }
+  return _minimal_period;
+}
 
 int64_t compute_sampling_period(double rate) {
   if (rate == 0) {
     return 0;
   }
-  return os::active_processor_count() * 1000000000.0 / rate;
+  int64_t period = os::active_processor_count() * 1000000000.0 / rate;
+  if (get_minimal_period() > 0 && period < get_minimal_period()) {
+    return get_minimal_period();
+  }
+  return period;
 }
 
 void JfrCPUTimeThreadSampler::autoadapt_period_if_needed() {
