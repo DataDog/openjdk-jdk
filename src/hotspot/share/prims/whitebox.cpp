@@ -191,7 +191,11 @@ WB_END
 
 WB_ENTRY(void, WB_SetCPUTimeSamplerProcessQueue(JNIEnv* env, jobject o, bool process_queue))
 #ifdef INCLUDE_JFR
+  #ifdef ASSERT
   JfrCPUTimeThreadSampling::set_process_queue(process_queue);
+  #else
+  warning("Stopping the CPU time sampler is only supported in debug builds");
+  #endif
 #endif
 WB_END
 

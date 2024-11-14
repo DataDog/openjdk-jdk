@@ -391,11 +391,10 @@ class JfrCPUTimeThreadSampler : public NonJavaThread {
   JfrStackFrame *_jfrFrames;
   volatile int _ignore_because_queue_full = 0;
   volatile int _ignore_because_queue_full_sum = 0;
-  // This is required for testing purposes
-  // To ensure that the sampler works even when the worker
-  // thread is stopped for a while, with unloaded methods
-  // in the queue
+
+#ifdef ASSERT
   volatile bool _process_queue = true;
+#endif
 
   void renew_enqueue_buffer_if_needed();
 
@@ -411,6 +410,7 @@ class JfrCPUTimeThreadSampler : public NonJavaThread {
 
   void autoadapt_period_if_needed();
 
+  bool should_process_trace_queue();
   void process_trace_queue();
 
   void set_rate(double rate, bool autoadapt);
@@ -567,9 +567,18 @@ class JFRRecordSampledThreadCallback : public CrashProtectionCallback {
 
 static size_t count = 0;
 
+
+bool JfrCPUTimeThreadSampler::should_process_trace_queue() {
+#ifdef ASSERT
+  return Atomic::load(&_process_queue);
+#else
+  return true;
+#endif
+}
+
 void JfrCPUTimeThreadSampler::process_trace_queue() {
   JfrCPUTimeTrace* trace;
-  while (Atomic::load(&_process_queue) && (trace = _queues.filled().dequeue()) != nullptr) {
+  while (should_process_trace_queue() && (trace = _queues.filled().dequeue()) != nullptr) {
     // make sure we have enough space in the JFR enqueue buffer
     renew_enqueue_buffer_if_needed();
     // create event, convert frames (resolve method ids)
@@ -939,11 +948,13 @@ void JfrCPUTimeThreadSampler::update_all_thread_timers() {
   }
 }
 
+#ifdef ASSERT
 void JfrCPUTimeThreadSampling::set_process_queue(bool process_queue) {
   if (_instance != nullptr && _instance->_sampler != nullptr) {
     Atomic::store(&_instance->_sampler->_process_queue, process_queue);
   }
 }
+#endif
 
 #else
 
@@ -984,6 +995,8 @@ void JfrCPUTimeThreadSampling::on_javathread_create(JavaThread* thread) {
 void JfrCPUTimeThreadSampling::on_javathread_terminate(JavaThread* thread) {
 }
 
+#ifdef ASSERT
 void JfrCPUTimeThreadSampling::set_process_queue(bool process_queue) {}
+#endif
 
 #endif // defined(LINUX) && defined(INCLUDE_JFR)
