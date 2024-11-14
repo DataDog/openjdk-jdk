@@ -22,7 +22,7 @@
  */
 
 package jdk.jfr.event.profiling;
-
+import java.lang.management.ManagementFactory;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -50,24 +50,24 @@ public class TestCPUTimeSampleThrottling {
     }
 
     private static void testZeroPerSecond() throws Exception {
-        Asserts.assertEquals(0, countEvents(1000, "0/s").count());
+        Asserts.assertTrue(0L == countEvents(1000, "0/s").count());
     }
 
     private static void testThrottleSettings() throws Exception {
-        int count = countEvents(1000,
+        long count = countEvents(1000,
             Runtime.getRuntime().availableProcessors() * 2 + "/s").count();
         Asserts.assertTrue(count > 0 && count < 3,
             "Expected between 0 and 3 events, got " + count);
     }
 
     private static void testThrottleSettingsPeriod() throws Exception {
-        float rate = countEvents(1000, "1ms").rate();
-        Asserts.assertTrue(rate > 900 && rate < 1100, "Expected around 1000 events per second, got " + rate);
+        float rate = countEvents(1000, "10ms").rate();
+        Asserts.assertTrue(rate > 90 && rate < 110, "Expected around 100 events per second, got " + rate);
     }
 
-    private record EventCount(int count, int timeMs) {
+    private record EventCount(long count, float time) {
         float rate() {
-            return (float) count / timeMs * 1000;
+            return count / time;
         }
     }
 
@@ -76,25 +76,26 @@ public class TestCPUTimeSampleThrottling {
             recording.enable(EventNames.CPUTimeSample)
                     .with("throttle", rate);
 
+            var bean = ManagementFactory.getThreadMXBean();
+
             recording.start();
+
+            long startThreadCpuTime = bean.getCurrentThreadCpuTime();
 
             wasteCPU(timeMs);
 
+            long spendCPUTime = bean.getCurrentThreadCpuTime() - startThreadCpuTime;
+
             recording.stop();
 
-            List<RecordedEvent> events = Events.fromRecording(recording).stream()
+            long eventCount = Events.fromRecording(recording).stream()
                     .filter(e -> e.getThread().getJavaName()
                                 .equals(Thread.currentThread().getName()))
-                    .sorted(Comparator.comparing(RecordedEvent::getStartTime))
-                    .toList();
+                    .count();
 
-            if (events.size() < 2) {
-                return new EventCount(events.size(), 0);
-            }
+            System.out.println("Event count: " + eventCount + ", CPU time: " + spendCPUTime / 1_000_000_000f + "s");
 
-            Instant start = events.get(0).getStartTime();
-            Instant end = events.get(events.size() - 1).getStartTime();
-            return new EventCount(events.size(), (int) Duration.between(start, end).toMillis());
+            return new EventCount(eventCount, spendCPUTime / 1_000_000_000f);
         }
     }
 
@@ -102,7 +103,9 @@ public class TestCPUTimeSampleThrottling {
         long start = System.currentTimeMillis();
         double i = 0;
         while (System.currentTimeMillis() - start < durationMs) {
-            i = i * Math.pow(Math.random(), Math.random());
+            for (int j = 0; j < 100000; j++) {
+                i = Math.sqrt(i * Math.pow(Math.sqrt(Math.random()), Math.random()));
+            }
         }
     }
 
