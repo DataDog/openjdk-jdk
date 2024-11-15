@@ -190,12 +190,10 @@ WB_ENTRY(jstring, WB_PrintString(JNIEnv* env, jobject wb, jstring str, jint max_
 WB_END
 
 WB_ENTRY(void, WB_SetCPUTimeSamplerProcessQueue(JNIEnv* env, jobject o, bool process_queue))
-#ifdef INCLUDE_JFR
-  #ifdef ASSERT
+#if defined(INCLUDE_JFR) && defined(ASSERT)
   JfrCPUTimeThreadSampling::set_process_queue(process_queue);
-  #else
-  warning("Stopping the CPU time sampler is only supported in debug builds");
-  #endif
+#else
+  warning("Stopping the CPU time sampler is only supported in debug builds with JFR");
 #endif
 WB_END
 
