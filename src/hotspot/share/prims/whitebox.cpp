@@ -128,7 +128,7 @@
 #include "osContainer_linux.hpp"
 #include "os_linux.hpp"
 #endif
-#ifdef INCLUDE_JFR
+#if INCLUDE_JFR && defined(ASSERT)
 #include "jfr/periodic/sampling/jfrCPUTimeThreadSampler.hpp"
 #endif
 
@@ -190,7 +190,7 @@ WB_ENTRY(jstring, WB_PrintString(JNIEnv* env, jobject wb, jstring str, jint max_
 WB_END
 
 WB_ENTRY(void, WB_SetCPUTimeSamplerProcessQueue(JNIEnv* env, jobject o, bool process_queue))
-#if defined(INCLUDE_JFR) && defined(ASSERT)
+#if INCLUDE_JFR != 0 && defined(ASSERT)
   JfrCPUTimeThreadSampling::set_process_queue(process_queue);
 #else
   warning("Stopping the CPU time sampler is only supported in debug builds with JFR");
