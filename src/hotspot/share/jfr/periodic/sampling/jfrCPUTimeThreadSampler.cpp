@@ -480,7 +480,7 @@ void JfrCPUTimeThreadSampler::enroll() {
 }
 
 void JfrCPUTimeThreadSampler::disenroll() {
-  if (Atomic::cmpxchg(&_disenrolled, false, true)) {
+  if (!Atomic::cmpxchg(&_disenrolled, false, true)) {
     log_info(jfr)("Disenrolling CPU thread sampler");
     stop_timer();
     Atomic::store(&_stop_signals, true);
