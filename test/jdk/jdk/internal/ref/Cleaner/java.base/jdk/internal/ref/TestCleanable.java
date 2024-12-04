@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2002, 2004, Oracle and/or its affiliates. All rights reserved.
+ * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -23,24 +21,19 @@
  * questions.
  */
 
-package com.sun.jmx.mbeanserver;
+package jdk.internal.ref;
 
-import java.security.PrivilegedAction;
+import java.lang.ref.Cleaner;
 
-/**
- * Utility class to be used by the method {@code AccessControler.doPrivileged}
- * to get a system property.
- *
- * @since 1.5
- */
-public class GetPropertyAction implements PrivilegedAction<String> {
-    private final String key;
+public class TestCleanable extends PhantomCleanable<Object> {
+    static final Object TARGET = new Object();
 
-    public GetPropertyAction(String key) {
-        this.key = key;
+    public TestCleanable(Cleaner cleaner) {
+        super(TARGET, cleaner);
     }
 
-    public String run() {
-        return System.getProperty(key);
+    @Override
+    protected void performCleanup() {
+        // no action
     }
 }
