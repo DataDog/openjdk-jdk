@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -20,22 +20,30 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
-
-/* @test
- * @bug 8004502
- * @summary Sanity check that specifying the APPLET property when creating an
- *   InitialContext behaves as expected when java.awt.Applet is not present
+/*
+ * @test
+ * @bug 8345474
+ * @summary Translation for instanceof is not triggered when patterns are not used in the compilation unit
+ * @enablePreview
+ * @compile T8345474.java
+ * @run main T8345474
  */
+import java.util.List;
 
-import javax.naming.*;
-import java.util.Hashtable;
+public class T8345474 {
+    public static void main(String[] args) {
+        erasureInstanceofTypeComparisonOperator();
+    }
 
-public class NoApplet {
-    @SuppressWarnings("deprecation")
-    public static void main(String[] args) throws NamingException {
-        Hashtable<Object,Object> env = new Hashtable<>();
-        env.put(Context.APPLET, new Object());
-        Context ctxt = new InitialContext(env);
-        ctxt.close();
+    public static void erasureInstanceofTypeComparisonOperator() {
+        List<Short> ls = List.of((short) 42);
+
+        assertTrue(ls.get(0) instanceof int);
+    }
+
+    static void assertTrue(boolean actual) {
+        if (!actual) {
+            throw new AssertionError("Expected: true, but got false");
+        }
     }
 }
