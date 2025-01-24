@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -19,36 +19,31 @@
  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
  * or visit www.oracle.com if you need additional information or have any
  * questions.
- *
  */
 
-#ifndef SHARE_CDS_UNREGISTEREDCLASSES_HPP
-#define SHARE_CDS_UNREGISTEREDCLASSES_HPP
+/*
+ * @test
+ * @bug 8344361
+ * @summary Restore null return for invalid services
+ */
 
-#include "memory/allStatic.hpp"
-#include "runtime/handles.hpp"
+import java.security.Provider;
 
-class InstanceKlass;
-class Symbol;
+public class InvalidServiceTest {
 
-class UnregisteredClasses: AllStatic {
-public:
-  static InstanceKlass* load_class(Symbol* h_name, const char* path,
-                                   Handle super_class, objArrayHandle interfaces,
-                                   TRAPS);
-  static void initialize(TRAPS);
-  static InstanceKlass* UnregisteredClassLoader_klass() {
-    return _UnregisteredClassLoader_klass;
-  }
+    public static void main(String[] args) throws Exception {
+        Provider p1 = new LProvider("LegacyFormat");
+        // this returns a service with null class name. Helps exercise the code path
+        Provider.Service s1 = p1.getService("MessageDigest", "SHA-1");
+        if (s1 != null)
+            throw new RuntimeException("expecting null service");
+    }
 
-  class ClassLoaderTable;
-
-private:
-  // Don't put this in vmClasses as it's used only with CDS dumping.
-  static InstanceKlass* _UnregisteredClassLoader_klass;
-
-  static Handle create_classloader(Symbol* path, TRAPS);
-  static Handle get_classloader(Symbol* path, TRAPS);
-};
-
-#endif // SHARE_CDS_UNREGISTEREDCLASSES_HPP
+    private static class LProvider extends Provider {
+        LProvider(String name) {
+            super(name, "1.0", null);
+            put("Signature.MD5withRSA", "com.foo.Sig");
+            put("MessageDigest.SHA-1 ImplementedIn", "Software");
+        }
+    }
+}
