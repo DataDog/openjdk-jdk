@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -19,40 +19,35 @@
  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
  * or visit www.oracle.com if you need additional information or have any
  * questions.
+ *
  */
 
-package jdk.jfr.api.recording.dump;
+super public class BadOldClassA
+    version 49:0
+{
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 
-import jdk.jfr.Recording;
-import jdk.jfr.consumer.RecordingFile;
-import jdk.test.lib.Asserts;
-import jdk.test.lib.jfr.EventNames;
-
-/**
- * @test
- * @summary Test copyTo and parse file
- * @requires vm.hasJFR
- * @library /test/lib
- * @run main/othervm jdk.jfr.api.recording.dump.TestDump
- */
-public class TestDump {
-
-    public static void main(String[] args) throws Exception {
-        Recording r = new Recording();
-        r.enable(EventNames.OSInformation);
-        r.start();
-        r.stop();
-
-        Path path = Paths.get(".", "my.jfr");
-        r.dump(path);
-        r.close();
-
-        Asserts.assertTrue(Files.exists(path), "Recording file does not exist: " + path);
-        Asserts.assertFalse(RecordingFile.readAllEvents(path).isEmpty(), "No events found");
-    }
-
+public Method "<init>":"()V"
+    stack 1 locals 1
+{
+        aload_0;
+        invokespecial    Method java/lang/Object."<init>":"()V";
+        return;
 }
+
+    /*
+     * The following method tries to return an Object as a String.
+     * Verifier should fail.
+     */
+public Method doit:"()Ljava/lang/String;"
+    stack 2 locals 1
+{
+        new              class java/lang/Object;
+        dup;
+        invokespecial    Method java/lang/Object."<init>":"()V";
+        astore_0;
+        aload_0;
+        areturn;   // tries to return an Object as a String
+}
+
+} // end Class BadOldClassA
