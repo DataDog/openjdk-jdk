@@ -37,6 +37,7 @@ import jdk.jfr.Description;
 import jdk.jfr.Label;
 import jdk.jfr.MetadataDefinition;
 import jdk.jfr.Name;
+import jdk.jfr.SettingControl;
 import jdk.jfr.internal.PlatformEventType;
 import jdk.jfr.internal.Type;
 import jdk.jfr.internal.util.TimespanRate;
@@ -46,7 +47,7 @@ import jdk.jfr.internal.util.Utils;
 @Label("CPUThrottleSetting")
 @Description("Upper bounds the emission rate for CPU time samples")
 @Name(Type.SETTINGS_PREFIX + "Rate")
-public final class CPUThrottleSetting extends JDKSettingControl {
+public final class CPUThrottleSetting extends SettingControl {
     public static final String DEFAULT_VALUE = "0/s";
     private final PlatformEventType eventType;
     private String value = DEFAULT_VALUE;
