@@ -1,5 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
 /*
- * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,32 +24,17 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
-#include <stdlib.h>
+-->
 
-#include "jni.h"
-#include "jni_util.h"
-#include <windows.h>
-
-/* Returns a Windows style environment block, discarding final trailing NUL */
-JNIEXPORT jstring JNICALL
-Java_java_lang_ProcessEnvironment_environmentBlock(JNIEnv *env, jclass klass)
-{
-    int i;
-    jstring envblock;
-    jchar *blockW = (jchar *) GetEnvironmentStringsW();
-    if (blockW == NULL) {
-        /* Out of memory is our best guess. */
-        JNU_ThrowOutOfMemoryError(env, "GetEnvironmentStrings failed");
-        return NULL;
-    }
-
-    /* Don't search for "\u0000\u0000", since an empty environment
-       block may legitimately consist of a single "\u0000".  */
-    for (i = 0; blockW[i];)
-        while (blockW[i++])
-            ;
-
-    envblock = (*env)->NewString(env, blockW, i);
-    FreeEnvironmentStringsW(blockW);
-    return envblock;
-}
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <Condition Message="!(loc.OsConditionMessage)">
+      <![CDATA[Installed OR (VersionNT >= $(var.JpExecutableOSVersion))]]>
+    </Condition>
+    <!--
+      Fragment contents must be referenced. Otherwise, the fragment will be ignored.
+      Use empty component group as an anchor for the reference.
+    -->
+    <ComponentGroup Id="FragmentOsCondition"/>
+  </Fragment>
+</Wix>
