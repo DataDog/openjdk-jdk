@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -20,27 +20,33 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+package org.openjdk.bench.javax.tools;
 
-import jdk.test.lib.dcmd.PidJcmdExecutor;
+import org.openjdk.jmh.annotations.*;
+import org.openjdk.jmh.infra.Blackhole;
 
-/*
- * @test CodeHeapAnalyticsParams
- * @bug 8225388
- * @summary Test the Compiler.CodeHeap_Analytics command
- * @requires vm.flagless
- * @library /test/lib
- * @modules java.base/jdk.internal.misc
- *          java.management
- * @run driver CodeHeapAnalyticsParams
- */
+import java.util.concurrent.TimeUnit;
+import javax.tools.JavaFileManager.Location;
+import javax.tools.StandardLocation;
 
-public class CodeHeapAnalyticsParams {
+@Warmup(iterations = 3, time = 1)
+@Measurement(iterations = 3, time = 1)
+@Fork(3)
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.NANOSECONDS)
+@State(Scope.Thread)
+public class LocationFor {
 
-    public static void main(String args[]) throws Exception {
-        PidJcmdExecutor executor = new PidJcmdExecutor();
-        executor.execute("Compiler.CodeHeap_Analytics all 1").shouldHaveExitValue(0);
-        // invalid argument should report exception, and don't crash
-        executor.execute("Compiler.CodeHeap_Analytics all 0").shouldContain("IllegalArgumentException");
-        executor.execute("Compiler.CodeHeap_Analytics all k").shouldContain("IllegalArgumentException");
+    @Benchmark
+    public void standard(Blackhole bh) {
+        for (Location loc : StandardLocation.values()) {
+            bh.consume(StandardLocation.locationFor(loc.getName()));
+        }
     }
+
+    @Benchmark
+    public Location custom() {
+        return StandardLocation.locationFor("MY_LOCATION");
+    }
+
 }
