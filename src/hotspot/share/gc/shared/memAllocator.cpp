@@ -29,6 +29,7 @@
 #include "gc/shared/memAllocator.hpp"
 #include "gc/shared/threadLocalAllocBuffer.inline.hpp"
 #include "gc/shared/tlab_globals.hpp"
+#include "jfr/jfrEvents.hpp"
 #include "memory/universe.hpp"
 #include "oops/arrayOop.hpp"
 #include "oops/oop.inline.hpp"
@@ -40,6 +41,7 @@
 #include "services/lowMemoryDetector.hpp"
 #include "utilities/align.hpp"
 #include "utilities/copy.hpp"
+#include "utilities/dtrace.hpp"
 #include "utilities/globalDefinitions.hpp"
 
 class MemAllocator::Allocation: StackObj {
@@ -170,7 +172,8 @@ void MemAllocator::Allocation::notify_allocation_jvmti_sampler() {
     return;
   }
 
-  if (!_allocated_outside_tlab && _allocated_tlab_size == 0 && !_tlab_end_reset_for_sample) {
+  bool hit_mark = _allocated_tlab_size != 0 || _tlab_end_reset_for_sample;
+  if (!_allocated_outside_tlab && !hit_mark) {
     // Sample if it's a non-TLAB allocation, or a TLAB allocation that either refills the TLAB
     // or expands it due to taking a sampler induced slow path.
     return;
@@ -180,23 +183,21 @@ void MemAllocator::Allocation::notify_allocation_jvmti_sampler() {
   // before doing the callback. The callback is done in the destructor of
   // the JvmtiSampledObjectAllocEventCollector.
   size_t bytes_since_last = 0;
-
+  size_t bytes_since_allocation = 0;
   {
     PreserveObj obj_h(_thread, _obj_ptr);
     JvmtiSampledObjectAllocEventCollector collector;
     size_t size_in_bytes = _allocator._word_size * HeapWordSize;
-    ThreadLocalAllocBuffer& tlab = _thread->tlab();
 
-    if (!_allocated_outside_tlab) {
-      bytes_since_last = tlab.bytes_since_last_sample_point();
+    if (_thread->heap_samplers().jvmti().check_for_sampling(&bytes_since_allocation, size_in_bytes, !_allocated_outside_tlab)) {
+      JvmtiExport::sampled_object_alloc_event_collector(obj_h());
     }
-
-    _thread->heap_sampler().check_for_sampling(obj_h(), size_in_bytes, bytes_since_last);
   }
 
-  if (_tlab_end_reset_for_sample || _allocated_tlab_size != 0) {
+  if (hit_mark) {
+    ThreadHeapSampler& sampler = _thread->heap_samplers().jvmti();
     // Tell tlab to forget bytes_since_last if we passed it to the heap sampler.
-    _thread->tlab().set_sample_end(bytes_since_last != 0);
+    sampler.update_bytes(_thread->tlab().set_sample_end(sampler.bytes_until_sample()), !_allocated_outside_tlab);
   }
 }
 
@@ -215,6 +216,36 @@ void MemAllocator::Allocation::notify_allocation_jfr_sampler() {
     // TLAB was refilled
     AllocTracer::send_allocation_in_new_tlab(obj()->klass(), mem, _allocated_tlab_size * HeapWordSize,
                                              size_in_bytes, _thread);
+  }
+
+  EventObjectAllocationSample event;
+  if (!event.should_commit()) {
+    return;
+  }
+
+  bool hit_mark = _allocated_tlab_size != 0 || _tlab_end_reset_for_sample;
+  if (!_allocated_outside_tlab && !hit_mark) {
+    // Sample if it's a non-TLAB allocation, or a TLAB allocation that either refills the TLAB
+    // or expands it due to taking a sampler induced slow path.
+    return;
+  }
+
+  ThreadHeapSampler& sampler = _thread->heap_samplers().jfr();
+  if (sampler.bytes_until_sample() == static_cast<size_t>(-1)) {
+    return;
+  }
+
+  size_t bytes_since_allocation = 0;
+  if (sampler.check_for_sampling(&bytes_since_allocation, size_in_bytes, !_allocated_outside_tlab)) {
+    size_t weight = bytes_since_allocation == 0 ? size_in_bytes : bytes_since_allocation;
+    AllocTracer::send_allocation_sample(obj()->klass(), mem, size_in_bytes, weight, _allocated_outside_tlab, _thread);
+    HOTSPOT_GC_ALLOCOBJECT_SAMPLE(obj()->klass()->name()->as_C_string(), size_in_bytes, weight);
+  }
+
+  if (hit_mark) {
+    // Tell tlab to forget bytes_since_last if we passed it to the heap sampler.
+    size_t bytes_inc = _thread->tlab().set_sample_end(sampler.bytes_until_sample());
+    sampler.update_bytes(bytes_inc, !_allocated_outside_tlab);
   }
 }
 
@@ -257,7 +288,9 @@ HeapWord* MemAllocator::mem_allocate_inside_tlab_slow(Allocation& allocation) co
   HeapWord* mem = nullptr;
   ThreadLocalAllocBuffer& tlab = _thread->tlab();
 
-  if (JvmtiExport::should_post_sampled_object_alloc()) {
+  EventObjectAllocationSample event;
+
+  if (JvmtiExport::should_post_sampled_object_alloc() || event.should_commit()) {
     tlab.set_back_allocation_end();
     mem = tlab.allocate(_word_size);
 
