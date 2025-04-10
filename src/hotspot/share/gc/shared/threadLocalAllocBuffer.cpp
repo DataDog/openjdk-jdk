@@ -49,7 +49,6 @@ ThreadLocalAllocBuffer::ThreadLocalAllocBuffer() :
   _desired_size(0),
   _refill_waste_limit(0),
   _allocated_before_last_gc(0),
-  _bytes_since_last_sample_point(0),
   _number_of_refills(0),
   _refill_waste(0),
   _gc_waste(0),
@@ -202,6 +201,7 @@ void ThreadLocalAllocBuffer::initialize(HeapWord* start,
   set_end(end);
   set_allocation_end(end);
   invariants();
+  _end_backup = nullptr;
 }
 
 void ThreadLocalAllocBuffer::initialize() {
@@ -312,21 +312,27 @@ void ThreadLocalAllocBuffer::print_stats(const char* tag) {
             _refill_waste * HeapWordSize);
 }
 
-void ThreadLocalAllocBuffer::set_sample_end(bool reset_byte_accumulation) {
+size_t ThreadLocalAllocBuffer::set_sample_end(size_t bytes_until_sample) {
   size_t heap_words_remaining = pointer_delta(_end, _top);
-  size_t bytes_until_sample = thread()->heap_sampler().bytes_until_sample();
   size_t words_until_sample = bytes_until_sample / HeapWordSize;
-
-  if (reset_byte_accumulation) {
-    _bytes_since_last_sample_point = 0;
-  }
 
   if (heap_words_remaining > words_until_sample) {
     HeapWord* new_end = _top + words_until_sample;
+    if (_end_backup != nullptr) {
+      if (new_end > _end_backup) {
+        HeapWord* tmp = new_end;
+        new_end = _end_backup;
+        _end_backup = tmp;
+      }
+    }
     set_end(new_end);
-    _bytes_since_last_sample_point += bytes_until_sample;
+    return bytes_until_sample;
   } else {
-    _bytes_since_last_sample_point += heap_words_remaining * HeapWordSize;
+    if (_end_backup != nullptr) {
+      set_end(_end_backup);
+      _end_backup = nullptr;
+    }
+    return heap_words_remaining * HeapWordSize;
   }
 }
 
