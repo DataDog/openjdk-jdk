@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -20,22 +20,28 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
-package jdk.vm.ci.hotspot.amd64;
 
-import jdk.vm.ci.hotspot.HotSpotVMConfigAccess;
-import jdk.vm.ci.hotspot.HotSpotVMConfigStore;
-
-/**
- * Used to access AMD64 specific native configuration details.
+/*
+ * @test
+ * @bug 8325859
+ * @summary potential information loss during type inference
+ * @modules jdk.compiler/com.sun.tools.javac.util
  */
-class AMD64HotSpotVMConfig extends HotSpotVMConfigAccess {
 
-    AMD64HotSpotVMConfig(HotSpotVMConfigStore config) {
-        super(config);
+import com.sun.tools.javac.util.Assert;
+
+public class SupplementaryInferenceContextTest {
+    static String result;
+    public static void main(String... args) {
+        runT(() -> supplyNull(Integer.valueOf(1)));
+        Assert.check(result.equals("class java.lang.Integer"));
     }
 
-    final boolean useCompressedOops = getFlag("UseCompressedOops", Boolean.class);
-    final long vmVersionFeatures = getFieldAddress("VM_Version::_features", "VM_Version::VM_Features");
-    final long vmFeaturesFeaturesOffset = getFieldOffset("VM_Version::VM_Features::_features_bitmap[0]", Long.class, "uint64_t");
-    final long vmFeaturesFeaturesSize = getFieldValue("VM_Version::VM_Features::_features_bitmap_size", Long.class, "int");
+    static <R, X> R supplyNull(X... varargs) {
+        result = varargs.getClass().getComponentType().toString();
+        System.err.println("result is =" + result);
+        return null;
+    }
+
+    static <T> void runT(Runnable runnable) { runnable.run(); }
 }
