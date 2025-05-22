@@ -26,15 +26,22 @@
 #ifndef SHARE_RUNTIME_THREADHEAPSAMPLER_HPP
 #define SHARE_RUNTIME_THREADHEAPSAMPLER_HPP
 
+#include "gc/shared/threadLocalAllocBuffer.hpp"
 #include "memory/allocation.hpp"
 
-class ThreadHeapSampler {
- private:
-  size_t _bytes_until_sample;
-  // Cheap random number generator
-  static uint64_t _rnd;
+class ThreadHeapSamplers;
 
-  static volatile int _sampling_interval;
+class ThreadHeapSampler {
+ friend ThreadHeapSamplers;
+
+ private:
+  volatile size_t _bytes_until_sample;
+  volatile size_t _bytes_since_last_sample_point;
+
+  // Cheap random number generator
+  uint64_t _rnd;
+
+  volatile int* _sampling_interval_ref;
 
   void pick_next_geometric_sample();
   void pick_next_sample(size_t overflowed_bytes = 0);
@@ -42,8 +49,11 @@ class ThreadHeapSampler {
   static double fast_log2(const double& d);
   uint64_t next_random(uint64_t rnd);
 
+  int get_interval();
+
+  volatile bool _active_flag;
  public:
-  ThreadHeapSampler() {
+  ThreadHeapSampler(volatile int* sampling_interval_ref) : _bytes_until_sample(0), _bytes_since_last_sample_point(0), _sampling_interval_ref(sampling_interval_ref), _active_flag(true) {
     _rnd = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this));
     if (_rnd == 0) {
       _rnd = 1;
@@ -53,12 +63,53 @@ class ThreadHeapSampler {
     pick_next_sample();
   }
 
-  size_t bytes_until_sample()                    { return _bytes_until_sample;   }
+  inline size_t bytes_until_sample() const {
+    return _bytes_until_sample;
+  }
 
-  void check_for_sampling(oop obj, size_t size_in_bytes, size_t bytes_allocated_before);
+  inline size_t bytes_since_last_sample_point() const {
+    return _bytes_since_last_sample_point;
+  }
 
+  void update_bytes(size_t bytes, bool reset);
+
+  bool check_for_sampling(size_t* bytes_since_allocation, size_t size_in_bytes, bool in_tlab);
+
+  // TODO: For compatibility purposes only
   static void set_sampling_interval(int sampling_interval);
   static int get_sampling_interval();
+
+  inline bool is_active() const {
+    return _active_flag;
+  }
+};
+
+class ThreadHeapSamplers {
+ private:
+  static volatile int _jvmti_sampling_interval;
+  static volatile int _jfr_sampling_interval;
+
+  ThreadHeapSampler _jvmti;
+  ThreadHeapSampler _jfr;
+
+
+
+ public:
+  ThreadHeapSamplers() : _jvmti(&_jvmti_sampling_interval), _jfr(&_jfr_sampling_interval) {
+  }
+
+  ThreadHeapSampler& jvmti() {
+    return _jvmti;
+  }
+
+  ThreadHeapSampler& jfr() {
+    return _jfr;
+  }
+
+  static void set_jvmti_sampling_interval(int interval);
+  static int get_jvmti_sampling_interval();
+  static void set_jfr_sampling_interval(int interval);
+  static int get_jfr_sampling_interval();
 };
 
 #endif // SHARE_RUNTIME_THREADHEAPSAMPLER_HPP
