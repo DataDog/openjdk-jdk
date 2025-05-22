@@ -32,6 +32,9 @@
 #include "runtime/threadHeapSampler.hpp"
 #include "utilities/checkedCast.hpp"
 
+#include "oops/oop.inline.hpp"
+#include "utilities/dtrace.hpp"
+
 // Cheap random number generator.
 uint64_t ThreadHeapSampler::_rnd;
 // Default is 512kb.
@@ -423,6 +426,8 @@ void ThreadHeapSampler::check_for_sampling(oop obj, size_t allocation_size, size
     _bytes_until_sample -= total_allocated_bytes;
     return;
   }
+
+  HOTSPOT_JVMTI_ALLOCOBJECT_SAMPLE(obj->klass()->name()->as_C_string(), allocation_size, bytes_since_allocation);
 
   JvmtiExport::sampled_object_alloc_event_collector(obj);
 
