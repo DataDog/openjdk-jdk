@@ -1,5 +1,5 @@
 /*
- * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
+ * Copyright (c) 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -19,31 +19,28 @@
  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
  * or visit www.oracle.com if you need additional information or have any
  * questions.
- *
  */
+package jdk.jfr.event.tracing;
 
-#ifndef CPU_AARCH64_SPIN_WAIT_AARCH64_HPP
-#define CPU_AARCH64_SPIN_WAIT_AARCH64_HPP
+import jdk.internal.misc.Unsafe;
+import jdk.jfr.FlightRecorder;
+import jdk.jfr.Recording;
+/**
+* @test
+* @summary Tests that PlatformTracer is not initialized if a method filter has not been set.
+* @requires vm.flagless
+* @requires vm.hasJFR
+* @modules java.base/jdk.internal.misc jdk.jfr/jdk.jfr.internal.tracing
+* @library /test/lib
+* @run main/othervm -XX:StartFlightRecording jdk.jfr.event.tracing.TestLazyPlatformTracer
+*/
+public class TestLazyPlatformTracer {
 
-class SpinWait {
-public:
-  enum Inst {
-    NONE = -1,
-    NOP,
-    ISB,
-    YIELD,
-    SB
-  };
-
-private:
-  Inst _inst;
-  int _count;
-
-public:
-  SpinWait(Inst inst = NONE, int count = 0) : _inst(inst), _count(count) {}
-
-  Inst inst() const { return _inst; }
-  int inst_count() const { return _count; }
-};
-
-#endif // CPU_AARCH64_SPIN_WAIT_AARCH64_HPP
+    public static void main(String... args) throws Exception {
+        // Stop recording so end chunk events are emitted
+        FlightRecorder.getFlightRecorder().getRecordings().getFirst().stop();
+        if (!Unsafe.getUnsafe().shouldBeInitialized(jdk.jfr.internal.tracing.PlatformTracer.class)) {
+            throw new AssertionError("PlatformTracer should not have been initialized");
+        }
+    }
+}
