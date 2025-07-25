@@ -9,3 +9,5 @@ claim_pattern:
 
 permissions:
   contents: "write"
+  pull_requests: "admin"
+  metadata: "read"
