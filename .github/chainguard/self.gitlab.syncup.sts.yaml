@@ -1,0 +1,11 @@
+issuer: https://gitlab.ddbuild.io
+
+subject_pattern: "project_path:DataDog/*"
+
+claim_pattern:
+  project_id: "1699"
+  ref: "jb/dd-octo-sts"
+  ref_type: "branch"
+
+permissions:
+  contents: "write"
