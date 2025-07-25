@@ -1,38 +1,55 @@
-# .github/workflows/sync-upstream.yml
-name: Sync Upstream
-
+# .github/workflows/auto-upstream-sync.yml
+name: Upstream-sync → protected master
 on:
-  schedule:
-    - cron: '22 14 * * *' # Runs every day at 14:15 UTC
-  workflow_dispatch:
+  schedule:            # run every night
+    - cron:  '7 2 * * *'
+  workflow_dispatch:   # (optional) manual trigger
 
-permissions:
-  contents: write
-  actions: read
+permissions:           # minimum perms the job needs
+  contents: write      # push the sync branch
+  pull-requests: write # open, approve & merge the PR
+
+concurrency:           # never let two syncs race
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   sync:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
-      with:
-        persist-credentials: false
-        fetch-depth: 0
+      # 1. full clone so we always have the latest tip
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Pull latest changes from upstream
-      run: |
-        git config --global user.email "sync@datadoghq.com"
-        git config --global user.name "Datadog Syncup Service"
-        git remote add upstream https://github.com/openjdk/jdk.git
-        git fetch upstream
-        git checkout -b upstream-master upstream/master
-        git checkout master
-        git merge upstream-master
+      # 2. fetch upstream & copy it to a side branch
+      - name: Update upstream-sync branch
+        run: |
+          git remote add upstream https://github.com/openjdk/jdk.git
+          git fetch upstream master
+          git checkout -B upstream-sync upstream/master
+          git push -f origin upstream-sync
 
-    - name: Push changes to downstream
-      uses: ad-m/github-push-action@master
-      with:
-        github_token: ${{ secrets.GH_PAT }}
-        branch: master
+      # 3. Open or update the PR `upstream-sync -> master`
+      - uses: peter-evans/create-pull-request@v7
+        id: cpr
+        with:
+          branch: upstream-sync
+          base:   master
+          title:  "Automated upstream merge"
+          body:   "Nightly sync of openjdk/jdk:master into this fork"
+
+      # 4. Auto-approve that PR
+      - if: steps.cpr.outputs.pull-request-operation != 'none'
+        uses: hmarr/auto-approve-action@v4
+        with:
+          pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
+
+      # 5. Enable auto-merge so GitHub merges as soon as
+      #    branch protection requirements are satisfied
+      - if: steps.cpr.outputs.pull-request-operation == 'created'
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
+          merge-method: merge
