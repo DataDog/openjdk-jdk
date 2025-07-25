@@ -4,7 +4,7 @@ subject_pattern: "project_path:DataDog/.*"
 
 claim_pattern:
   project_id: "1126"
-  ref: "jb/dd-octo-sts"
+  ref: "(master|jb/dd-octo-sts)"
   ref_type: "branch"
 
 permissions:
