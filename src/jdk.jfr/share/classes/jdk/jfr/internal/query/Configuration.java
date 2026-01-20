@@ -106,4 +106,13 @@ public final class Configuration {
      * {@code null) means no end time.
      */
     public Instant endTime;
+
+    /**
+     * If contextual event fields should be displayed.
+     * <p>
+     * Contextual events are those with @Contextual annotated fields.
+     * When enabled, displays fields from contextual events that were
+     * active when the displayed event occurred.
+     */
+    public boolean showContext;
 }

@@ -26,6 +26,7 @@ package jdk.jfr.internal.query;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import jdk.jfr.consumer.RecordedEvent;
 
@@ -68,5 +69,31 @@ final class Table {
             row.putValue(field.index, field.valueGetter.apply(event));
         }
         rows.add(row);
+    }
+
+    public void add(RecordedEvent event, List<Field> sourceFields, Set<RecordedEvent> contextEvents) {
+        Row row = new Row(fields.size());
+        for (Field field : sourceFields) {
+            row.putValue(field.index, field.valueGetter.apply(event));
+        }
+        row.setContextualEvents(contextEvents);
+        rows.add(row);
+    }
+
+    public void addContextualColumn(String fieldName) {
+        int newIndex = fields.size();
+        Field contextField = new Field(
+            fieldName,                              // name
+            newIndex,                               // index
+            row -> ((Row)row).getContextualValue(fieldName), // valueGetter
+            null,                                   // type (not needed for contextual fields)
+            List.of()                               // sourceFields
+        );
+        fields.add(contextField);
+
+        // Update all existing rows to accommodate new field
+        for (Row row : rows) {
+            row.expandToSize(fields.size());
+        }
     }
 }

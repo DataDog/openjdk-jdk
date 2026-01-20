@@ -36,19 +36,33 @@ final class QueryExecutor {
     private final List<QueryRun> queryRuns = new ArrayList<>();
     private final List<EventType> eventTypes = new ArrayList<>();
     private final EventStream stream;
+    private final Configuration configuration;
 
     public QueryExecutor(EventStream stream) {
-        this(stream, List.of());
+        this(stream, List.of(), new Configuration());
     }
 
     public QueryExecutor(EventStream stream, Query query) {
-        this(stream, List.of(query));
+        this(stream, List.of(query), new Configuration());
     }
 
     public QueryExecutor(EventStream stream, List<Query> queries) {
+        this(stream, queries, new Configuration());
+    }
+
+    public QueryExecutor(EventStream stream, Configuration configuration) {
+        this(stream, List.of(), configuration);
+    }
+
+    public QueryExecutor(EventStream stream, Query query, Configuration configuration) {
+        this(stream, List.of(query), configuration);
+    }
+
+    public QueryExecutor(EventStream stream, List<Query> queries, Configuration configuration) {
         this.stream = stream;
+        this.configuration = configuration;
         for (Query query : queries) {
-            queryRuns.add(new QueryRun(stream, query));
+            queryRuns.add(new QueryRun(stream, query, configuration));
         }
         stream.setReuse(false);
         stream.setOrdered(true);
@@ -79,7 +93,7 @@ final class QueryExecutor {
         for (EventType type : eventTypes) {
             try {
                 Query query = new Query("SELECT * FROM " + type.getName());
-                QueryRun run = new QueryRun(stream, query);
+                QueryRun run = new QueryRun(stream, query, configuration);
                 queryRuns.add(run);
             } catch (ParseException pe) {
                 // The event name contained whitespace or similar, ignore.

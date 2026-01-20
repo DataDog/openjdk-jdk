@@ -67,6 +67,8 @@ public final class View extends Command {
         stream.println("");
         stream.println("  --cell-height <integer> Maximum number of rows in a table cell. Default value depends on the view");
         stream.println("");
+        stream.println("  --show-context          Display contextual event fields alongside regular events");
+        stream.println("");
         stream.println("  <view>                  Name of the view or event type to display. See list below for");
         stream.println("                          available views");
         stream.println("");
@@ -104,6 +106,7 @@ public final class View extends Command {
         list.add("[--width <integer>]");
         list.add("[--truncate <mode>]");
         list.add("[--cell-height <integer>]");
+        list.add("[--show-context]");
         list.add("<view>");
         list.add("<file>");
         return list;
@@ -122,6 +125,9 @@ public final class View extends Command {
         while (true) {
             if (acceptSwitch(options, "--verbose")) {
                 configuration.verbose = true;
+            }
+            if (acceptSwitch(options, "--show-context")) {
+                configuration.showContext = true;
             }
             if (acceptOption(options, "--truncate")) {
                 String mode = options.remove();

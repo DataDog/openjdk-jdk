@@ -1,0 +1,34 @@
+Claude Code Configuration Transfer Instructions
+==============================================
+
+This archive contains personal Claude Code configuration files that cannot be
+committed to the OpenJDK repository.
+
+Files in TEMP-claude-config.tar.gz:
+- CLAUDE.md: Project-specific instructions for Claude
+- .claude/jfr.md: JFR-related context and notes
+- .claude/settings.local.json: Local settings
+
+To extract on another machine:
+------------------------------
+
+1. Copy TEMP-claude-config.tar.gz to your OpenJDK project root directory
+
+2. Extract the archive:
+   tar -xzf TEMP-claude-config.tar.gz
+
+3. Verify extraction:
+   ls -la CLAUDE.md .claude/
+
+4. Remove the temporary archive:
+   rm TEMP-claude-config.tar.gz
+
+IMPORTANT:
+----------
+- These files are TEMPORARY and should NOT be committed to the repository
+- Add them to .git/info/exclude if needed:
+  echo "CLAUDE.md" >> .git/info/exclude
+  echo ".claude/" >> .git/info/exclude
+
+- The global CLAUDE.md is at: ~/.claude/CLAUDE.md
+- This local CLAUDE.md is project-specific overrides
