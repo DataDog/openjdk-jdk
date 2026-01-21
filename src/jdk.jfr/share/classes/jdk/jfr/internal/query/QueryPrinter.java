@@ -93,7 +93,7 @@ public final class QueryPrinter {
         try {
             stopWatch.beginQueryValidation();
             Query q = new Query(query);
-            QueryExecutor executor = new QueryExecutor(stream, q);
+            QueryExecutor executor = new QueryExecutor(stream, q, configuration);
             stopWatch.beginAggregation();
             QueryRun task = executor.run().getFirst();
             if (!task.getSyntaxErrors().isEmpty()) {

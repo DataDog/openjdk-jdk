@@ -25,6 +25,7 @@
 package jdk.jfr.internal.query;
 
 import java.time.Instant;
+import java.util.Set;
 
 import jdk.jfr.internal.util.Output;
 
@@ -115,4 +116,14 @@ public final class Configuration {
      * active when the displayed event occurred.
      */
     public boolean showContext;
+
+    /**
+     * List of specific context event types to display.
+     * <p>
+     * If null or empty, all contextual event types are shown.
+     * Otherwise, only events whose simple name matches one in this set are shown.
+     * Simple names are case-sensitive and should match the event type name
+     * without package prefix (e.g., "Span", "Trace", "ContextEvent").
+     */
+    public Set<String> contextTypes;
 }

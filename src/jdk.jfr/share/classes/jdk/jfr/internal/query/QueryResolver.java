@@ -71,6 +71,7 @@ final class QueryResolver {
     private final Map<String, FilteredType> typeAliases = new LinkedHashMap<>();
     private final Map<String, Field> fieldAliases = new LinkedHashMap<>();
     private final List<Field> resultFields = new ArrayList<>();
+    private final ContextualFieldIndex contextualFieldIndex;
 
     // For readability take query apart
     private final List<String> column;
@@ -83,6 +84,7 @@ final class QueryResolver {
 
     public QueryResolver(Query query, List<EventType> eventTypes) {
         this.eventTypes = eventTypes;
+        this.contextualFieldIndex = new ContextualFieldIndex(eventTypes);
         this.column = query.column;
         this.format = query.format;
         this.select = query.select;
@@ -234,7 +236,14 @@ final class QueryResolver {
 
     private Field addField(String name, List<FilteredType> types) throws QueryException {
         List<Field> fields = resolveFields(name, types);
+
+        // If no regular fields found, try to resolve as contextual field
         if (fields.isEmpty()) {
+            Field contextualField = resolveContextualField(name, types);
+            if (contextualField != null) {
+                resultFields.add(contextualField);
+                return contextualField;
+            }
             throw new QueryException(unknownField(name, types));
         }
 
@@ -260,6 +269,60 @@ final class QueryResolver {
         }
         resultFields.add(primary);
         return primary;
+    }
+
+    /**
+     * Attempts to resolve a field reference as a contextual field.
+     * <p>
+     * Contextual fields are referenced as "TypeName.fieldName" where TypeName
+     * is an event type with @Contextual annotated fields.
+     *
+     * @param name the field reference (e.g., "Trace.traceId")
+     * @param types the FROM types (used as the source type for the field)
+     * @return a Field configured for contextual value extraction, or null if not a contextual field
+     */
+    private Field resolveContextualField(String name, List<FilteredType> types) {
+        ContextualFieldIndex.ResolvedField resolved = contextualFieldIndex.resolve(name);
+        if (resolved == null) {
+            return null;
+        }
+
+        // Use the first FROM type as the source type for this contextual field
+        FilteredType sourceType = types.isEmpty() ? null : types.getFirst();
+
+        // Create a Field for the contextual reference
+        Field field = new Field(sourceType, name);
+        field.contextual = true;
+        field.contextTypeName = resolved.typeInfo().simpleName();
+        field.contextFieldName = resolved.fieldName();
+
+        // Set label to the full reference name
+        field.label = name;
+        field.visible = true;
+        field.alignLeft = true;
+
+        // Determine the data type from the contextual event type
+        for (var vd : resolved.typeInfo().eventType().getFields()) {
+            if (vd.getName().equals(resolved.fieldName())) {
+                field.dataType = vd.getTypeName();
+                // Configure type-specific settings
+                FieldBuilder.configureFieldByType(field, vd);
+                break;
+            }
+        }
+
+        // Use sentinel valueGetter that throws with clear error message
+        // Values for contextual fields are extracted via ContextValueExtractor during aggregation
+        field.valueGetter = event -> {
+            throw new IllegalStateException(
+                "valueGetter should not be called for contextual field: " + name +
+                ". Use ContextValueExtractor instead.");
+        };
+
+        // Add this field as its own source field
+        field.sourceFields.add(field);
+
+        return field;
     }
 
     private List<Field> resolveFields(String name, List<FilteredType> types) {

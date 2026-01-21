@@ -82,18 +82,18 @@ final class Table {
 
     public void addContextualColumn(String fieldName) {
         int newIndex = fields.size();
-        Field contextField = new Field(
-            fieldName,                              // name
-            newIndex,                               // index
-            row -> ((Row)row).getContextualValue(fieldName), // valueGetter
-            null,                                   // type (not needed for contextual fields)
-            List.of()                               // sourceFields
-        );
+        Field contextField = new Field(null, fieldName);
+        contextField.index = newIndex;
+        contextField.visible = true;
+        contextField.label = fieldName;
+        contextField.alignLeft = true;
         fields.add(contextField);
 
-        // Update all existing rows to accommodate new field
+        // Update all existing rows to accommodate new field and populate contextual values
         for (Row row : rows) {
             row.expandToSize(fields.size());
+            Object value = row.getContextualValue(fieldName);
+            row.putValue(newIndex, value);
         }
     }
 }

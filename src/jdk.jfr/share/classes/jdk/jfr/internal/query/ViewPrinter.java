@@ -109,7 +109,7 @@ public final class ViewPrinter {
             configuration.verboseHeaders = true;
         }
         if (text.equalsIgnoreCase("all-events")) {
-            QueryExecutor executor = new QueryExecutor(stream);
+            QueryExecutor executor = new QueryExecutor(stream, configuration);
             stopWatch.beginAggregation();
             List<QueryRun> runs = executor.run();
             stopWatch.beginFormatting();
@@ -141,7 +141,7 @@ public final class ViewPrinter {
             for (ViewConfiguration view : views) {
                 queries.add(new Query(view.query()));
             }
-            QueryExecutor executor = new QueryExecutor(stream, queries);
+            QueryExecutor executor = new QueryExecutor(stream, queries, configuration);
             int index = 0;
             stopWatch.beginAggregation();
             List<QueryRun> runs = executor.run();
@@ -162,7 +162,7 @@ public final class ViewPrinter {
             if (view.name().equalsIgnoreCase(text)) {
                 stopWatch.beginQueryValidation();
                 Query q = new Query(view.query());
-                QueryExecutor executor = new QueryExecutor(stream, q);
+                QueryExecutor executor = new QueryExecutor(stream, q, configuration);
                 stopWatch.beginAggregation();
                 QueryRun run = executor.run().getFirst();
                 stopWatch.beginFormatting();

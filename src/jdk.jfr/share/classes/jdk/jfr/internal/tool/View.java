@@ -30,7 +30,9 @@ import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import jdk.jfr.consumer.EventStream;
 import jdk.jfr.internal.query.ViewPrinter;
@@ -67,7 +69,9 @@ public final class View extends Command {
         stream.println("");
         stream.println("  --cell-height <integer> Maximum number of rows in a table cell. Default value depends on the view");
         stream.println("");
-        stream.println("  --show-context          Display contextual event fields alongside regular events");
+        stream.println("  --show-context[=<types>] Display contextual event fields alongside regular events.");
+        stream.println("                          Optional comma-separated list of event type names to filter");
+        stream.println("                          (e.g., --show-context=Span,Trace). If omitted, shows all contextual events");
         stream.println("");
         stream.println("  <view>                  Name of the view or event type to display. See list below for");
         stream.println("                          available views");
@@ -106,7 +110,7 @@ public final class View extends Command {
         list.add("[--width <integer>]");
         list.add("[--truncate <mode>]");
         list.add("[--cell-height <integer>]");
-        list.add("[--show-context]");
+        list.add("[--show-context[=<types>]]");
         list.add("<view>");
         list.add("<file>");
         return list;
@@ -126,8 +130,22 @@ public final class View extends Command {
             if (acceptSwitch(options, "--verbose")) {
                 configuration.verbose = true;
             }
-            if (acceptSwitch(options, "--show-context")) {
+            // Handle --show-context with optional value
+            String option = options.peek();
+            if (option != null && option.startsWith("--show-context")) {
+                options.remove();
                 configuration.showContext = true;
+
+                // Check if there's a value (--show-context=Type1,Type2)
+                if (option.contains("=")) {
+                    String value = option.substring(option.indexOf('=') + 1);
+                    if (!value.isEmpty()) {
+                        configuration.contextTypes = new HashSet<>();
+                        for (String type : value.split(",")) {
+                            configuration.contextTypes.add(type.trim());
+                        }
+                    }
+                }
             }
             if (acceptOption(options, "--truncate")) {
                 String mode = options.remove();

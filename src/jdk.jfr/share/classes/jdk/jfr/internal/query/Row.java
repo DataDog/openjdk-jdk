@@ -58,7 +58,7 @@ final class Row {
     }
 
     public void setContextualEvents(Set<RecordedEvent> events) {
-        this.contextualEvents = events;
+        this.contextualEvents = events != null ? events : Collections.emptySet();
     }
 
     public Set<RecordedEvent> getContextualEvents() {
@@ -72,16 +72,28 @@ final class Row {
         }
     }
 
-    public Object getContextualValue(String fieldName) {
+    /**
+     * Retrieves the value of a contextual field from the stored contextual events.
+     *
+     * @param qualifiedFieldName the field name in "TypeName.fieldName" format
+     * @return the field value, or null if not found (displays as "N/A")
+     * @throws IllegalArgumentException if the field name is not properly qualified
+     */
+    public Object getContextualValue(String qualifiedFieldName) {
         // Parse "TypeName.fieldName"
-        int dotIndex = fieldName.indexOf('.');
-        String typeName = fieldName.substring(0, dotIndex);
-        String attrName = fieldName.substring(dotIndex + 1);
+        int dotIndex = qualifiedFieldName.indexOf('.');
+        if (dotIndex == -1 || dotIndex == 0 || dotIndex == qualifiedFieldName.length() - 1) {
+            throw new IllegalArgumentException(
+                "Contextual field name must be in format 'TypeName.fieldName': " + qualifiedFieldName);
+        }
+
+        String typeName = qualifiedFieldName.substring(0, dotIndex);
+        String attrName = qualifiedFieldName.substring(dotIndex + 1);
 
         // Find matching contextual event and extract value
         for (RecordedEvent ctxEvent : contextualEvents) {
             EventType eventType = ctxEvent.getEventType();
-            String eventTypeName = getSimpleName(eventType);
+            String eventTypeName = QueryUtil.getSimpleName(eventType);
             if (eventTypeName.equals(typeName)) {
                 if (ctxEvent.hasField(attrName)) {
                     return ctxEvent.getValue(attrName);
@@ -89,11 +101,6 @@ final class Row {
             }
         }
         return null; // Will display as "N/A"
-    }
-
-    private String getSimpleName(EventType type) {
-        String name = type.getName();
-        return name.substring(name.lastIndexOf(".") + 1);
     }
 
     @Override

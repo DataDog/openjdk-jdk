@@ -433,4 +433,77 @@ final class FieldBuilder {
         set.add("jdk.types.StackTrace");
         return set;
     }
+
+    /**
+     * Configures a field based on its ValueDescriptor type and annotations.
+     * <p>
+     * This is used for contextual fields where the Field is created directly
+     * without going through the full FieldBuilder pipeline.
+     *
+     * @param field the field to configure
+     * @param descriptor the value descriptor providing type information
+     */
+    public static void configureFieldByType(Field field, ValueDescriptor descriptor) {
+        String typeName = descriptor.getTypeName();
+
+        // Configure numeric types
+        switch (typeName) {
+        case "int", "long", "short", "byte":
+            field.integralType = true;
+            field.alignLeft = false;
+            break;
+        case "float", "double":
+            field.fractionalType = true;
+            field.alignLeft = false;
+            break;
+        case "boolean":
+            field.alignLeft = false;
+            break;
+        default:
+            field.alignLeft = true;
+            break;
+        }
+
+        // Configure time-related types
+        if (descriptor.getAnnotation(Timestamp.class) != null) {
+            field.timestamp = true;
+        }
+        if (descriptor.getAnnotation(Timespan.class) != null) {
+            field.timespan = true;
+        }
+
+        // Configure percentage
+        if (descriptor.getAnnotation(Percentage.class) != null) {
+            field.percentage = true;
+        }
+
+        // Configure data amount
+        DataAmount dataAmount = descriptor.getAnnotation(DataAmount.class);
+        if (dataAmount != null) {
+            if (DataAmount.BITS.equals(dataAmount.value())) {
+                field.bits = true;
+            }
+            if (DataAmount.BYTES.equals(dataAmount.value())) {
+                field.bytes = true;
+            }
+        }
+
+        // Configure frequency
+        if (descriptor.getAnnotation(Frequency.class) != null) {
+            field.frequency = true;
+        }
+
+        // Configure memory address
+        if (descriptor.getAnnotation(MemoryAddress.class) != null) {
+            field.memoryAddress = true;
+        }
+
+        // Configure known types for lexical sorting
+        if (KNOWN_TYPES.contains(typeName)) {
+            field.lexicalSort = true;
+            field.fixedWidth = false;
+        } else {
+            field.fixedWidth = !typeName.equals("java.lang.String");
+        }
+    }
 }

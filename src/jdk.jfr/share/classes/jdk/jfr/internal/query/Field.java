@@ -140,13 +140,40 @@ final class Field {
 
     public FunctionFactory functionFactory;
 
+    /**
+     * Indicates this field references a contextual event type.
+     * When {@code true}, both {@link #contextTypeName} and {@link #contextFieldName}
+     * are guaranteed to be non-null.
+     */
+    boolean contextual;
+
+    /**
+     * The contextual event type name (e.g., "Trace" or "jdk.Trace").
+     * Non-null only when {@link #contextual} is {@code true}.
+     */
+    String contextTypeName;
+
+    /**
+     * The field name within the contextual event (e.g., "traceId").
+     * Non-null only when {@link #contextual} is {@code true}.
+     */
+    String contextFieldName;
+
     public Field(FilteredType type, String name) {
         this.type = type;
         this.name = name;
     }
 
+    /**
+     * Returns true if this field references a contextual event type.
+     */
+    public boolean isContextual() {
+        return contextual;
+    }
+
     @Override
     public String toString() {
-        return type.getName() + "#" + name;
+        String typeName = type != null ? type.getName() : "<contextual>";
+        return typeName + "#" + name;
     }
 }

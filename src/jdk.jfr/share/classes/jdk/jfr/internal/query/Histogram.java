@@ -128,11 +128,29 @@ final class Histogram {
     }
 
     public void add(RecordedEvent e, FilteredType type, List<Field> sourceFields) {
+        add(e, type, sourceFields, ContextValueExtractor.NONE);
+    }
+
+    /**
+     * Adds an event to the histogram with optional contextual value extraction.
+     *
+     * @param e the event to add
+     * @param type the filtered type of the event
+     * @param sourceFields the fields to extract values from
+     * @param contextExtractor callback for extracting contextual field values
+     */
+    public void add(RecordedEvent e, FilteredType type, List<Field> sourceFields, ContextValueExtractor contextExtractor) {
         LookupKey lk = new LookupKey();
         final Object[] values = new Object[sourceFields.size()];
         for (int i = 0; i < values.length; i++) {
             Field field = sourceFields.get(i);
-            Object value = field.valueGetter.apply(e);
+            Object value;
+            if (field.contextual) {
+                // Extract value from contextual event
+                value = contextExtractor.extract(field, e);
+            } else {
+                value = field.valueGetter.apply(e);
+            }
             values[i] = value;
             if (field.grouper != null) {
                 lk.add(makeKey(value));
