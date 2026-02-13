@@ -36,7 +36,7 @@
         -->
         <javac.benchmark.openjdk.zip.download.url>https://download.java.net/openjdk/jdk11/ri/openjdk-11+28_windows-x64_bin.zip</javac.benchmark.openjdk.zip.download.url>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <jmh.version>1.36</jmh.version>
+        <jmh.version>1.37</jmh.version>
     </properties>
 
     <build>
