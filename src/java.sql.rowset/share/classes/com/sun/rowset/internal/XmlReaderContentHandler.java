@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -48,7 +48,7 @@ import java.text.MessageFormat;
  * a <code>RowSet</code> object.
  * <P>
  * A rowset consists of its properties, metadata, and data values. An XML document
- * representating a rowset includes the values in these three categories along with
+ * representing a rowset includes the values in these three categories along with
  * appropriate XML tags to identify them.  It also includes a top-level XML tag for
  * the rowset and three section tags identifying the three categories of values.
  * <P>
@@ -659,13 +659,12 @@ public class XmlReaderContentHandler extends DefaultHandler {
                  case PropClassTag:
                      //Added the handling for Class tags to take care of maps
                      //Makes an entry into the map upon end of class tag
-                     try{
-                          typeMap.put(Key_map,sun.reflect.misc.ReflectUtil.forName(Value_map));
-
-                        }catch(ClassNotFoundException ex) {
-                          throw new SAXException(MessageFormat.format(resBundle.handleGetObject("xmlrch.errmap").toString(), ex.getMessage()));
-                        }
-                      break;
+                     try {
+                         typeMap.put(Key_map, Class.forName(Value_map, true, null));
+                     } catch (ClassNotFoundException ex) {
+                         throw new SAXException(MessageFormat.format(resBundle.handleGetObject("xmlrch.errmap").toString(), ex.getMessage()));
+                     }
+                     break;
 
                  case MapTag:
                       //Added the handling for Map to take set the typeMap
@@ -982,8 +981,7 @@ public class XmlReaderContentHandler extends DefaultHandler {
     }
 
     private boolean getBooleanValue(String s) {
-
-        return Boolean.valueOf(s).booleanValue();
+        return Boolean.parseBoolean(s);
     }
 
     private java.math.BigDecimal getBigDecimalValue(String s) {

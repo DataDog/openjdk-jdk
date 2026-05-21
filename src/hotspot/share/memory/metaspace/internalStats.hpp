@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2020 SAP SE. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2022 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,8 +26,8 @@
 #ifndef SHARE_MEMORY_METASPACE_INTERNALSTATS_HPP
 #define SHARE_MEMORY_METASPACE_INTERNALSTATS_HPP
 
-#include "memory/allocation.hpp"
-#include "runtime/atomic.hpp"
+#include "memory/allStatic.hpp"
+#include "runtime/atomicAccess.hpp"
 #include "utilities/globalDefinitions.hpp"
 
 class outputStream;
@@ -92,9 +92,6 @@ class InternalStats : public AllStatic {
   /* Number of chunk in place enlargements */       \
   x(num_chunks_enlarged)                            \
                                                     \
-  /* Number of times we did a purge */              \
-  x(num_purges)                                     \
-                                                    \
   /* Number of times we read inconsistent stats. */ \
   x(num_inconsistent_stats)                         \
 
@@ -111,7 +108,7 @@ public:
 
 // incrementors
 #define INCREMENTOR(name)           static void inc_##name() { _##name++; }
-#define INCREMENTOR_ATOMIC(name)    static void inc_##name() { Atomic::inc(&_##name); }
+#define INCREMENTOR_ATOMIC(name)    static void inc_##name() { AtomicAccess::inc(&_##name); }
   ALL_MY_COUNTERS(INCREMENTOR, INCREMENTOR_ATOMIC)
 #undef INCREMENTOR
 #undef INCREMENTOR_ATOMIC

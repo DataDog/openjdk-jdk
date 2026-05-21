@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,23 +37,23 @@ class FilterQueue {
  private:
   class Node : public CHeapObj<mtInternal> {
    public:
-    Node(const E& e): _next(NULL), _data(e) { }
+    Node(const E& e): _next(nullptr), _data(e) { }
     Node*    _next;
     E                   _data;
   };
 
-  Node* _first;
+  Atomic<Node*> _first;
   Node* load_first() {
-    return Atomic::load_acquire(&_first);
+    return _first.load_acquire();
   }
 
   static bool match_all(E d) { return true; }
 
  public:
-  FilterQueue() : _first(NULL) { }
+  FilterQueue() : _first(nullptr) { }
 
   bool is_empty() {
-    return load_first() == NULL;
+    return load_first() == nullptr;
   }
 
   // Adds an item to the queue in a MT safe way, re-entrant.

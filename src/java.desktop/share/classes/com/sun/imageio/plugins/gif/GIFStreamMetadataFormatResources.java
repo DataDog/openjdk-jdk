@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,7 @@ public class GIFStreamMetadataFormatResources extends ListResourceBundle {
 
     public GIFStreamMetadataFormatResources() {}
 
+    @Override
     protected Object[][] getContents() {
         return new Object[][] {
 
@@ -49,7 +50,7 @@ public class GIFStreamMetadataFormatResources extends ListResourceBundle {
         { "LogicalScreenDescriptor/logicalScreenHeight",
           "The height in pixels of the whole picture" },
         { "LogicalScreenDescriptor/colorResolution",
-          "The number of bits of color resolution, beteen 1 and 8" },
+          "The number of bits of color resolution, between 1 and 8" },
         { "LogicalScreenDescriptor/pixelAspectRatio",
           "If 0, indicates square pixels, else W/H = (value + 15)/64" },
         { "GlobalColorTable/sizeOfGlobalColorTable",

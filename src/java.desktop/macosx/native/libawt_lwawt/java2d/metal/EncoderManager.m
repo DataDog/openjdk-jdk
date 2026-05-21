@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -41,11 +41,9 @@ const SurfaceRasterFlags defaultRasterFlags = { JNI_FALSE, JNI_TRUE };
 - (void)dealloc;
 
 - (void)reset:(id<MTLTexture>)destination
-           isDstOpaque:(jboolean)isDstOpaque
-    isDstPremultiplied:(jboolean)isDstPremultiplied
-                  isAA:(jboolean)isAA
-                  isText:(jboolean)isText
-                  isLCD:(jboolean)isLCD;
+         isAA:(jboolean)isAA
+       isText:(jboolean)isText
+        isLCD:(jboolean)isLCD;
 
 - (void)updateEncoder:(id<MTLRenderCommandEncoder>)encoder
               context:(MTLContext *)mtlc
@@ -64,7 +62,6 @@ const SurfaceRasterFlags defaultRasterFlags = { JNI_FALSE, JNI_TRUE };
 
     // Persistent encoder properties
     id<MTLTexture> _destination;
-    SurfaceRasterFlags _dstFlags;
 
     jboolean _isAA;
     jboolean _isText;
@@ -123,14 +120,10 @@ const SurfaceRasterFlags defaultRasterFlags = { JNI_FALSE, JNI_TRUE };
 }
 
 - (void)reset:(id<MTLTexture>)destination
-           isDstOpaque:(jboolean)isDstOpaque
-    isDstPremultiplied:(jboolean)isDstPremultiplied
-                  isAA:(jboolean)isAA
-                  isText:(jboolean)isText
-                  isLCD:(jboolean)isLCD {
+         isAA:(jboolean)isAA
+       isText:(jboolean)isText
+        isLCD:(jboolean)isLCD {
     _destination = destination;
-    _dstFlags.isOpaque = isDstOpaque;
-    _dstFlags.isPremultiplied = isDstPremultiplied;
     _isAA = isAA;
     _isText = isText;
     _isLCD = isLCD;
@@ -288,20 +281,20 @@ const SurfaceRasterFlags defaultRasterFlags = { JNI_FALSE, JNI_TRUE };
 
 - (id<MTLRenderCommandEncoder> _Nonnull)getAARenderEncoder:(const BMTLSDOps * _Nonnull)dstOps {
   id<MTLTexture> dstTxt = dstOps->pTexture;
-  RenderOptions roptions = {JNI_FALSE, JNI_TRUE, INTERPOLATION_NEAREST_NEIGHBOR, defaultRasterFlags, {dstOps->isOpaque, JNI_TRUE}, JNI_FALSE, JNI_FALSE, JNI_FALSE};
+  RenderOptions roptions = {JNI_FALSE, JNI_TRUE, INTERPOLATION_NEAREST_NEIGHBOR, defaultRasterFlags, JNI_FALSE, JNI_FALSE, JNI_FALSE};
   return [self getEncoder:dstTxt renderOptions:&roptions];
 }
 
 - (id<MTLRenderCommandEncoder> _Nonnull)getAAShaderRenderEncoder:(const BMTLSDOps * _Nonnull)dstOps
 {
-    RenderOptions roptions = {JNI_FALSE, JNI_FALSE, INTERPOLATION_NEAREST_NEIGHBOR, defaultRasterFlags, {dstOps->isOpaque, JNI_TRUE}, JNI_FALSE, JNI_FALSE, JNI_TRUE};
+    RenderOptions roptions = {JNI_FALSE, JNI_FALSE, INTERPOLATION_NEAREST_NEIGHBOR, defaultRasterFlags, JNI_FALSE, JNI_FALSE, JNI_TRUE};
     return [self getEncoder:dstOps->pTexture renderOptions:&roptions];
 }
 
 - (id<MTLRenderCommandEncoder> _Nonnull)getRenderEncoder:(id<MTLTexture> _Nonnull)dest
                                              isDstOpaque:(bool)isOpaque
 {
-    RenderOptions roptions = {JNI_FALSE, JNI_FALSE, INTERPOLATION_NEAREST_NEIGHBOR, defaultRasterFlags, {isOpaque, JNI_TRUE}, JNI_FALSE, JNI_FALSE, JNI_FALSE};
+    RenderOptions roptions = {JNI_FALSE, JNI_FALSE, INTERPOLATION_NEAREST_NEIGHBOR, defaultRasterFlags, JNI_FALSE, JNI_FALSE, JNI_FALSE};
     return [self getEncoder:dest renderOptions:&roptions];
 }
 
@@ -329,7 +322,7 @@ const SurfaceRasterFlags defaultRasterFlags = { JNI_FALSE, JNI_TRUE };
                                                isSrcOpaque:(bool)isSrcOpaque
                                                isDstOpaque:(bool)isDstOpaque
 {
-    RenderOptions roptions = {JNI_TRUE, JNI_FALSE, INTERPOLATION_NEAREST_NEIGHBOR, {isSrcOpaque, JNI_TRUE }, {isDstOpaque, JNI_TRUE}, JNI_FALSE, JNI_TRUE, JNI_FALSE};
+    RenderOptions roptions = {JNI_TRUE, JNI_FALSE, INTERPOLATION_NEAREST_NEIGHBOR, {isSrcOpaque, JNI_TRUE }, JNI_FALSE, JNI_TRUE, JNI_FALSE};
     return [self getEncoder:dest renderOptions:&roptions];
 }
 
@@ -339,7 +332,7 @@ const SurfaceRasterFlags defaultRasterFlags = { JNI_FALSE, JNI_TRUE };
                                     interpolation:(int)interpolation
                                              isAA:(jboolean)isAA
 {
-    RenderOptions roptions = {JNI_TRUE, isAA, interpolation, { isSrcOpaque, JNI_TRUE }, {isDstOpaque, JNI_TRUE}, JNI_FALSE, JNI_FALSE, JNI_FALSE};
+    RenderOptions roptions = {JNI_TRUE, isAA, interpolation, { isSrcOpaque, JNI_TRUE }, JNI_FALSE, JNI_FALSE, JNI_FALSE};
     return [self getEncoder:dest renderOptions:&roptions];
 }
 
@@ -354,7 +347,8 @@ const SurfaceRasterFlags defaultRasterFlags = { JNI_FALSE, JNI_TRUE };
 - (id<MTLRenderCommandEncoder> _Nonnull) getTextEncoder:(const BMTLSDOps * _Nonnull)dstOps
                                       isSrcOpaque:(bool)isSrcOpaque
 {
-    RenderOptions roptions = {JNI_TRUE, JNI_FALSE, INTERPOLATION_NEAREST_NEIGHBOR, { isSrcOpaque, JNI_TRUE }, {dstOps->isOpaque, JNI_TRUE}, JNI_TRUE, JNI_FALSE, JNI_FALSE};
+    RenderOptions roptions = {JNI_TRUE, JNI_FALSE, INTERPOLATION_NEAREST_NEIGHBOR, { isSrcOpaque, JNI_TRUE },
+                              JNI_TRUE, JNI_FALSE, JNI_FALSE};
     return [self getEncoder:dstOps->pTexture renderOptions:&roptions];
 }
 
@@ -367,9 +361,9 @@ const SurfaceRasterFlags defaultRasterFlags = { JNI_FALSE, JNI_TRUE };
   jboolean needEnd = JNI_FALSE;
   if (_encoder != nil) {
     if (_destination != dest || renderOptions->isAA != _encoderStates.aa) {
-      J2dTraceLn2(J2D_TRACE_VERBOSE,
-                  "end common encoder because of dest change: %p -> %p",
-                  _destination, dest);
+      J2dTraceLn(J2D_TRACE_VERBOSE,
+                 "end common encoder because of dest change: %p -> %p",
+                 _destination, dest);
       needEnd = JNI_TRUE;
     } else if ((_useStencil == NO) != ([_mtlc.clip isShape] == NO)) {
       // 1. When mode changes RECT -> SHAPE we must recreate encoder with
@@ -380,9 +374,9 @@ const SurfaceRasterFlags defaultRasterFlags = { JNI_FALSE, JNI_TRUE };
       // encoder with disabled stencil test, but [encoder
       // setDepthStencilState:nil] causes crash, so we have to recreate encoder
       // in such case
-      J2dTraceLn2(J2D_TRACE_VERBOSE,
-                  "end common encoder because toggle stencil: %d -> %d",
-                  (int)_useStencil, (int)[_mtlc.clip isShape]);
+      J2dTraceLn(J2D_TRACE_VERBOSE,
+                 "end common encoder because toggle stencil: %d -> %d",
+                 (int)_useStencil, (int)[_mtlc.clip isShape]);
       needEnd = JNI_TRUE;
     }
   }
@@ -432,16 +426,14 @@ const SurfaceRasterFlags defaultRasterFlags = { JNI_FALSE, JNI_TRUE };
         rpd.stencilAttachment.storeAction = MTLStoreActionStore;
     }
 
-    // J2dTraceLn1(J2D_TRACE_VERBOSE, "created render encoder to draw on
+    // J2dTraceLn(J2D_TRACE_VERBOSE, "created render encoder to draw on
     // tex=%p", dest);
     _encoder = [[cbw getCommandBuffer] renderCommandEncoderWithDescriptor:rpd];
 
     [_encoderStates reset:dest
-               isDstOpaque:renderOptions->dstFlags.isOpaque
-        isDstPremultiplied:YES
-                      isAA:renderOptions->isAA
-                      isText:renderOptions->isText
-                      isLCD:renderOptions->isLCD];
+                     isAA:renderOptions->isAA
+                   isText:renderOptions->isText
+                    isLCD:renderOptions->isLCD];
   }
 
   //

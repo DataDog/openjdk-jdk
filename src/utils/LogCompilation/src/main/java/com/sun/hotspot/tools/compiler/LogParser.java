@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -439,9 +439,9 @@ public class LogParser extends DefaultHandler implements ErrorHandler {
             this.method = method;
             this.bci = bci;
         }
-        final public Method method;
-        final public int bci;
-        final public String toString() {
+        public final Method method;
+        public final int bci;
+        public final String toString() {
             return "@" + bci + " " + method;
         }
     }
@@ -513,12 +513,12 @@ public class LogParser extends DefaultHandler implements ErrorHandler {
     private HashMap<String, Method> methods = new HashMap<>();
 
     /**
-     * Map compilation IDs ({@see #makeId()}) to newly created nmethods.
+     * Map compilation IDs ({@link #makeId()}) to newly created nmethods.
      */
     private LinkedHashMap<String, NMethod> nmethods = new LinkedHashMap<>();
 
     /**
-     * Map compilation task IDs {@see #makeId()}) to {@link Compilation}
+     * Map compilation task IDs {@link #makeId()}) to {@link Compilation}
      * objects.
      */
     private HashMap<String, Compilation> compiles = new HashMap<>();
@@ -544,9 +544,9 @@ public class LogParser extends DefaultHandler implements ErrorHandler {
      * originating from that scope.
      *
      * New scopes are typically pushed when parse log events are encountered
-     * ({@see #startElement()}) and popped when parsing of a given Java method
-     * is done ({@see #endElement()}). Parsing events can be nested. Several
-     * other events add information to scopes ({@see #startElement()}).
+     * ({@link #startElement()}) and popped when parsing of a given Java method
+     * is done ({@link #endElement()}). Parsing events can be nested. Several
+     * other events add information to scopes ({@code startElement()}).
      */
     private Deque<CallSite> scopes = new ArrayDeque<>();
 
@@ -973,7 +973,7 @@ public class LogParser extends DefaultHandler implements ErrorHandler {
             m.setHolder(type(search(atts, "holder")));
             m.setName(search(atts, "name"));
             m.setReturnType(type(search(atts, "return")));
-            String arguments = atts.getValue("arguments");;
+            String arguments = atts.getValue("arguments");
             if (arguments == null) {
                 m.setSignature("()" + sigtype(atts.getValue("return")));
             } else {
@@ -1082,6 +1082,7 @@ public class LogParser extends DefaultHandler implements ErrorHandler {
             site.setReason("succeed: " + search(atts, "reason"));
         } else if (qname.equals("failure")) {
             failureReason = search(atts, "reason");
+            lateInlining = false;
         } else if (qname.equals("task_done")) {
             compile.setEnd(Double.parseDouble(search(atts, "stamp")));
             if (Integer.parseInt(search(atts, "success")) == 0) {
@@ -1098,6 +1099,10 @@ public class LogParser extends DefaultHandler implements ErrorHandler {
             e.setCompileKind(compileKind);
             String level = atts.getValue("level");
             e.setLevel(level);
+            String reason = atts.getValue("reason");
+            if (reason != null) {
+              e.setReason(reason);
+            }
             events.add(e);
         } else if (qname.equals("uncommon_trap")) {
             String id = atts.getValue("compile_id");

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "classfile/vmSymbols.hpp"
 #include "interpreter/bytecodeStream.hpp"
 #include "logging/log.hpp"
@@ -223,7 +222,7 @@ int RetTableEntry::_init_nof_jsrs = 5;
 
 RetTableEntry::RetTableEntry(int target, RetTableEntry *next) {
   _target_bci = target;
-  _jsrs = new GrowableArray<intptr_t>(_init_nof_jsrs);
+  _jsrs = new GrowableArray<int>(_init_nof_jsrs);
   _next = next;
 }
 
@@ -280,7 +279,7 @@ RetTableEntry* RetTable::find_jsrs_for_target(int targBci) {
     cur = cur->next();
   }
   ShouldNotReachHere();
-  return NULL;
+  return nullptr;
 }
 
 // The instruction at bci is changing size by "delta".  Update the return map.
@@ -392,7 +391,6 @@ void CellTypeState::print(outputStream *os) {
 //
 
 void GenerateOopMap::initialize_bb() {
-  _gc_points = 0;
   _bb_count  = 0;
   _bb_hdr_bits.reinitialize(method()->code_size());
 }
@@ -402,15 +400,13 @@ void GenerateOopMap::bb_mark_fct(GenerateOopMap *c, int bci, int *data) {
   if (c->is_bb_header(bci))
      return;
 
-  if (TraceNewOopMapGeneration) {
-     tty->print_cr("Basicblock#%d begins at: %d", c->_bb_count, bci);
-  }
+  log_debug(generateoopmap)( "Basicblock#%d begins at: %d", c->_bb_count, bci);
   c->set_bbmark_bit(bci);
   c->_bb_count++;
 }
 
 
-void GenerateOopMap::mark_bbheaders_and_count_gc_points() {
+void GenerateOopMap::mark_bbheaders() {
   initialize_bb();
 
   bool fellThrough = false;  // False to get first BB marked.
@@ -418,7 +414,7 @@ void GenerateOopMap::mark_bbheaders_and_count_gc_points() {
   // First mark all exception handlers as start of a basic-block
   ExceptionTable excps(method());
   for(int i = 0; i < excps.length(); i ++) {
-    bb_mark_fct(this, excps.handler_pc(i), NULL);
+    bb_mark_fct(this, excps.handler_pc(i), nullptr);
   }
 
   // Then iterate through the code
@@ -429,26 +425,23 @@ void GenerateOopMap::mark_bbheaders_and_count_gc_points() {
     int bci = bcs.bci();
 
     if (!fellThrough)
-        bb_mark_fct(this, bci, NULL);
+        bb_mark_fct(this, bci, nullptr);
 
-    fellThrough = jump_targets_do(&bcs, &GenerateOopMap::bb_mark_fct, NULL);
+    fellThrough = jump_targets_do(&bcs, &GenerateOopMap::bb_mark_fct, nullptr);
 
      /* We will also mark successors of jsr's as basic block headers. */
     switch (bytecode) {
       case Bytecodes::_jsr:
-        assert(!fellThrough, "should not happen");
-        bb_mark_fct(this, bci + Bytecodes::length_for(bytecode), NULL);
-        break;
       case Bytecodes::_jsr_w:
         assert(!fellThrough, "should not happen");
-        bb_mark_fct(this, bci + Bytecodes::length_for(bytecode), NULL);
+        // If this is the last bytecode, there is no successor to mark
+        if (bci + Bytecodes::length_for(bytecode) < method()->code_size()) {
+          bb_mark_fct(this, bci + Bytecodes::length_for(bytecode), nullptr);
+        }
         break;
       default:
         break;
     }
-
-    if (possible_gc_point(&bcs))
-      _gc_points++;
   }
 }
 
@@ -502,7 +495,10 @@ void GenerateOopMap::mark_reachable_code() {
           case Bytecodes::_jsr:
           case Bytecodes::_jsr_w:
             assert(!fell_through, "should not happen");
-            reachable_basicblock(this, bci + Bytecodes::length_for(bytecode), &change);
+            // If this is the last bytecode, there is no successor to mark
+            if (bci + Bytecodes::length_for(bytecode) < method()->code_size()) {
+              reachable_basicblock(this, bci + Bytecodes::length_for(bytecode), &change);
+            }
             break;
           default:
             break;
@@ -547,7 +543,13 @@ bool GenerateOopMap::jump_targets_do(BytecodeStream *bcs, jmpFct_t jmpFct, int *
     case Bytecodes::_ifnull:
     case Bytecodes::_ifnonnull:
       (*jmpFct)(this, bcs->dest(), data);
-      (*jmpFct)(this, bci + 3, data);
+      // Class files verified by the old verifier can have a conditional branch
+      // as their last bytecode, provided the conditional branch is unreachable
+      // during execution.  Check if this instruction is the method's last bytecode
+      // and, if so, don't call the jmpFct.
+      if (bci + 3 < method()->code_size()) {
+        (*jmpFct)(this, bci + 3, data);
+      }
       break;
 
     case Bytecodes::_goto:
@@ -580,9 +582,6 @@ bool GenerateOopMap::jump_targets_do(BytecodeStream *bcs, jmpFct_t jmpFct, int *
     case Bytecodes::_jsr:
       assert(bcs->is_wide()==false, "sanity check");
       (*jmpFct)(this, bcs->dest(), data);
-
-
-
       break;
     case Bytecodes::_jsr_w:
       (*jmpFct)(this, bcs->dest_w(), data);
@@ -643,7 +642,7 @@ BasicBlock  *GenerateOopMap::get_basic_block_containing(int bci) const {
   }
 
   fatal("should have found BB");
-  return NULL;
+  return nullptr;
 }
 
 void GenerateOopMap::restore_state(BasicBlock *bb)
@@ -654,7 +653,7 @@ void GenerateOopMap::restore_state(BasicBlock *bb)
 }
 
 int GenerateOopMap::next_bb_start_pc(BasicBlock *bb) {
- int bbNum = bb - _basic_blocks + 1;
+ intptr_t bbNum = bb - _basic_blocks + 1;
  if (bbNum == _bb_count)
     return method()->code_size();
 
@@ -666,11 +665,11 @@ int GenerateOopMap::next_bb_start_pc(BasicBlock *bb) {
 //
 
 // Allocate memory and throw LinkageError if failure.
-#define ALLOC_RESOURCE_ARRAY(var, type, count) \
-  var = NEW_RESOURCE_ARRAY_RETURN_NULL(type, count);              \
-  if (var == NULL) {                                              \
+#define ALLOC_RESOURCE_ARRAY(var, type, count)                           \
+  var = NEW_RESOURCE_ARRAY_RETURN_NULL(type, count);                     \
+  if (var == nullptr) {                                                  \
     report_error("Cannot reserve enough memory to analyze this method"); \
-    return;                                                       \
+    return;                                                              \
   }
 
 
@@ -795,7 +794,7 @@ void GenerateOopMap::copy_state(CellTypeState *dst, CellTypeState *src) {
 // monitor matching is purely informational and doesn't say anything
 // about the correctness of the code.
 void GenerateOopMap::merge_state_into_bb(BasicBlock *bb) {
-  guarantee(bb != NULL, "null basicblock");
+  guarantee(bb != nullptr, "null basicblock");
   assert(bb->is_alive(), "merging state into a dead basicblock");
 
   if (_stack_top == bb->_stack_top) {
@@ -912,13 +911,12 @@ void GenerateOopMap::do_interpretation()
   // iterated more than once.
   int i = 0;
   do {
-#ifndef PRODUCT
-    if (TraceNewOopMapGeneration) {
-      tty->print("\n\nIteration #%d of do_interpretation loop, method:\n", i);
-      method()->print_name(tty);
-      tty->print("\n\n");
+    if (log_is_enabled(Trace, generateoopmap)) {
+      LogStream st(Log(generateoopmap)::trace());
+      st.print("Iteration #%d of do_interpretation loop, method:", i);
+      method()->print_name(&st);
+      st.print("\n\n");
     }
-#endif
     _conflict = false;
     _monitor_safe = true;
     // init_state is now called from init_basic_blocks.  The length of a
@@ -972,7 +970,7 @@ void GenerateOopMap::init_basic_blocks() {
 
       bbNo++;
     }
-    // Remember prevous bci.
+    // Remember previous bci.
     prev_bci = bci;
   }
   // Set
@@ -1083,8 +1081,7 @@ void GenerateOopMap::initialize_vars() {
 
 void GenerateOopMap::add_to_ref_init_set(int localNo) {
 
-  if (TraceNewOopMapGeneration)
-    tty->print_cr("Added init vars: %d", localNo);
+  log_debug(generateoopmap)("Added init vars: %d", localNo);
 
   // Is it already in the set?
   if (_init_vars->contains(localNo) )
@@ -1151,13 +1148,13 @@ void GenerateOopMap::interp_bb(BasicBlock *bb) {
     }
     interp1(&itr);
 
-    bool fall_through = jump_targets_do(&itr, GenerateOopMap::merge_state, NULL);
+    bool fall_through = jump_targets_do(&itr, GenerateOopMap::merge_state, nullptr);
     if (_got_error)  return;
 
     if (itr.code() == Bytecodes::_ret) {
       assert(!fall_through, "cannot be set if ret instruction");
-      // Automatically handles 'wide' ret indicies
-      ret_jump_targets_do(&itr, GenerateOopMap::merge_state, itr.get_index(), NULL);
+      // Automatically handles 'wide' ret indices
+      ret_jump_targets_do(&itr, GenerateOopMap::merge_state, itr.get_index(), nullptr);
     } else if (fall_through) {
      // Hit end of BB, but the instr. was a fall-through instruction,
      // so perform transition as if the BB ended in a "jump".
@@ -1171,42 +1168,46 @@ void GenerateOopMap::interp_bb(BasicBlock *bb) {
 }
 
 void GenerateOopMap::do_exception_edge(BytecodeStream* itr) {
-  // Only check exception edge, if bytecode can trap
-  if (!Bytecodes::can_trap(itr->code())) return;
-  switch (itr->code()) {
-    case Bytecodes::_aload_0:
-      // These bytecodes can trap for rewriting.  We need to assume that
-      // they do not throw exceptions to make the monitor analysis work.
-      return;
 
-    case Bytecodes::_ireturn:
-    case Bytecodes::_lreturn:
-    case Bytecodes::_freturn:
-    case Bytecodes::_dreturn:
-    case Bytecodes::_areturn:
-    case Bytecodes::_return:
-      // If the monitor stack height is not zero when we leave the method,
-      // then we are either exiting with a non-empty stack or we have
-      // found monitor trouble earlier in our analysis.  In either case,
-      // assume an exception could be taken here.
-      if (_monitor_top == 0) {
+  // Only check exception edge, if bytecode can trap or if async exceptions can be thrown
+  // from any bytecode in the interpreter when single stepping.
+  if (!_all_exception_edges) {
+    if (!Bytecodes::can_trap(itr->code())) return;
+    switch (itr->code()) {
+      case Bytecodes::_aload_0:
+        // These bytecodes can trap for rewriting.  We need to assume that
+        // they do not throw exceptions to make the monitor analysis work.
         return;
-      }
-      break;
 
-    case Bytecodes::_monitorexit:
-      // If the monitor stack height is bad_monitors, then we have detected a
-      // monitor matching problem earlier in the analysis.  If the
-      // monitor stack height is 0, we are about to pop a monitor
-      // off of an empty stack.  In either case, the bytecode
-      // could throw an exception.
-      if (_monitor_top != bad_monitors && _monitor_top != 0) {
-        return;
-      }
-      break;
+      case Bytecodes::_ireturn:
+      case Bytecodes::_lreturn:
+      case Bytecodes::_freturn:
+      case Bytecodes::_dreturn:
+      case Bytecodes::_areturn:
+      case Bytecodes::_return:
+        // If the monitor stack height is not zero when we leave the method,
+        // then we are either exiting with a non-empty stack or we have
+        // found monitor trouble earlier in our analysis.  In either case,
+        // assume an exception could be taken here.
+        if (_monitor_top == 0) {
+          return;
+        }
+        break;
 
-    default:
-      break;
+      case Bytecodes::_monitorexit:
+        // If the monitor stack height is bad_monitors, then we have detected a
+        // monitor matching problem earlier in the analysis.  If the
+        // monitor stack height is 0, we are about to pop a monitor
+        // off of an empty stack.  In either case, the bytecode
+        // could throw an exception.
+        if (_monitor_top != bad_monitors && _monitor_top != 0) {
+          return;
+        }
+        break;
+
+      default:
+        break;
+    }
   }
 
   if (_has_exceptions) {
@@ -1220,7 +1221,7 @@ void GenerateOopMap::do_exception_edge(BytecodeStream* itr) {
 
       if (start_pc <= bci && bci < end_pc) {
         BasicBlock *excBB = get_basic_block_at(handler_pc);
-        guarantee(excBB != NULL, "no basic block for exception");
+        guarantee(excBB != nullptr, "no basic block for exception");
         CellTypeState *excStk = excBB->stack();
         CellTypeState *cOpStck = stack();
         CellTypeState cOpStck_0 = cOpStck[0];
@@ -1274,7 +1275,6 @@ void GenerateOopMap::do_exception_edge(BytecodeStream* itr) {
 }
 
 void GenerateOopMap::report_monitor_mismatch(const char *msg) {
-  ResourceMark rm;
   LogStream ls(Log(monitormismatch)::info());
   ls.print("Monitor mismatch in method ");
   method()->print_short_name(&ls);
@@ -1284,13 +1284,13 @@ void GenerateOopMap::report_monitor_mismatch(const char *msg) {
 void GenerateOopMap::print_states(outputStream *os,
                                   CellTypeState* vec, int num) {
   for (int i = 0; i < num; i++) {
-    vec[i].print(tty);
+    vec[i].print(os);
   }
 }
 
 // Print the state values at the current bytecode.
-void GenerateOopMap::print_current_state(outputStream   *os,
-                                         BytecodeStream *currentBC,
+void GenerateOopMap::print_current_state(outputStream*   os,
+                                         BytecodeStream* currentBC,
                                          bool            detailed) {
   if (detailed) {
     os->print("     %4d vars     = ", currentBC->bci());
@@ -1312,9 +1312,10 @@ void GenerateOopMap::print_current_state(outputStream   *os,
     case Bytecodes::_invokestatic:
     case Bytecodes::_invokedynamic:
     case Bytecodes::_invokeinterface: {
-      int idx = currentBC->has_index_u4() ? currentBC->get_index_u4() : currentBC->get_index_u2_cpcache();
+      ResourceMark rm;
+      int idx = currentBC->has_index_u4() ? currentBC->get_index_u4() : currentBC->get_index_u2();
       ConstantPool* cp      = method()->constants();
-      int nameAndTypeIdx    = cp->name_and_type_ref_index_at(idx);
+      int nameAndTypeIdx    = cp->name_and_type_ref_index_at(idx, currentBC->code());
       int signatureIdx      = cp->signature_ref_index_at(nameAndTypeIdx);
       Symbol* signature     = cp->symbol_at(signatureIdx);
       os->print("%s", signature->as_C_string());
@@ -1342,8 +1343,9 @@ void GenerateOopMap::print_current_state(outputStream   *os,
 // Sets the current state to be the state after executing the
 // current instruction, starting in the current state.
 void GenerateOopMap::interp1(BytecodeStream *itr) {
-  if (TraceNewOopMapGeneration) {
-    print_current_state(tty, itr, TraceNewOopMapGenerationDetailed);
+  if (log_is_enabled(Trace, generateoopmap)) {
+    LogStream st(Log(generateoopmap)::trace());
+    print_current_state(&st, itr, Verbose);
   }
 
   // Should we report the results? Result is reported *before* the instruction at the current bci is executed.
@@ -1591,16 +1593,16 @@ void GenerateOopMap::interp1(BytecodeStream *itr) {
     case Bytecodes::_jsr:               do_jsr(itr->dest());         break;
     case Bytecodes::_jsr_w:             do_jsr(itr->dest_w());       break;
 
-    case Bytecodes::_getstatic:         do_field(true,  true,  itr->get_index_u2_cpcache(), itr->bci()); break;
-    case Bytecodes::_putstatic:         do_field(false, true,  itr->get_index_u2_cpcache(), itr->bci()); break;
-    case Bytecodes::_getfield:          do_field(true,  false, itr->get_index_u2_cpcache(), itr->bci()); break;
-    case Bytecodes::_putfield:          do_field(false, false, itr->get_index_u2_cpcache(), itr->bci()); break;
+    case Bytecodes::_getstatic:         do_field(true,   true,  itr->get_index_u2(), itr->bci(), itr->code()); break;
+    case Bytecodes::_putstatic:         do_field(false,  true,  itr->get_index_u2(), itr->bci(), itr->code()); break;
+    case Bytecodes::_getfield:          do_field(true,   false, itr->get_index_u2(), itr->bci(), itr->code()); break;
+    case Bytecodes::_putfield:          do_field(false,  false, itr->get_index_u2(), itr->bci(), itr->code()); break;
 
     case Bytecodes::_invokevirtual:
-    case Bytecodes::_invokespecial:     do_method(false, false, itr->get_index_u2_cpcache(), itr->bci()); break;
-    case Bytecodes::_invokestatic:      do_method(true,  false, itr->get_index_u2_cpcache(), itr->bci()); break;
-    case Bytecodes::_invokedynamic:     do_method(true,  false, itr->get_index_u4(),         itr->bci()); break;
-    case Bytecodes::_invokeinterface:   do_method(false, true,  itr->get_index_u2_cpcache(), itr->bci()); break;
+    case Bytecodes::_invokespecial:     do_method(false, false, itr->get_index_u2(), itr->bci(), itr->code()); break;
+    case Bytecodes::_invokestatic:      do_method(true,  false, itr->get_index_u2(), itr->bci(), itr->code()); break;
+    case Bytecodes::_invokedynamic:     do_method(true,  false, itr->get_index_u4(), itr->bci(), itr->code()); break;
+    case Bytecodes::_invokeinterface:   do_method(false, true,  itr->get_index_u2(), itr->bci(), itr->code()); break;
     case Bytecodes::_newarray:
     case Bytecodes::_anewarray:         pp_new_ref(vCTS, itr->bci()); break;
     case Bytecodes::_checkcast:         do_checkcast(); break;
@@ -1726,7 +1728,7 @@ void GenerateOopMap::ppop(CellTypeState *out) {
 }
 
 void GenerateOopMap::ppush1(CellTypeState in) {
-  assert(in.is_reference() | in.is_value(), "sanity check");
+  assert(in.is_reference() || in.is_value(), "sanity check");
   push(in);
 }
 
@@ -1754,7 +1756,7 @@ void GenerateOopMap::ppop_any(int poplen) {
   }
 }
 
-// Replace all occurences of the state 'match' with the state 'replace'
+// Replace all occurrences of the state 'match' with the state 'replace'
 // in our current state vector.
 void GenerateOopMap::replace_all_CTS_matches(CellTypeState match,
                                              CellTypeState replace) {
@@ -1834,7 +1836,7 @@ void GenerateOopMap::do_monitorexit(int bci) {
     // possibility that this bytecode will throw an
     // exception.
     BasicBlock* bb = get_basic_block_containing(bci);
-    guarantee(bb != NULL, "no basic block for bci");
+    guarantee(bb != nullptr, "no basic block for bci");
     bb->set_changed(true);
     bb->_monitor_top = bad_monitors;
 
@@ -1925,10 +1927,10 @@ int GenerateOopMap::copy_cts(CellTypeState *dst, CellTypeState *src) {
   return idx;
 }
 
-void GenerateOopMap::do_field(int is_get, int is_static, int idx, int bci) {
+void GenerateOopMap::do_field(int is_get, int is_static, int idx, int bci, Bytecodes::Code bc) {
   // Dig up signature for field in constant pool
   ConstantPool* cp     = method()->constants();
-  int nameAndTypeIdx     = cp->name_and_type_ref_index_at(idx);
+  int nameAndTypeIdx     = cp->name_and_type_ref_index_at(idx, bc);
   int signatureIdx       = cp->signature_ref_index_at(nameAndTypeIdx);
   Symbol* signature      = cp->symbol_at(signatureIdx);
 
@@ -1951,10 +1953,10 @@ void GenerateOopMap::do_field(int is_get, int is_static, int idx, int bci) {
   pp(in, out);
 }
 
-void GenerateOopMap::do_method(int is_static, int is_interface, int idx, int bci) {
+void GenerateOopMap::do_method(int is_static, int is_interface, int idx, int bci, Bytecodes::Code bc) {
  // Dig up signature for field in constant pool
   ConstantPool* cp  = _method->constants();
-  Symbol* signature   = cp->signature_ref_at(idx);
+  Symbol* signature   = cp->signature_ref_at(idx, bc);
 
   // Parse method signature
   CellTypeState out[4];
@@ -2023,12 +2025,10 @@ void GenerateOopMap::ret_jump_targets_do(BytecodeStream *bcs, jmpFct_t jmpFct, i
     int target_bci = rtEnt->jsrs(i);
     // Make sure a jrtRet does not set the changed bit for dead basicblock.
     BasicBlock* jsr_bb    = get_basic_block_containing(target_bci - 1);
-    debug_only(BasicBlock* target_bb = &jsr_bb[1];)
+    DEBUG_ONLY(BasicBlock* target_bb = &jsr_bb[1];)
     assert(target_bb  == get_basic_block_at(target_bci), "wrong calc. of successor basicblock");
     bool alive = jsr_bb->is_alive();
-    if (TraceNewOopMapGeneration) {
-      tty->print("pc = %d, ret -> %d alive: %s\n", bci, target_bci, alive ? "true" : "false");
-    }
+    log_debug(generateoopmap)("pc = %d, ret -> %d alive: %s", bci, target_bci, alive ? "true" : "false");
     if (alive) jmpFct(this, target_bci, data);
   }
 }
@@ -2046,43 +2046,34 @@ char* GenerateOopMap::state_vec_to_string(CellTypeState* vec, int len) {
   return _state_vec_buf;
 }
 
+#ifndef PRODUCT
 void GenerateOopMap::print_time() {
   tty->print_cr ("Accumulated oopmap times:");
   tty->print_cr ("---------------------------");
   tty->print_cr ("  Total : %3.3f sec.", GenerateOopMap::_total_oopmap_time.seconds());
   tty->print_cr ("  (%3.0f bytecodes per sec) ",
-  GenerateOopMap::_total_byte_count / GenerateOopMap::_total_oopmap_time.seconds());
+  (double)GenerateOopMap::_total_byte_count / GenerateOopMap::_total_oopmap_time.seconds());
 }
+#endif
 
 //
 //  ============ Main Entry Point ===========
 //
-GenerateOopMap::GenerateOopMap(const methodHandle& method) {
+GenerateOopMap::GenerateOopMap(const methodHandle& method, bool all_exception_edges) :
   // We have to initialize all variables here, that can be queried directly
-  _method = method;
-  _max_locals=0;
-  _init_vars = NULL;
-
-#ifndef PRODUCT
-  // If we are doing a detailed trace, include the regular trace information.
-  if (TraceNewOopMapGenerationDetailed) {
-    TraceNewOopMapGeneration = true;
-  }
-#endif
-}
+  _method(method),
+  _max_locals(0),
+  _all_exception_edges(all_exception_edges),
+  _init_vars(nullptr) {}
 
 bool GenerateOopMap::compute_map(Thread* current) {
 #ifndef PRODUCT
-  if (TimeOopMap2) {
-    method()->print_short_name(tty);
-    tty->print("  ");
-  }
   if (TimeOopMap) {
     _total_byte_count += method()->code_size();
+    TraceTime t_all(nullptr, &_total_oopmap_time, TimeOopMap);
   }
 #endif
-  TraceTime t_single("oopmap time", TimeOopMap2);
-  TraceTime t_all(NULL, &_total_oopmap_time, TimeOopMap);
+  TraceTime t_single("oopmap time", TRACETIME_LOG(Debug, generateoopmap));
 
   // Initialize values
   _got_error      = false;
@@ -2094,29 +2085,27 @@ bool GenerateOopMap::compute_map(Thread* current) {
   _init_vars      = new GrowableArray<intptr_t>(5);  // There are seldom more than 5 init_vars
   _report_result  = false;
   _report_result_for_send = false;
-  _new_var_map    = NULL;
-  _ret_adr_tos    = new GrowableArray<intptr_t>(5);  // 5 seems like a good number;
+  _new_var_map    = nullptr;
+  _ret_adr_tos    = new GrowableArray<int>(5);  // 5 seems like a good number;
   _did_rewriting  = false;
   _did_relocation = false;
 
-  if (TraceNewOopMapGeneration) {
-    tty->print("Method name: %s\n", method()->name()->as_C_string());
-    if (Verbose) {
-      _method->print_codes();
-      tty->print_cr("Exception table:");
-      ExceptionTable excps(method());
-      for(int i = 0; i < excps.length(); i ++) {
-        tty->print_cr("[%d - %d] -> %d",
-                      excps.start_pc(i), excps.end_pc(i), excps.handler_pc(i));
-      }
+  if (log_is_enabled(Debug, generateoopmap)) {
+    ResourceMark rm;
+    LogStream st(Log(generateoopmap)::debug());
+    st.print_cr("Method name: %s\n", method()->name()->as_C_string());
+    _method->print_codes_on(&st);
+    st.print_cr("Exception table:");
+    ExceptionTable excps(method());
+    for (int i = 0; i < excps.length(); i ++) {
+      st.print_cr("[%d - %d] -> %d",
+                  excps.start_pc(i), excps.end_pc(i), excps.handler_pc(i));
     }
   }
 
   // if no code - do nothing
   // compiler needs info
   if (method()->code_size() == 0 || _max_locals + method()->max_stack() == 0) {
-    fill_stackmap_prolog(0);
-    fill_stackmap_epilog();
     return true;
   }
   // Step 1: Compute all jump targets and their return value
@@ -2125,7 +2114,7 @@ bool GenerateOopMap::compute_map(Thread* current) {
 
   // Step 2: Find all basic blocks and count GC points
   if (!_got_error)
-    mark_bbheaders_and_count_gc_points();
+    mark_bbheaders();
 
   // Step 3: Calculate stack maps
   if (!_got_error)
@@ -2146,10 +2135,10 @@ bool GenerateOopMap::compute_map(Thread* current) {
 void GenerateOopMap::error_work(const char *format, va_list ap) {
   _got_error = true;
   char msg_buffer[512];
-  os::vsnprintf(msg_buffer, sizeof(msg_buffer), format, ap);
+  (void) os::vsnprintf(msg_buffer, sizeof(msg_buffer), format, ap);
   // Append method name
   char msg_buffer2[512];
-  os::snprintf(msg_buffer2, sizeof(msg_buffer2), "%s in method %s", msg_buffer, method()->name()->as_C_string());
+  (void) os::snprintf(msg_buffer2, sizeof(msg_buffer2), "%s in method %s", msg_buffer, method()->name()->as_C_string());
   Thread* current = Thread::current();
   if (current->can_call_java()) {
     _exception = Exceptions::new_exception(JavaThread::cast(current),
@@ -2177,13 +2166,10 @@ void GenerateOopMap::verify_error(const char *format, ...) {
 //
 void GenerateOopMap::report_result() {
 
-  if (TraceNewOopMapGeneration) tty->print_cr("Report result pass");
+  log_debug(generateoopmap)("Report result pass");
 
   // We now want to report the result of the parse
   _report_result = true;
-
-  // Prolog code
-  fill_stackmap_prolog(_gc_points);
 
    // Mark everything changed, then do one interpretation pass.
   for (int i = 0; i<_bb_count; i++) {
@@ -2193,27 +2179,19 @@ void GenerateOopMap::report_result() {
     }
   }
 
-  // Note: Since we are skipping dead-code when we are reporting results, then
-  // the no. of encountered gc-points might be fewer than the previously number
-  // we have counted. (dead-code is a pain - it should be removed before we get here)
-  fill_stackmap_epilog();
-
-  // Report initvars
-  fill_init_vars(_init_vars);
-
   _report_result = false;
 }
 
 void GenerateOopMap::result_for_basicblock(int bci) {
- if (TraceNewOopMapGeneration) tty->print_cr("Report result pass for basicblock");
+ log_debug(generateoopmap)("Report result pass for basicblock");
 
   // We now want to report the result of the parse
   _report_result = true;
 
   // Find basicblock and report results
   BasicBlock* bb = get_basic_block_containing(bci);
-  guarantee(bb != NULL, "no basic block for bci");
-  assert(bb->is_reachable(), "getting result from unreachable basicblock");
+  guarantee(bb != nullptr, "no basic block for bci");
+  assert(bb->is_reachable(), "getting result from unreachable basicblock at bci %d", bci);
   bb->set_changed(true);
   interp_bb(bb);
 }
@@ -2225,9 +2203,7 @@ void GenerateOopMap::result_for_basicblock(int bci) {
 void GenerateOopMap::record_refval_conflict(int varNo) {
   assert(varNo>=0 && varNo< _max_locals, "index out of range");
 
-  if (TraceOopMapRewrites) {
-     tty->print("### Conflict detected (local no: %d)\n", varNo);
-  }
+  log_trace(generateoopmap)("### Conflict detected (local no: %d)", varNo);
 
   if (!_new_var_map) {
     _new_var_map = NEW_RESOURCE_ARRAY(int, _max_locals);
@@ -2266,22 +2242,22 @@ void GenerateOopMap::rewrite_refval_conflicts()
   // Tracing flag
   _did_rewriting = true;
 
-  if (TraceOopMapRewrites) {
-    tty->print_cr("ref/value conflict for method %s - bytecodes are getting rewritten", method()->name()->as_C_string());
-    method()->print();
-    method()->print_codes();
+  if (log_is_enabled(Trace, generateoopmap)) {
+    ResourceMark rm;
+    LogStream st(Log(generateoopmap)::trace());
+    st.print_cr("ref/value conflict for method %s - bytecodes are getting rewritten", method()->name()->as_C_string());
+    method()->print_on(&st);
+    method()->print_codes_on(&st);
   }
 
-  assert(_new_var_map!=NULL, "nothing to rewrite");
+  assert(_new_var_map!=nullptr, "nothing to rewrite");
   assert(_conflict==true, "We should not be here");
 
   compute_ret_adr_at_TOS();
   if (!_got_error) {
     for (int k = 0; k < _max_locals && !_got_error; k++) {
       if (_new_var_map[k] != k) {
-        if (TraceOopMapRewrites) {
-          tty->print_cr("Rewriting: %d -> %d", k, _new_var_map[k]);
-        }
+        log_trace(generateoopmap)("Rewriting: %d -> %d", k, _new_var_map[k]);
         rewrite_refval_conflict(k, _new_var_map[k]);
         if (_got_error) return;
         nof_conflicts++;
@@ -2296,7 +2272,7 @@ void GenerateOopMap::rewrite_refval_conflicts()
   _max_locals += _nof_refval_conflicts;
 
   // That was that...
-  _new_var_map = NULL;
+  _new_var_map = nullptr;
   _nof_refval_conflicts = 0;
 }
 
@@ -2332,22 +2308,16 @@ bool GenerateOopMap::rewrite_refval_conflict_inst(BytecodeStream *itr, int from,
   int bci = itr->bci();
 
   if (is_aload(itr, &index) && index == from) {
-    if (TraceOopMapRewrites) {
-      tty->print_cr("Rewriting aload at bci: %d", bci);
-    }
+    log_trace(generateoopmap)("Rewriting aload at bci: %d", bci);
     return rewrite_load_or_store(itr, Bytecodes::_aload, Bytecodes::_aload_0, to);
   }
 
   if (is_astore(itr, &index) && index == from) {
     if (!stack_top_holds_ret_addr(bci)) {
-      if (TraceOopMapRewrites) {
-        tty->print_cr("Rewriting astore at bci: %d", bci);
-      }
+      log_trace(generateoopmap)("Rewriting astore at bci: %d", bci);
       return rewrite_load_or_store(itr, Bytecodes::_astore, Bytecodes::_astore_0, to);
     } else {
-      if (TraceOopMapRewrites) {
-        tty->print_cr("Supress rewriting of astore at bci: %d", bci);
-      }
+      log_trace(generateoopmap)("Suppress rewriting of astore at bci: %d", bci);
     }
   }
 
@@ -2377,7 +2347,7 @@ bool GenerateOopMap::rewrite_load_or_store(BytecodeStream *bcs, Bytecodes::Code 
   // If we need to relocate in order to patch the byte, we
   // do the patching in a temp. buffer, that is passed to the reloc.
   // The patching of the bytecode stream is then done by the Relocator.
-  // This is neccesary, since relocating the instruction at a certain bci, might
+  // This is necessary, since relocating the instruction at a certain bci, might
   // also relocate that instruction, e.g., if a _goto before it gets widen to a _goto_w.
   // Hence, we do not know which bci to patch after relocation.
 
@@ -2395,16 +2365,16 @@ bool GenerateOopMap::rewrite_load_or_store(BytecodeStream *bcs, Bytecodes::Code 
   // Patch either directly in Method* or in temp. buffer
   if (newIlen == 1) {
     assert(varNo < 4, "varNo too large");
-    *bcp = bc0 + varNo;
+    *bcp = (u1)(bc0 + varNo);
   } else if (newIlen == 2) {
     assert(varNo < 256, "2-byte index needed!");
     *(bcp + 0) = bcN;
-    *(bcp + 1) = varNo;
+    *(bcp + 1) = (u1)varNo;
   } else {
     assert(newIlen == 4, "Wrong instruction length");
     *(bcp + 0) = Bytecodes::_wide;
     *(bcp + 1) = bcN;
-    Bytes::put_Java_u2(bcp+2, varNo);
+    Bytes::put_Java_u2(bcp+2, (u2)varNo);
   }
 
   if (newIlen != ilen) {
@@ -2429,7 +2399,7 @@ class RelocCallback : public RelocatorListener {
   }
 };
 
-// Returns true if expanding was succesful. Otherwise, reports an error and
+// Returns true if expanding was successful. Otherwise, reports an error and
 // returns false.
 void GenerateOopMap::expand_current_instr(int bci, int ilen, int newIlen, u_char inst_buffer[]) {
   JavaThread* THREAD = JavaThread::current(); // For exception macros.
@@ -2496,7 +2466,7 @@ bool GenerateOopMap::stack_top_holds_ret_addr(int bci) {
 }
 
 void GenerateOopMap::compute_ret_adr_at_TOS() {
-  assert(_ret_adr_tos != NULL, "must be initialized");
+  assert(_ret_adr_tos != nullptr, "must be initialized");
   _ret_adr_tos->clear();
 
   for (int i = 0; i < bb_count(); i++) {
@@ -2515,9 +2485,7 @@ void GenerateOopMap::compute_ret_adr_at_TOS() {
         // TDT: should this be is_good_address() ?
         if (_stack_top > 0 && stack()[_stack_top-1].is_address()) {
           _ret_adr_tos->append(bcs.bci());
-          if (TraceNewOopMapGeneration) {
-            tty->print_cr("Ret_adr TOS at bci: %d", bcs.bci());
-          }
+          log_debug(generateoopmap)("Ret_adr TOS at bci: %d", bcs.bci());
         }
         interp1(&bcs);
       }

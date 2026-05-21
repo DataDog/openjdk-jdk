@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,9 +21,6 @@
  * questions.
  */
 
-// SunJSSE does not support dynamic system properties, no way to re-use
-// system properties in samevm/agentvm mode.
-
 /*
  * @test
  * @bug 8043758
@@ -33,6 +30,7 @@
  * @run main/othervm DTLSOverDatagram
  */
 
+import java.io.IOException;
 import java.nio.*;
 import java.net.*;
 import java.util.*;
@@ -42,6 +40,7 @@ import jdk.test.lib.security.KeyStoreUtils;
 import jdk.test.lib.security.SSLContextBuilder;
 
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import jdk.test.lib.hexdump.HexPrinter;
 
@@ -50,9 +49,6 @@ import jdk.test.lib.hexdump.HexPrinter;
  */
 public class DTLSOverDatagram {
 
-    private static final int MAX_HANDSHAKE_LOOPS = 200;
-    private static final int MAX_APP_READ_LOOPS = 60;
-    private static final int SOCKET_TIMEOUT = 10 * 1000; // in millis
     private static final int BUFFER_SIZE = 1024;
     private static final int MAXIMUM_PACKET_SIZE = 1024;
 
@@ -75,8 +71,10 @@ public class DTLSOverDatagram {
     private static final ByteBuffer CLIENT_APP =
                 ByteBuffer.wrap("Hi Server, I'm Client".getBytes());
 
-    private static Exception clientException = null;
-    private static Exception serverException = null;
+    private final AtomicBoolean exceptionOccurred = new AtomicBoolean(false);
+
+    private final CountDownLatch serverStarted = new CountDownLatch(1);
+    private int socketTimeout = 10 * 1000; // in millis
     /*
      * =============================================================
      * The test case
@@ -131,8 +129,15 @@ public class DTLSOverDatagram {
      * The remainder is support stuff for DTLS operations.
      */
     SSLEngine createSSLEngine(boolean isClient) throws Exception {
-        SSLContext context = getDTLSContext();
-        SSLEngine engine = context.createSSLEngine();
+        SSLContext context =
+                isClient ? getClientDTLSContext() : getServerDTLSContext();
+
+        // Note: client and server ports are not to be used for network
+        // communication, but only to be set in client and server SSL engines.
+        // We must use the same context, host and port for initial and resuming
+        // sessions when testing session resumption (abbreviated handshake).
+        SSLEngine engine = context.createSSLEngine("localhost",
+                isClient ? 51111 : 52222);
 
         SSLParameters paras = engine.getSSLParameters();
         paras.setMaximumPacketSize(MAXIMUM_PACKET_SIZE);
@@ -148,18 +153,12 @@ public class DTLSOverDatagram {
             SocketAddress peerAddr, String side) throws Exception {
 
         boolean endLoops = false;
-        int loops = MAX_HANDSHAKE_LOOPS;
+        int loops = 0;
         engine.beginHandshake();
-        while (!endLoops &&
-                (serverException == null) && (clientException == null)) {
-
-            if (--loops < 0) {
-                throw new RuntimeException(
-                        "Too many loops to produce handshake packets");
-            }
+        while (!endLoops && !exceptionOccurred.get()) {
 
             SSLEngineResult.HandshakeStatus hs = engine.getHandshakeStatus();
-            log(side, "=======handshake(" + loops + ", " + hs + ")=======");
+            log(side, "=======handshake(" + ++loops + ", " + hs + ")=======");
 
             switch (hs) {
                 case NEED_UNWRAP, NEED_UNWRAP_AGAIN -> {
@@ -313,16 +312,10 @@ public class DTLSOverDatagram {
     void receiveAppData(SSLEngine engine,
             DatagramSocket socket, ByteBuffer expectedApp) throws Exception {
 
-        int loops = MAX_APP_READ_LOOPS;
-        while ((serverException == null) && (clientException == null)) {
-            if (--loops < 0) {
-                throw new RuntimeException(
-                        "Too much loops to receive application data");
-            }
-
+        while (!exceptionOccurred.get()) {
             byte[] buf = new byte[BUFFER_SIZE];
-            DatagramPacket packet = new DatagramPacket(buf, buf.length);
-            socket.receive(packet);
+            DatagramPacket packet = readFromSocket(socket, buf);
+
             ByteBuffer netBuffer = ByteBuffer.wrap(buf, 0, packet.getLength());
             ByteBuffer recBuffer = ByteBuffer.allocate(BUFFER_SIZE);
             SSLEngineResult rs = engine.unwrap(netBuffer, recBuffer);
@@ -338,19 +331,31 @@ public class DTLSOverDatagram {
         }
     }
 
+    /*
+    Some tests failed with receive time-out errors when the client tried to read
+    from the server. The server thread had exited normally so the read _should_
+    succeed. So let's try to read a couple of times before giving up.
+     */
+    DatagramPacket readFromSocket(DatagramSocket socket, byte[] buffer) throws IOException {
+        for (int i = 1 ; i <= 2 ; ++i) {
+            try {
+                DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+                socket.receive(packet);
+                return packet;
+            } catch (SocketTimeoutException exc) {
+                System.out.println("Attempt " + i + ": Timeout occurred reading from socket.");
+            }
+        }
+        throw new IOException("Did not receive data after 2 attempts.");
+    }
+
     // produce handshake packets
     boolean produceHandshakePackets(SSLEngine engine, SocketAddress socketAddr,
             String side, List<DatagramPacket> packets) throws Exception {
 
         boolean endLoops = false;
-        int loops = MAX_HANDSHAKE_LOOPS / 2;
-        while (!endLoops &&
-                (serverException == null) && (clientException == null)) {
-
-            if (--loops < 0) {
-                throw new RuntimeException(
-                        "Too many loops to produce handshake packets");
-            }
+        int loops = 0;
+        while (!endLoops && !exceptionOccurred.get()) {
 
             ByteBuffer oNet = ByteBuffer.allocate(32768);
             ByteBuffer oApp = ByteBuffer.allocate(0);
@@ -360,7 +365,7 @@ public class DTLSOverDatagram {
             SSLEngineResult.Status rs = r.getStatus();
             SSLEngineResult.HandshakeStatus hs = r.getHandshakeStatus();
             log(side, "----produce handshake packet(" +
-                    loops + ", " + rs + ", " + hs + ")----");
+                    ++loops + ", " + rs + ", " + hs + ")----");
 
             verifySSLEngineResultStatus(r, side);
 
@@ -475,6 +480,10 @@ public class DTLSOverDatagram {
         return null;
     }
 
+    public void setSocketTimeout(int socketTimeout) {
+        this.socketTimeout = socketTimeout;
+    }
+
     // run delegated tasks
     void runDelegatedTasks(SSLEngine engine) throws Exception {
         Runnable runnable;
@@ -502,7 +511,7 @@ public class DTLSOverDatagram {
     }
 
     // get DTSL context
-    SSLContext getDTLSContext() throws Exception {
+    static SSLContext getDTLSContext() throws Exception {
         String passphrase = "passphrase";
         return SSLContextBuilder.builder()
                 .trustStore(KeyStoreUtils.loadKeyStore(TRUST_FILENAME, passphrase))
@@ -512,16 +521,20 @@ public class DTLSOverDatagram {
                 .build();
     }
 
+    protected SSLContext getServerDTLSContext() throws Exception {
+        return getDTLSContext();
+    }
+
+    protected SSLContext getClientDTLSContext() throws Exception {
+        return getDTLSContext();
+    }
+
 
     /*
      * =============================================================
      * The remainder is support stuff to kickstart the testing.
      */
 
-    // Will the handshaking and application data exchange succeed?
-    public boolean isGoodJob() {
-        return true;
-    }
 
     public final void runTest(DTLSOverDatagram testCase) throws Exception {
         InetSocketAddress serverSocketAddress = new InetSocketAddress
@@ -532,8 +545,8 @@ public class DTLSOverDatagram {
         try (DatagramSocket serverSocket = new DatagramSocket(serverSocketAddress);
                 DatagramSocket clientSocket = new DatagramSocket(clientSocketAddress)) {
 
-            serverSocket.setSoTimeout(SOCKET_TIMEOUT);
-            clientSocket.setSoTimeout(SOCKET_TIMEOUT);
+            serverSocket.setSoTimeout(socketTimeout);
+            clientSocket.setSoTimeout(socketTimeout);
 
             InetSocketAddress serverSocketAddr = new InetSocketAddress(
                     InetAddress.getLoopbackAddress(), serverSocket.getLocalPort());
@@ -541,97 +554,51 @@ public class DTLSOverDatagram {
             InetSocketAddress clientSocketAddr = new InetSocketAddress(
                     InetAddress.getLoopbackAddress(), clientSocket.getLocalPort());
 
-            ExecutorService pool = Executors.newFixedThreadPool(2);
-            Future<String> server, client;
+            ExecutorService pool = Executors.newFixedThreadPool(1);
+            Future<Void> server;
 
-            try {
-                server = pool.submit(new ServerCallable(
+            server = pool.submit(() -> runServer(
                         testCase, serverSocket, clientSocketAddr));
-                client = pool.submit(new ClientCallable(
-                        testCase, clientSocket, serverSocketAddr));
-            } finally {
-                pool.shutdown();
-            }
+            pool.shutdown();
 
-            boolean failed = false;
-
-            // wait for client to finish
-            try {
-                System.out.println("Client finished: " + client.get());
-            } catch (CancellationException | InterruptedException
-                        | ExecutionException e) {
-                System.out.println("Exception on client side: ");
-                e.printStackTrace(System.out);
-                failed = true;
-            }
-
-            // wait for server to finish
-            try {
-                System.out.println("Client finished: " + server.get());
-            } catch (CancellationException | InterruptedException
-                        | ExecutionException e) {
-                System.out.println("Exception on server side: ");
-                e.printStackTrace(System.out);
-                failed = true;
-            }
-
-            if (failed) {
-                throw new RuntimeException("Test failed");
-            }
+            runClient(testCase, clientSocket, serverSocketAddr);
+            server.get();
         }
     }
 
-    record ServerCallable(DTLSOverDatagram testCase, DatagramSocket socket,
-                          InetSocketAddress clientSocketAddr) implements Callable<String> {
+    Void runServer(DTLSOverDatagram testCase, DatagramSocket socket,
+                          InetSocketAddress clientSocketAddr) throws Exception {
+        try {
+            serverStarted.countDown();
+            testCase.doServerSide(socket, clientSocketAddr);
 
-        @Override
-        public String call() throws Exception {
-            try {
-                testCase.doServerSide(socket, clientSocketAddr);
-            } catch (Exception e) {
-                System.out.println("Exception in  ServerCallable.call():");
-                e.printStackTrace(System.out);
-                serverException = e;
+        } catch (Exception exc) {
+            exceptionOccurred.set(true);
 
-                if (testCase.isGoodJob()) {
-                    throw e;
-                } else {
-                    return "Well done, server!";
-                }
-            }
-
-            if (testCase.isGoodJob()) {
-                return "Well done, server!";
-            } else {
-                throw new Exception("No expected exception");
-            }
+            // log for debugging clarity
+            System.out.println("Unexpected exception in server");
+            exc.printStackTrace(System.err);
+            throw exc;
         }
+
+        return null;
     }
 
-    record ClientCallable(DTLSOverDatagram testCase, DatagramSocket socket,
-                          InetSocketAddress serverSocketAddr) implements Callable<String> {
+    private void runClient(DTLSOverDatagram testCase, DatagramSocket socket,
+                           InetSocketAddress serverSocketAddr) throws Exception {
+        if(!serverStarted.await(5, TimeUnit.SECONDS)) {
+            throw new Exception("Server did not start within 5 seconds.");
+        }
 
-        @Override
-        public String call() throws Exception {
-            try {
-                testCase.doClientSide(socket, serverSocketAddr);
-            } catch (Exception e) {
-                System.out.println("Exception in ClientCallable.call():");
-                e.printStackTrace(System.out);
-                clientException = e;
+        try {
+            testCase.doClientSide(socket, serverSocketAddr);
+        } catch (Exception exc) {
+            exceptionOccurred.set(true);
 
-                if (testCase.isGoodJob()) {
-                    throw e;
-                } else {
-                    return "Well done, client!";
-                }
-            }
-
-            if (testCase.isGoodJob()) {
-                return "Well done, client!";
-            } else {
-                throw new Exception("No expected exception");
-            }
+            // log for debugging clarity
+            System.out.println("Unexpected exception in client.");
+            exc.printStackTrace(System.err);
+            throw exc;
         }
     }
 

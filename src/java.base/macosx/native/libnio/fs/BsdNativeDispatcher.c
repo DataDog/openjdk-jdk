@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,14 +38,19 @@
 #else
 #define ISREADONLY MNT_RDONLY
 #endif
+#include <sys/attr.h>
+#include <unistd.h>
 
 #include <stdlib.h>
 #include <string.h>
+#include <sys/attr.h>
+#include <sys/clonefile.h>
 
 static jfieldID entry_name;
 static jfieldID entry_dir;
 static jfieldID entry_fstype;
 static jfieldID entry_options;
+static jfieldID entry_dev;
 
 struct fsstat_iter {
     struct statfs *buf;
@@ -81,6 +86,8 @@ Java_sun_nio_fs_BsdNativeDispatcher_initIDs(JNIEnv* env, jclass this)
     CHECK_NULL(entry_fstype);
     entry_options = (*env)->GetFieldID(env, clazz, "opts", "[B");
     CHECK_NULL(entry_options);
+    entry_dev = (*env)->GetFieldID(env, clazz, "dev", "J");
+    CHECK_NULL(entry_dev);
 }
 
 JNIEXPORT jlong JNICALL
@@ -108,7 +115,7 @@ Java_sun_nio_fs_BsdNativeDispatcher_getfsstat(JNIEnv* env, jclass this)
     }
 
     // It's possible that a new filesystem gets mounted between
-    // the first getfsstat and the second so loop until consistant
+    // the first getfsstat and the second so loop until consistent
 
     while (nentries != iter->nentries) {
         if (iter->buf != NULL)
@@ -147,7 +154,8 @@ Java_sun_nio_fs_BsdNativeDispatcher_fsstatEntry(JNIEnv* env, jclass this,
     char* dir;
     char* fstype;
     char* options;
-    dev_t dev;
+    int32_t fsid_val[2];
+    long dev;
 
     if (iter == NULL || iter->pos >= iter->nentries)
        return -1;
@@ -159,6 +167,8 @@ Java_sun_nio_fs_BsdNativeDispatcher_fsstatEntry(JNIEnv* env, jclass this,
         options="ro";
     else
         options="";
+    fsid_val[0] = iter->buf[iter->pos].f_fsid.val[0];
+    fsid_val[1] = iter->buf[iter->pos].f_fsid.val[1];
 
     iter->pos++;
 
@@ -189,6 +199,9 @@ Java_sun_nio_fs_BsdNativeDispatcher_fsstatEntry(JNIEnv* env, jclass this,
         return -1;
     (*env)->SetByteArrayRegion(env, bytes, 0, len, (jbyte*)options);
     (*env)->SetObjectField(env, entry, entry_options, bytes);
+
+    dev = (((long)fsid_val[1]) << 32) | (long)fsid_val[0];
+    (*env)->SetLongField(env, entry, entry_dev, long_to_jlong(dev));
 
     return 0;
 }
@@ -223,4 +236,89 @@ Java_sun_nio_fs_BsdNativeDispatcher_getmntonname0(JNIEnv *env, jclass this,
     }
 
     return mntonname;
+}
+
+JNIEXPORT jint JNICALL
+Java_sun_nio_fs_BsdNativeDispatcher_clonefile0(JNIEnv* env, jclass this,
+    jlong srcAddress, jlong dstAddress, jint flags)
+{
+    const char* src = (const char*)jlong_to_ptr(srcAddress);
+    const char* dst = (const char*)jlong_to_ptr(dstAddress);
+
+    int ret = clonefile(src, dst, flags);
+    if (ret != 0) {
+        throwUnixException(env, errno);
+        return ret;
+    }
+
+    return 0;
+}
+
+size_t initattrlist(jint commonattr, jlong modTime, jlong accTime,
+    jlong createTime, const int attrsize, char* buf, struct attrlist *attrList)
+{
+    int count = 0;
+
+    // attributes are ordered per the getattrlist(2) spec
+    if ((commonattr & ATTR_CMN_CRTIME) != 0) {
+        struct timespec* t = (struct timespec*)buf;
+        t->tv_sec   = createTime / 1000000000;
+        t->tv_nsec  = createTime % 1000000000;
+        count++;
+    }
+    if ((commonattr & ATTR_CMN_MODTIME) != 0) {
+        struct timespec* t = (struct timespec*)(buf + count*attrsize);
+        t->tv_sec   = modTime / 1000000000;
+        t->tv_nsec  = modTime % 1000000000;
+        count++;
+    }
+    if ((commonattr & ATTR_CMN_ACCTIME) != 0) {
+        struct timespec* t = (struct timespec*)(buf + count*attrsize);
+        t->tv_sec   = accTime / 1000000000;
+        t->tv_nsec  = accTime % 1000000000;
+        count++;
+    }
+
+    memset(attrList, 0, sizeof(struct attrlist));
+    attrList->bitmapcount = ATTR_BIT_MAP_COUNT;
+    attrList->commonattr = commonattr;
+
+    return count*attrsize;
+}
+
+JNIEXPORT void JNICALL
+Java_sun_nio_fs_BsdNativeDispatcher_setattrlist0(JNIEnv* env, jclass this,
+    jlong pathAddress, int commonattr, jlong modTime, jlong accTime,
+    jlong createTime, jlong options)
+{
+    const char* path = (const char*)jlong_to_ptr(pathAddress);
+    // attributes must align on 4-byte boundaries per the getattrlist(2) spec
+    const int attrsize = ((sizeof(struct timespec) + 3)/4)*4;
+    char buf[3*attrsize];
+
+    struct attrlist attrList;
+    size_t attrBufSize = initattrlist(commonattr, modTime, accTime, createTime,
+                                      attrsize, buf, &attrList);
+
+    if (setattrlist(path, &attrList, (void*)buf, attrBufSize, options) != 0) {
+        throwUnixException(env, errno);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_sun_nio_fs_BsdNativeDispatcher_fsetattrlist0(JNIEnv* env, jclass this,
+    jint fd, int commonattr, jlong modTime, jlong accTime,
+    jlong createTime, jlong options)
+{
+    // attributes must align on 4-byte boundaries per the getattrlist(2) spec
+    const int attrsize = ((sizeof(struct timespec) + 3)/4)*4;
+    char buf[3*attrsize];
+
+    struct attrlist attrList;
+    size_t attrBufSize = initattrlist(commonattr, modTime, accTime, createTime,
+                                      attrsize, buf, &attrList);
+
+    if (fsetattrlist(fd, &attrList, (void*)buf, attrBufSize, options) != 0) {
+        throwUnixException(env, errno);
+    }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "gc/g1/g1FullGCScope.hpp"
+#include "gc/shared/gc_globals.hpp"
 
 G1FullGCJFRTracerMark::G1FullGCJFRTracerMark(STWGCTimer* timer, GCTracer* tracer)
   : G1JFRTracerMark(timer, tracer) {
@@ -36,40 +36,28 @@ G1FullGCJFRTracerMark::~G1FullGCJFRTracerMark() {
 }
 
 G1FullGCScope::G1FullGCScope(G1MonitoringSupport* monitoring_support,
-                             bool explicit_gc,
                              bool clear_soft,
-                             bool do_maximum_compaction) :
-    _rm(),
-    _explicit_gc(explicit_gc),
-    _g1h(G1CollectedHeap::heap()),
-    _svc_marker(SvcGCMarker::FULL),
+                             bool do_maximal_compaction,
+                             GCTracer* tracer) :
+    _should_clear_soft_refs(clear_soft),
+    _do_maximal_compaction(do_maximal_compaction),
     _timer(),
-    _tracer(),
-    _active(),
-    _tracer_mark(&_timer, &_tracer),
-    _soft_refs(clear_soft, _g1h->soft_ref_policy()),
-    _monitoring_scope(monitoring_support, true /* full_gc */, true /* all_memory_pools_affected */),
-    _heap_printer(_g1h),
-    _region_compaction_threshold(do_maximum_compaction ?
-                                 HeapRegion::GrainWords :
-                                 (1 - MarkSweepDeadRatio / 100.0) * HeapRegion::GrainWords) { }
-
-bool G1FullGCScope::is_explicit_gc() {
-  return _explicit_gc;
-}
-
-bool G1FullGCScope::should_clear_soft_refs() {
-  return _soft_refs.should_clear();
-}
+    _tracer(tracer),
+    _tracer_mark(&_timer, _tracer),
+    _monitoring_scope(monitoring_support),
+    _heap_printer(G1CollectedHeap::heap()),
+    _region_compaction_threshold(do_maximal_compaction ?
+                                 G1HeapRegion::GrainWords :
+                                 (1 - MarkSweepDeadRatio / 100.0) * G1HeapRegion::GrainWords) { }
 
 STWGCTimer* G1FullGCScope::timer() {
   return &_timer;
 }
 
-G1FullGCTracer* G1FullGCScope::tracer() {
-  return &_tracer;
+GCTracer* G1FullGCScope::tracer() {
+  return _tracer;
 }
 
-size_t G1FullGCScope::region_compaction_threshold() {
+size_t G1FullGCScope::region_compaction_threshold() const {
   return _region_compaction_threshold;
 }

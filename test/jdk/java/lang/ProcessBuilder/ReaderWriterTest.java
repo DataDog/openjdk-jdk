@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,16 +21,9 @@
  * questions.
  */
 
-import static org.testng.Assert.*;
-
-import org.testng.Assert;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import jdk.test.lib.process.ProcessTools;
-
-import jdk.test.lib.hexdump.HexPrinter;
-import jdk.test.lib.hexdump.HexPrinter.Formatters;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -42,19 +35,22 @@ import java.nio.file.Files;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.charset.UnsupportedCharsetException;
-import java.util.List;
-import java.util.Locale;
+import java.util.stream.Stream;
 
-import jtreg.SkippedException;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.opentest4j.TestAbortedException;
 
 /*
  * @test
+ * @requires vm.flagless
  * @library /test/lib
- * @build jdk.test.lib.process.ProcessTools jdk.test.lib.hexdump.HexPrinter
- * @run testng ReaderWriterTest
+ * @build jdk.test.lib.process.ProcessTools
+ * @run junit ReaderWriterTest
  */
 
-@Test
 public class ReaderWriterTest {
 
     static final String ASCII = "ASCII: \u0000_A-Z_a-Z_\u007C_\u007D_\u007E_\u007F_;";
@@ -64,13 +60,12 @@ public class ReaderWriterTest {
     public static final String TESTCHARS = "OneWay: " + ASCII + ISO_8859_1 + FRACTIONS;
     public static final String ROUND_TRIP_TESTCHARS = "RoundTrip: " + ASCII + ISO_8859_1 + FRACTIONS;
 
-    @DataProvider(name="CharsetCases")
-    static Object[][] charsetCases() {
-        return new Object[][] {
-                {"UTF-8"},
-                {"ISO8859-1"},
-                {"US-ASCII"},
-        };
+    static Stream<Arguments> charsetCases() {
+        return Stream.of(
+                Arguments.of("UTF-8"),
+                Arguments.of("ISO8859-1"),
+                Arguments.of("US-ASCII")
+        );
     }
 
     /**
@@ -82,7 +77,7 @@ public class ReaderWriterTest {
         Charset cs = Charset.forName(nativeEncoding);
         System.out.println("Native.encoding Charset: " + cs);
 
-        ProcessBuilder pb = ProcessTools.createJavaProcessBuilder("ReaderWriterTest$ChildWithCharset");
+        ProcessBuilder pb = ProcessTools.createLimitedTestJavaProcessBuilder("ReaderWriterTest$ChildWithCharset");
         Process p = pb.start();
         writeTestChars(p.outputWriter());
         checkReader(p.inputReader(), cs, "Out");
@@ -92,7 +87,7 @@ public class ReaderWriterTest {
             if (exitValue != 0)
                 System.out.println("exitValue: " + exitValue);
         } catch (InterruptedException ie) {
-            Assert.fail("waitFor interrupted");
+            fail("waitFor interrupted");
         }
     }
 
@@ -121,7 +116,7 @@ public class ReaderWriterTest {
             // 2: redirectErrorStream(true); no redirect of errorOutput
             // 3: redirectErrorStream(true); redirect of errorOutput to a file
 
-            ProcessBuilder pb = ProcessTools.createJavaProcessBuilder("ReaderWriterTest$ChildWithCharset");
+            ProcessBuilder pb = ProcessTools.createLimitedTestJavaProcessBuilder("ReaderWriterTest$ChildWithCharset");
             pb.redirectInput(inPath.toFile());
             pb.redirectOutput(outPath.toFile());
             if (errType == 1 || errType == 3) {
@@ -130,32 +125,28 @@ public class ReaderWriterTest {
             if (errType == 2 || errType == 3) {
                 pb.redirectErrorStream(true);
             }
-            Process p = pb.start();
-            // Output has been redirected to a null stream; success is IOException on the write
-            try {
+            try (Process p = pb.start()) {
+                // Output has been redirected to a null stream; success is IOException on the write
                 BufferedWriter wr = p.outputWriter();
-                wr.write("X");
-                wr.flush();
-                Assert.fail("writing to null stream should throw IOException");
-            } catch (IOException ioe) {
-                // Normal, A Null output stream is closed when created.
-            }
+                assertThrows(IOException.class, () -> {
+                    wr.write("X");
+                    wr.flush();
+                });
 
-            // InputReader should be empty; and at EOF
-            BufferedReader inputReader = p.inputReader();
-            int ch = inputReader.read();
-            Assert.assertEquals(ch, -1, "inputReader not at EOF: ch: " + (char)ch);
+                // InputReader should be empty; and at EOF
+                BufferedReader inputReader = p.inputReader();
+                int ch = inputReader.read();
+                assertEquals(-1, ch, "inputReader not at EOF: ch: " + (char) ch);
 
-            // InputReader should be empty; and at EOF
-            BufferedReader errorReader = p.errorReader();
-            ch = errorReader.read();
-            Assert.assertEquals(ch, -1, "errorReader not at EOF: ch: " + (char)ch);
+                // InputReader should be empty; and at EOF
+                BufferedReader errorReader = p.errorReader();
+                ch = errorReader.read();
+                assertEquals(-1, ch, "errorReader not at EOF: ch: " + (char) ch);
 
-            try {
                 int exitValue = p.waitFor();
                 if (exitValue != 0) System.out.println("exitValue: " + exitValue);
             } catch (InterruptedException ie) {
-                Assert.fail("waitFor interrupted");
+                fail("waitFor interrupted");
             }
         }
     }
@@ -180,18 +171,19 @@ public class ReaderWriterTest {
      *
      * @param encoding a charset name
      */
-    @Test(dataProvider = "CharsetCases", enabled = true)
+    @ParameterizedTest
+    @MethodSource("charsetCases")
     void testCase(String encoding) throws IOException {
         Charset cs = null;
         try {
             cs = Charset.forName(encoding);
             System.out.println("Charset: " + cs);
         } catch (UnsupportedCharsetException use) {
-            throw new SkippedException("Charset not supported: " + encoding);
+            throw new TestAbortedException("Charset not supported: " + encoding);
         }
         String cleanCSName = cleanCharsetName(cs);
 
-        ProcessBuilder pb = ProcessTools.createJavaProcessBuilder(
+        ProcessBuilder pb = ProcessTools.createLimitedTestJavaProcessBuilder(
                 "-Dsun.stdout.encoding=" + cleanCSName,     // Encode in the child using the charset
                 "-Dsun.stderr.encoding=" + cleanCSName,
                 "ReaderWriterTest$ChildWithCharset");
@@ -217,35 +209,13 @@ public class ReaderWriterTest {
     @Test
     void testNullCharsets()  throws IOException {
         // Launch a child; its behavior is not interesting and is ignored
-        ProcessBuilder pb = ProcessTools.createJavaProcessBuilder(
+        ProcessBuilder pb = ProcessTools.createLimitedTestJavaProcessBuilder(
                 "ReaderWriterTest$ChildWithCharset");
 
-        Process p = pb.start();
-        try {
-            writeTestChars(p.outputWriter(null));
-            Assert.fail("Process.outputWriter(null) did not throw NPE");
-        } catch (NullPointerException npe) {
-            // expected, ignore
-        }
-        try {
-            checkReader(p.inputReader(null), null, "Out");
-            Assert.fail("Process.inputReader(null) did not throw NPE");
-        } catch (NullPointerException npe) {
-            // expected, ignore
-        }
-        try {
-            checkReader(p.errorReader(null), null, "Err");
-            Assert.fail("Process.errorReader(null) did not throw NPE");
-        } catch (NullPointerException npe) {
-            // expected, ignore
-        }
-
-        p.destroyForcibly();
-        try {
-            // Collect the exit status to cleanup after the process; but ignore it
-            p.waitFor();
-        } catch (InterruptedException ie) {
-            // Ignored
+        try (Process p = pb.start()) {
+            assertThrows(NullPointerException.class, () -> writeTestChars(p.outputWriter(null)));
+            assertThrows(NullPointerException.class, () -> checkReader(p.inputReader(null), null, "Out"));
+            assertThrows(NullPointerException.class, () -> checkReader(p.errorReader(null), null, "Err"));
         }
     }
 
@@ -263,7 +233,7 @@ public class ReaderWriterTest {
                 : StandardCharsets.UTF_8;
 
         // Launch a child; its behavior is not interesting and is ignored
-        ProcessBuilder pb = ProcessTools.createJavaProcessBuilder(
+        ProcessBuilder pb = ProcessTools.createLimitedTestJavaProcessBuilder(
                 "ReaderWriterTest$ChildWithCharset");
 
         Process p = pb.start();
@@ -271,7 +241,7 @@ public class ReaderWriterTest {
             var writer = p.outputWriter(cs);
             writer = p.outputWriter(cs);        // try again with same
             writer = p.outputWriter(otherCharset);  // this should throw
-            Assert.fail("Process.outputWriter(otherCharset) did not throw IllegalStateException");
+            fail("Process.outputWriter(otherCharset) did not throw IllegalStateException");
         } catch (IllegalStateException ile) {
             // expected, ignore
             System.out.println(ile);
@@ -280,7 +250,7 @@ public class ReaderWriterTest {
             var reader = p.inputReader(cs);
             reader = p.inputReader(cs);             // try again with same
             reader = p.inputReader(otherCharset);   // this should throw
-            Assert.fail("Process.inputReader(otherCharset) did not throw IllegalStateException");
+            fail("Process.inputReader(otherCharset) did not throw IllegalStateException");
         } catch (IllegalStateException ile) {
             // expected, ignore
             System.out.println(ile);
@@ -289,7 +259,7 @@ public class ReaderWriterTest {
             var reader = p.errorReader(cs);
             reader = p.errorReader(cs);             // try again with same
             reader = p.errorReader(otherCharset);   // this should throw
-            Assert.fail("Process.errorReader(otherCharset) did not throw IllegalStateException");
+            fail("Process.errorReader(otherCharset) did not throw IllegalStateException");
         } catch (IllegalStateException ile) {
             // expected, ignore
             System.out.println(ile);
@@ -319,13 +289,13 @@ public class ReaderWriterTest {
             String reencoded = cs.decode(bb).toString();
             if (!firstline.equals(reencoded))
                 diffStrings(firstline, reencoded);
-            assertEquals(firstline, reencoded, label + " Test Chars");
+            assertEquals(reencoded, firstline, label + " Test Chars");
 
             bb = cs.encode(ROUND_TRIP_TESTCHARS);
             reencoded = cs.decode(bb).toString();
             if (!secondline.equals(reencoded))
                 diffStrings(secondline, reencoded);
-            assertEquals(secondline, reencoded, label + " Round Trip Test Chars");
+            assertEquals(reencoded, secondline, label + " Round Trip Test Chars");
         }
     }
 

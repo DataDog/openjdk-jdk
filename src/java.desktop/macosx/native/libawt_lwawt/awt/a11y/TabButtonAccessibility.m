@@ -1,11 +1,13 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2021, JetBrains s.r.o.. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -59,11 +61,14 @@
 - (jobject)tabGroup
 {
     if (fTabGroupAxContext == NULL) {
-        JNIEnv* env = [ThreadUtilities getJNIEnv];
-        jobject tabGroupAxContext = [(CommonComponentAccessibility *)[self parent] axContextWithEnv:env];
-        fTabGroupAxContext = (*env)->NewWeakGlobalRef(env, tabGroupAxContext);
-        CHECK_EXCEPTION();
-        (*env)->DeleteLocalRef(env, tabGroupAxContext);
+        CommonComponentAccessibility* parent = [self typeSafeParent];
+        if (parent != nil) {
+            JNIEnv *env = [ThreadUtilities getJNIEnv];
+            jobject tabGroupAxContext = [parent axContextWithEnv:env];
+            fTabGroupAxContext = (*env)->NewWeakGlobalRef(env, tabGroupAxContext);
+            CHECK_EXCEPTION();
+            (*env)->DeleteLocalRef(env, tabGroupAxContext);
+        }
     }
     return fTabGroupAxContext;
 }
@@ -79,10 +84,7 @@
 
 - (NSAccessibilitySubrole)accessibilitySubrole
 {
-    if (@available(macOS 10.13, *)) {
-        return NSAccessibilityTabButtonSubrole;
-    }
-    return NSAccessibilityUnknownSubrole;
+    return NSAccessibilityTabButtonSubrole;
 }
 
 - (id)accessibilityValue
@@ -102,6 +104,15 @@
 - (BOOL)accessibilityPerformPress {
     [self performPressAction];
     return YES;
+}
+
+- (NSString *)accessibilityRoleDescription
+{
+    NSString *value = NSAccessibilityRoleDescription([self accessibilityRole], NSAccessibilityTabButtonSubrole);
+    if (value == nil) {
+        value = [super accessibilityRoleDescription];
+    }
+    return value;
 }
 
 @end

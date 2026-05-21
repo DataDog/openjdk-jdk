@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,27 +22,34 @@
  *
  */
 
-#include "precompiled.hpp"
+#include "cds/aotThread.hpp"
 #include "memory/allocation.inline.hpp"
 #include "prims/jvmtiRawMonitor.hpp"
-#include "runtime/atomic.hpp"
+#include "runtime/atomicAccess.hpp"
 #include "runtime/interfaceSupport.inline.hpp"
+#include "runtime/javaThread.hpp"
 #include "runtime/orderAccess.hpp"
-#include "runtime/thread.inline.hpp"
+#include "runtime/threads.hpp"
+#include "runtime/threadSMR.hpp"
 
-JvmtiRawMonitor::QNode::QNode(Thread* thread) : _next(NULL), _prev(NULL),
+JvmtiRawMonitor::QNode::QNode(Thread* thread) : _next(nullptr), _prev(nullptr),
                                                 _event(thread->_ParkEvent),
                                                 _notified(0), _t_state(TS_RUN) {
 }
 
 GrowableArray<JvmtiRawMonitor*>* JvmtiPendingMonitors::_monitors =
-  new (ResourceObj::C_HEAP, mtServiceability) GrowableArray<JvmtiRawMonitor*>(1, mtServiceability);
+  new (mtServiceability) GrowableArray<JvmtiRawMonitor*>(1, mtServiceability);
 
 void JvmtiPendingMonitors::transition_raw_monitors() {
-  assert((Threads::number_of_threads()==1),
-         "Java thread has not been created yet or more than one java thread "
-         "is running. Raw monitor transition will not work");
   JavaThread* current_java_thread = JavaThread::current();
+
+#ifdef ASSERT
+  for (JavaThreadIteratorWithHandle jtiwh; JavaThread *thread = jtiwh.next(); ) {
+    assert(thread == current_java_thread || thread->is_aot_thread(),
+           "Didn't expect concurrent application threads at this point");
+  }
+#endif
+
   {
     ThreadToNativeFromVM ttnfvm(current_java_thread);
     for (int i = 0; i < count(); i++) {
@@ -58,12 +65,12 @@ void JvmtiPendingMonitors::transition_raw_monitors() {
 // class JvmtiRawMonitor
 //
 
-JvmtiRawMonitor::JvmtiRawMonitor(const char* name) : _owner(NULL),
+JvmtiRawMonitor::JvmtiRawMonitor(const char* name) : _owner(nullptr),
                                                      _recursions(0),
-                                                     _entry_list(NULL),
-                                                     _wait_set(NULL),
+                                                     _entry_list(nullptr),
+                                                     _wait_set(nullptr),
                                                      _magic(JVMTI_RM_MAGIC),
-                                                     _name(NULL) {
+                                                     _name(nullptr) {
 #ifdef ASSERT
   _name = strcpy(NEW_C_HEAP_ARRAY(char, strlen(name) + 1, mtInternal), name);
 #endif
@@ -79,7 +86,7 @@ JvmtiRawMonitor::~JvmtiRawMonitor() {
 
 bool
 JvmtiRawMonitor::is_valid() {
-  int value = 0;
+  jlong value = 0;
 
   // This object might not be a JvmtiRawMonitor so we can't assume
   // the _magic field is properly aligned. Get the value in a safe
@@ -122,7 +129,10 @@ JvmtiRawMonitor::is_valid() {
 
 void JvmtiRawMonitor::simple_enter(Thread* self) {
   for (;;) {
-    if (Atomic::replace_if_null(&_owner, self)) {
+    if (AtomicAccess::replace_if_null(&_owner, self)) {
+      if (self->is_Java_thread()) {
+        Continuation::pin(JavaThread::cast(self));
+      }
       return;
     }
 
@@ -134,9 +144,12 @@ void JvmtiRawMonitor::simple_enter(Thread* self) {
     node._next = _entry_list;
     _entry_list = &node;
     OrderAccess::fence();
-    if (_owner == NULL && Atomic::replace_if_null(&_owner, self)) {
+    if (_owner == nullptr && AtomicAccess::replace_if_null(&_owner, self)) {
       _entry_list = node._next;
       RawMonitor_lock->unlock();
+      if (self->is_Java_thread()) {
+        Continuation::pin(JavaThread::cast(self));
+      }
       return;
     }
     RawMonitor_lock->unlock();
@@ -148,19 +161,22 @@ void JvmtiRawMonitor::simple_enter(Thread* self) {
 
 void JvmtiRawMonitor::simple_exit(Thread* self) {
   guarantee(_owner == self, "invariant");
-  Atomic::release_store(&_owner, (Thread*)NULL);
+  AtomicAccess::release_store(&_owner, (Thread*)nullptr);
   OrderAccess::fence();
-  if (_entry_list == NULL) {
+  if (self->is_Java_thread()) {
+    Continuation::unpin(JavaThread::cast(self));
+  }
+  if (_entry_list == nullptr) {
     return;
   }
 
   RawMonitor_lock->lock_without_safepoint_check();
   QNode* w = _entry_list;
-  if (w != NULL) {
+  if (w != nullptr) {
     _entry_list = w->_next;
   }
   RawMonitor_lock->unlock();
-  if (w != NULL) {
+  if (w != nullptr) {
     guarantee(w ->_t_state == QNode::TS_ENTER, "invariant");
     // Once we set _t_state to TS_RUN the waiting thread can complete
     // simple_enter and 'w' is pointing into random stack space. So we have
@@ -195,12 +211,12 @@ inline void JvmtiRawMonitor::dequeue_waiter(QNode& node) {
     if (node._t_state == QNode::TS_WAIT) {
       // Simple O(n) unlink, but performance isn't critical here.
       QNode* p;
-      QNode* q = NULL;
+      QNode* q = nullptr;
       for (p = _wait_set; p != &node; p = p->_next) {
         q = p;
       }
       guarantee(p == &node, "invariant");
-      if (q == NULL) {
+      if (q == nullptr) {
         guarantee (p == _wait_set, "invariant");
         _wait_set = p->_next;
       } else {
@@ -241,7 +257,7 @@ int JvmtiRawMonitor::simple_wait(Thread* self, jlong millis) {
     {
       // This transition must be after we exited the monitor.
       ThreadInVMfromNative tivmfn(jt);
-      if (jt->is_interrupted(true)) {
+      if (jt->get_and_clear_interrupted()) {
         ret = M_INTERRUPTED;
       } else {
         ThreadBlockInVM tbivm(jt);
@@ -252,7 +268,7 @@ int JvmtiRawMonitor::simple_wait(Thread* self, jlong millis) {
         }
         // Return to VM before post-check of interrupt state
       }
-      if (jt->is_interrupted(true)) {
+      if (jt->get_and_clear_interrupted()) {
         ret = M_INTERRUPTED;
       }
     }
@@ -271,7 +287,7 @@ int JvmtiRawMonitor::simple_wait(Thread* self, jlong millis) {
 
 void JvmtiRawMonitor::simple_notify(Thread* self, bool all) {
   guarantee(_owner == self, "invariant");
-  if (_wait_set == NULL) {
+  if (_wait_set == nullptr) {
     return;
   }
 
@@ -282,15 +298,15 @@ void JvmtiRawMonitor::simple_notify(Thread* self, bool all) {
   // We use (B), which is crude and results in lots of futile
   // context switching.  In particular (B) induces lots of contention.
 
-  ParkEvent* ev = NULL;       // consider using a small auto array ...
+  ParkEvent* ev = nullptr;       // consider using a small auto array ...
   RawMonitor_lock->lock_without_safepoint_check();
   for (;;) {
     QNode* w = _wait_set;
-    if (w == NULL) break;
+    if (w == nullptr) break;
     _wait_set = w->_next;
-    if (ev != NULL) {
+    if (ev != nullptr) {
       ev->unpark();
-      ev = NULL;
+      ev = nullptr;
     }
     ev = w->_event;
     OrderAccess::loadstore();
@@ -301,7 +317,7 @@ void JvmtiRawMonitor::simple_notify(Thread* self, bool all) {
     }
   }
   RawMonitor_lock->unlock();
-  if (ev != NULL) {
+  if (ev != nullptr) {
     ev->unpark();
   }
   return;
@@ -315,7 +331,7 @@ void JvmtiRawMonitor::ExitOnSuspend::operator()(JavaThread* current) {
 
 // JavaThreads will enter here with state _thread_in_native.
 void JvmtiRawMonitor::raw_enter(Thread* self) {
-  // TODO Atomic::load on _owner field
+  // TODO AtomicAccess::load on _owner field
   if (_owner == self) {
     _recursions++;
     return;
@@ -341,7 +357,7 @@ void JvmtiRawMonitor::raw_enter(Thread* self) {
     }
   }
 
-  self->set_current_pending_raw_monitor(NULL);
+  self->set_current_pending_raw_monitor(nullptr);
 
   guarantee(_owner == self, "invariant");
   guarantee(_recursions == 0, "invariant");
@@ -372,7 +388,7 @@ int JvmtiRawMonitor::raw_wait(jlong millis, Thread* self) {
   self->_ParkEvent->reset();
   OrderAccess::fence();
 
-  intptr_t save = _recursions;
+  int save = _recursions;
   _recursions = 0;
   ret = simple_wait(self, millis);
 
@@ -391,7 +407,7 @@ int JvmtiRawMonitor::raw_wait(jlong millis, Thread* self) {
         break;
       }
     }
-    if (jt->is_interrupted(true)) {
+    if (jt->get_and_clear_interrupted()) {
       ret = M_INTERRUPTED;
     }
   } else { // Non-JavaThread re-enter

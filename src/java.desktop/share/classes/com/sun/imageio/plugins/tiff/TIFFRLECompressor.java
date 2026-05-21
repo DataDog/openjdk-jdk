@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -39,7 +39,7 @@ public class TIFFRLECompressor extends TIFFFaxCompressor {
 
     /**
      * Encode a row of data using Modified Huffman Compression also known as
-     * CCITT RLE (Run Lenth Encoding).
+     * CCITT RLE (Run Length Encoding).
      *
      * @param data        The row of data to compress.
      * @param rowOffset   Starting index in {@code data}.
@@ -87,6 +87,7 @@ public class TIFFRLECompressor extends TIFFFaxCompressor {
         return outIndex;
     }
 
+    @Override
     public int encode(byte[] b, int off,
                       int width, int height,
                       int[] bitsPerSample,

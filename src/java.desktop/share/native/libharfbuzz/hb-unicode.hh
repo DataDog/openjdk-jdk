@@ -105,12 +105,9 @@ HB_UNICODE_FUNCS_IMPLEMENT_CALLBACKS_SIMPLE
   unsigned int
   modified_combining_class (hb_codepoint_t u)
   {
-    /* XXX This hack belongs to the USE shaper (for Tai Tham):
-     * Reorder SAKOT to ensure it comes after any tone marks. */
+    /* Reorder SAKOT to ensure it comes after any tone marks. */
     if (unlikely (u == 0x1A60u)) return 254;
-
-    /* XXX This hack belongs to the Tibetan shaper:
-     * Reorder PADMA to ensure it comes after any vowel marks. */
+    /* Reorder PADMA to ensure it comes after any vowel marks. */
     if (unlikely (u == 0x0FC6u)) return 254;
     /* Reorder TSA -PHRU to reorder before U+0F74 */
     if (unlikely (u == 0x0F39u)) return 127;
@@ -121,7 +118,7 @@ HB_UNICODE_FUNCS_IMPLEMENT_CALLBACKS_SIMPLE
   static hb_bool_t
   is_variation_selector (hb_codepoint_t unicode)
   {
-    /* U+180B..180D MONGOLIAN FREE VARIATION SELECTORs are handled in the
+    /* U+180B..180D, U+180F MONGOLIAN FREE VARIATION SELECTORs are handled in the
      * Arabic shaper.  No need to match them here. */
     return unlikely (hb_in_ranges<hb_codepoint_t> (unicode,
                                                    0xFE00u, 0xFE0Fu, /* VARIATION SELECTOR-1..16 */
@@ -136,7 +133,7 @@ HB_UNICODE_FUNCS_IMPLEMENT_CALLBACKS_SIMPLE
    * As such, we make exceptions for those four.
    * Also ignoring U+1BCA0..1BCA3. https://github.com/harfbuzz/harfbuzz/issues/503
    *
-   * Unicode 7.0:
+   * Unicode 14.0:
    * $ grep '; Default_Ignorable_Code_Point ' DerivedCoreProperties.txt | sed 's/;.*#/#/'
    * 00AD          # Cf       SOFT HYPHEN
    * 034F          # Mn       COMBINING GRAPHEME JOINER
@@ -145,6 +142,7 @@ HB_UNICODE_FUNCS_IMPLEMENT_CALLBACKS_SIMPLE
    * 17B4..17B5    # Mn   [2] KHMER VOWEL INHERENT AQ..KHMER VOWEL INHERENT AA
    * 180B..180D    # Mn   [3] MONGOLIAN FREE VARIATION SELECTOR ONE..MONGOLIAN FREE VARIATION SELECTOR THREE
    * 180E          # Cf       MONGOLIAN VOWEL SEPARATOR
+   * 180F          # Mn       MONGOLIAN FREE VARIATION SELECTOR FOUR
    * 200B..200F    # Cf   [5] ZERO WIDTH SPACE..RIGHT-TO-LEFT MARK
    * 202A..202E    # Cf   [5] LEFT-TO-RIGHT EMBEDDING..RIGHT-TO-LEFT OVERRIDE
    * 2060..2064    # Cf   [5] WORD JOINER..INVISIBLE PLUS
@@ -243,6 +241,57 @@ HB_UNICODE_FUNCS_IMPLEMENT_CALLBACKS_SIMPLE
     }
   }
 
+  static hb_codepoint_t
+  vertical_char_for (hb_codepoint_t u)
+  {
+    switch (u >> 8)
+    {
+      case 0x20: switch (u) {
+        case 0x2013u: return 0xfe32u; // EN DASH
+        case 0x2014u: return 0xfe31u; // EM DASH
+        case 0x2025u: return 0xfe30u; // TWO DOT LEADER
+        case 0x2026u: return 0xfe19u; // HORIZONTAL ELLIPSIS
+      } break;
+      case 0x30: switch (u) {
+        case 0x3001u: return 0xfe11u; // IDEOGRAPHIC COMMA
+        case 0x3002u: return 0xfe12u; // IDEOGRAPHIC FULL STOP
+        case 0x3008u: return 0xfe3fu; // LEFT ANGLE BRACKET
+        case 0x3009u: return 0xfe40u; // RIGHT ANGLE BRACKET
+        case 0x300au: return 0xfe3du; // LEFT DOUBLE ANGLE BRACKET
+        case 0x300bu: return 0xfe3eu; // RIGHT DOUBLE ANGLE BRACKET
+        case 0x300cu: return 0xfe41u; // LEFT CORNER BRACKET
+        case 0x300du: return 0xfe42u; // RIGHT CORNER BRACKET
+        case 0x300eu: return 0xfe43u; // LEFT WHITE CORNER BRACKET
+        case 0x300fu: return 0xfe44u; // RIGHT WHITE CORNER BRACKET
+        case 0x3010u: return 0xfe3bu; // LEFT BLACK LENTICULAR BRACKET
+        case 0x3011u: return 0xfe3cu; // RIGHT BLACK LENTICULAR BRACKET
+        case 0x3014u: return 0xfe39u; // LEFT TORTOISE SHELL BRACKET
+        case 0x3015u: return 0xfe3au; // RIGHT TORTOISE SHELL BRACKET
+        case 0x3016u: return 0xfe17u; // LEFT WHITE LENTICULAR BRACKET
+        case 0x3017u: return 0xfe18u; // RIGHT WHITE LENTICULAR BRACKET
+      } break;
+      case 0xfe: switch (u) {
+        case 0xfe4fu: return 0xfe34u; // WAVY LOW LINE
+      } break;
+      case 0xff: switch (u) {
+        case 0xff01u: return 0xfe15u; // FULLWIDTH EXCLAMATION MARK
+        case 0xff08u: return 0xfe35u; // FULLWIDTH LEFT PARENTHESIS
+        case 0xff09u: return 0xfe36u; // FULLWIDTH RIGHT PARENTHESIS
+        case 0xff0cu: return 0xfe10u; // FULLWIDTH COMMA
+        case 0xff1au: return 0xfe13u; // FULLWIDTH COLON
+        case 0xff1bu: return 0xfe14u; // FULLWIDTH SEMICOLON
+        case 0xff1fu: return 0xfe16u; // FULLWIDTH QUESTION MARK
+        case 0xff3bu: return 0xfe47u; // FULLWIDTH LEFT SQUARE BRACKET
+        case 0xff3du: return 0xfe48u; // FULLWIDTH RIGHT SQUARE BRACKET
+        case 0xff3fu: return 0xfe33u; // FULLWIDTH LOW LINE
+        case 0xff5bu: return 0xfe37u; // FULLWIDTH LEFT CURLY BRACKET
+        case 0xff5du: return 0xfe38u; // FULLWIDTH RIGHT CURLY BRACKET
+      } break;
+    }
+
+    return u;
+  }
+
   struct {
 #define HB_UNICODE_FUNC_IMPLEMENT(name) hb_unicode_##name##_func_t name;
     HB_UNICODE_FUNCS_IMPLEMENT_CALLBACKS
@@ -289,8 +338,8 @@ DECLARE_NULL_INSTANCE (hb_unicode_funcs_t);
 #define HB_MODIFIED_COMBINING_CLASS_CCC15 18 /* tsere */
 #define HB_MODIFIED_COMBINING_CLASS_CCC16 19 /* segol */
 #define HB_MODIFIED_COMBINING_CLASS_CCC17 20 /* patah */
-#define HB_MODIFIED_COMBINING_CLASS_CCC18 21 /* qamats */
-#define HB_MODIFIED_COMBINING_CLASS_CCC19 14 /* holam */
+#define HB_MODIFIED_COMBINING_CLASS_CCC18 21 /* qamats & qamats qatan */
+#define HB_MODIFIED_COMBINING_CLASS_CCC19 14 /* holam & holam haser for vav*/
 #define HB_MODIFIED_COMBINING_CLASS_CCC20 24 /* qubuts */
 #define HB_MODIFIED_COMBINING_CLASS_CCC21 12 /* dagesh */
 #define HB_MODIFIED_COMBINING_CLASS_CCC22 25 /* meteg */
@@ -359,6 +408,13 @@ DECLARE_NULL_INSTANCE (hb_unicode_funcs_t);
           FLAG (HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK) | \
           FLAG (HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK)))
 
+#define HB_UNICODE_GENERAL_CATEGORY_IS_LETTER(gen_cat) \
+        (FLAG_UNSAFE (gen_cat) & \
+         (FLAG (HB_UNICODE_GENERAL_CATEGORY_LOWERCASE_LETTER) | \
+          FLAG (HB_UNICODE_GENERAL_CATEGORY_MODIFIER_LETTER) | \
+          FLAG (HB_UNICODE_GENERAL_CATEGORY_OTHER_LETTER) | \
+          FLAG (HB_UNICODE_GENERAL_CATEGORY_TITLECASE_LETTER) | \
+          FLAG (HB_UNICODE_GENERAL_CATEGORY_UPPERCASE_LETTER)))
 
 /*
  * Ranges, used for bsearch tables.

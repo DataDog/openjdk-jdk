@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -41,7 +41,7 @@
  *          jdk.compiler/com.sun.tools.javac.tree
  *          jdk.compiler/com.sun.tools.javac.util
  * @build AbstractTreeScannerTest SourceTreeScannerTest
- * @run main SourceTreeScannerTest -q -r .
+ * @run main/timeout=480 SourceTreeScannerTest -q -r .
  */
 
 import java.io.*;
@@ -95,8 +95,6 @@ public class SourceTreeScannerTest extends AbstractTreeScannerTest {
     private class ScanTester extends TreeScanner<Void,Void> {
         /** Main entry method for the class. */
         int test(JCCompilationUnit tree) {
-            if (!tree.sourcefile.toString().contains("EmptyBreak.java"))
-                return 0;
             sourcefile = tree.sourcefile;
             found = new HashSet<Tree>();
             scan(tree, null);
@@ -145,30 +143,28 @@ public class SourceTreeScannerTest extends AbstractTreeScannerTest {
             if (o instanceof JCTree) {
                 JCTree tree = (JCTree) o;
                 //System.err.println("EXPECT: " + tree.getKind() + " " + trim(tree, 64));
-                if (!tree.hasTag(JCTree.Tag.DEFAULTCASELABEL)) {
-                    expect.add(tree);
-                    for (Field f: getFields(tree)) {
-                        if (TypeBoundKind.class.isAssignableFrom(f.getType())) {
-                            // not part of public API
-                            continue;
+                expect.add(tree);
+                for (Field f: getFields(tree)) {
+                    if (TypeBoundKind.class.isAssignableFrom(f.getType())) {
+                        // not part of public API
+                        continue;
+                    }
+                    try {
+                        //System.err.println("FIELD: " + f.getName());
+                        if (tree instanceof JCModuleDecl && f.getName().equals("mods")) {
+                            // The modifiers will not found by TreeScanner,
+                            // but the embedded annotations will be.
+                            reflectiveScan(((JCModuleDecl) tree).mods.annotations);
+                        } else if (tree instanceof JCCase &&
+                                   ((JCCase) tree).getCaseKind() == CaseKind.RULE &&
+                                   f.getName().equals("stats")) {
+                            //value case, visit value:
+                            reflectiveScan(((JCCase) tree).getBody());
+                        } else {
+                            reflectiveScan(f.get(tree));
                         }
-                        try {
-                            //System.err.println("FIELD: " + f.getName());
-                            if (tree instanceof JCModuleDecl && f.getName().equals("mods")) {
-                                // The modifiers will not found by TreeScanner,
-                                // but the embedded annotations will be.
-                                reflectiveScan(((JCModuleDecl) tree).mods.annotations);
-                            } else if (tree instanceof JCCase &&
-                                       ((JCCase) tree).getCaseKind() == CaseKind.RULE &&
-                                       f.getName().equals("stats")) {
-                                //value case, visit value:
-                                reflectiveScan(((JCCase) tree).getBody());
-                            } else {
-                                reflectiveScan(f.get(tree));
-                            }
-                        } catch (IllegalAccessException e) {
-                            error(e.toString());
-                        }
+                    } catch (IllegalAccessException e) {
+                        error(e.toString());
                     }
                 }
             } else if (o instanceof List) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -100,7 +100,7 @@ final class MaxFragExtension {
         }
     }
 
-    static enum MaxFragLenEnum {
+    enum MaxFragLenEnum {
         MFL_512     ((byte)0x01,  512,  "2^9"),
         MFL_1024    ((byte)0x02, 1024,  "2^10"),
         MFL_2048    ((byte)0x03, 2048,  "2^11"),
@@ -110,7 +110,7 @@ final class MaxFragExtension {
         final int fragmentSize;
         final String description;
 
-        private MaxFragLenEnum(byte id, int fragmentSize, String description) {
+        MaxFragLenEnum(byte id, int fragmentSize, String description) {
             this.id = id;
             this.fragmentSize = fragmentSize;
             this.description = description;
@@ -176,7 +176,8 @@ final class MaxFragExtension {
 
             // Is it a supported and enabled extension?
             if (!chc.sslConfig.isAvailable(CH_MAX_FRAGMENT_LENGTH)) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                         "Ignore unavailable max_fragment_length extension");
                 }
@@ -190,8 +191,8 @@ final class MaxFragExtension {
                 requestedMFLength =
                     chc.resumingSession.getNegotiatedMaxFragSize();
             } else if (chc.sslConfig.maximumPacketSize != 0) {
-                // Maybe we can calculate the fragment size more accurate
-                // by condering the enabled cipher suites in the future.
+                // Maybe we can calculate the fragment size more accurately
+                // by considering the enabled cipher suites in the future.
                 requestedMFLength = chc.sslConfig.maximumPacketSize;
                 if (chc.sslContext.isDTLS()) {
                     requestedMFLength -= DTLSRecord.maxPlaintextPlusSize;
@@ -213,7 +214,8 @@ final class MaxFragExtension {
             } else {
                 // log and ignore, no MFL extension.
                 chc.maxFragmentLength = -1;
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                         "No available max_fragment_length extension can " +
                         "be used for fragment size of " +
@@ -243,7 +245,8 @@ final class MaxFragExtension {
             ServerHandshakeContext shc = (ServerHandshakeContext)context;
 
             if (!shc.sslConfig.isAvailable(CH_MAX_FRAGMENT_LENGTH)) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                         "Ignore unavailable max_fragment_length extension");
                 }
@@ -288,7 +291,8 @@ final class MaxFragExtension {
             MaxFragLenSpec spec = (MaxFragLenSpec)
                     shc.handshakeExtensions.get(CH_MAX_FRAGMENT_LENGTH);
             if (spec == null) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.finest(
                         "Ignore unavailable max_fragment_length extension");
                 }
@@ -305,7 +309,8 @@ final class MaxFragExtension {
                     // For better interoperability, abort the maximum
                     // fragment length negotiation, rather than terminate
                     // the connection with a fatal alert.
-                    if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                    if (SSLLogger.isOn() &&
+                            SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                         SSLLogger.fine(
                             "Abort the maximum fragment length negotiation, " +
                             "may overflow the maximum packet size limit.");
@@ -413,7 +418,8 @@ final class MaxFragExtension {
                     // For better interoperability, abort the maximum
                     // fragment length negotiation, rather than terminate
                     // the connection with a fatal alert.
-                    if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                    if (SSLLogger.isOn() &&
+                            SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                         SSLLogger.fine(
                             "Abort the maximum fragment length negotiation, " +
                             "may overflow the maximum packet size limit.");
@@ -455,7 +461,8 @@ final class MaxFragExtension {
             MaxFragLenSpec spec = (MaxFragLenSpec)
                     shc.handshakeExtensions.get(CH_MAX_FRAGMENT_LENGTH);
             if (spec == null) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.finest(
                         "Ignore unavailable max_fragment_length extension");
                 }
@@ -472,7 +479,8 @@ final class MaxFragExtension {
                     // For better interoperability, abort the maximum
                     // fragment length negotiation, rather than terminate
                     // the connection with a fatal alert.
-                    if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                    if (SSLLogger.isOn() &&
+                            SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                         SSLLogger.fine(
                             "Abort the maximum fragment length negotiation, " +
                             "may overflow the maximum packet size limit.");
@@ -578,7 +586,8 @@ final class MaxFragExtension {
                     // For better interoperability, abort the maximum
                     // fragment length negotiation, rather than terminate
                     // the connection with a fatal alert.
-                    if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                    if (SSLLogger.isOn() &&
+                            SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                         SSLLogger.fine(
                             "Abort the maximum fragment length negotiation, " +
                             "may overflow the maximum packet size limit.");

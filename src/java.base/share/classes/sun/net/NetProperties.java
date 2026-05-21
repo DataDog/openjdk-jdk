@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,8 +27,6 @@ package sun.net;
 import jdk.internal.util.StaticProperty;
 
 import java.io.*;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.Properties;
 
 /*
@@ -39,18 +37,8 @@ import java.util.Properties;
  * @author Jean-Christophe Collet
  *
  */
-
-@SuppressWarnings("removal")
 public class NetProperties {
-    private static Properties props = new Properties();
-    static {
-        AccessController.doPrivileged(
-            new PrivilegedAction<Void>() {
-                public Void run() {
-                    loadDefaultProperties();
-                    return null;
-                }});
-    }
+    private static final Properties props = loadDefaultProperties(new Properties());
 
     private NetProperties() { };
 
@@ -59,7 +47,7 @@ public class NetProperties {
      * Loads the default networking system properties
      * the file is in jre/lib/net.properties
      */
-    private static void loadDefaultProperties() {
+    private static Properties loadDefaultProperties(Properties props) {
         String fname = StaticProperty.javaHome();
         if (fname == null) {
             throw new Error("Can't find java.home ??");
@@ -68,14 +56,14 @@ public class NetProperties {
             File f = new File(fname, "conf");
             f = new File(f, "net.properties");
             fname = f.getCanonicalPath();
-            InputStream in = new FileInputStream(fname);
-            BufferedInputStream bin = new BufferedInputStream(in);
-            props.load(bin);
-            bin.close();
+            try (FileInputStream in = new FileInputStream(fname)) {
+                props.load(in);
+            }
         } catch (Exception e) {
             // Do nothing. We couldn't find or access the file
             // so we won't have default properties...
         }
+        return props;
     }
 
     /**
@@ -83,9 +71,6 @@ public class NetProperties {
      * returns the default value, if it exists, otherwise returns
      * <code>null</code>.
      * @param      key  the property name.
-     * @throws  SecurityException  if a security manager exists and its
-     *          <code>checkPropertiesAccess</code> method doesn't allow access
-     *          to the system properties.
      * @return the <code>String</code> value for the property,
      *         or <code>null</code>
      */
@@ -93,8 +78,7 @@ public class NetProperties {
         String def = props.getProperty(key);
         try {
             return System.getProperty(key, def);
-        } catch (IllegalArgumentException e) {
-        } catch (NullPointerException e) {
+        } catch (IllegalArgumentException | NullPointerException e) {
         }
         return null;
     }
@@ -105,9 +89,6 @@ public class NetProperties {
      * <code>null</code>.
      * @param   key     the property name.
      * @param   defval  the default value to use if the property is not found
-     * @throws  SecurityException  if a security manager exists and its
-     *          <code>checkPropertiesAccess</code> method doesn't allow access
-     *          to the system properties.
      * @return the <code>Integer</code> value for the property,
      *         or <code>null</code>
      */
@@ -116,8 +97,7 @@ public class NetProperties {
 
         try {
             val = System.getProperty(key, props.getProperty(key));
-        } catch (IllegalArgumentException e) {
-        } catch (NullPointerException e) {
+        } catch (IllegalArgumentException | NullPointerException e) {
         }
 
         if (val != null) {
@@ -134,9 +114,6 @@ public class NetProperties {
      * defined returns the default value, if it exists, otherwise returns
      * <code>null</code>.
      * @param   key     the property name.
-     * @throws  SecurityException  if a security manager exists and its
-     *          <code>checkPropertiesAccess</code> method doesn't allow access
-     *          to the system properties.
      * @return the <code>Boolean</code> value for the property,
      *         or <code>null</code>
      */
@@ -145,8 +122,7 @@ public class NetProperties {
 
         try {
             val = System.getProperty(key, props.getProperty(key));
-        } catch (IllegalArgumentException e) {
-        } catch (NullPointerException e) {
+        } catch (IllegalArgumentException | NullPointerException e) {
         }
 
         if (val != null) {

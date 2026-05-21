@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -118,7 +118,7 @@ OGLVertexCache_FlushVertexCache()
  *
  * The reason this is a problem for us is that we do not want to flush the
  * vertex array (in the case of mask/glyph operations) or issue a glEnd()
- * (in the case of non-antialiased primitives) everytime the current color
+ * (in the case of non-antialiased primitives) every time the current color
  * changes, which would defeat any benefit from batching in the first place.
  * We handle this in practice by not calling CHECK/RESET_PREVIOUS_OP() when
  * the simple color state is changing in OGLPaints_SetColor().  This is
@@ -220,8 +220,8 @@ OGLVertexCache_AddMaskQuad(OGLContext *oglc,
     jfloat tx1, ty1, tx2, ty2;
     jfloat dx1, dy1, dx2, dy2;
 
-    J2dTraceLn1(J2D_TRACE_INFO, "OGLVertexCache_AddMaskQuad: %d",
-                maskCacheIndex);
+    J2dTraceLn(J2D_TRACE_INFO, "OGLVertexCache_AddMaskQuad: %d",
+               maskCacheIndex);
 
     if (maskCacheIndex >= OGLVC_MASK_CACHE_MAX_INDEX ||
         vertexCacheIndex >= OGLVC_MAX_INDEX)

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -78,13 +78,13 @@ import sun.util.locale.provider.TimeZoneNameUtility;
  * If you decide to create a date-time formatter with a specific
  * format pattern for a specific locale, you can do so with:
  * <blockquote>
- * <pre>
- * new SimpleDateFormat(aPattern, DateFormatSymbols.getInstance(aLocale)).
- * </pre>
+ * {@snippet lang=java :
+ * new SimpleDateFormat(aPattern, DateFormatSymbols.getInstance(aLocale));
+ * }
  * </blockquote>
  *
  * <p>If the locale contains "rg" (region override)
- * <a href="../util/Locale.html#def_locale_extension">Unicode extension</a>,
+ * {@linkplain Locale##def_locale_extension Unicode extension},
  * the symbols are overridden for the designated region.
  *
  * <p>
@@ -145,10 +145,12 @@ public class DateFormatSymbols implements Serializable, Cloneable {
      * @throws     java.util.MissingResourceException
      *             if the resources for the specified locale cannot be
      *             found or cannot be loaded.
+     * @throws     NullPointerException if {@code locale} is null
      */
     public DateFormatSymbols(Locale locale)
     {
-        initializeData(locale);
+        initializeData(Objects.requireNonNull(locale,
+            "locale should not be null"));
     }
 
     /**
@@ -299,8 +301,9 @@ public class DateFormatSymbols implements Serializable, Cloneable {
      * The returned array represents the union of locales supported by the
      * Java runtime and by installed
      * {@link java.text.spi.DateFormatSymbolsProvider DateFormatSymbolsProvider}
-     * implementations.  It must contain at least a {@code Locale}
-     * instance equal to {@link java.util.Locale#US Locale.US}.
+     * implementations. At a minimum, the returned array must contain a
+     * {@code Locale} instance equal to {@link Locale#ROOT Locale.ROOT} and
+     * a {@code Locale} instance equal to {@link Locale#US Locale.US}.
      *
      * @return An array of locales for which localized
      *         {@code DateFormatSymbols} instances are available.
@@ -343,20 +346,7 @@ public class DateFormatSymbols implements Serializable, Cloneable {
      * @since 1.6
      */
     public static final DateFormatSymbols getInstance(Locale locale) {
-        DateFormatSymbols dfs = getProviderInstance(locale);
-        if (dfs != null) {
-            return dfs;
-        }
-        throw new RuntimeException("DateFormatSymbols instance creation failed.");
-    }
-
-    /**
-     * Returns a DateFormatSymbols provided by a provider or found in
-     * the cache. Note that this method returns a cached instance,
-     * not its clone. Therefore, the instance should never be given to
-     * an application.
-     */
-    static final DateFormatSymbols getInstanceRef(Locale locale) {
+        Objects.requireNonNull(locale, "locale should not be null");
         DateFormatSymbols dfs = getProviderInstance(locale);
         if (dfs != null) {
             return dfs;
@@ -414,6 +404,9 @@ public class DateFormatSymbols implements Serializable, Cloneable {
      * @implSpec This method returns 13 elements since
      * {@link java.util.Calendar#UNDECIMBER Calendar.UNDECIMBER} is supported.
      * @return the month strings.
+     *
+     * @spec https://www.unicode.org/reports/tr35
+     *      Unicode Locale Data Markup Language (LDML)
      */
     public String[] getMonths() {
         return Arrays.copyOf(months, months.length);
@@ -452,6 +445,9 @@ public class DateFormatSymbols implements Serializable, Cloneable {
      * @implSpec This method returns 13 elements since
      * {@link java.util.Calendar#UNDECIMBER Calendar.UNDECIMBER} is supported.
      * @return the short month strings.
+     *
+     * @spec https://www.unicode.org/reports/tr35
+     *      Unicode Locale Data Markup Language (LDML)
      */
     public String[] getShortMonths() {
         return Arrays.copyOf(shortMonths, shortMonths.length);
@@ -605,7 +601,8 @@ public class DateFormatSymbols implements Serializable, Cloneable {
         for (int i = 0; i < newZoneStrings.length; ++i) {
             int len = newZoneStrings[i].length;
             if (len < 5) {
-                throw new IllegalArgumentException();
+                throw new IllegalArgumentException(String.format(
+                        "Row %s of the input array does not have a length of at least 5", i));
             }
             aCopy[i] = Arrays.copyOf(newZoneStrings[i], len);
         }
@@ -649,8 +646,11 @@ public class DateFormatSymbols implements Serializable, Cloneable {
     }
 
     /**
-     * Override hashCode.
-     * Generates a hash code for the DateFormatSymbols object.
+     * {@return the hash code for this {@code DateFormatSymbols}}
+     *
+     * @implSpec Non-transient instance fields of this class are used to calculate
+     * a hash code value which adheres to the contract defined in {@link Objects#hashCode}.
+     * @see Object#hashCode()
      */
     @Override
     public int hashCode() {
@@ -674,8 +674,19 @@ public class DateFormatSymbols implements Serializable, Cloneable {
     }
 
     /**
-     * Override equals
+     * Compares the specified object with this {@code DateFormatSymbols} for equality.
+     * Returns true if the object is also a {@code DateFormatSymbols} and the two
+     * {@code DateFormatSymbols} objects represent the same date-time formatting data.
+     *
+     * @implSpec This method performs an equality check with a notion of class
+     * identity based on {@code getClass()}, rather than {@code instanceof}.
+     * Therefore, in the equals methods in subclasses, no instance of this class
+     * should compare as equal to an instance of a subclass.
+     * @param  obj object to be compared for equality
+     * @return {@code true} if the specified object is equal to this {@code DateFormatSymbols}
+     * @see Object#equals(Object)
      */
+    @Override
     public boolean equals(Object obj)
     {
         if (this == obj) return true;
@@ -688,18 +699,10 @@ public class DateFormatSymbols implements Serializable, Cloneable {
                 && Arrays.equals(shortWeekdays, that.shortWeekdays)
                 && Arrays.equals(ampms, that.ampms)
                 && Arrays.deepEquals(getZoneStringsWrapper(), that.getZoneStringsWrapper())
-                && ((localPatternChars != null
-                  && localPatternChars.equals(that.localPatternChars))
-                 || (localPatternChars == null
-                  && that.localPatternChars == null)));
+                && Objects.equals(localPatternChars, that.localPatternChars));
     }
 
     // =======================privates===============================
-
-    /**
-     * Useful constant for defining time zone offsets.
-     */
-    static final int millisPerHour = 60*60*1000;
 
     /**
      * Cache to hold DateFormatSymbols instances per Locale.

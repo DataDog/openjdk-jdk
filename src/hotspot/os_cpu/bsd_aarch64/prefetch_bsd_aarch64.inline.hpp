@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2026, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2014, Red Hat Inc. All rights reserved.
  * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -27,10 +27,9 @@
 #ifndef OS_CPU_BSD_AARCH64_PREFETCH_BSD_AARCH64_INLINE_HPP
 #define OS_CPU_BSD_AARCH64_PREFETCH_BSD_AARCH64_INLINE_HPP
 
-#include "runtime/prefetch.hpp"
+// Included in runtime/prefetch.inline.hpp
 
-
-inline void Prefetch::read (void *loc, intx interval) {
+inline void Prefetch::read (const void *loc, intx interval) {
   if (interval >= 0)
     asm("prfm PLDL1KEEP, [%0, %1]" : : "r"(loc), "r"(interval));
 }

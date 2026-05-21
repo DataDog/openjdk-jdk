@@ -1,6 +1,6 @@
 /*
  * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,16 +32,31 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import jdk.test.lib.process.OutputAnalyzer;
+import jdk.test.lib.process.ProcessTools;
+
 /**
  * @test
- * @bug 8271718
+ * @bug 8271718 8273135 8275344
  * @summary Verifies MT safety of color transformation while profile is changed
+ * @library /test/lib
+ * @run main/othervm MTTransformReplacedProfile
+ * @run main/othervm MTTransformReplacedProfile checkJNI
  */
 public final class MTTransformReplacedProfile {
 
     private static volatile long endtime;
 
     public static void main(String[] args) throws Exception {
+        if (args.length > 0 && args[0].equals("checkJNI")) {
+            ProcessBuilder pb = ProcessTools.createTestJavaProcessBuilder(
+                    "-Xcheck:jni", MTTransformReplacedProfile.class.getName());
+            OutputAnalyzer oa = ProcessTools.executeProcess(pb);
+            oa.stderrShouldBeEmpty();
+            oa.stdoutShouldBeEmpty();
+            oa.shouldHaveExitValue(0);
+            return;
+        }
         ICC_Profile[] profiles = {
                 ICC_Profile.getInstance(ColorSpace.CS_sRGB),
                 ICC_Profile.getInstance(ColorSpace.CS_LINEAR_RGB),
@@ -110,7 +125,7 @@ public final class MTTransformReplacedProfile {
         float[] colorvalue = new float[3];
         Thread transform = new Thread(() -> {
             boolean rgb = true;
-            while (!stop.get()) {
+            while (!stop.get() && !isComplete()) {
                 try {
                     if (rgb) {
                         cs.toRGB(colorvalue);

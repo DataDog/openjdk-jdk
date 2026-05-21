@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,15 +25,16 @@
 
 package java.lang.reflect;
 
-import java.lang.annotation.*;
+import java.lang.annotation.Annotation;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Set;
 import java.util.Objects;
 import java.util.StringJoiner;
-import java.util.stream.Stream;
 import java.util.stream.Collectors;
 
 import jdk.internal.access.SharedSecrets;
+import jdk.internal.vm.annotation.Stable;
 import sun.reflect.annotation.AnnotationParser;
 import sun.reflect.annotation.AnnotationSupport;
 import sun.reflect.annotation.TypeAnnotationParser;
@@ -45,6 +46,7 @@ import sun.reflect.generics.repository.ConstructorRepository;
  * A shared superclass for the common functionality of {@link Method}
  * and {@link Constructor}.
  *
+ * @sealedGraph
  * @since 1.8
  */
 public abstract sealed class Executable extends AccessibleObject
@@ -68,6 +70,10 @@ public abstract sealed class Executable extends AccessibleObject
     abstract ConstructorRepository getGenericInfo();
 
     boolean equalParamTypes(Class<?>[] params1, Class<?>[] params2) {
+        // The parameter arrays are trusted and the same for a root and all leaf
+        // copies. Thus, == on arrays is more useful than == on Executable.
+        if (params1 == params2)
+            return true;
         /* Avoid unnecessary cloning */
         if (params1.length == params2.length) {
             for (int i = 0; i < params1.length; i++) {
@@ -87,31 +93,15 @@ public abstract sealed class Executable extends AccessibleObject
                getDeclaringClass());
     }
 
-    void printModifiersIfNonzero(StringBuilder sb, int mask, boolean isDefault) {
-        int mod = getModifiers() & mask;
+    // Appends source modifiers of this declaration to a display string builder.
+    abstract void appendModifiers(StringBuilder sb);
 
-        if (mod != 0 && !isDefault) {
-            sb.append(Modifier.toString(mod)).append(' ');
-        } else {
-            int access_mod = mod & Modifier.ACCESS_MODIFIERS;
-            if (access_mod != 0)
-                sb.append(Modifier.toString(access_mod)).append(' ');
-            if (isDefault)
-                sb.append("default ");
-            mod = (mod & ~Modifier.ACCESS_MODIFIERS);
-            if (mod != 0)
-                sb.append(Modifier.toString(mod)).append(' ');
-        }
-    }
-
-    String sharedToString(int modifierMask,
-                          boolean isDefault,
-                          Class<?>[] parameterTypes,
+    String sharedToString(Class<?>[] parameterTypes,
                           Class<?>[] exceptionTypes) {
         try {
             StringBuilder sb = new StringBuilder();
 
-            printModifiersIfNonzero(sb, modifierMask, isDefault);
+            appendModifiers(sb);
             specificToStringHeader(sb);
             sb.append(Arrays.stream(parameterTypes)
                       .map(Type::getTypeName)
@@ -145,11 +135,11 @@ public abstract sealed class Executable extends AccessibleObject
         }
     }
 
-    String sharedToGenericString(int modifierMask, boolean isDefault) {
+    String sharedToGenericString() {
         try {
             StringBuilder sb = new StringBuilder();
 
-            printModifiersIfNonzero(sb, modifierMask, isDefault);
+            appendModifiers(sb);
 
             TypeVariable<?>[] typeparms = getTypeParameters();
             if (typeparms.length > 0) {
@@ -204,8 +194,25 @@ public abstract sealed class Executable extends AccessibleObject
     /**
      * {@return the Java language {@linkplain Modifier modifiers} for
      * the executable represented by this object}
+     * @see #accessFlags
      */
     public abstract int getModifiers();
+
+    /**
+     * {@return an unmodifiable set of the {@linkplain AccessFlag
+     * access flags} for the executable represented by this object,
+     * possibly empty}
+     *
+     * @see #getModifiers()
+     * @jvms 4.6 Methods
+     * @since 20
+     */
+    @Override
+    public Set<AccessFlag> accessFlags() {
+        return reflectionFactory.parseAccessFlags(getModifiers(),
+                                                  AccessFlag.Location.METHOD,
+                                                  getDeclaringClass());
+    }
 
     /**
      * Returns an array of {@code TypeVariable} objects that represent the
@@ -237,12 +244,17 @@ public abstract sealed class Executable extends AccessibleObject
      * represented by this object.  Returns an array of length
      * 0 if the underlying executable takes no parameters.
      * Note that the constructors of some inner classes
-     * may have an implicitly declared parameter in addition to
-     * explicitly declared ones.
+     * may have an {@linkplain java.compiler/javax.lang.model.util.Elements.Origin#MANDATED
+     * implicitly declared} parameter in addition to explicitly
+     * declared ones.
+     * Also note that compact constructors of a record class may have
+     * {@linkplain java.compiler/javax.lang.model.util.Elements.Origin#MANDATED
+     * implicitly declared} parameters.
      *
      * @return the parameter types for the executable this object
      * represents
      */
+    @SuppressWarnings("doclint:reference") // cross-module links
     public abstract Class<?>[] getParameterTypes();
 
     /**
@@ -253,9 +265,7 @@ public abstract sealed class Executable extends AccessibleObject
      * @return The number of formal parameters for the executable this
      * object represents
      */
-    public int getParameterCount() {
-        throw new AbstractMethodError();
-    }
+    public abstract int getParameterCount();
 
     /**
      * Returns an array of {@code Type} objects that represent the
@@ -264,18 +274,32 @@ public abstract sealed class Executable extends AccessibleObject
      * underlying executable takes no parameters.  Note that the
      * constructors of some inner classes may have an implicitly
      * declared parameter in addition to explicitly declared ones.
-     * Also note that as a <a
-     * href="{@docRoot}/java.base/java/lang/reflect/package-summary.html#LanguageJvmModel">modeling
-     * artifact</a>, the number of returned parameters can differ
+     * Compact constructors of a record class may also have
+     * {@linkplain java.compiler/javax.lang.model.util.Elements.Origin#MANDATED
+     * implicitly declared} parameters,
+     * but they are a special case and thus considered as if they had
+     * been explicitly declared in the source.
+     * Finally note that as a {@link java.lang.reflect##LanguageJvmModel
+     * modeling artifact}, the number of returned parameters can differ
      * depending on whether or not generic information is present. If
-     * generic information is present, only parameters explicitly
-     * present in the source will be returned; if generic information
-     * is not present, implicit and synthetic parameters may be
+     * generic information is present, parameters explicitly
+     * present in the source or parameters of compact constructors
+     * of a record class will be returned.
+     * Note that parameters of compact constructors of a record class are a special case,
+     * as they are not explicitly present in the source, and its type will be returned
+     * regardless of the parameters being
+     * {@linkplain java.compiler/javax.lang.model.util.Elements.Origin#MANDATED
+     * implicitly declared} or not.
+     * If generic information is not present, implicit and synthetic parameters may be
      * returned as well.
      *
      * <p>If a formal parameter type is a parameterized type,
      * the {@code Type} object returned for it must accurately reflect
-     * the actual type arguments used in the source code.
+     * the actual type arguments used in the source code. This assertion also
+     * applies to the parameters of compact constructors of a record class,
+     * independently of them being
+     * {@linkplain java.compiler/javax.lang.model.util.Elements.Origin#MANDATED
+     * implicitly declared} or not.
      *
      * <p>If a formal parameter type is a type variable or a parameterized
      * type, it is created. Otherwise, it is resolved.
@@ -293,6 +317,7 @@ public abstract sealed class Executable extends AccessibleObject
      *     the underlying executable's parameter types refer to a parameterized
      *     type that cannot be instantiated for any reason
      */
+    @SuppressWarnings("doclint:reference") // cross-module links
     public Type[] getGenericParameterTypes() {
         if (hasGenericInformation())
             return getGenericInfo().getParameterTypes();
@@ -315,26 +340,38 @@ public abstract sealed class Executable extends AccessibleObject
         } else {
             final boolean realParamData = hasRealParameterData();
             final Type[] genericParamTypes = getGenericParameterTypes();
-            final Type[] nonGenericParamTypes = getParameterTypes();
+            final Type[] nonGenericParamTypes = getSharedParameterTypes();
             // If we have real parameter data, then we use the
             // synthetic and mandate flags to our advantage.
             if (realParamData) {
-                final Type[] out = new Type[nonGenericParamTypes.length];
-                final Parameter[] params = getParameters();
-                int fromidx = 0;
-                for (int i = 0; i < out.length; i++) {
-                    final Parameter param = params[i];
-                    if (param.isSynthetic() || param.isImplicit()) {
-                        // If we hit a synthetic or mandated parameter,
-                        // use the non generic parameter info.
-                        out[i] = nonGenericParamTypes[i];
+                if (getDeclaringClass().isRecord() && this instanceof Constructor) {
+                    /* we could be seeing a compact constructor of a record class
+                     * its parameters are mandated but we should be able to retrieve
+                     * its generic information if present
+                     */
+                    if (genericParamTypes.length == nonGenericParamTypes.length) {
+                        return genericParamTypes;
                     } else {
-                        // Otherwise, use the generic parameter info.
-                        out[i] = genericParamTypes[fromidx];
-                        fromidx++;
+                        return nonGenericParamTypes.clone();
                     }
+                } else {
+                    final Type[] out = new Type[nonGenericParamTypes.length];
+                    final Parameter[] params = getParameters();
+                    int fromidx = 0;
+                    for (int i = 0; i < out.length; i++) {
+                        final Parameter param = params[i];
+                        if (param.isSynthetic() || param.isImplicit()) {
+                            // If we hit a synthetic or mandated parameter,
+                            // use the non generic parameter info.
+                            out[i] = nonGenericParamTypes[i];
+                        } else {
+                            // Otherwise, use the generic parameter info.
+                            out[i] = genericParamTypes[fromidx];
+                            fromidx++;
+                        }
+                    }
+                    return out;
                 }
-                return out;
             } else {
                 // Otherwise, use the non-generic parameter data.
                 // Without method parameter reflection data, we have
@@ -342,7 +379,7 @@ public abstract sealed class Executable extends AccessibleObject
                 // synthetic/mandated, thus, no way to match up the
                 // indexes.
                 return genericParamTypes.length == nonGenericParamTypes.length ?
-                    genericParamTypes : nonGenericParamTypes;
+                    genericParamTypes : getParameterTypes();
             }
         }
     }
@@ -367,7 +404,7 @@ public abstract sealed class Executable extends AccessibleObject
         // Need to copy the cached array to prevent users from messing
         // with it.  Since parameters are immutable, we can
         // shallow-copy.
-        return privateGetParameters().clone();
+        return parameterData().parameters.clone();
     }
 
     private Parameter[] synthesizeAllParams() {
@@ -378,7 +415,7 @@ public abstract sealed class Executable extends AccessibleObject
             // modifiers?  Probably not in the general case, since
             // we'd have no way of knowing about them, but there
             // may be specific cases.
-            out[i] = new Parameter("arg" + i, 0, this, i);
+            out[i] = new Parameter(null, 0, this, i);
         return out;
     }
 
@@ -406,46 +443,40 @@ public abstract sealed class Executable extends AccessibleObject
         }
     }
 
-    private Parameter[] privateGetParameters() {
-        // Use tmp to avoid multiple writes to a volatile.
-        Parameter[] tmp = parameters;
-
-        if (tmp == null) {
-
-            // Otherwise, go to the JVM to get them
-            try {
-                tmp = getParameters0();
-            } catch(IllegalArgumentException e) {
-                // Rethrow ClassFormatErrors
-                throw new MalformedParametersException("Invalid constant pool index");
-            }
-
-            // If we get back nothing, then synthesize parameters
-            if (tmp == null) {
-                hasRealParameterData = false;
-                tmp = synthesizeAllParams();
-            } else {
-                hasRealParameterData = true;
-                verifyParameters(tmp);
-            }
-
-            parameters = tmp;
-        }
-
-        return tmp;
-    }
 
     boolean hasRealParameterData() {
-        // If this somehow gets called before parameters gets
-        // initialized, force it into existence.
-        if (parameters == null) {
-            privateGetParameters();
-        }
-        return hasRealParameterData;
+        return parameterData().isReal;
     }
 
-    private transient volatile boolean hasRealParameterData;
-    private transient volatile Parameter[] parameters;
+    private ParameterData parameterData() {
+        ParameterData parameterData = this.parameterData;
+        if (parameterData != null) {
+            return parameterData;
+        }
+
+        Parameter[] tmp;
+        // Go to the JVM to get them
+        try {
+            tmp = getParameters0();
+        } catch (IllegalArgumentException e) {
+            // Rethrow ClassFormatErrors
+            throw new MalformedParametersException("Invalid constant pool index");
+        }
+
+        // If we get back nothing, then synthesize parameters
+        if (tmp == null) {
+            tmp = synthesizeAllParams();
+            parameterData = new ParameterData(tmp, false);
+        } else {
+            verifyParameters(tmp);
+            parameterData = new ParameterData(tmp, true);
+        }
+        return this.parameterData = parameterData;
+    }
+
+    private transient @Stable ParameterData parameterData;
+
+    record ParameterData(@Stable Parameter[] parameters, boolean isReal) {}
 
     private native Parameter[] getParameters0();
     native byte[] getTypeAnnotationBytes0();
@@ -501,7 +532,9 @@ public abstract sealed class Executable extends AccessibleObject
      * {@return a string describing this {@code Executable}, including
      * any type parameters}
      */
-    public abstract String toGenericString();
+    public String toGenericString() {
+        return sharedToGenericString();
+    }
 
     /**
      * {@return {@code true} if this executable was declared to take a
@@ -738,13 +771,18 @@ public abstract sealed class Executable extends AccessibleObject
      * Returns an array of length 0 if the method/constructor declares no
      * parameters.
      * Note that the constructors of some inner classes
-     * may have an implicitly declared parameter in addition to
-     * explicitly declared ones.
+     * may have an
+     * {@linkplain java.compiler/javax.lang.model.util.Elements.Origin#MANDATED
+     * implicitly declared} parameter in addition to explicitly declared ones.
+     * Also note that compact constructors of a record class may have
+     * {@linkplain java.compiler/javax.lang.model.util.Elements.Origin#MANDATED
+     * implicitly declared} parameters.
      *
      * @return an array of objects representing the types of the
      * formal parameters of the method or constructor represented by this
      * {@code Executable}
      */
+    @SuppressWarnings("doclint:reference") // cross-module links
     public AnnotatedType[] getAnnotatedParameterTypes() {
         return TypeAnnotationParser.buildAnnotatedTypes(getTypeAnnotationBytes0(),
                 SharedSecrets.getJavaLangAccess().

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,6 @@
  * @summary Synthetic anonymous class used as access constructor tag conflicting with a top level class.
  * @modules jdk.compiler/com.sun.tools.javac.api
  *          jdk.compiler/com.sun.tools.javac.main
- *          jdk.jdeps/com.sun.tools.classfile
  * @library /tools/lib /tools/javac/lib ../lib
  * @build toolbox.ToolBox InMemoryFileManager TestResult
  * @build AccessToPrivateInnerClassConstructorsTest SyntheticTestDriver ExpectedClass ExpectedClasses
@@ -44,14 +43,11 @@
                 "<init>(AccessToPrivateInnerClassConstructorsTest)",
                 "<init>(AccessToPrivateInnerClassConstructorsTest, " +
                        "AccessToPrivateInnerClassConstructorsTest$1)"},
-        expectedNumberOfSyntheticFields = 1,
         expectedNumberOfSyntheticMethods = 0)
 @ExpectedClass(className = "AccessToPrivateInnerClassConstructorsTest$1Local",
-        expectedMethods = {"<init>(AccessToPrivateInnerClassConstructorsTest)"},
-        expectedNumberOfSyntheticFields = 1)
+        expectedMethods = {"<init>(AccessToPrivateInnerClassConstructorsTest)"})
 @ExpectedClass(className = "AccessToPrivateInnerClassConstructorsTest$2Local",
-        expectedMethods = {"<init>(AccessToPrivateInnerClassConstructorsTest)"},
-        expectedNumberOfSyntheticFields = 1)
+        expectedMethods = {"<init>(AccessToPrivateInnerClassConstructorsTest)"})
 public class AccessToPrivateInnerClassConstructorsTest {
 
     public static void main(String... args) {

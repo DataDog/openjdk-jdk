@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,11 +27,9 @@ package jdk.jfr.internal.consumer;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.security.AccessControlContext;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.Objects;
 import jdk.jfr.consumer.RecordedEvent;
 
 /**
@@ -46,10 +44,10 @@ public final class EventFileStream extends AbstractEventStream {
     private ChunkParser currentParser;
     private RecordedEvent[] cacheSorted;
 
-    public EventFileStream(@SuppressWarnings("removal") AccessControlContext acc, Path path) throws IOException {
-        super(acc, null, Collections.emptyList());
-        Objects.requireNonNull(path);
-        this.input = new RecordingInput(path.toFile(), FileAccess.UNPRIVILEGED);
+    public EventFileStream(Path file) throws IOException {
+        super(Collections.emptyList());
+        this.input = new RecordingInput(file.toFile());
+        this.input.setStreamed();
     }
 
     @Override
@@ -64,13 +62,18 @@ public final class EventFileStream extends AbstractEventStream {
 
     @Override
     public void close() {
-        setClosed(true);
+        closeParser();
         dispatcher().runCloseActions();
         try {
             input.close();
         } catch (IOException e) {
             // ignore
         }
+    }
+
+    @Override
+    protected boolean isRecordingStream() {
+        return false;
     }
 
     @Override
@@ -85,7 +88,7 @@ public final class EventFileStream extends AbstractEventStream {
             end = disp.endNanos;
         }
 
-        currentParser = new ChunkParser(input, disp.parserConfiguration);
+        currentParser = new ChunkParser(input, disp.parserConfiguration, parserState());
         while (!isClosed()) {
             onMetadata(currentParser);
             if (currentParser.getStartNanos() > end) {
@@ -93,10 +96,9 @@ public final class EventFileStream extends AbstractEventStream {
                 return;
             }
             disp = dispatcher();
-            disp.parserConfiguration.filterStart = start;
-            disp.parserConfiguration.filterEnd = end;
-            currentParser.updateConfiguration(disp.parserConfiguration, true);
-            if (disp.parserConfiguration.isOrdered()) {
+            var ranged  = disp.parserConfiguration.withRange(start, end);
+            currentParser.updateConfiguration(ranged, true);
+            if (disp.parserConfiguration.ordered()) {
                 processOrdered(disp);
             } else {
                 processUnordered(disp);
@@ -125,6 +127,10 @@ public final class EventFileStream extends AbstractEventStream {
                 cacheSorted[index++] = event;
             }
             dispatchOrdered(c, index);
+            if (index > 100_000 && 4 * index < cacheSorted.length) {
+                cacheSorted = new RecordedEvent[2 * index];
+            }
+            onFlush();
             index = 0;
         }
     }
@@ -134,8 +140,8 @@ public final class EventFileStream extends AbstractEventStream {
         Arrays.sort(cacheSorted, 0, index, EVENT_COMPARATOR);
         for (int i = 0; i < index; i++) {
             c.dispatch(cacheSorted[i]);
+            cacheSorted[i] = null;
         }
-        onFlush();
     }
 
     private void processUnordered(Dispatcher c) throws IOException {

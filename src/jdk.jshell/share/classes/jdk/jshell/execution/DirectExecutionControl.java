@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,10 +24,14 @@
  */
 package jdk.jshell.execution;
 
+import java.lang.Character.UnicodeBlock;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Set;
 import java.util.stream.IntStream;
 import jdk.jshell.spi.ExecutionControl;
 import jdk.jshell.spi.SPIResolutionException;
@@ -102,6 +106,11 @@ public class DirectExecutionControl implements ExecutionControl {
         loaderDelegate.classesRedefined(cbcs);
     }
 
+    /**
+     * @throws ExecutionControl.UserException {@inheritDoc}
+     * @throws ExecutionControl.ResolutionException {@inheritDoc}
+     * @throws ExecutionControl.StoppedException {@inheritDoc}
+     */
     @Override
     public String invoke(String className, String methodName)
             throws RunException, InternalException, EngineTerminationException {
@@ -132,6 +141,11 @@ public class DirectExecutionControl implements ExecutionControl {
         }
     }
 
+    /**
+     * @throws ExecutionControl.UserException {@inheritDoc}
+     * @throws ExecutionControl.ResolutionException {@inheritDoc}
+     * @throws ExecutionControl.StoppedException {@inheritDoc}
+     */
     @Override
     public String varValue(String className, String varName)
             throws RunException, EngineTerminationException, InternalException {
@@ -172,6 +186,13 @@ public class DirectExecutionControl implements ExecutionControl {
         throw new NotImplementedException("stop: Not supported.");
     }
 
+    /**
+     * @throws ExecutionControl.UserException {@inheritDoc}
+     * @throws ExecutionControl.ResolutionException {@inheritDoc}
+     * @throws ExecutionControl.StoppedException {@inheritDoc}
+     * @throws ExecutionControl.EngineTerminationException {@inheritDoc}
+     * @throws ExecutionControl.NotImplementedException {@inheritDoc}
+     */
     @Override
     public Object extensionCommand(String command, Object arg)
             throws RunException, EngineTerminationException, InternalException {
@@ -222,26 +243,32 @@ public class DirectExecutionControl implements ExecutionControl {
         if (value == null) {
             return "null";
         } else if (value instanceof String) {
-            return "\"" + ((String) value).codePoints()
-                    .flatMap(cp ->
-                        (cp == '"')
-                            ? "\\\"".codePoints()
-                            : (cp < 256)
-                                ? charRep[cp].codePoints()
-                                : IntStream.of(cp))
-                    .collect(
-                            StringBuilder::new,
-                            StringBuilder::appendCodePoint,
-                            StringBuilder::append)
-                    .toString() + "\"";
+            StringBuilder result = new StringBuilder();
+            result.append("\"");
+            var cpIt = ((String) value).codePoints().iterator();
+            int idx = 0;
+            while (cpIt.hasNext()) {
+                int cp = cpIt.nextInt();
+                if (cp == '"') {
+                    result.append("\\\"");
+                } else {
+                    appendEscapedChar(idx, cp, result);
+                }
+                idx++;
+            }
+            result.append("\"");
+            return result.toString();
         } else if (value instanceof Character) {
             char cp = (char) (Character) value;
-            return "'" + (
-                (cp == '\'')
-                    ? "\\\'"
-                    : (cp < 256)
-                            ? charRep[cp]
-                            : String.valueOf(cp)) + "'";
+            StringBuilder result = new StringBuilder();
+            result.append("'");
+            if (cp == '\'') {
+                result.append("\\\'");
+            } else {
+                appendEscapedChar(0, cp, result);
+            }
+            result.append("'");
+            return result.toString();
         } else if (value.getClass().isArray()) {
             int dims = 0;
             Class<?> t = value.getClass();
@@ -277,6 +304,29 @@ public class DirectExecutionControl implements ExecutionControl {
         }
     }
 
+    private static void appendEscapedChar(int idx, int cp, StringBuilder target) {
+        if (cp < 256) {
+            target.append(charRep[cp]);
+        } else if (needsEscape(idx, cp)) {
+            target.append(String.format("\\u%04X", cp));
+        } else {
+            target.appendCodePoint(cp);
+        }
+    }
+
+    private static boolean needsEscape(int idx, int cp) {
+        UnicodeBlock block = UnicodeBlock.of(cp);
+        if (block == UnicodeBlock.COMBINING_DIACRITICAL_MARKS ||
+            block == UnicodeBlock.COMBINING_DIACRITICAL_MARKS_EXTENDED ||
+            block == UnicodeBlock.COMBINING_DIACRITICAL_MARKS_SUPPLEMENT) {
+            //escape leading combining diacritical marks,
+            //as those might be confusingly merged into the leading quotes:
+            return idx == 0;
+        } else {
+            return false;
+        }
+    }
+
     /**
      * Converts incoming exceptions in user code into instances of subtypes of
      * {@link ExecutionControl.ExecutionControlException} and throws the
@@ -288,10 +338,15 @@ public class DirectExecutionControl implements ExecutionControl {
      * @throws ExecutionControl.InternalException for internal problems
      */
     protected String throwConvertedInvocationException(Throwable cause) throws RunException, InternalException {
-        throw asRunException(cause);
+        // Guard against recursive cause chains by
+        // using a Set with identity equality semantics.
+        Set<Throwable> dejaVu = Collections.newSetFromMap(new IdentityHashMap<>());
+        dejaVu.add(cause);
+
+        throw asRunException(cause, dejaVu);
     }
 
-    private RunException asRunException(Throwable ex) {
+    private RunException asRunException(Throwable ex, Set<Throwable> dejaVu) {
         if (ex instanceof SPIResolutionException) {
             SPIResolutionException spire = (SPIResolutionException) ex;
             return new ResolutionException(spire.id(), spire.getStackTrace());
@@ -300,7 +355,14 @@ public class DirectExecutionControl implements ExecutionControl {
                     ex.getClass().getName(),
                     ex.getStackTrace());
             Throwable cause = ex.getCause();
-            ue.initCause(cause == null ? null : asRunException(cause));
+            if (cause != null) {
+                Throwable throwable = dejaVu.add(cause)
+                        ? asRunException(cause, dejaVu)
+                        : new UserException("CIRCULAR REFERENCE!",
+                            cause.getClass().getName(),
+                            cause.getStackTrace());
+                ue.initCause(throwable);
+            }
             return ue;
         }
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
 
 /*
  * @test
- * @bug 8143037 8142447 8144095 8140265 8144906 8146138 8147887 8147886 8148316 8148317 8143955 8157953 8080347 8154714 8166649 8167643 8170162 8172102 8165405 8174796 8174797 8175304 8167554 8180508 8166232 8196133 8199912 8211694 8223688 8254196
+ * @bug 8143037 8142447 8144095 8140265 8144906 8146138 8147887 8147886 8148316 8148317 8143955 8157953 8080347 8154714 8166649 8167643 8170162 8172102 8165405 8174796 8174797 8175304 8167554 8180508 8166232 8196133 8199912 8211694 8223688 8254196 8295984
  * @summary Tests for Basic tests for REPL tool
  * @modules jdk.compiler/com.sun.tools.javac.api
  *          jdk.compiler/com.sun.tools.javac.main
@@ -32,7 +32,7 @@
  * @library /tools/lib
  * @build toolbox.ToolBox toolbox.JarTask toolbox.JavacTask
  * @build KullaTesting TestingInputStream Compiler
- * @run testng/timeout=600 ToolBasicTest
+ * @run junit/timeout=600 ToolBasicTest
  * @key intermittent
  */
 
@@ -57,19 +57,18 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.sun.net.httpserver.HttpServer;
-import org.testng.annotations.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.fail;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.assertFalse;
-import static org.testng.Assert.fail;
-
-@Test
 public class ToolBasicTest extends ReplToolTesting {
 
+    @Test
     public void elideStartUpFromList() {
-        test(
-                (a) -> assertCommandOutputContains(a, "123", "==> 123"),
+        test((a) -> assertCommandOutputContains(a, "123", "==> 123"),
                 (a) -> assertCommandCheckOutput(a, "/list", (s) -> {
                     int cnt;
                     try (Scanner scanner = new Scanner(s)) {
@@ -81,11 +80,12 @@ public class ToolBasicTest extends ReplToolTesting {
                             }
                         }
                     }
-                    assertEquals(cnt, 1, "Expected only one listed line");
+                    assertEquals(1, cnt, "Expected only one listed line");
                 })
         );
     }
 
+    @Test
     public void elideStartUpFromSave() throws IOException {
         Compiler compiler = new Compiler();
         Path path = compiler.getPath("myfile");
@@ -94,10 +94,11 @@ public class ToolBasicTest extends ReplToolTesting {
                 (a) -> assertCommand(a, "/save " + path.toString(), "")
         );
         try (Stream<String> lines = Files.lines(path)) {
-            assertEquals(lines.count(), 1, "Expected only one saved line");
+            assertEquals(1, lines.count(), "Expected only one saved line");
         }
     }
 
+    @Test
     public void testInterrupt() {
         ReplTest interrupt = (a) -> assertCommand(a, "\u0003", "");
         for (String s : new String[] { "", "\u0003" }) {
@@ -132,6 +133,7 @@ public class ToolBasicTest extends ReplToolTesting {
         }
     }
 
+    @Test
     public void testCtrlD() {
         test(false, new String[]{"--no-startup"},
                 a -> {
@@ -155,11 +157,6 @@ public class ToolBasicTest extends ReplToolTesting {
             out = new PrintWriter(writer);
             setCommandInput(cmd + "\n");
             t = new Thread(() -> {
-                try {
-                    // no chance to know whether cmd is being evaluated
-                    Thread.sleep(5000);
-                } catch (InterruptedException ignored) {
-                }
                 int i = 1;
                 int n = 30;
                 synchronized (lock) {
@@ -198,6 +195,7 @@ public class ToolBasicTest extends ReplToolTesting {
         }
     }
 
+    @Test
     public void testStop() {
         test(
                 (a) -> assertStop(a, "while (true) {}", ""),
@@ -205,6 +203,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testRerun() {
         test(false, new String[] {"--no-startup"},
                 (a) -> assertCommand(a, "/0", "|  No snippet with ID: 0"),
@@ -226,7 +225,7 @@ public class ToolBasicTest extends ReplToolTesting {
             final int finalI = i;
             Consumer<String> check = (s) -> {
                 String[] ss = s.split("\n");
-                assertEquals(ss[0], codes[finalI]);
+                assertEquals(codes[finalI], ss[0]);
                 assertTrue(ss.length > 1, s);
             };
             tests.add((a) -> assertCommandCheckOutput(a, "/" + (finalI + 1), check));
@@ -236,7 +235,7 @@ public class ToolBasicTest extends ReplToolTesting {
             final int finalI = i;
             Consumer<String> check = (s) -> {
                 String[] ss = s.split("\n");
-                assertEquals(ss[0], codes[codes.length - finalI - 1]);
+                assertEquals(codes[codes.length - finalI - 1], ss[0]);
                 assertTrue(ss.length > 1, s);
             };
             tests.add((a) -> assertCommandCheckOutput(a, "/-" + (2 * finalI + 1), check));
@@ -246,11 +245,12 @@ public class ToolBasicTest extends ReplToolTesting {
                 tests.toArray(new ReplTest[tests.size()]));
     }
 
+    @Test
     public void test8142447() {
         Function<String, BiFunction<String, Integer, ReplTest>> assertRerun = cmd -> (code, assertionCount) ->
                 (a) -> assertCommandCheckOutput(a, cmd, s -> {
                             String[] ss = s.split("\n");
-                            assertEquals(ss[0], code);
+                            assertEquals(code, ss[0]);
                             loadVariable(a, "int", "assertionCount", Integer.toString(assertionCount), Integer.toString(assertionCount));
                         });
         ReplTest assertVariables = (a) -> assertCommandCheckOutput(a, "/v", assertVariables());
@@ -261,7 +261,7 @@ public class ToolBasicTest extends ReplToolTesting {
                 "void add(int n) { assertionCount += n; }");
         test(new String[]{"--startup", startup.toString()},
                 (a) -> assertCommand(a, "add(1)", ""), // id: 1
-                (a) -> assertCommandCheckOutput(a, "add(ONE)", s -> assertEquals(s.split("\n")[0], "|  Error:")), // id: e1
+                (a) -> assertCommandCheckOutput(a, "add(ONE)", s -> assertEquals("|  Error:", s.split("\n")[0])), // id: e1
                 (a) -> assertVariable(a, "int", "ONE", "1", "1"),
                 assertRerun.apply("/1").apply("add(1)", 2), assertVariables,
                 assertRerun.apply("/e1").apply("add(ONE)", 3), assertVariables,
@@ -275,6 +275,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testClasspathDirectory() {
         Compiler compiler = new Compiler();
         Path outDir = Paths.get("testClasspathDirectory");
@@ -290,6 +291,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testEnvInStartUp() {
         Compiler compiler = new Compiler();
         Path outDir = Paths.get("testClasspathDirectory");
@@ -325,6 +327,7 @@ public class ToolBasicTest extends ReplToolTesting {
         return compiler.getPath(outDir).resolve(jarName).toString();
     }
 
+    @Test
     public void testClasspathJar() {
         String jarPath = makeSimpleJar();
         test(
@@ -337,6 +340,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testClasspathUserHomeExpansion() {
         String jarPath = makeSimpleJar();
         String tilde = "~" + File.separator;
@@ -351,6 +355,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testBadClasspath() {
         String jarPath = makeSimpleJar();
         Compiler compiler = new Compiler();
@@ -378,6 +383,7 @@ public class ToolBasicTest extends ReplToolTesting {
         return compiler.getPath(outDir).resolve(jarName).toString();
     }
 
+    @Test
     public void testBadSourceJarClasspath() {
         String jarPath = makeBadSourceJar();
         test(
@@ -396,6 +402,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testModulePath() {
         Compiler compiler = new Compiler();
         Path modsDir = Paths.get("mods");
@@ -411,6 +418,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testModulePathUserHomeExpansion() {
         String tilde = "~" + File.separatorChar;
         test(
@@ -420,6 +428,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testBadModulePath() {
         Compiler compiler = new Compiler();
         Path t1 = compiler.getPath("whatever/thing.zip");
@@ -430,6 +439,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testStartupFileOption() {
         Compiler compiler = new Compiler();
         Path startup = compiler.getPath("StartupFileOption/startup.txt");
@@ -445,6 +455,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testLoadingFromArgs() {
         Compiler compiler = new Compiler();
         Path path = compiler.getPath("loading.repl");
@@ -455,6 +466,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testReset() {
         test(
                 (a) -> assertReset(a, "/res"),
@@ -475,6 +487,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testOpen() {
         Compiler compiler = new Compiler();
         Path path = compiler.getPath("testOpen.repl");
@@ -509,6 +522,7 @@ public class ToolBasicTest extends ReplToolTesting {
         }
     }
 
+    @Test
     public void testOpenLocalFileUrl() {
         Compiler compiler = new Compiler();
         Path path = compiler.getPath("testOpen.repl");
@@ -523,6 +537,7 @@ public class ToolBasicTest extends ReplToolTesting {
         }
     }
 
+    @Test
     public void testOpenFileOverHttp() throws IOException {
         var script = "int a = 10;int b = 20;int c = a + b;";
 
@@ -547,13 +562,16 @@ public class ToolBasicTest extends ReplToolTesting {
                         (a) -> assertCommand(a, "c", "c ==> 30")
                 );
             }
+            test(new String[] {urlAddress},
+                 "File '" + urlAddress + "' for 'jshell' is not found.\n");
         } finally {
             httpServer.stop(0);
         }
     }
 
+    @Test
     public void testOpenResource() {
-        test(
+        test(new String[]{"-R", "-Duser.language=en", "-R", "-Duser.country=US"},
                 (a) -> assertCommand(a, "/open PRINTING", ""),
                 (a) -> assertCommandOutputContains(a, "/list",
                         "void println", "System.out.printf"),
@@ -562,10 +580,12 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testSave() throws IOException {
         Compiler compiler = new Compiler();
         Path path = compiler.getPath("testSave.repl");
         {
+            Path pathWithDirectories = compiler.getPath("what/ever/testSave.repl");
             List<String> list = Arrays.asList(
                     "int a;",
                     "class A { public String toString() { return \"A\"; } }"
@@ -574,9 +594,11 @@ public class ToolBasicTest extends ReplToolTesting {
                     (a) -> assertVariable(a, "int", "a"),
                     (a) -> assertCommand(a, "()", null, null, null, "", ""),
                     (a) -> assertClass(a, "class A { public String toString() { return \"A\"; } }", "class", "A"),
-                    (a) -> assertCommand(a, "/save " + path.toString(), "")
+                    (a) -> assertCommand(a, "/save " + path.toString(), ""),
+                    (a) -> assertCommand(a, "/save " + pathWithDirectories.toString(), "")
             );
-            assertEquals(Files.readAllLines(path), list);
+            assertEquals(list, Files.readAllLines(path));
+            assertEquals(list, Files.readAllLines(pathWithDirectories));
         }
         {
             List<String> output = new ArrayList<>();
@@ -592,7 +614,7 @@ public class ToolBasicTest extends ReplToolTesting {
                             .collect(Collectors.toList()))),
                     (a) -> assertCommand(a, "/save -all " + path.toString(), "")
             );
-            assertEquals(Files.readAllLines(path), output);
+            assertEquals(output, Files.readAllLines(path));
         }
         {
             List<String> output = new ArrayList<>();
@@ -609,7 +631,7 @@ public class ToolBasicTest extends ReplToolTesting {
                             .collect(Collectors.toList()))),
                     (a) -> assertCommand(a, "/save 2-3 1 4 " + path.toString(), "")
             );
-            assertEquals(Files.readAllLines(path), output);
+            assertEquals(output, Files.readAllLines(path));
         }
         {
             List<String> output = new ArrayList<>();
@@ -624,10 +646,11 @@ public class ToolBasicTest extends ReplToolTesting {
                     (a) -> assertCommand(a, "/save -history " + path.toString(), "")
             );
             output.add("/save -history " + path.toString());
-            assertEquals(Files.readAllLines(path), output);
+            assertEquals(output, Files.readAllLines(path));
         }
     }
 
+    @Test
     public void testStartRetain() {
         Compiler compiler = new Compiler();
         Path startUpFile = compiler.getPath("startUp.txt");
@@ -658,6 +681,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testStartSave() throws IOException {
         Compiler compiler = new Compiler();
         Path startSave = compiler.getPath("startSave.txt");
@@ -665,9 +689,10 @@ public class ToolBasicTest extends ReplToolTesting {
         List<String> lines = Files.lines(startSave)
                 .filter(s -> !s.isEmpty())
                 .collect(Collectors.toList());
-        assertEquals(lines, START_UP);
+        assertEquals(START_UP, lines);
     }
 
+    @Test
     public void testConstrainedUpdates() {
         test(
                 a -> assertClass(a, "class XYZZY { }", "class", "XYZZY"),
@@ -677,6 +702,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testRemoteExit() {
         test(
                 a -> assertVariable(a, "int", "x"),
@@ -689,11 +715,13 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testFeedbackNegative() {
         test(a -> assertCommandCheckOutput(a, "/set feedback aaaa",
                 assertStartsWith("|  Does not match any current feedback mode")));
     }
 
+    @Test
     public void testFeedbackSilent() {
         for (String off : new String[]{"s", "silent"}) {
             test(
@@ -705,6 +733,7 @@ public class ToolBasicTest extends ReplToolTesting {
         }
     }
 
+    @Test
     public void testFeedbackNormal() {
         Compiler compiler = new Compiler();
         Path testNormalFile = compiler.getPath("testConciseNormal");
@@ -731,6 +760,7 @@ public class ToolBasicTest extends ReplToolTesting {
         }
     }
 
+    @Test
     public void testVarsWithNotActive() {
         test(
                 a -> assertVariable(a, "Blath", "x"),
@@ -738,6 +768,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testHistoryReference() {
         test(false, new String[]{"--no-startup"},
                 a -> assertCommand(a, "System.err.println(99)", "", "", null, "", "99\n"),
@@ -770,6 +801,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testRerunIdRange() {
         Compiler compiler = new Compiler();
         Path startup = compiler.getPath("rangeStartup");
@@ -828,7 +860,8 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
-    @Test(enabled = false) // TODO 8158197
+    @Test // TODO 8158197
+    @Disabled
     public void testHeadlessEditPad() {
         String prevHeadless = System.getProperty("java.awt.headless");
         try {
@@ -841,6 +874,7 @@ public class ToolBasicTest extends ReplToolTesting {
         }
     }
 
+    @Test
     public void testAddExports() {
         test(false, new String[]{"--no-startup"},
                 a -> assertCommandOutputStartsWith(a, "import jdk.internal.misc.VM;", "|  Error:")
@@ -857,6 +891,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testRedeclareVariableNoInit() {
         test(
                 a -> assertCommand(a, "Integer a;", "a ==> null"),
@@ -868,6 +903,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
      }
 
+    @Test
     public void testWarningUnchecked() { //8223688
         test(false, new String[]{"--no-startup"},
                 a -> assertCommand(a, "abstract class A<T> { A(T t){} }", "|  created class A"),
@@ -879,6 +915,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testIndent() { //8223688
         prefsMap.remove("INDENT");
         test(false, new String[]{"--no-startup"},
@@ -890,6 +927,7 @@ public class ToolBasicTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testSystemExitStartUp() {
         Compiler compiler = new Compiler();
         Path startup = compiler.getPath("SystemExitStartUp/startup.txt");

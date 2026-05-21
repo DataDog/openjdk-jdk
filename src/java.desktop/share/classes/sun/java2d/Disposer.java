@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,16 +25,14 @@
 
 package sun.java2d;
 
-import sun.awt.util.ThreadGroupUtils;
-
+import java.lang.ref.PhantomReference;
 import java.lang.ref.Reference;
 import java.lang.ref.ReferenceQueue;
-import java.lang.ref.PhantomReference;
 import java.lang.ref.WeakReference;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
-import java.util.ArrayList;
 import java.util.Hashtable;
+import java.util.concurrent.ConcurrentLinkedDeque;
+
+import sun.awt.util.ThreadGroupUtils;
 
 /**
  * This class is used for registering and disposing the native
@@ -50,48 +48,25 @@ import java.util.Hashtable;
  *
  * @see DisposerRecord
  */
-@SuppressWarnings("removal")
+@SuppressWarnings("restricted")
 public class Disposer implements Runnable {
     private static final ReferenceQueue<Object> queue = new ReferenceQueue<>();
     private static final Hashtable<java.lang.ref.Reference<Object>, DisposerRecord> records =
         new Hashtable<>();
 
-    private static Disposer disposerInstance;
-    public static final int WEAK = 0;
-    public static final int PHANTOM = 1;
-    public static int refType = PHANTOM;
+    private static final Disposer disposerInstance;
 
     static {
-        java.security.AccessController.doPrivileged(
-            new java.security.PrivilegedAction<Void>() {
-                public Void run() {
-                    System.loadLibrary("awt");
-                    return null;
-                }
-            });
+        System.loadLibrary("awt");
         initIDs();
-        String type = java.security.AccessController.doPrivileged(
-                new sun.security.action.GetPropertyAction("sun.java2d.reftype"));
-        if (type != null) {
-            if (type.equals("weak")) {
-                refType = WEAK;
-                System.err.println("Using WEAK refs");
-            } else {
-                refType = PHANTOM;
-                System.err.println("Using PHANTOM refs");
-            }
-        }
         disposerInstance = new Disposer();
-        AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            String name = "Java2D Disposer";
-            ThreadGroup rootTG = ThreadGroupUtils.getRootThreadGroup();
-            Thread t = new Thread(rootTG, disposerInstance, name, 0, false);
-            t.setContextClassLoader(null);
-            t.setDaemon(true);
-            t.setPriority(Thread.MAX_PRIORITY);
-            t.start();
-            return null;
-        });
+        String name = "Java2D Disposer";
+        ThreadGroup rootTG = ThreadGroupUtils.getRootThreadGroup();
+        Thread t = new Thread(rootTG, disposerInstance, name, 0, false);
+        t.setContextClassLoader(null);
+        t.setDaemon(true);
+        t.setPriority(Thread.MAX_PRIORITY);
+        t.start();
     }
 
     /**
@@ -130,26 +105,20 @@ public class Disposer implements Runnable {
         if (target instanceof DisposerTarget) {
             target = ((DisposerTarget)target).getDisposerReferent();
         }
-        java.lang.ref.Reference<Object> ref;
-        if (refType == PHANTOM) {
-            ref = new PhantomReference<>(target, queue);
-        } else {
-            ref = new WeakReference<>(target, queue);
-        }
-        records.put(ref, rec);
+        records.put(new PhantomReference<>(target, queue), rec);
     }
 
     public void run() {
         while (true) {
             try {
-                Object obj = queue.remove();
-                ((Reference)obj).clear();
+                Reference<?> obj = queue.remove();
+                obj.clear();
                 DisposerRecord rec = records.remove(obj);
-                rec.dispose();
+                safeDispose(rec);
                 obj = null;
                 rec = null;
                 clearDeferredRecords();
-            } catch (Exception e) {
+            } catch (Throwable t) {
                 System.out.println("Exception while removing reference.");
             }
         }
@@ -162,29 +131,31 @@ public class Disposer implements Runnable {
      * which happens to be the Toolkit thread, is in use.
      */
     public static interface PollDisposable {
-    };
+    }
 
-    private static ArrayList<DisposerRecord> deferredRecords = null;
+    private static ConcurrentLinkedDeque<DisposerRecord> deferredRecords = new ConcurrentLinkedDeque<>();
+
+    private static void safeDispose(DisposerRecord rec) {
+        try {
+            rec.dispose();
+        } catch (final Throwable t) {
+            System.out.println("Exception while disposing deferred rec.");
+        }
+    }
 
     private static void clearDeferredRecords() {
-        if (deferredRecords == null || deferredRecords.isEmpty()) {
-            return;
-        }
-        for (int i=0;i<deferredRecords.size(); i++) {
-            try {
-                DisposerRecord rec = deferredRecords.get(i);
-                rec.dispose();
-            } catch (Exception e) {
-                System.out.println("Exception while disposing deferred rec.");
+        while (!deferredRecords.isEmpty()) {
+            final DisposerRecord rec = deferredRecords.pollFirst();
+            if (rec != null) {
+                safeDispose(rec);
             }
         }
-        deferredRecords.clear();
     }
 
     /*
      * Set to indicate the queue is presently being polled.
      */
-    public static volatile boolean pollingQueue = false;
+    public static volatile boolean pollingQueue;
 
     /*
      * The pollRemove() method is called back from a dispose method
@@ -200,7 +171,7 @@ public class Disposer implements Runnable {
         if (pollingQueue) {
             return;
         }
-        Object obj;
+        Reference<?> obj;
         pollingQueue = true;
         int freed = 0;
         int deferred = 0;
@@ -208,10 +179,10 @@ public class Disposer implements Runnable {
             while ( freed < 10000 && deferred < 100 &&
                     (obj = queue.poll()) != null ) {
                 freed++;
-                ((Reference)obj).clear();
+                obj.clear();
                 DisposerRecord rec = records.remove(obj);
                 if (rec instanceof PollDisposable) {
-                    rec.dispose();
+                    safeDispose(rec);
                     obj = null;
                     rec = null;
                 } else {
@@ -219,13 +190,10 @@ public class Disposer implements Runnable {
                         continue;
                     }
                     deferred++;
-                    if (deferredRecords == null) {
-                      deferredRecords = new ArrayList<DisposerRecord>(5);
-                    }
-                    deferredRecords.add(rec);
+                    deferredRecords.offerLast(rec);
                 }
             }
-        } catch (Exception e) {
+        } catch (Throwable t) {
             System.out.println("Exception while removing reference.");
         } finally {
             pollingQueue = false;
@@ -242,7 +210,6 @@ public class Disposer implements Runnable {
      * so will clutter the records hashmap and no one will be cleaning up
      * the reference queue.
      */
-    @SuppressWarnings("unchecked")
     public static void addReference(Reference<Object> ref, DisposerRecord rec) {
         records.put(ref, rec);
     }

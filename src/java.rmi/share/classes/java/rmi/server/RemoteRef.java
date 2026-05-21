@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,7 +44,6 @@ public interface RemoteRef extends java.io.Externalizable {
      * ineffectual. Do not use; no replacement.
      */
     @Deprecated
-    @SuppressWarnings("serial")
     static final long serialVersionUID = 3632638527362204081L;
 
     /**
@@ -53,7 +52,7 @@ public interface RemoteRef extends java.io.Externalizable {
      * UnicastServerRef) are located in the package defined by the
      * prefix.
      */
-    final static String packagePrefix = "sun.rmi.server";
+    static final String packagePrefix = "sun.rmi.server";
 
     /**
      * Invoke a method. This form of delegating method invocation

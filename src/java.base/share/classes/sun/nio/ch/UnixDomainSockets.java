@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,7 +28,6 @@ package sun.nio.ch;
 import java.io.FileDescriptor;
 import java.io.IOException;
 import java.net.BindException;
-import java.net.NetPermission;
 import java.net.SocketAddress;
 import java.net.UnixDomainSocketAddress;
 import java.nio.channels.UnsupportedAddressTypeException;
@@ -44,36 +43,16 @@ import sun.nio.fs.AbstractFileSystemProvider;
 class UnixDomainSockets {
     private UnixDomainSockets() { }
 
-    static final UnixDomainSocketAddress UNNAMED = UnixDomainSocketAddress.of("");
+    private static class UnnamedHolder {
+        static final UnixDomainSocketAddress UNNAMED = UnixDomainSocketAddress.of("");
+    }
 
     private static final boolean supported;
 
     private static final String tempDir = UnixDomainSocketsUtil.getTempDir();
 
-    private static final NetPermission accessUnixDomainSocket =
-            new NetPermission("accessUnixDomainSocket");
-
     static boolean isSupported() {
         return supported;
-    }
-
-    static void checkPermission() {
-        @SuppressWarnings("removal")
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null)
-            sm.checkPermission(accessUnixDomainSocket);
-    }
-
-    static UnixDomainSocketAddress getRevealedLocalAddress(SocketAddress sa) {
-        UnixDomainSocketAddress addr = (UnixDomainSocketAddress) sa;
-        try {
-            checkPermission();
-            // Security check passed
-        } catch (SecurityException e) {
-            // Return unnamed address only if security check fails
-            addr = UNNAMED;
-        }
-        return addr;
     }
 
     static UnixDomainSocketAddress localAddress(FileDescriptor fd) throws IOException {
@@ -82,11 +61,6 @@ class UnixDomainSockets {
     }
 
     private static native byte[] localAddress0(FileDescriptor fd) throws IOException;
-
-    @SuppressWarnings("removal")
-    static String getRevealedLocalAddressAsString(SocketAddress sa) {
-        return (System.getSecurityManager() != null) ? sa.toString() : "";
-    }
 
     static UnixDomainSocketAddress checkAddress(SocketAddress sa) {
         if (sa == null)
@@ -133,7 +107,11 @@ class UnixDomainSockets {
             throw new BindException("Could not locate temporary directory for sockets");
         int rnd = random.nextInt(Integer.MAX_VALUE);
         try {
-            Path path = Path.of(dir, "socket_" + rnd);
+            final Path path = Path.of(dir, "socket_" + rnd);
+            if (path.getFileSystem().provider() != sun.nio.fs.DefaultFileSystemProvider.instance()) {
+                throw new UnsupportedOperationException(
+                        "Unix Domain Sockets not supported on non-default file system");
+            }
             return UnixDomainSocketAddress.of(path);
         } catch (InvalidPathException e) {
             throw new BindException("Invalid temporary directory");
@@ -158,6 +136,10 @@ class UnixDomainSockets {
             paths[0] = new String(bytes, UnixDomainSocketsUtil.getCharset());
         }
         return n;
+    }
+
+    static UnixDomainSocketAddress unnamed() {
+        return UnnamedHolder.UNNAMED;
     }
 
     private static native boolean init();

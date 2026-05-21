@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,33 +32,37 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.testng.annotations.BeforeClass;
-import org.testng.annotations.Test;
-import org.testng.Assert;
+import jdk.test.lib.net.IPSupport;
+
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.fail;
 
 
 /* @test
  * @bug 8244958
+ * @library /test/lib
+ * @build jdk.test.lib.Platform jdk.test.lib.net.IPSupport
  * @summary Test that "jdk.net.hosts.file" NameService implementation returns addresses
  *          with respect to "java.net.preferIPv4Stack" and "java.net.preferIPv6Addresses" system
  *          property values
- * @run testng/othervm -Djdk.net.hosts.file=TestHostsFile.txt
- *    -Djava.net.preferIPv4Stack=true -Djava.net.preferIPv6Addresses=true HostsFileOrderingTest
- * @run testng/othervm -Djdk.net.hosts.file=TestHostsFile.txt
- *    -Djava.net.preferIPv4Stack=true -Djava.net.preferIPv6Addresses=false HostsFileOrderingTest
- * @run testng/othervm -Djdk.net.hosts.file=TestHostsFile.txt
- *    -Djava.net.preferIPv4Stack=true -Djava.net.preferIPv6Addresses=system HostsFileOrderingTest
- * @run testng/othervm -Djdk.net.hosts.file=TestHostsFile.txt
- *    -Djava.net.preferIPv4Stack=true -Djava.net.preferIPv6Addresses=notVALID HostsFileOrderingTest
- * @run testng/othervm -Djdk.net.hosts.file=TestHostsFile.txt
- *    -Djava.net.preferIPv4Stack=false -Djava.net.preferIPv6Addresses=true HostsFileOrderingTest
- * @run testng/othervm -Djdk.net.hosts.file=TestHostsFile.txt
- *    -Djava.net.preferIPv4Stack=false -Djava.net.preferIPv6Addresses=false HostsFileOrderingTest
- * @run testng/othervm -Djdk.net.hosts.file=TestHostsFile.txt
- *    -Djava.net.preferIPv4Stack=false -Djava.net.preferIPv6Addresses=system HostsFileOrderingTest
- * @run testng/othervm -Djdk.net.hosts.file=TestHostsFile.txt
- *    -Djava.net.preferIPv4Stack=false -Djava.net.preferIPv6Addresses=notVALID HostsFileOrderingTest
- * @run testng/othervm -Djdk.net.hosts.file=TestHostsFile.txt HostsFileOrderingTest
+ * @run junit/othervm -Djdk.net.hosts.file=TestHostsFile.txt
+ *    -Djava.net.preferIPv4Stack=true -Djava.net.preferIPv6Addresses=true ${test.main.class}
+ * @run junit/othervm -Djdk.net.hosts.file=TestHostsFile.txt
+ *    -Djava.net.preferIPv4Stack=true -Djava.net.preferIPv6Addresses=false ${test.main.class}
+ * @run junit/othervm -Djdk.net.hosts.file=TestHostsFile.txt
+ *    -Djava.net.preferIPv4Stack=true -Djava.net.preferIPv6Addresses=system ${test.main.class}
+ * @run junit/othervm -Djdk.net.hosts.file=TestHostsFile.txt
+ *    -Djava.net.preferIPv4Stack=true -Djava.net.preferIPv6Addresses=notVALID ${test.main.class}
+ * @run junit/othervm -Djdk.net.hosts.file=TestHostsFile.txt
+ *    -Djava.net.preferIPv4Stack=false -Djava.net.preferIPv6Addresses=true ${test.main.class}
+ * @run junit/othervm -Djdk.net.hosts.file=TestHostsFile.txt
+ *    -Djava.net.preferIPv4Stack=false -Djava.net.preferIPv6Addresses=false ${test.main.class}
+ * @run junit/othervm -Djdk.net.hosts.file=TestHostsFile.txt
+ *    -Djava.net.preferIPv4Stack=false -Djava.net.preferIPv6Addresses=system ${test.main.class}
+ * @run junit/othervm -Djdk.net.hosts.file=TestHostsFile.txt
+ *    -Djava.net.preferIPv4Stack=false -Djava.net.preferIPv6Addresses=notVALID ${test.main.class}
+ * @run junit/othervm -Djdk.net.hosts.file=TestHostsFile.txt ${test.main.class}
  */
 
 public class HostsFileOrderingTest {
@@ -66,8 +70,8 @@ public class HostsFileOrderingTest {
     /*
      * Generate hosts file with the predefined list of IP addresses
      */
-    @BeforeClass
-    public void generateHostsFile() throws Exception {
+    @BeforeAll
+    public static void generateHostsFile() throws Exception {
         String content = ADDRESSES_LIST.stream()
                 .map(addr -> addr + " " + TEST_HOST_NAME)
                 .collect(
@@ -93,7 +97,7 @@ public class HostsFileOrderingTest {
         } else {
             System.err.printf("Expected addresses:%n%s%n", Arrays.deepToString(expectedAddresses));
             System.err.printf("Resolved addresses:%n%s%n", Arrays.deepToString(resolvedAddresses));
-            Assert.fail("Wrong host resolution result is returned");
+            fail("Wrong host resolution result is returned");
         }
     }
 
@@ -104,6 +108,9 @@ public class HostsFileOrderingTest {
     static ExpectedOrder getExpectedOrderFromSystemProperties() {
         if (PREFER_IPV4_STACK_VALUE != null &&
             PREFER_IPV4_STACK_VALUE.equalsIgnoreCase("true")) {
+            return ExpectedOrder.IPV4_ONLY;
+        }
+        if (!IPSupport.hasIPv6()) {
             return ExpectedOrder.IPV4_ONLY;
         }
 

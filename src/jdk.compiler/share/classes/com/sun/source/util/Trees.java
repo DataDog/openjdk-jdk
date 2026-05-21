@@ -50,6 +50,8 @@ import com.sun.source.tree.Tree;
  * Bridges JSR 199, JSR 269, and the Tree API.
  *
  * @author Peter von der Ah&eacute;
+ *
+ * @since 1.6
  */
 public abstract class Trees {
     /**
@@ -72,7 +74,7 @@ public abstract class Trees {
     }
 
     /**
-     * Returns a {code Trees} object for a given {@code ProcessingEnvironment}.
+     * Returns a {@code Trees} object for a given {@code ProcessingEnvironment}.
      * @param env the processing environment for which to get the {@code Trees} object
      * @throws IllegalArgumentException if the env does not support the Tree API.
      * @return the {@code Trees} object

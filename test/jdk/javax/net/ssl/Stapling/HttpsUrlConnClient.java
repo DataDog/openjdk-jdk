@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,12 +28,16 @@
  * @test
  * @bug 8046321 8153829
  * @summary OCSP Stapling for TLS
- * @library ../../../../java/security/testlibrary
- * @build CertificateBuilder SimpleOCSPServer
- * @run main/othervm HttpsUrlConnClient
+ * @library /test/lib
+ * @run main/othervm HttpsUrlConnClient RSA SHA256withRSA
+ * @run main/othervm HttpsUrlConnClient RSASSA-PSS RSASSA-PSS
  */
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.math.BigInteger;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -41,7 +45,9 @@ import java.net.Socket;
 import java.net.URL;
 import java.net.HttpURLConnection;
 import java.net.InetAddress;
+
 import javax.net.ssl.*;
+
 import java.security.KeyStore;
 import java.security.PublicKey;
 import java.security.Security;
@@ -55,12 +61,20 @@ import java.security.cert.X509Certificate;
 import java.security.cert.PKIXRevocationChecker;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.TimeZone;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import sun.security.testlibrary.SimpleOCSPServer;
-import sun.security.testlibrary.CertificateBuilder;
-import sun.security.validator.ValidatorException;
+import jdk.test.lib.security.SimpleOCSPServer;
+import jdk.test.lib.security.CertificateBuilder;
 
 public class HttpsUrlConnClient {
 
@@ -72,6 +86,9 @@ public class HttpsUrlConnClient {
 
     static final byte[] LINESEP = { 10 };
     static final Base64.Encoder B64E = Base64.getMimeEncoder(64, LINESEP);
+
+    static String SIGALG;
+    static String KEYALG;
 
     // Turn on TLS debugging
     static boolean debug = true;
@@ -90,10 +107,6 @@ public class HttpsUrlConnClient {
     static String INT_ALIAS = "intermediate";
     static String SSL_ALIAS = "ssl";
 
-    /*
-     * Is the server ready to serve?
-     */
-    volatile static boolean serverReady = false;
     volatile int serverPort = 0;
 
     volatile Exception serverException = null;
@@ -137,6 +150,9 @@ public class HttpsUrlConnClient {
         System.setProperty("javax.net.ssl.trustStore", "");
         System.setProperty("javax.net.ssl.trustStorePassword", "");
 
+        KEYALG = args[0];
+        SIGALG = args[1];
+
         // Create the PKI we will use for the test and start the OCSP servers
         createPKI();
         utcDateFmt.setTimeZone(TimeZone.getTimeZone("GMT"));
@@ -159,7 +175,7 @@ public class HttpsUrlConnClient {
         ClientParameters cliParams = new ClientParameters();
         cliParams.protocols = allowedProts;
         ServerParameters servParams = new ServerParameters();
-        serverReady = false;
+        CountDownLatch serverReady = new CountDownLatch(1);
 
         System.out.println("=====================================");
         System.out.println("Stapling enabled, PKIXParameters with");
@@ -187,7 +203,7 @@ public class HttpsUrlConnClient {
         Security.setProperty("ocsp.enable", "false");
 
         HttpsUrlConnClient sslTest = new HttpsUrlConnClient(cliParams,
-                servParams);
+                servParams, serverReady);
         TestResult tr = sslTest.getResult();
         if (!checkClientValidationFailure(tr.clientExc, BasicReason.REVOKED)) {
             if (tr.clientExc != null) {
@@ -214,10 +230,11 @@ public class HttpsUrlConnClient {
     /*
      * Define the server side of the test.
      *
-     * If the server prematurely exits, serverReady will be set to true
+     * If the server prematurely exits, serverReady will be counted down
      * to avoid infinite hangs.
      */
-    void doServerSide(ServerParameters servParams) throws Exception {
+    void doServerSide(ServerParameters servParams, CountDownLatch serverReady)
+            throws Exception {
 
         // Selectively enable or disable the feature
         System.setProperty("jdk.tls.server.enableStatusRequestExtension",
@@ -269,7 +286,7 @@ public class HttpsUrlConnClient {
         /*
          * Signal Client, we're ready for his connect.
          */
-        serverReady = true;
+        serverReady.countDown();
 
         try (SSLSocket sslSocket = (SSLSocket) sslServerSocket.accept();
                 BufferedReader in = new BufferedReader(
@@ -301,18 +318,13 @@ public class HttpsUrlConnClient {
     /*
      * Define the client side of the test.
      *
-     * If the server prematurely exits, serverReady will be set to true
+     * If the server prematurely exits, serverReady will be counted down
      * to avoid infinite hangs.
      */
-    void doClientSide(ClientParameters cliParams) throws Exception {
+    void doClientSide(ClientParameters cliParams, CountDownLatch serverReady)
+            throws Exception {
 
-        // Wait 5 seconds for server ready
-        for (int i = 0; (i < 100 && !serverReady); i++) {
-            Thread.sleep(50);
-        }
-        if (!serverReady) {
-            throw new RuntimeException("Server not ready yet");
-        }
+        serverReady.await();
 
         // Selectively enable or disable the feature
         System.setProperty("jdk.tls.client.enableStatusRequestExtension",
@@ -368,16 +380,16 @@ public class HttpsUrlConnClient {
      *
      * Fork off the other side, then do your work.
      */
-    HttpsUrlConnClient(ClientParameters cliParams,
-            ServerParameters servParams) throws Exception {
+    HttpsUrlConnClient(ClientParameters cliParams, ServerParameters servParams,
+            CountDownLatch serverReady) throws Exception {
         Exception startException = null;
         try {
             if (separateServerThread) {
-                startServer(servParams, true);
-                startClient(cliParams, false);
+                startServer(servParams, true, serverReady);
+                startClient(cliParams, false, serverReady);
             } else {
-                startClient(cliParams, true);
-                startServer(servParams, false);
+                startClient(cliParams, true, serverReady);
+                startServer(servParams, false, serverReady);
             }
         } catch (Exception e) {
             startException = e;
@@ -448,51 +460,53 @@ public class HttpsUrlConnClient {
         return tr;
     }
 
-    final void startServer(ServerParameters servParams, boolean newThread)
-            throws Exception {
+    final void startServer(ServerParameters servParams, boolean newThread,
+            CountDownLatch serverReady) throws IOException {
         if (newThread) {
             serverThread = new Thread() {
                 @Override
                 public void run() {
                     try {
-                        doServerSide(servParams);
+                        doServerSide(servParams, serverReady);
                     } catch (Exception e) {
                         /*
                          * Our server thread just died.
                          *
                          * Release the client, if not active already...
                          */
-                        System.err.println("Server died...");
-                        serverReady = true;
+                        System.err.println("Server died: " + e);
                         serverException = e;
+                    } finally {
+                        serverReady.countDown();
                     }
                 }
             };
             serverThread.start();
         } else {
             try {
-                doServerSide(servParams);
+                doServerSide(servParams, serverReady);
             } catch (Exception e) {
+                System.err.println("Server died: " + e);
                 serverException = e;
             } finally {
-                serverReady = true;
+                serverReady.countDown();
             }
         }
     }
 
-    final void startClient(ClientParameters cliParams, boolean newThread)
-            throws Exception {
+    final void startClient(ClientParameters cliParams, boolean newThread,
+            CountDownLatch serverReady) throws Exception {
         if (newThread) {
             clientThread = new Thread() {
                 @Override
                 public void run() {
                     try {
-                        doClientSide(cliParams);
+                        doClientSide(cliParams, serverReady);
                     } catch (Exception e) {
                         /*
                          * Our client thread just died.
                          */
-                        System.err.println("Client died...");
+                        System.err.println("Client died: " + e);
                         clientException = e;
                     }
                 }
@@ -500,9 +514,10 @@ public class HttpsUrlConnClient {
             clientThread.start();
         } else {
             try {
-                doClientSide(cliParams);
+                doClientSide(cliParams, serverReady);
             } catch (Exception e) {
                 clientException = e;
+                System.err.println("Client died: " + e);
             }
         }
     }
@@ -514,7 +529,7 @@ public class HttpsUrlConnClient {
      */
     private static void createPKI() throws Exception {
         CertificateBuilder cbld = new CertificateBuilder();
-        KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
+        KeyPairGenerator keyGen = KeyPairGenerator.getInstance(KEYALG);
         keyGen.initialize(2048);
         KeyStore.Builder keyStoreBuilder =
                 KeyStore.Builder.newInstance("PKCS12", null,
@@ -540,7 +555,7 @@ public class HttpsUrlConnClient {
         addCommonCAExts(cbld);
         // Make our Root CA Cert!
         X509Certificate rootCert = cbld.build(null, rootCaKP.getPrivate(),
-                "SHA256withRSA");
+                SIGALG);
         log("Root CA Created:\n" + certInfo(rootCert));
 
         // Now build a keystore and add the keys and cert
@@ -556,11 +571,9 @@ public class HttpsUrlConnClient {
         rootOcsp.start();
 
         // Wait 5 seconds for server ready
-        for (int i = 0; (i < 100 && !rootOcsp.isServerReady()); i++) {
-            Thread.sleep(50);
-        }
-        if (!rootOcsp.isServerReady()) {
-            throw new RuntimeException("Server not ready yet");
+        boolean readyStatus = rootOcsp.awaitServerReady(5, TimeUnit.SECONDS);
+        if (!readyStatus) {
+            throw new RuntimeException("Server not ready");
         }
 
         rootOcspPort = rootOcsp.getPort();
@@ -582,7 +595,7 @@ public class HttpsUrlConnClient {
         cbld.addAIAExt(Collections.singletonList(rootRespURI));
         // Make our Intermediate CA Cert!
         X509Certificate intCaCert = cbld.build(rootCert, rootCaKP.getPrivate(),
-                "SHA256withRSA");
+                SIGALG);
         log("Intermediate CA Created:\n" + certInfo(intCaCert));
 
         // Provide intermediate CA cert revocation info to the Root CA
@@ -609,11 +622,9 @@ public class HttpsUrlConnClient {
         intOcsp.start();
 
         // Wait 5 seconds for server ready
-        for (int i = 0; (i < 100 && !intOcsp.isServerReady()); i++) {
-            Thread.sleep(50);
-        }
-        if (!intOcsp.isServerReady()) {
-            throw new RuntimeException("Server not ready yet");
+        readyStatus = intOcsp.awaitServerReady(5, TimeUnit.SECONDS);
+        if (!readyStatus) {
+            throw new RuntimeException("Server not ready");
         }
 
         intOcspPort = intOcsp.getPort();
@@ -644,7 +655,7 @@ public class HttpsUrlConnClient {
         cbld.addAIAExt(Collections.singletonList(intCaRespURI));
         // Make our SSL Server Cert!
         X509Certificate sslCert = cbld.build(intCaCert, intCaKP.getPrivate(),
-                "SHA256withRSA");
+                SIGALG);
         log("SSL Certificate Created:\n" + certInfo(sslCert));
 
         // Provide SSL server cert revocation info to the Intermeidate CA

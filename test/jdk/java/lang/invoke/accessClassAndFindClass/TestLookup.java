@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -25,15 +23,15 @@
 
 /* @test
  * @compile TestLookup.java TestCls.java
- * @run testng/othervm -ea -esa test.java.lang.invoke.TestLookup
+ * @run junit/othervm -ea -esa test.java.lang.invoke.TestLookup
  */
 package test.java.lang.invoke;
 
-import org.testng.annotations.Test;
-
 import static java.lang.invoke.MethodHandles.*;
 
-import static org.testng.AssertJUnit.*;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.*;
 
 public class TestLookup {
 
@@ -45,10 +43,10 @@ public class TestLookup {
         assertNull(lookup2.lookupClass().getClassLoader());
     }
 
-    @Test(expectedExceptions = {ClassNotFoundException.class})
+    @Test
     public void testPublicCannotLoadUserClass() throws IllegalAccessException, ClassNotFoundException {
         Lookup lookup = publicLookup();
-        lookup.findClass("test.java.lang.invoke.TestCls");
+        assertThrows(ClassNotFoundException.class, () -> lookup.findClass("test.java.lang.invoke.TestCls"));
     }
 
     @Test

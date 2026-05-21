@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,6 +37,10 @@
 #import "GeomUtilities.h"
 #import "JNIUtilities.h"
 
+#define ONE_SIDED 0
+#define TWO_SIDED_LONG_EDGE 1
+#define TWO_SIDED_SHORT_EDGE 2
+
 static jclass sjc_Paper = NULL;
 static jclass sjc_PageFormat = NULL;
 static jclass sjc_CPrinterJob = NULL;
@@ -59,7 +63,7 @@ static jmethodID sjm_printerJob = NULL;
    GET_CPRINTERDIALOG_CLASS_RETURN(ret); \
    GET_FIELD_RETURN(sjm_printerJob, sjc_CPrinterDialog, "fPrinterJob", "Lsun/lwawt/macosx/CPrinterJob;", ret);
 
-static NSPrintInfo* createDefaultNSPrintInfo();
+static NSPrintInfo* createDefaultNSPrintInfo(JNIEnv* env, jstring printer);
 
 static void makeBestFit(NSPrintInfo* src);
 
@@ -351,6 +355,24 @@ static void javaPageFormatToNSPrintInfo(JNIEnv* env, jobject srcPrintJob, jobjec
     [dstPrintInfo setPrinter:printer];
 }
 
+static jint duplexModeToSides(PMDuplexMode duplexMode) {
+    switch(duplexMode) {
+        case kPMDuplexNone: return ONE_SIDED;
+        case kPMDuplexTumble: return TWO_SIDED_SHORT_EDGE;
+        case kPMDuplexNoTumble: return TWO_SIDED_LONG_EDGE;
+        default: return -1;
+    }
+}
+
+static PMDuplexMode sidesToDuplexMode(jint sides) {
+    switch(sides) {
+        case ONE_SIDED: return kPMDuplexNone;
+        case TWO_SIDED_SHORT_EDGE: return kPMDuplexTumble;
+        case TWO_SIDED_LONG_EDGE: return kPMDuplexNoTumble;
+        default: return kPMDuplexNone;
+    }
+}
+
 static void nsPrintInfoToJavaPrinterJob(JNIEnv* env, NSPrintInfo* src, jobject dstPrinterJob, jobject dstPageable)
 {
     GET_CPRINTERJOB_CLASS();
@@ -360,6 +382,8 @@ static void nsPrintInfoToJavaPrinterJob(JNIEnv* env, NSPrintInfo* src, jobject d
     DECLARE_METHOD(jm_setPageRangeAttribute, sjc_CPrinterJob, "setPageRangeAttribute", "(IIZ)V");
     DECLARE_METHOD(jm_setPrintToFile, sjc_CPrinterJob, "setPrintToFile", "(Z)V");
     DECLARE_METHOD(jm_setDestinationFile, sjc_CPrinterJob, "setDestinationFile", "(Ljava/lang/String;)V");
+    DECLARE_METHOD(jm_setSides, sjc_CPrinterJob, "setSides", "(I)V");
+    DECLARE_METHOD(jm_setOutputBin, sjc_CPrinterJob, "setOutputBin", "(Ljava/lang/String;)V");
 
     // get the selected printer's name, and set the appropriate PrintService on the Java side
     NSString *name = [[src printer] name];
@@ -420,6 +444,19 @@ static void nsPrintInfoToJavaPrinterJob(JNIEnv* env, NSPrintInfo* src, jobject d
                           jFirstPage, jLastPage, isRangeSet); // AWT_THREADING Safe (known object)
         CHECK_EXCEPTION();
 
+        PMDuplexMode duplexSetting;
+        if (PMGetDuplex(src.PMPrintSettings, &duplexSetting) == noErr) {
+            jint sides = duplexModeToSides(duplexSetting);
+            (*env)->CallVoidMethod(env, dstPrinterJob, jm_setSides, sides); // AWT_THREADING Safe (known object)
+            CHECK_EXCEPTION();
+        }
+
+        NSString* outputBin = [[src printSettings] objectForKey:@"OutputBin"];
+        if (outputBin != nil) {
+            jstring outputBinName = NSStringToJavaString(env, outputBin);
+            (*env)->CallVoidMethod(env, dstPrinterJob, jm_setOutputBin, outputBinName);
+            CHECK_EXCEPTION();
+        }
     }
 }
 
@@ -438,6 +475,9 @@ static void javaPrinterJobToNSPrintInfo(JNIEnv* env, jobject srcPrinterJob, jobj
     DECLARE_METHOD(jm_getNumberOfPages, jc_Pageable, "getNumberOfPages", "()I");
     DECLARE_METHOD(jm_getPageFormat, sjc_CPrinterJob, "getPageFormatFromAttributes", "()Ljava/awt/print/PageFormat;");
     DECLARE_METHOD(jm_getDestinationFile, sjc_CPrinterJob, "getDestinationFile", "()Ljava/lang/String;");
+    DECLARE_METHOD(jm_getSides, sjc_CPrinterJob, "getSides", "()I");
+    DECLARE_METHOD(jm_getOutputBin, sjc_CPrinterJob, "getOutputBin", "()Ljava/lang/String;");
+
 
     NSMutableDictionary* printingDictionary = [dst dictionary];
 
@@ -495,6 +535,26 @@ static void javaPrinterJobToNSPrintInfo(JNIEnv* env, jobject srcPrinterJob, jobj
        [printingDictionary setObject:nsURL forKey:NSPrintJobSavingURL];
     } else {
        [dst setJobDisposition:NSPrintSpoolJob];
+    }
+
+    jint sides = (*env)->CallIntMethod(env, srcPrinterJob, jm_getSides);
+    CHECK_EXCEPTION();
+
+    if (sides >= 0) {
+        PMDuplexMode duplexMode = sidesToDuplexMode(sides);
+        PMPrintSettings printSettings = dst.PMPrintSettings;
+        if (PMSetDuplex(printSettings, duplexMode) == noErr) {
+            [dst updateFromPMPrintSettings];
+        }
+    }
+
+    jobject outputBin = (*env)->CallObjectMethod(env, srcPrinterJob, jm_getOutputBin);
+    CHECK_EXCEPTION();
+    if (outputBin != NULL) {
+        NSString *nsOutputBinStr = JavaStringToNSString(env, outputBin);
+        if (nsOutputBinStr != nil) {
+            [[dst printSettings] setObject:nsOutputBinStr forKey:@"OutputBin"];
+        }
     }
 }
 
@@ -557,11 +617,11 @@ JNI_COCOA_EXIT(env);
  * Signature: ()J
  */
 JNIEXPORT jlong JNICALL Java_sun_lwawt_macosx_CPrinterJob_createNSPrintInfo
-  (JNIEnv *env, jobject jthis)
+  (JNIEnv *env, jclass clazz)
 {
     jlong result = -1;
 JNI_COCOA_ENTER(env);
-    // This is used to create the NSPrintInfo for this PrinterJob. Thread
+    // This is used to create the NSPrintInfo for a PrinterJob. Thread
     //  safety is assured by the java side of this call.
 
     NSPrintInfo* printInfo = createDefaultNSPrintInfo(env, NULL);
@@ -574,11 +634,11 @@ JNI_COCOA_EXIT(env);
 
 /*
  * Class:     sun_lwawt_macosx_CPrinterJob
- * Method:    dispose
+ * Method:    disposeNSPrintInfo
  * Signature: (J)V
  */
-JNIEXPORT void JNICALL Java_sun_lwawt_macosx_CPrinterJob_dispose
-  (JNIEnv *env, jobject jthis, jlong nsPrintInfo)
+JNIEXPORT void JNICALL Java_sun_lwawt_macosx_CPrinterJob_disposeNSPrintInfo
+  (JNIEnv *env, jclass clazz, jlong nsPrintInfo)
 {
 JNI_COCOA_ENTER(env);
     if (nsPrintInfo != -1)
@@ -596,7 +656,7 @@ JNI_COCOA_EXIT(env);
  * Signature: ()V
  */
 JNIEXPORT jboolean JNICALL Java_sun_lwawt_macosx_CPrinterJob_printLoop
-  (JNIEnv *env, jobject jthis, jboolean blocks, jint firstPage, jint lastPage)
+  (JNIEnv *env, jobject jthis, jboolean blocks, jint firstPage, jint totalPages)
 {
     AWT_ASSERT_NOT_APPKIT_THREAD;
 
@@ -612,14 +672,14 @@ JNIEXPORT jboolean JNICALL Java_sun_lwawt_macosx_CPrinterJob_printLoop
 JNI_COCOA_ENTER(env);
     // Get the first page's PageFormat for setting things up (This introduces
     //  and is a facet of the same problem in Radar 2818593/2708932).
-    jobject page = (*env)->CallObjectMethod(env, jthis, jm_getPageFormat, 0); // AWT_THREADING Safe (!appKit)
+    jobject page = (*env)->CallObjectMethod(env, jthis, jm_getPageFormat, firstPage); // AWT_THREADING Safe (!appKit)
     CHECK_EXCEPTION();
     if (page != NULL) {
         jobject pageFormatArea = (*env)->CallObjectMethod(env, jthis, jm_getPageFormatArea, page); // AWT_THREADING Safe (!appKit)
         CHECK_EXCEPTION();
 
         PrinterView* printerView = [[PrinterView alloc] initWithFrame:JavaToNSRect(env, pageFormatArea) withEnv:env withPrinterJob:jthis];
-        [printerView setFirstPage:firstPage lastPage:lastPage];
+        [printerView setTotalPages:totalPages];
 
         GET_NSPRINTINFO_METHOD_RETURN(NO)
         NSPrintInfo* printInfo = (NSPrintInfo*)jlong_to_ptr((*env)->CallLongMethod(env, jthis, sjm_getNSPrintInfo)); // AWT_THREADING Safe (known object)

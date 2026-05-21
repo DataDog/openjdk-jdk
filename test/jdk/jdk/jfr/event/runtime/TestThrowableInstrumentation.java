@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
 
 package jdk.jfr.event.runtime;
 
-import sun.hotspot.WhiteBox;
+import jdk.test.whitebox.WhiteBox;
 import java.util.Objects;
 import jdk.test.lib.Platform;
 
@@ -36,8 +36,8 @@ import jdk.test.lib.Platform;
  * @modules java.base/jdk.internal.misc
  *          java.management
  * @requires vm.compMode!="Xint"
- * @build  sun.hotspot.WhiteBox
- * @run driver jdk.test.lib.helpers.ClassFileInstaller sun.hotspot.WhiteBox
+ * @build  jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run main/othervm -Xbootclasspath/a:. -XX:+UnlockDiagnosticVMOptions -XX:+WhiteBoxAPI
  *                   -Xbatch -XX:StartFlightRecording:dumponexit=true jdk.jfr.event.runtime.TestThrowableInstrumentation
  */
@@ -52,7 +52,7 @@ public class TestThrowableInstrumentation {
     public static void main(String[] args) {
         // Compile Throwable::<clinit> with C1 (if available)
         if (!WHITE_BOX.enqueueInitializerForCompilation(java.lang.Throwable.class, COMP_LEVEL_SIMPLE)) {
-          if (!Platform.isServer() || isTieredCompilationEnabled() || Platform.isEmulatedClient()) {
+          if (!Platform.isServer() || isTieredCompilationEnabled()) {
             throw new RuntimeException("Unable to compile Throwable::<clinit> with C1");
           }
         }

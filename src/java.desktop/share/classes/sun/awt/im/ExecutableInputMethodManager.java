@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,16 +35,11 @@ import java.awt.PopupMenu;
 import java.awt.Menu;
 import java.awt.MenuItem;
 import java.awt.Toolkit;
-import sun.awt.AppContext;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.InvocationEvent;
 import java.awt.im.spi.InputMethodDescriptor;
 import java.lang.reflect.InvocationTargetException;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
-import java.security.PrivilegedActionException;
-import java.security.PrivilegedExceptionAction;
 import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.Locale;
@@ -61,7 +56,7 @@ import sun.awt.SunToolkit;
  * {@code InputMethodManager} class. It is runnable as a separate
  * thread in the AWT environment.&nbsp;
  * {@code InputMethodManager.getInstance()} creates an instance of
- * {@code ExecutableInputMethodManager} and executes it as a deamon
+ * {@code ExecutableInputMethodManager} and executes it as a daemon
  * thread.
  *
  * @see InputMethodManager
@@ -181,9 +176,8 @@ class ExecutableInputMethodManager extends InputMethodManager
                                     lock,
                                     true);
 
-        AppContext requesterAppContext = SunToolkit.targetToAppContext(requester);
         synchronized (lock) {
-            SunToolkit.postEvent(requesterAppContext, event);
+            SunToolkit.postEvent(event);
             while (!event.isDispatched()) {
                 lock.wait();
             }
@@ -252,24 +246,14 @@ class ExecutableInputMethodManager extends InputMethodManager
      * initializes the input method locator list for all
      * installed input method descriptors.
      */
-    @SuppressWarnings("removal")
     private void initializeInputMethodLocatorList() {
         synchronized (javaInputMethodLocatorList) {
             javaInputMethodLocatorList.clear();
-            try {
-                AccessController.doPrivileged(new PrivilegedExceptionAction<Object>() {
-                    public Object run() {
-                        for (InputMethodDescriptor descriptor :
-                            ServiceLoader.load(InputMethodDescriptor.class,
-                                               ClassLoader.getSystemClassLoader())) {
-                            ClassLoader cl = descriptor.getClass().getClassLoader();
-                            javaInputMethodLocatorList.add(new InputMethodLocator(descriptor, cl, null));
-                        }
-                        return null;
-                    }
-                });
-            }  catch (PrivilegedActionException e) {
-                e.printStackTrace();
+            for (InputMethodDescriptor descriptor :
+                ServiceLoader.load(InputMethodDescriptor.class,
+                                   ClassLoader.getSystemClassLoader())) {
+                ClassLoader cl = descriptor.getClass().getClassLoader();
+                javaInputMethodLocatorList.add(new InputMethodLocator(descriptor, cl, null));
             }
             javaInputMethodCount = javaInputMethodLocatorList.size();
         }
@@ -375,7 +359,7 @@ class ExecutableInputMethodManager extends InputMethodManager
                     variant = localeString.substring(postIndex + 1);
                 }
             }
-            Locale locale = new Locale(language, country, variant);
+            Locale locale = Locale.of(language, country, variant);
             locator = locator.deriveLocator(locale);
         }
 
@@ -550,8 +534,8 @@ class ExecutableInputMethodManager extends InputMethodManager
         if (preferredLocale.equals(Locale.KOREA)) {
             preferredLocale = Locale.KOREAN;
         }
-        if (preferredLocale.equals(new Locale("th", "TH"))) {
-            preferredLocale = new Locale("th");
+        if (preferredLocale.equals(Locale.of("th", "TH"))) {
+            preferredLocale = Locale.of("th");
         }
 
         // obtain node
@@ -594,13 +578,8 @@ class ExecutableInputMethodManager extends InputMethodManager
         }
     }
 
-    @SuppressWarnings("removal")
     private Preferences getUserRoot() {
-        return AccessController.doPrivileged(new PrivilegedAction<Preferences>() {
-            public Preferences run() {
-                return Preferences.userRoot();
-            }
-        });
+        return Preferences.userRoot();
     }
 
     private Locale getAdvertisedLocale(InputMethodLocator locator, Locale locale) {
@@ -623,10 +602,10 @@ class ExecutableInputMethodManager extends InputMethodManager
                 advertised = Locale.KOREAN;
             }
         } else if (locale.getLanguage().equals("th")) {
-            if (locator.isLocaleAvailable(new Locale("th", "TH"))) {
-                advertised = new Locale("th", "TH");
-            } else if (locator.isLocaleAvailable(new Locale("th"))) {
-                advertised = new Locale("th");
+            if (locator.isLocaleAvailable(Locale.of("th", "TH"))) {
+                advertised = Locale.of("th", "TH");
+            } else if (locator.isLocaleAvailable(Locale.of("th"))) {
+                advertised = Locale.of("th");
             }
         }
 

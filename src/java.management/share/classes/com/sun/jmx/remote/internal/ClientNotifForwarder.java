@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,9 +33,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
 
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import javax.security.auth.Subject;
 
 import javax.management.Notification;
@@ -51,14 +48,10 @@ import javax.management.remote.TargetedNotification;
 
 import com.sun.jmx.remote.util.ClassLogger;
 import com.sun.jmx.remote.util.EnvHelp;
-import java.lang.reflect.UndeclaredThrowableException;
 import java.util.concurrent.RejectedExecutionException;
 
 
 public abstract class ClientNotifForwarder {
-
-    @SuppressWarnings("removal")
-    private final AccessControlContext acc;
 
     public ClientNotifForwarder(Map<String, ?> env) {
         this(null, env);
@@ -140,36 +133,34 @@ public abstract class ClientNotifForwarder {
 
         this.defaultClassLoader = defaultClassLoader;
         this.executor = ex;
-        this.acc = AccessController.getContext();
     }
 
     /**
      * Called to fetch notifications from a server.
      */
-    abstract protected NotificationResult fetchNotifs(long clientSequenceNumber,
+    protected abstract NotificationResult fetchNotifs(long clientSequenceNumber,
                                                       int maxNotifications,
                                                       long timeout)
             throws IOException, ClassNotFoundException;
 
-    abstract protected Integer addListenerForMBeanRemovedNotif()
+    protected abstract Integer addListenerForMBeanRemovedNotif()
         throws IOException, InstanceNotFoundException;
 
-    abstract protected void removeListenerForMBeanRemovedNotif(Integer id)
+    protected abstract void removeListenerForMBeanRemovedNotif(Integer id)
         throws IOException, InstanceNotFoundException,
                ListenerNotFoundException;
 
     /**
      * Used to send out a notification about lost notifs
      */
-    abstract protected void lostNotifs(String message, long number);
+    protected abstract void lostNotifs(String message, long number);
 
 
     public synchronized void addNotificationListener(Integer listenerID,
                                         ObjectName name,
                                         NotificationListener listener,
                                         NotificationFilter filter,
-                                        Object handback,
-                                        Subject delegationSubject)
+                                        Object handback)
             throws IOException, InstanceNotFoundException {
 
         if (logger.traceOn()) {
@@ -182,9 +173,7 @@ public abstract class ClientNotifForwarder {
                                             name,
                                             listener,
                                             filter,
-                                            handback,
-                                            delegationSubject));
-
+                                            handback));
 
         init(false);
     }
@@ -194,9 +183,8 @@ public abstract class ClientNotifForwarder {
                    NotificationListener listener)
             throws ListenerNotFoundException, IOException {
 
-        List<Integer> ids = new ArrayList<Integer>();
-        List<ClientListenerInfo> values =
-                new ArrayList<ClientListenerInfo>(infoList.values());
+        List<Integer> ids = new ArrayList<>();
+        List<ClientListenerInfo> values = new ArrayList<>(infoList.values());
         for (int i=values.size()-1; i>=0; i--) {
             ClientListenerInfo li = values.get(i);
 
@@ -220,8 +208,7 @@ public abstract class ClientNotifForwarder {
 
         Integer id = null;
 
-        List<ClientListenerInfo> values =
-                new ArrayList<ClientListenerInfo>(infoList.values());
+        List<ClientListenerInfo> values = new ArrayList<>(infoList.values());
         for (int i=values.size()-1; i>=0; i--) {
             ClientListenerInfo li = values.get(i);
             if (li.sameAs(name, listener, filter, handback)) {
@@ -281,10 +268,9 @@ public abstract class ClientNotifForwarder {
                          "Remove all listeners registered at "+name);
         }
 
-        List<Integer> ids = new ArrayList<Integer>();
+        List<Integer> ids = new ArrayList<>();
 
-        List<ClientListenerInfo> values =
-                new ArrayList<ClientListenerInfo>(infoList.values());
+        List<ClientListenerInfo> values = new ArrayList<>(infoList.values());
         for (int i=values.size()-1; i>=0; i--) {
             ClientListenerInfo li = values.get(i);
             if (li.sameAs(name)) {
@@ -305,7 +291,7 @@ public abstract class ClientNotifForwarder {
      * and the thread used to fetch notifis will be stopped, a new thread can be
      * created only after the method <code>postReconnection</code> is called.
      *
-     * It is caller's responsiblity to not re-call this method before calling
+     * It is caller's responsibility to not re-call this method before calling
      * <code>postReconnection</code>.
      */
     public synchronized ClientListenerInfo[] preReconnection() throws IOException {
@@ -340,9 +326,7 @@ public abstract class ClientNotifForwarder {
             try {
                 wait();
             } catch (InterruptedException ire) {
-                IOException ioe = new IOException(ire.toString());
-                EnvHelp.initCause(ioe, ire);
-                throw ioe;
+                throw new IOException(ire.toString(), ire);
             }
         }
 
@@ -381,9 +365,7 @@ public abstract class ClientNotifForwarder {
                   try {
                       wait();
                   } catch (InterruptedException ire) {
-                      IOException ioe = new IOException(ire.toString());
-                      EnvHelp.initCause(ioe, ire);
-                      throw ioe;
+                      throw new IOException(ire.toString(), ire);
                   }
               }
 
@@ -430,40 +412,14 @@ public abstract class ClientNotifForwarder {
         }
 
         // Set new context class loader, returns previous one.
-        @SuppressWarnings("removal")
         private final ClassLoader setContextClassLoader(final ClassLoader loader) {
-            final AccessControlContext ctxt = ClientNotifForwarder.this.acc;
-            // if ctxt is null, log a config message and throw a
-            // SecurityException.
-            if (ctxt == null) {
-                logOnce("AccessControlContext must not be null.",null);
-                throw new SecurityException("AccessControlContext must not be null");
-            }
-            return AccessController.doPrivileged(
-                new PrivilegedAction<ClassLoader>() {
-                    public ClassLoader run() {
-                        try {
-                            // get context class loader - may throw
-                            // SecurityException - though unlikely.
-                            final ClassLoader previous =
-                                Thread.currentThread().getContextClassLoader();
+            final ClassLoader previous = Thread.currentThread().getContextClassLoader();
 
-                            // if nothing needs to be done, break here...
-                            if (loader == previous) return previous;
+            // if nothing needs to be done, break here...
+            if (loader == previous) return previous;
 
-                            // reset context class loader - may throw
-                            // SecurityException
-                            Thread.currentThread().setContextClassLoader(loader);
-                            return previous;
-                        } catch (SecurityException x) {
-                            logOnce("Permission to set ContextClassLoader missing. " +
-                                    "Notifications will not be dispatched. " +
-                                    "Please check your Java policy configuration: " +
-                                    x, x);
-                            throw x;
-                        }
-                    }
-                }, ctxt);
+            Thread.currentThread().setContextClassLoader(loader);
+            return previous;
         }
 
         public void run() {
@@ -514,7 +470,7 @@ public abstract class ClientNotifForwarder {
 
                     clientSequenceNumber = nr.getNextSequenceNumber();
 
-                    listeners = new HashMap<Integer, ClientListenerInfo>();
+                    listeners = new HashMap<>();
 
                     for (int i = 0 ; i < len ; i++) {
                         final TargetedNotification tn = notifs[i];
@@ -566,7 +522,7 @@ public abstract class ClientNotifForwarder {
             if (nr == null) {
                 if (logger.traceOn()) {
                     logger.trace("NotifFetcher-run",
-                            "Recieved null object as notifs, stops fetching because the "
+                            "Received null object as notifs, stops fetching because the "
                                     + "notification server is terminated.");
                 }
             }
@@ -797,7 +753,7 @@ public abstract class ClientNotifForwarder {
 
     /*
      * Called to decide whether need to start a thread for fetching notifs.
-     * <P>The parameter reconnected will decide whether to initilize the clientSequenceNumber,
+     * <P>The parameter reconnected will decide whether to initialize the clientSequenceNumber,
      * initilaizing the clientSequenceNumber means to ignore all notifications arrived before.
      * If it is reconnected, we will not initialize in order to get all notifications arrived
      * during the reconnection. It may cause the newly registered listeners to receive some
@@ -821,10 +777,7 @@ public abstract class ClientNotifForwarder {
                 try {
                     wait();
                 } catch (InterruptedException ire) {
-                    IOException ioe = new IOException(ire.toString());
-                    EnvHelp.initCause(ioe, ire);
-
-                    throw ioe;
+                    throw new IOException(ire.toString(), ire);
                 }
             }
 
@@ -901,10 +854,7 @@ public abstract class ClientNotifForwarder {
             try {
                 wait();
             } catch (InterruptedException ire) {
-                IOException ioe = new IOException(ire.toString());
-                EnvHelp.initCause(ioe, ire);
-
-                throw ioe;
+                throw new IOException(ire.toString(), ire);
             }
         }
 
@@ -920,8 +870,7 @@ public abstract class ClientNotifForwarder {
     private final ClassLoader defaultClassLoader;
     private Executor executor;
 
-    private final Map<Integer, ClientListenerInfo> infoList =
-            new HashMap<Integer, ClientListenerInfo>();
+    private final Map<Integer, ClientListenerInfo> infoList = new HashMap<>();
 
     // notif stuff
     private long clientSequenceNumber = -1;

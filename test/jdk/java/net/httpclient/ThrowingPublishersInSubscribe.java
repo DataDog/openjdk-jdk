@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,25 +25,24 @@
  * @test
  * @summary Tests what happens when request publishers
  *          throw unexpected exceptions.
- * @library /test/lib http2/server
- * @build jdk.test.lib.net.SimpleSSLContext HttpServerAdapters
+ * @library /test/lib /test/jdk/java/net/httpclient/lib
+ * @build jdk.test.lib.net.SimpleSSLContext
  *        ReferenceTracker AbstractThrowingPublishers ThrowingPublishersInSubscribe
- * @modules java.base/sun.net.www.http
- *          java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- * @run testng/othervm -Djdk.internal.httpclient.debug=true
+ *        jdk.httpclient.test.lib.common.HttpServerAdapters
+ * @run junit/othervm -Djdk.internal.httpclient.debug=true
  *                     -Djdk.httpclient.enableAllMethodRetry=true
- *                     ThrowingPublishersInSubscribe
+ *                     ${test.main.class}
  */
 
-import org.testng.annotations.Test;
 
 import java.util.Set;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 public class ThrowingPublishersInSubscribe extends AbstractThrowingPublishers {
 
-    @Test(dataProvider = "subscribeProvider")
+    @ParameterizedTest
+    @MethodSource("subscribeProvider")
     public void testThrowingAsString(String uri, boolean sameClient,
                                             Thrower thrower, Set<Where> whereValues)
             throws Exception

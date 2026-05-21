@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,7 +46,7 @@ import java.lang.ref.WeakReference;
  * </p>
  * <p>
  * WARNING WARNING WARNING WARNING WARNING WARNING:<br>
- * Do NOT create an annonymous inner class that extends this!  If you do
+ * Do NOT create an anonymous inner class that extends this!  If you do,
  * a strong reference will be held to the containing class, which in most
  * cases defeats the purpose of this class.
  *
@@ -111,7 +111,7 @@ abstract class ActionPropertyChangeListener<T extends JComponent>
         while ((r = (OwnedWeakReference)queue.poll()) != null) {
             ActionPropertyChangeListener<?> oldPCL = r.getOwner();
             Action oldAction = oldPCL.getAction();
-            if (oldAction!=null) {
+            if (oldAction != null) {
                 oldAction.removePropertyChangeListener(oldPCL);
             }
         }

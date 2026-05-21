@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
 
 /*
  * @test
- * @bug      8225055 8239804 8246774 8258338 8261976
+ * @bug      8225055 8239804 8246774 8258338 8261976 8275199 8285939
  * @summary  Record types
  * @library  /tools/lib ../../lib
  * @modules jdk.javadoc/jdk.javadoc.internal.tool
@@ -45,19 +45,17 @@ import toolbox.ToolBox;
 
 public class TestRecordTypes extends JavadocTester {
     public static void main(String... args) throws Exception {
-        TestRecordTypes tester = new TestRecordTypes();
-        tester.runTests(m -> new Object[] { Path.of(m.getName()) });
+        var tester = new TestRecordTypes();
+        tester.runTests();
     }
 
     private final ToolBox tb = new ToolBox();
 
-    // The following constants are set up for use with -linkoffline
-    // (but note: JDK 11 does not include java.lang.Record, so expect
-    // some 404 broken links until we can update this to a stable version.)
+    // The following constants are set up for use with -linkoffline.
     private static final String externalDocs =
-        "https://docs.oracle.com/en/java/javase/11/docs/api";
+        "https://docs.oracle.com/en/java/javase/17/docs/api";
     private static final String localDocs =
-        Path.of(testSrc).resolve("jdk11").toUri().toString();
+        Path.of(testSrc).resolve("jdk17").toUri().toString();
 
     @Test
     public void testRecordKeywordUnnamedPackage(Path base) throws IOException {
@@ -177,7 +175,7 @@ public class TestRecordTypes extends JavadocTester {
                 """
                     <dl class="notes">
                     <dt>Type Parameters:</dt>
-                    <dd><code>T</code> - This is a type parameter.</dd>
+                    <dd><span id="type-param-T"><code>T</code> - This is a type parameter.</span></dd>
                     <dt>Record Components:</dt>
                     <dd><code><span id="param-r1">r1</span></code> - This is a component.</dd>
                     </dl>""",
@@ -239,7 +237,8 @@ public class TestRecordTypes extends JavadocTester {
                 """
                     Indicates whether some other object is "equal to" this one. The objects are equa\
                     l if the other object is of the same class and if all the record components are \
-                    equal. All components in this record class are compared with '=='.""",
+                    equal. All components in this record class are compared with the <code>compare</\
+                    code> method from their corresponding wrapper classes.""",
                 """
                     <span class="element-name">r1</span>""",
                 """
@@ -302,7 +301,8 @@ public class TestRecordTypes extends JavadocTester {
                 """
                     Indicates whether some other object is "equal to" this one. The objects are equa\
                     l if the other object is of the same class and if all the record components are \
-                    equal. All components in this record class are compared with '=='.""",
+                    equal. All components in this record class are compared with the <code>compare</\
+                    code> method from their corresponding wrapper classes.""",
                 """
                     <span class="element-name">r1</span>""",
                 """
@@ -313,7 +313,8 @@ public class TestRecordTypes extends JavadocTester {
     @Test
     public void testGeneratedEqualsPrimitive(Path base) throws IOException {
         testGeneratedEquals(base, "int a, int b",
-             "All components in this record class are compared with '=='.");
+             "All components in this record class are compared with the <code>compare</code> method " +
+                     "from their corresponding wrapper classes.");
     }
 
     @Test
@@ -326,7 +327,8 @@ public class TestRecordTypes extends JavadocTester {
     public void testGeneratedEqualsMixed(Path base) throws IOException {
         testGeneratedEquals(base, "int a, Object b",
              "Reference components are compared with <code>Objects::equals(Object,Object)</code>; "
-             + "primitive components are compared with '=='.");
+             + "primitive components are compared with the <code>compare</code> method from their "
+             + "corresponding wrapper classes.");
     }
 
     private void testGeneratedEquals(Path base, String comps, String expect) throws IOException {
@@ -391,17 +393,17 @@ public class TestRecordTypes extends JavadocTester {
     }
 
     @Test
-    public void testExamples(Path base) throws IOException {
+    public void testExamples(Path base) {
         javadoc("-d", base.resolve("out-no-link").toString(),
                 "-quiet", "-noindex",
-                "-sourcepath", testSrc.toString(),
+                "-sourcepath", testSrc,
                 "-linksource",
                 "examples");
 
         checkExit(Exit.OK);
         javadoc("-d", base.resolve("out-with-link").toString(),
                 "-quiet", "-noindex",
-                "-sourcepath", testSrc.toString(),
+                "-sourcepath", testSrc,
                 "-linksource",
                 "-linkoffline", externalDocs, localDocs,
                 "examples");
@@ -515,8 +517,8 @@ public class TestRecordTypes extends JavadocTester {
         checkOutput("deprecated-list.html", true,
                 """
                     <h2 title="Contents">Contents</h2>
-                    <ul>
-                    <li><a href="#record-class">Record Classes</a></li>
+                    <ul class="contents-list">
+                    <li id="contents-record-class"><a href="#record-class">Record Classes</a></li>
                     </ul>""",
                 """
                     <div id="record-class">
@@ -526,7 +528,7 @@ public class TestRecordTypes extends JavadocTester {
                     <div class="table-header col-last">Description</div>
                     <div class="col-summary-item-name even-row-color"><a href="p/R.html" title="class in p">p.R</a></div>
                     <div class="col-last even-row-color">
-                    <div class="deprecation-comment">Do not use.</div>
+                    <div class="block">Do not use.</div>
                     </div>""");
     }
 
@@ -547,8 +549,8 @@ public class TestRecordTypes extends JavadocTester {
         checkOutput("deprecated-list.html", true,
                 """
                     <h2 title="Contents">Contents</h2>
-                    <ul>
-                    <li><a href="#method">Methods</a></li>
+                    <ul class="contents-list">
+                    <li id="contents-method"><a href="#method">Methods</a></li>
                     </ul>""",
                 """
                     <div id="method">
@@ -559,5 +561,89 @@ public class TestRecordTypes extends JavadocTester {
                     <div class="col-summary-item-name even-row-color"><a href="p/R.html#r1()">p.R.r1()</a></div>
                     <div class="col-last even-row-color"></div>
                     </div>""");
+    }
+
+    @Test
+    public void testSerializableType(Path base) throws IOException {
+        Path src = base.resolve("src");
+        tb.writeJavaFiles(src,
+                """
+                    /**
+                     * A point,
+                     * @param x the x coord
+                     * @param y the y coord
+                     */
+                    public record Point(int x, int y) implements java.io.Serializable { }""");
+
+        javadoc("-d", base.resolve("out").toString(),
+                "-quiet", "-noindex", "--no-platform-links",
+                src.resolve("Point.java").toString());
+        checkExit(Exit.OK);
+
+        checkOutput(Output.OUT, false,
+                "warning: no comment");
+
+        checkOutput("serialized-form.html", true,
+                """
+                    <section class="serialized-class-details" id="Point">
+                    <h3>Record Class&nbsp;<a href="Point.html" title="class in Unnamed Package">Point</a></h3>
+                    <div class="type-signature">class Point extends java.lang.Record implements java.io.Serializable</div>
+                    <ul class="block-list">
+                    <li>
+                    <section class="detail">
+                    <h4>Serialized Fields</h4>
+                    <ul class="block-list">
+                    <li class="block-list">
+                    <h5>x</h5>
+                    <pre>int x</pre>
+                    <div class="block">The field for the <a href="./Point.html#param-x"><code>x</code></a> record component.</div>
+                    </li>
+                    <li class="block-list">
+                    <h5>y</h5>
+                    <pre>int y</pre>
+                    <div class="block">The field for the <a href="./Point.html#param-y"><code>y</code></a> record component.</div>
+                    </li>
+                    </ul>
+                    </section>
+                    </li>
+                    </ul>
+                    </section>""");
+    }
+
+    @Test
+    public void testPackageTree(Path base) throws IOException {
+        Path src = base.resolve("src");
+        tb.writeJavaFiles(src,
+                """
+                    package p;
+                    /**
+                     * A point.
+                     * @param x the x coord
+                     * @param y the y coord
+                     */
+                    public record Point(int x, int y) { }""");
+
+        javadoc("-d", base.resolve("out").toString(),
+                "-quiet", "-noindex", "--no-platform-links",
+                "-sourcepath", src.toString(),
+                "p");
+        checkExit(Exit.OK);
+
+        checkOutput("p/package-tree.html", true,
+                """
+                    <section class="hierarchy">
+                    <h2 title="Record Class Hierarchy">Record Class Hierarchy</h2>
+                    <ul>
+                    <li class="circle">java.lang.Object
+                    <ul>
+                    <li class="circle">java.lang.Record
+                    <ul>
+                    <li class="circle">p.<a href="Point.html" class="type-name-link" title="class in p">Point</a></li>
+                    </ul>
+                    </li>
+                    </ul>
+                    </li>
+                    </ul>
+                    </section>""");
     }
 }

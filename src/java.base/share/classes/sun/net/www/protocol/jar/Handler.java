@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,8 @@ package sun.net.www.protocol.jar;
 
 import java.io.IOException;
 import java.net.*;
+import static jdk.internal.util.Exceptions.filterJarName;
+import static jdk.internal.util.Exceptions.formatMsg;
 
 /*
  * Jar URL Handler
@@ -78,8 +80,8 @@ public class Handler extends java.net.URLStreamHandler {
 
         URL enclosedURL1 = null, enclosedURL2 = null;
         try {
-            enclosedURL1 = new URL(file1.substring(0, sep1));
-            enclosedURL2 = new URL(file2.substring(0, sep2));
+            enclosedURL1 = newURL(file1.substring(0, sep1));
+            enclosedURL2 = newURL(file2.substring(0, sep2));
         } catch (MalformedURLException unused) {
             return super.sameFile(u1, u2);
         }
@@ -108,7 +110,7 @@ public class Handler extends java.net.URLStreamHandler {
         URL enclosedURL = null;
         String fileWithoutEntry = file.substring(0, sep);
         try {
-            enclosedURL = new URL(fileWithoutEntry);
+            enclosedURL = newURL(fileWithoutEntry);
             h += enclosedURL.hashCode();
         } catch (MalformedURLException unused) {
             h += fileWithoutEntry.hashCode();
@@ -179,10 +181,13 @@ public class Handler extends java.net.URLStreamHandler {
         // test the inner URL
         try {
             String innerSpec = spec.substring(0, index - 1);
-            new URL(innerSpec);
+            newURL(innerSpec);
         } catch (MalformedURLException e) {
-            throw new NullPointerException("invalid url: " +
-                                           spec + " (" + e + ")");
+            throw new NullPointerException(
+                formatMsg("invalid url: %s %s", filterJarName(spec),
+                                                filterJarName(e.getMessage())
+                                                    .prefixWith("(")
+                                                    .suffixWith(")")));
         }
         return spec;
     }
@@ -193,19 +198,18 @@ public class Handler extends java.net.URLStreamHandler {
         if (spec.startsWith("/")) {
             int bangSlash = indexOfBangSlash(ctxFile);
             if (bangSlash == -1) {
-                throw new NullPointerException("malformed " +
-                                               "context url:" +
-                                               url +
-                                               ": no !/");
+                throw new NullPointerException(
+                    formatMsg("malformed context url%s : no !/",
+                              filterJarName(String.valueOf(url)).prefixWith(": ")));
             }
             ctxFile = ctxFile.substring(0, bangSlash);
         } else {
             // chop up the last component
             int lastSlash = ctxFile.lastIndexOf('/');
             if (lastSlash == -1) {
-                throw new NullPointerException("malformed " +
-                                               "context url:" +
-                                               url);
+                throw new NullPointerException(
+                    formatMsg("malformed context url%s",
+                              filterJarName(String.valueOf(url)).prefixWith(": ")));
             } else if (lastSlash < ctxFile.length() - 1) {
                 ctxFile = ctxFile.substring(0, lastSlash + 1);
             }
@@ -258,5 +262,10 @@ public class Handler extends java.net.URLStreamHandler {
             file = file.substring(0, file.length() -1);
 
         return file;
+    }
+
+    @SuppressWarnings("deprecation")
+    private static URL newURL(String spec) throws MalformedURLException {
+        return new URL(spec);
     }
 }

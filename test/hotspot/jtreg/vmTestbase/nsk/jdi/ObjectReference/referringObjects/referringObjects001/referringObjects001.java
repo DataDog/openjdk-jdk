@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -57,7 +57,7 @@
  *          /test/lib
  * @build nsk.jdi.ObjectReference.referringObjects.referringObjects001.referringObjects001
  *        nsk.share.jdi.TestClass1
- * @run main/othervm/native
+ * @run main/othervm/native/timeout=480
  *      nsk.jdi.ObjectReference.referringObjects.referringObjects001.referringObjects001
  *      -verbose
  *      -arch=${os.family}-${os.simpleArch}
@@ -82,7 +82,10 @@ import nsk.share.jpda.AbstractDebuggeeTest;
 public class referringObjects001 extends HeapwalkingDebugger {
 
     public static void main(String argv[]) {
-        System.exit(run(argv, System.out) + Consts.JCK_STATUS_BASE);
+        int result = run(argv,System.out);
+        if (result != 0) {
+            throw new RuntimeException("TEST FAILED with result " + result);
+        }
     }
 
     public static int run(String argv[], PrintStream out) {
@@ -241,6 +244,7 @@ public class referringObjects001 extends HeapwalkingDebugger {
                 }
             }
         } catch (Throwable t) {
+            setSuccess(false);
             log.complain("Unexpected exception:");
             t.printStackTrace(log.getOutStream());
         }

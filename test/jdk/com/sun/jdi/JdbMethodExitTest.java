@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -153,7 +153,6 @@ class JdbMethodExitTestTarg {
         // a resume.
 
         JdbMethodExitTestTarg xx = new JdbMethodExitTestTarg();
-        System.out.println("threadid="+Thread.currentThread().getId());
         bkpt();
 
         // test all possible return types
@@ -202,9 +201,14 @@ public class JdbMethodExitTest extends JdbTest {
         // test all possible return types
         execCommand(JdbCommand.run())
                 .shouldContain("Breakpoint hit");
-        Integer threadId = Integer.parseInt(
-                new OutputAnalyzer(getDebuggeeOutput())
-                        .firstMatch("^threadid=(.*)$", 1));
+
+        // In order to find the main threadId, we need to parse a line from the "threads"
+        // command output that looks something like:
+        //    (java.lang.VirtualThread)694            main            running (at breakpoint)
+        OutputAnalyzer o = execCommand(JdbCommand.threads());
+        String match = o.firstMatch("^\\s*\\(.+\\)(\\d+)\\s+main\\s+running.+$", 1);
+        Integer threadId = Integer.parseInt(match);
+
         jdb.command(JdbCommand.untrace());
 
         jdb.command(JdbCommand.traceMethods(false, null));
@@ -235,6 +239,7 @@ public class JdbMethodExitTest extends JdbTest {
         // trace exit of methods with all the return values
         // (but just check a couple of them)
         jdb.command(JdbCommand.traceMethodExits(true, threadId));
+        execCommand(JdbCommand.trace());
         execCommand(JdbCommand.cont())
                 .shouldContain("instance of JdbMethodExitTestTarg")
                 .shouldContain("return value = 8");
@@ -248,7 +253,7 @@ public class JdbMethodExitTest extends JdbTest {
                 .shouldContain("Method entered:");
         execCommand(JdbCommand.cont())
                 .shouldContain("Method exited: return value = \"traceMethods\"");
-        jdb.command(JdbCommand.stepUp());
+        jdb.command(JdbCommand.next());
 
 
         List<String> reply = new LinkedList<>();

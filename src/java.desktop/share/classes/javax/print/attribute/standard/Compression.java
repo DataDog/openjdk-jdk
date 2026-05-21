@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -66,7 +66,9 @@ public class Compression extends EnumSyntax implements DocAttribute {
 
     /**
      * GNU zip compression technology described in
-     * <a href="http://www.ietf.org/rfc/rfc1952.txt">RFC 1952</a>.
+     * <a href="https://www.rfc-editor.org/info/rfc1952">RFC 1952</a>.
+     * @spec https://www.rfc-editor.org/info/rfc1952
+     *      RFC 1952: GZIP file format specification version 4.3
      */
     public static final Compression GZIP = new Compression(2);
 
@@ -104,6 +106,7 @@ public class Compression extends EnumSyntax implements DocAttribute {
     /**
      * Returns the string table for class {@code Compression}.
      */
+    @Override
     protected String[] getStringTable() {
         return myStringTable.clone();
     }
@@ -111,6 +114,7 @@ public class Compression extends EnumSyntax implements DocAttribute {
     /**
      * Returns the enumeration value table for class {@code Compression}.
      */
+    @Override
     protected EnumSyntax[] getEnumValueTable() {
         return (EnumSyntax[])myEnumValueTable.clone();
     }
@@ -125,6 +129,7 @@ public class Compression extends EnumSyntax implements DocAttribute {
      * @return printing attribute class (category), an instance of class
      *         {@link Class java.lang.Class}
      */
+    @Override
     public final Class<? extends Attribute> getCategory() {
         return Compression.class;
     }
@@ -138,6 +143,7 @@ public class Compression extends EnumSyntax implements DocAttribute {
      *
      * @return attribute category name
      */
+    @Override
     public final String getName() {
         return "compression";
     }

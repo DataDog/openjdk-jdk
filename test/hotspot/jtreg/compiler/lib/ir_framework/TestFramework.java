@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,19 +23,32 @@
 
 package compiler.lib.ir_framework;
 
-import compiler.lib.ir_framework.driver.*;
+import compiler.lib.ir_framework.driver.FlagVMProcess;
+import compiler.lib.ir_framework.driver.TestVMException;
+import compiler.lib.ir_framework.driver.TestVMProcess;
+import compiler.lib.ir_framework.driver.irmatching.IRMatcher;
+import compiler.lib.ir_framework.driver.irmatching.IRViolationException;
+import compiler.lib.ir_framework.driver.irmatching.Matchable;
+import compiler.lib.ir_framework.driver.irmatching.parser.TestClassParser;
 import compiler.lib.ir_framework.shared.*;
-import compiler.lib.ir_framework.test.*;
+import compiler.lib.ir_framework.test.TestVM;
 import jdk.test.lib.Platform;
 import jdk.test.lib.Utils;
 import jdk.test.lib.helpers.ClassFileInstaller;
-import sun.hotspot.WhiteBox;
+import jdk.test.whitebox.WhiteBox;
+import jtreg.SkippedException;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.reflect.Method;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * This class represents the main entry point to the test framework whose main purpose is to perform regex-based checks on
@@ -72,19 +85,19 @@ import java.util.stream.Collectors;
  * {@code runXX()} methods of {@link TestFramework}. The second way, which gives more control, is to create a new
  * {@code TestFramework} builder object on which {@link #start()} needs to be eventually called to start the testing.
  * <p>
- * The framework is called from the <i>driver VM</i> in which the JTreg test is initially run by specifying {@code
+ * The framework is called from the <i>Driver VM</i> in which the JTreg test is initially run by specifying {@code
  * @run driver} in the JTreg header. This strips all additionally specified JTreg VM and Javaoptions.
- * The framework creates a new <i>flag VM</i> with all these flags added again in order to figure out which flags are
+ * The framework creates a new <i>Flag VM</i> with all these flags added again in order to figure out which flags are
  * required to run the tests specified in the test class (e.g. {@code -XX:+PrintIdeal} and {@code -XX:+PrintOptoAssembly}
  * for IR matching).
  * <p>
- * After the flag VM terminates, it starts a new <i>test VM</i> which performs the execution of the specified
+ * After the Flag VM terminates, it starts a new <i>Test VM</i> which performs the execution of the specified
  * tests in the test class as described in {@link Test}, {@link Check}, and {@link Run}.
  * <p>
- * In a last step, once the test VM has terminated without exceptions, IR matching is performed if there are any IR
+ * In a last step, once the Test VM has terminated without exceptions, IR matching is performed if there are any IR
  * rules and if no VM flags disable it (e.g. not running with {@code -Xint}, see {@link IR} for more details).
  * The IR regex matching is done on the output of {@code -XX:+PrintIdeal} and {@code -XX:+PrintOptoAssembly} by parsing
- * the hotspot_pid file of the test VM. Failing IR rules are reported by throwing a {@link IRViolationException}.
+ * the hotspot_pid file of the Test VM. Failing IR rules are reported by throwing a {@link IRViolationException}.
  *
  * @see Test
  * @see Check
@@ -97,6 +110,7 @@ public class TestFramework {
      * performed when all these additional JTreg flags (does not include additionally added framework and scenario flags
      * by user code) are whitelisted.
      *
+     * <p>
      * A flag is whitelisted if it is a property flag (starting with -D), -ea, -esa, or if the flag name contains any of
      * the entries of this list as a substring (partial match).
      */
@@ -108,7 +122,6 @@ public class TestFramework {
                     "Trace",
                     "Print",
                     "Verify",
-                    "TLAB",
                     "UseNewCode",
                     "Xmn",
                     "Xms",
@@ -122,25 +135,38 @@ public class TestFramework {
                     "BackgroundCompilation",
                     "Xbatch",
                     "TieredCompilation",
+                    "CompileThreshold",
                     "Xmixed",
                     "server",
+                    "AlignVector",
+                    "UseAVX",
+                    "UseSSE",
+                    "UseSVE",
                     "Xlog",
-                    "LogCompilation"
+                    "LogCompilation",
+                    "UseCompactObjectHeaders",
+                    "UseFMA",
+                    // Riscv
+                    "UseRVV",
+                    "UseZbb",
+                    "UseZfh",
+                    "UseZicond",
+                    "UseZvbb"
             )
     );
 
     public static final boolean VERBOSE = Boolean.getBoolean("Verbose");
+    public static final boolean PRINT_RULE_MATCHING_TIME = Boolean.getBoolean("PrintRuleMatchingTime");
     public static final boolean TESTLIST = !System.getProperty("Test", "").isEmpty();
     public static final boolean EXCLUDELIST = !System.getProperty("Exclude", "").isEmpty();
     private static final boolean REPORT_STDOUT = Boolean.getBoolean("ReportStdout");
     // Only used for internal testing and should not be used for normal user testing.
-    private static final boolean SKIP_WHITEBOX_INSTALL = Boolean.getBoolean("SkipWhiteBoxInstall");
 
     private static final String RERUN_HINT = """
                                                #############################################################
                                                 - To only run the failed tests use -DTest, -DExclude,
                                                   and/or -DScenarios.
-                                                - To also get the standard output of the test VM run with
+                                                - To also get the standard output of the Test VM run with
                                                   -DReportStdout=true or for even more fine-grained logging
                                                   use -DVerbose=true.
                                                #############################################################
@@ -156,6 +182,8 @@ public class TestFramework {
     private Set<Integer> scenarioIndices;
     private List<String> flags;
     private int defaultWarmup = -1;
+    private boolean testClassesOnBootClassPath;
+    private boolean allowNotCompilable = false;
 
     /*
      * Public interface methods
@@ -174,7 +202,7 @@ public class TestFramework {
     /**
      * Creates an instance acting as a builder to test {@code testClass}.
      * Use this constructor if you want to use multiple run options (flags, helper classes, scenarios).
-     * Use the associated add methods ({@link #addFlags(String...)}, @link #addScenarios(Scenario...)},
+     * Use the associated add methods ({@link #addFlags(String...)}, {@link #addScenarios(Scenario...)},
      * {@link #addHelperClasses(Class...)}) to set up everything and then start the testing by invoking {@link #start()}.
      *
      * @param testClass the class to be tested by the framework.
@@ -208,10 +236,10 @@ public class TestFramework {
     }
 
     /**
-     * Tests the class from which this method was invoked from. The test VM is called with the specified {@code flags}.
+     * Tests the class from which this method was invoked from. The Test VM is called with the specified {@code flags}.
      * <ul>
      *     <li><p>The {@code flags} override any set VM or Javaoptions flags by JTreg by default.<p>
-     *            Use {@code -DPreferCommandLineFlags=true} if you want to prefer the JTreg VM and  Javaoptions flags over
+     *            Use {@code -DPreferCommandLineFlags=true} if you want to prefer the JTreg VM and Javaoptions flags over
      *            the specified {@code flags} of this method.</li>
      *     <li><p>If you want to run your entire JTreg test with additional flags, use this method.</li>
      *     <li><p>If you want to run your entire JTreg test with additional flags but for another test class then the one
@@ -220,7 +248,7 @@ public class TestFramework {
      *            {@link #addScenarios(Scenario...)}</li>
      * </ul>
      *
-     * @param flags VM flags to be used for the test VM.
+     * @param flags VM flags to be used for the Test VM.
      */
     public static void runWithFlags(String... flags) {
         StackWalker walker = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
@@ -230,13 +258,13 @@ public class TestFramework {
     }
 
     /**
-     * Add VM flags to be used for the test VM. These flags override any VM or Javaoptions set by JTreg by default.<p>
+     * Add VM flags to be used for the Test VM. These flags override any VM or Javaoptions set by JTreg by default.<p>
      * Use {@code -DPreferCommandLineFlags=true} if you want to prefer the VM or Javaoptions over the scenario flags.
      *
      * <p>
      * The testing can be started by invoking {@link #start()}
      *
-     * @param flags VM options to be applied to the test VM.
+     * @param flags VM options to be applied to the Test VM.
      * @return the same framework instance.
      */
     public TestFramework addFlags(String... flags) {
@@ -278,7 +306,7 @@ public class TestFramework {
     }
 
     /**
-     * Add scenarios to be used for the test VM. A test VM is called for each scenario in {@code scenarios} by using the
+     * Add scenarios to be used for the Test VM. A Test VM is called for each scenario in {@code scenarios} by using the
      * specified VM flags in the scenario. The scenario flags override any flags set by {@link #addFlags(String...)}
      * and thus also override any VM or Javaoptions set by JTreg by default.<p>
      * Use {@code -DPreferCommandLineFlags=true} if you want to prefer the VM and Javaoptions over the scenario flags.
@@ -286,12 +314,12 @@ public class TestFramework {
      * <p>
      * The testing can be started by invoking {@link #start()}
      *
-     * @param scenarios scenarios which specify specific flags for the test VM.
+     * @param scenarios scenarios which specify specific flags for the Test VM.
      * @return the same framework instance.
      */
     public TestFramework addScenarios(Scenario... scenarios) {
-        TestFormat.check(scenarios != null && Arrays.stream(scenarios).noneMatch(Objects::isNull),
-                         "A scenario cannot be null");
+        TestFormat.checkAndReport(scenarios != null && Arrays.stream(scenarios).noneMatch(Objects::isNull),
+                                  "A scenario cannot be null");
         if (this.scenarios == null) {
             this.scenarios = new ArrayList<>();
             this.scenarioIndices = new HashSet<>();
@@ -299,10 +327,91 @@ public class TestFramework {
 
         for (Scenario scenario : scenarios) {
             int scenarioIndex = scenario.getIndex();
-            TestFormat.check(scenarioIndices.add(scenarioIndex),
-                             "Cannot define two scenarios with the same index " + scenarioIndex);
+            if (!scenarioIndices.add(scenarioIndex)) {
+                TestFormat.failNoThrow("Cannot define two scenarios with the same index " + scenarioIndex);
+                continue;
+            }
             this.scenarios.add(scenario);
         }
+        TestFormat.throwIfAnyFailures();
+        return this;
+    }
+
+    /**
+     * Add the cross-product (cartesian product) of sets of flags as Scenarios. Unlike when constructing
+     * scenarios directly a string can contain multiple flags separated with a space. This allows grouping
+     * flags that have to be specified together. Further, an empty string in a set stands in for "no flag".
+     * <p>
+     * Passing a single set will create a scenario for each of the provided flags in the set (i.e. the same as
+     * passing an additional set with an empty string only).
+     * <p>
+     * Example:
+     * <pre>
+     *     addCrossProductScenarios(Set.of("", "-Xint", "-Xbatch -XX:-TieredCompilation"),
+     *                              Set.of("-XX:+UseNewCode", "-XX:UseNewCode2"))
+     * </pre>
+     *   produces the following Scenarios
+     * <pre>
+     *     Scenario(0, "-XX:+UseNewCode")
+     *     Scenario(1, "-XX:+UseNewCode2")
+     *     Scenario(2, "-Xint", "-XX:+UseNewCode")
+     *     Scenario(3, "-Xint", "-XX:+UseNewCode2")
+     *     Scenario(4, "-Xbatch -XX:-TieredCompilation", "-XX:+UseNewCode")
+     *     Scenario(5, "-Xbatch -XX:-TieredCompilation", "-XX:+UseNewCode2")
+     * </pre>
+     *
+     * @param flagSets sets of flags to generate the cross product for.
+     * @return the same framework instance.
+     */
+    @SafeVarargs
+    @SuppressWarnings("varargs")
+    final public TestFramework addCrossProductScenarios(Set<String>... flagSets) {
+        TestFormat.checkAndReport(flagSets != null &&
+                                  Arrays.stream(flagSets).noneMatch(Objects::isNull) &&
+                                  Arrays.stream(flagSets).flatMap(Set::stream).noneMatch(Objects::isNull),
+                                  "Flags must not be null");
+        if (flagSets.length == 0) {
+            return this;
+        }
+
+        int initIdx = 0;
+        if (this.scenarioIndices != null && !this.scenarioIndices.isEmpty()) {
+            initIdx = this.scenarioIndices.stream().max(Comparator.comparingInt(Integer::intValue)).get() + 1;
+        }
+        AtomicInteger idx = new AtomicInteger(initIdx);
+
+        Stream<List<String>> crossProduct = Arrays.stream(flagSets)
+            .reduce(
+                Stream.of(Collections.emptyList()), // Initialize Stream<List<String>> acc with a Stream containing an empty list of Strings.
+                (Stream<List<String>> acc, Set<String> set) ->
+                    acc.flatMap(lAcc -> // For each List<String>> lAcc in acc...
+                        set.stream().map(flag -> { // ...and each flag in the current set...
+                            List<String> newList = new ArrayList<>(lAcc); // ...create a new list containing lAcc...
+                            newList.add(flag); // ...and append the flag.
+                            return newList;
+                        }) // This results in one List<List<String>> for each lAcc...
+                    ), // ...that get flattened into one big List<List<String>>.
+                Stream::concat); // combiner; if any reduction steps are executed in parallel, just concat two streams.
+
+        Scenario[] newScenarios = crossProduct
+            .map(flags -> new Scenario( // For each List<String> flags in crossProduct create a new Scenario.
+                idx.getAndIncrement(),
+                flags.stream() // Process flags
+                     .map(s -> Set.of(s.split("[ ]"))) // Split multiple flags in the same string into separate strings.
+                     .flatMap(Collection::stream) // Flatten the Stream<List<String>> into Stream<String>>.
+                     .filter(s -> !s.isEmpty()) // Remove empty string flags.
+                     .toList()
+                     .toArray(new String[0])))
+            .toList().toArray(new Scenario[0]);
+        return addScenarios(newScenarios);
+    }
+
+    /**
+     * Add test classes to boot classpath. This adds all classes found on path {@link jdk.test.lib.Utils#TEST_CLASSES}
+     * to the boot classpath with "-Xbootclasspath/a". This is useful when trying to run tests in a privileged mode.
+     */
+    public TestFramework addTestClassesToBootClassPath() {
+        this.testClassesOnBootClassPath = true;
         return this;
     }
 
@@ -311,9 +420,11 @@ public class TestFramework {
      * set test class.
      */
     public void start() {
-        if (!SKIP_WHITEBOX_INSTALL) {
+        if (shouldInstallWhiteBox()) {
             installWhiteBox();
         }
+        checkCompatibleFlags();
+        checkIRRuleCompilePhasesFormat();
         disableIRVerificationIfNotFeasible();
 
         if (scenarios == null) {
@@ -323,7 +434,6 @@ public class TestFramework {
                 System.err.println(System.lineSeparator() + e.getExceptionInfo() + RERUN_HINT);
                 throw e;
             } catch (IRViolationException e) {
-                System.out.println("Compilation(s) of failed match(es):");
                 System.out.println(e.getCompilations());
                 System.err.println(System.lineSeparator() + e.getExceptionInfo() + System.lineSeparator() + RERUN_HINT);
                 throw e;
@@ -331,6 +441,39 @@ public class TestFramework {
         } else {
             startWithScenarios();
         }
+    }
+
+    private void checkIRRuleCompilePhasesFormat() {
+        for (Method method : testClass.getDeclaredMethods()) {
+            for (IR irAnno : method.getAnnotationsByType(IR.class)) {
+                TestFormat.checkNoThrow(irAnno.phase().length > 0,
+                                        "@IR rule " + irAnno + " must specify a non-empty list of compile " +
+                                        "phases \"phase\" at " + method);
+            }
+        }
+        TestFormat.throwIfAnyFailures();
+    }
+
+    /**
+     * Try to load the Whitebox class from the user directory with a custom class loader. If the user has already built the
+     * Whitebox, we can load it. Otherwise, the framework needs to install it.
+     *
+     * @return true if the framework needs to install the Whitebox
+     */
+    private boolean shouldInstallWhiteBox() {
+        try {
+            URL url = Path.of(System.getProperty("user.dir")).toUri().toURL();
+            URLClassLoader userDirClassLoader =
+                    URLClassLoader.newInstance(new URL[] {url}, TestFramework.class.getClassLoader().getParent());
+            Class.forName(WhiteBox.class.getName(), false, userDirClassLoader);
+        } catch (MalformedURLException e) {
+            throw new TestFrameworkException("corrupted user.dir property", e);
+        } catch (ClassNotFoundException e) {
+            // We need to manually install the WhiteBox if we cannot load the WhiteBox class from the user directory.
+            // This happens when the user test does not explicitly install the WhiteBox as part of the test.
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -342,16 +485,29 @@ public class TestFramework {
      * @return the same framework instance.
      */
     public TestFramework setDefaultWarmup(int defaultWarmup) {
-        TestFormat.check(defaultWarmup >= 0, "Cannot specify a negative default warm-up");
+        TestFormat.checkAndReport(defaultWarmup >= 0, "Cannot specify a negative default warm-up");
         this.defaultWarmup = defaultWarmup;
         return this;
     }
 
     /**
-     * Get the VM output of the test VM. Use {@code -DVerbose=true} to enable more debug information. If scenarios
+     * In rare cases, methods may not be compilable because of a compilation bailout. By default, this leads to a
+     * test failure. However, if such cases are expected in multiple methods in a test class, this flag can be set to
+     * true, which allows any test to pass even if there is a compilation bailout. If only selected methods are prone
+     * to bail out, it is preferred to use {@link Test#allowNotCompilable()} instead for more fine-grained control.
+     * By setting this flag, any associated {@link IR} rule of a test is only executed if the test method was compiled,
+     * and else it is ignored silently.
+     */
+    public TestFramework allowNotCompilable() {
+        this.allowNotCompilable = true;
+        return this;
+    }
+
+    /**
+     * Get the VM output of the Test VM. Use {@code -DVerbose=true} to enable more debug information. If scenarios
      * were run, use {@link Scenario#getTestVMOutput()}.
      *
-     * @return the last test VM output.
+     * @return the last Test VM output.
      */
     public static String getLastTestVMOutput() {
         return TestVMProcess.getLastTestVMOutput();
@@ -531,27 +687,42 @@ public class TestFramework {
      * Disable IR verification completely in certain cases.
      */
     private void disableIRVerificationIfNotFeasible() {
-        if (irVerificationPossible) {
-            irVerificationPossible = Platform.isDebugBuild() && !Platform.isInt() && !Platform.isComp();
-            if (!irVerificationPossible) {
-                System.out.println("IR verification disabled due to not running a debug build (required for PrintIdeal" +
-                                   "and PrintOptoAssembly), running with -Xint, or -Xcomp (use warm-up of 0 instead)");
-                return;
-            }
-
-            irVerificationPossible = hasIRAnnotations();
-            if (!irVerificationPossible) {
-                System.out.println("IR verification disabled due to test " + testClass + " not specifying any @IR annotations");
-                return;
-            }
-
-            // No IR verification is done if additional non-whitelisted JTreg VM or Javaoptions flag is specified.
-            irVerificationPossible = onlyWhitelistedJTregVMAndJavaOptsFlags();
-            if (!irVerificationPossible) {
-                System.out.println("IR verification disabled due to using non-whitelisted JTreg VM or Javaoptions flag(s)."
-                                   + System.lineSeparator());
-            }
+        if (!irVerificationPossible) {
+            return;
         }
+
+        boolean debugTest = Platform.isDebugBuild();
+        boolean intTest = !Platform.isInt();
+        boolean compTest = !Platform.isComp();
+        boolean irTest = hasIRAnnotations();
+        // No IR verification is done if additional non-whitelisted JTreg VM or Javaoptions flag is specified.
+        List<String> nonWhiteListedFlags = anyNonWhitelistedJTregVMAndJavaOptsFlags();
+        boolean nonWhiteListedTest = nonWhiteListedFlags.isEmpty();
+
+        irVerificationPossible = debugTest && intTest && compTest && irTest && nonWhiteListedTest;
+        if (irVerificationPossible) {
+            return;
+        }
+
+        System.out.println("IR verification disabled due to the following reason(s):");
+        if (!debugTest) {
+            System.out.println("- Not running a debug build (required for PrintIdeal and PrintOptoAssembly)");
+        }
+        if (!intTest) {
+            System.out.println("- Running with -Xint (no compilations)");
+        }
+        if (!compTest) {
+            System.out.println("- Running with -Xcomp (use warm-up of 0 instead)");
+        }
+        if (!irTest) {
+            System.out.println("- Test " + testClass + " not specifying any @IR annotations");
+        }
+        if (!nonWhiteListedTest) {
+            System.out.println("- Using non-whitelisted JTreg VM or Javaoptions flag(s):");
+            nonWhiteListedFlags.forEach((f) -> System.out.println("  - " + f));
+        }
+
+        System.out.println();
     }
 
     /**
@@ -592,8 +763,9 @@ public class TestFramework {
             }
             if (e instanceof IRViolationException irException) {
                 // For IR violations, only show the actual violations and not the (uninteresting) stack trace.
-                System.out.println((scenario != null ? "Scenario #" + scenario.getIndex() + " - " : "")
-                                   + "Compilation(s) of failed matche(s):");
+                if (scenario != null) {
+                    System.out.println("Scenario #" + scenario.getIndex());
+                }
                 System.out.println(irException.getCompilations());
                 builder.append(errorMsg).append(System.lineSeparator()).append(irException.getExceptionInfo());
             } else if (e instanceof TestVMException testVMException) {
@@ -602,11 +774,11 @@ public class TestFramework {
                 // Print stack trace otherwise
                 StringWriter errors = new StringWriter();
                 e.printStackTrace(new PrintWriter(errors));
-                builder.append(errors.toString());
+                builder.append(errors);
             }
             builder.append(System.lineSeparator());
         }
-        System.err.println(builder.toString());
+        System.err.println(builder);
         if (!VERBOSE && !REPORT_STDOUT && !TESTLIST && !EXCLUDELIST) {
             // Provide a hint to the user how to get additional output/debugging information.
             System.err.println(RERUN_HINT);
@@ -625,9 +797,9 @@ public class TestFramework {
     }
 
     /**
-     * Execute a separate "flag" VM with White Box access to determine all test VM flags. The flag VM sends an encoding of
-     * all required flags for the test VM to the driver VM over a socket. Once the flag VM exits, this driver VM parses the
-     * test VM flags, which also determine if IR matching should be done, and then starts the test VM to execute all tests.
+     * Execute a separate Flag VM with White Box access to determine all Test VM flags. The Flag VM sends an encoding of
+     * all required flags for the Test VM to the Driver VM over a socket. Once the Flag VM exits, this Driver VM parses the
+     * Test VM flags, which also determine if IR matching should be done, and then starts the Test VM to execute all tests.
      */
     private void start(Scenario scenario) {
         if (scenario != null && !scenario.isEnabled()) {
@@ -652,12 +824,12 @@ public class TestFramework {
                     "" : " - [" + String.join(", ", additionalFlags) + "]";
 
             if (shouldVerifyIR) {
-                // Only need to use flag VM if an IR verification is possibly done.
+                // Only need to use Flag VM if an IR verification is possibly done.
                 System.out.println("Run Flag VM:");
                 FlagVMProcess flagVMProcess = new FlagVMProcess(testClass, additionalFlags);
                 shouldVerifyIR = flagVMProcess.shouldVerifyIR();
                 if (shouldVerifyIR) {
-                    // Add more flags for the test VM which are required to do IR verification.
+                    // Add more flags for the Test VM which are required to do IR verification.
                     additionalFlags.addAll(flagVMProcess.getTestVMFlags());
                 } // else: Flag VM found a reason to not do IR verification.
             } else {
@@ -675,28 +847,44 @@ public class TestFramework {
     }
 
     private boolean hasIRAnnotations() {
-        return Arrays.stream(testClass.getDeclaredMethods()).anyMatch(m -> m.getAnnotationsByType(IR.class) != null);
+        return Arrays.stream(testClass.getDeclaredMethods()).anyMatch(m -> m.getAnnotationsByType(IR.class).length > 0);
     }
 
-    private boolean onlyWhitelistedJTregVMAndJavaOptsFlags() {
+    private void checkCompatibleFlags() {
+        for (String flag : Utils.getTestJavaOpts()) {
+            if (flag.contains("-agentpath")) {
+                throw new SkippedException("Can't run test with agent.");
+            }
+        }
+    }
+
+    private List<String> anyNonWhitelistedJTregVMAndJavaOptsFlags() {
         List<String> flags = Arrays.stream(Utils.getTestJavaOpts())
                                    .map(s -> s.replaceFirst("-XX:[+|-]?|-(?=[^D|^e])", ""))
-                                   .collect(Collectors.toList());
+                                   .toList();
+        List<String> nonWhiteListedFlags = new ArrayList<>();
         for (String flag : flags) {
+            if (flag.contains("agentpath")) {
+                throw new SkippedException("Can't run test with -javaagent");
+            }
             // Property flags (prefix -D), -ea and -esa are whitelisted.
             if (!flag.startsWith("-D") && !flag.startsWith("-e") && JTREG_WHITELIST_FLAGS.stream().noneMatch(flag::contains)) {
                 // Found VM flag that is not whitelisted
-                return false;
+                nonWhiteListedFlags.add(flag);
             }
         }
-        return true;
+        return nonWhiteListedFlags;
     }
 
     private void runTestVM(List<String> additionalFlags) {
-        TestVMProcess testVMProcess = new TestVMProcess(additionalFlags, testClass, helperClasses, defaultWarmup);
+        TestVMProcess testVMProcess = new TestVMProcess(additionalFlags, testClass, helperClasses, defaultWarmup,
+                                                        allowNotCompilable, testClassesOnBootClassPath);
         if (shouldVerifyIR) {
             try {
-                new IRMatcher(testVMProcess.getHotspotPidFileName(), testVMProcess.getIrEncoding(), testClass);
+                TestClassParser testClassParser = new TestClassParser(testClass, allowNotCompilable);
+                Matchable testClassMatchable = testClassParser.parse(testVMProcess.testVmData());
+                IRMatcher matcher = new IRMatcher(testClassMatchable);
+                matcher.match();
             } catch (IRViolationException e) {
                 e.addCommandLine(testVMProcess.getCommandLine());
                 throw e;
@@ -704,7 +892,7 @@ public class TestFramework {
         } else {
             System.out.println("IR verification disabled either due to no @IR annotations, through explicitly setting " +
                                "-DVerify=false, due to not running a debug build, using a non-whitelisted JTreg VM or " +
-                               "Javaopts flag like -Xint, or running the test VM with other VM flags added by user code " +
+                               "Javaopts flag like -Xint, or running the Test VM with other VM flags added by user code " +
                                "that make the IR verification impossible (e.g. -XX:-UseCompile, " +
                                "-XX:TieredStopAtLevel=[1,2,3], etc.).");
         }

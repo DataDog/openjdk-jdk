@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -151,7 +151,7 @@ final class CertificateStatus {
             statusType = CertStatusRequestType.valueOf((byte)Record.getInt8(m));
             if (statusType == CertStatusRequestType.OCSP) {
                 byte[] respDER = Record.getBytes24(m);
-                // Convert the incoming bytes to a OCSPResponse strucutre
+                // Convert the incoming bytes to a OCSPResponse structure
                 if (respDER.length > 0) {
                     encodedResponses.add(respDER);
                     encodedResponsesLen = 3 + respDER.length;
@@ -164,7 +164,7 @@ final class CertificateStatus {
                 int respListLen = Record.getInt24(m);
                 encodedResponsesLen = respListLen;
 
-                // Add each OCSP reponse into the array list in the order
+                // Add each OCSP response into the array list in the order
                 // we receive them off the wire.  A zero-length array is
                 // allowed for ocsp_multi, and means that a response for
                 // a given certificate is not available.
@@ -246,10 +246,13 @@ final class CertificateStatus {
             }
 
             MessageFormat messageFormat = new MessageFormat(
-                "\"CertificateStatus\": '{'\n" +
-                "  \"type\"                : \"{0}\",\n" +
-                "  \"responses \"          : [\n" + "{1}\n" + "  ]\n" +
-                "'}'",
+                    """
+                            "CertificateStatus": '{'
+                              "type"                : "{0}",
+                              "responses "          : [
+                            {1}
+                              ]
+                            '}'""",
                 Locale.ENGLISH);
             Object[] messageFields = {
                 statusType.name,
@@ -278,7 +281,7 @@ final class CertificateStatus {
                     new CertificateStatusMessage(chc, message);
 
             // Log the message
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                         "Consuming server CertificateStatus handshake message",
                         cst);
@@ -322,7 +325,7 @@ final class CertificateStatus {
 
             // Create the CertificateStatus message from info in the
             CertificateStatusMessage csm = new CertificateStatusMessage(shc);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                     "Produced server CertificateStatus handshake message", csm);
             }
@@ -355,7 +358,8 @@ final class CertificateStatus {
                 // status_request[_v2] extension.  2) The CertificateStatus
                 // message was not sent.  This means that cert path checking
                 // was deferred, but must happen immediately.
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine("Server did not send CertificateStatus, " +
                             "checking cert chain without status info.");
                 }

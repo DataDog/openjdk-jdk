@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,10 +24,10 @@
 #ifndef SHARE_GC_Z_ZFORWARDINGENTRY_HPP
 #define SHARE_GC_Z_ZFORWARDINGENTRY_HPP
 
+#include "cppstdlib/type_traits.hpp"
 #include "gc/z/zBitField.hpp"
 #include "memory/allocation.hpp"
 #include "metaprogramming/primitiveConversions.hpp"
-#include <type_traits>
 
 //
 // Forwarding entry layout
@@ -58,11 +58,11 @@ private:
   uint64_t _entry;
 
 public:
-  ZForwardingEntry() :
-      _entry(0) {}
+  ZForwardingEntry()
+    : _entry(0) {}
 
-  ZForwardingEntry(size_t from_index, size_t to_offset) :
-      _entry(field_populated::encode(true) |
+  ZForwardingEntry(size_t from_index, size_t to_offset)
+    : _entry(field_populated::encode(true) |
              field_to_offset::encode(to_offset) |
              field_from_index::encode(from_index)) {}
 

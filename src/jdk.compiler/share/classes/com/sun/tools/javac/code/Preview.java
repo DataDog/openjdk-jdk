@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,17 +27,21 @@ package com.sun.tools.javac.code;
 
 import com.sun.tools.javac.code.Lint.LintCategory;
 import com.sun.tools.javac.code.Source.Feature;
+import com.sun.tools.javac.code.Symbol.ModuleSymbol;
 import com.sun.tools.javac.jvm.Target;
 import com.sun.tools.javac.resources.CompilerProperties.Errors;
+import com.sun.tools.javac.resources.CompilerProperties.LintWarnings;
 import com.sun.tools.javac.resources.CompilerProperties.Warnings;
 import com.sun.tools.javac.util.Assert;
 import com.sun.tools.javac.util.Context;
+import com.sun.tools.javac.util.JCDiagnostic.DiagnosticFlag;
 import com.sun.tools.javac.util.JCDiagnostic.DiagnosticPosition;
 import com.sun.tools.javac.util.JCDiagnostic.Error;
+import com.sun.tools.javac.util.JCDiagnostic.LintWarning;
 import com.sun.tools.javac.util.JCDiagnostic.SimpleDiagnosticPosition;
 import com.sun.tools.javac.util.JCDiagnostic.Warning;
 import com.sun.tools.javac.util.Log;
-import com.sun.tools.javac.util.MandatoryWarningHandler;
+import com.sun.tools.javac.util.Names;
 import com.sun.tools.javac.util.Options;
 
 import javax.tools.JavaFileObject;
@@ -46,9 +50,6 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-import static com.sun.tools.javac.code.Flags.RECORD;
-import static com.sun.tools.javac.code.Flags.SEALED;
-import static com.sun.tools.javac.code.Flags.NON_SEALED;
 import static com.sun.tools.javac.main.Option.PREVIEW;
 import com.sun.tools.javac.util.JCDiagnostic;
 
@@ -67,9 +68,6 @@ public class Preview {
     /** flag: are preview features enabled */
     private final boolean enabled;
 
-    /** the diag handler to manage preview feature usage diagnostics */
-    private final MandatoryWarningHandler previewHandler;
-
     /** test flag: should all features be considered as preview features? */
     private final boolean forcePreview;
 
@@ -78,11 +76,11 @@ public class Preview {
 
     private final Set<JavaFileObject> sourcesWithPreviewFeatures = new HashSet<>();
 
-    private final Lint lint;
+    private final Names names;
     private final Log log;
     private final Source source;
 
-    private static final Context.Key<Preview> previewKey = new Context.Key<>();
+    protected static final Context.Key<Preview> previewKey = new Context.Key<>();
 
     public static Preview instance(Context context) {
         Preview instance = context.get(previewKey);
@@ -92,15 +90,14 @@ public class Preview {
         return instance;
     }
 
-    Preview(Context context) {
+    @SuppressWarnings("this-escape")
+    protected Preview(Context context) {
         context.put(previewKey, this);
         Options options = Options.instance(context);
+        names = Names.instance(context);
         enabled = options.isSet(PREVIEW);
         log = Log.instance(context);
-        lint = Lint.instance(context);
         source = Source.instance(context);
-        this.previewHandler =
-                new MandatoryWarningHandler(log, source, lint.isEnabled(LintCategory.PREVIEW), true, "preview", LintCategory.PREVIEW);
         forcePreview = options.isSet("forcePreview");
         majorVersionToSource = initMajorVersionToSourceMap();
     }
@@ -115,33 +112,68 @@ public class Preview {
             }
         }
         return majorVersionToSource;
-   }
+    }
 
     /**
-     * Report usage of a preview feature. Usages reported through this method will affect the
-     * set of sourcefiles with dependencies on preview features.
-     * @param pos the position at which the preview feature was used.
-     * @param feature the preview feature used.
+     * Returns true if {@code s} is deemed to participate in the preview of {@code previewSymbol}, and
+     * therefore no warnings or errors will be produced.
+     *
+     * @param syms the symbol table
+     * @param s the symbol depending on the preview symbol
+     * @param previewSymbol the preview symbol marked with @Preview
+     * @return true if {@code s} is participating in the preview of {@code previewSymbol}
      */
-    public void warnPreview(int pos, Feature feature) {
-        warnPreview(new SimpleDiagnosticPosition(pos), feature);
+    public boolean participatesInPreview(Symtab syms, Symbol s, Symbol previewSymbol) {
+        // All symbols in the same module as the preview symbol participate in the preview API
+        if (previewSymbol.packge().modle == s.packge().modle) {
+            return true;
+        }
+
+        return participatesInPreview(syms, s.packge().modle);
+    }
+
+    /**
+     * Returns true if module {@code m} is deemed to participate in the preview, and
+     * therefore no warnings or errors will be produced.
+     *
+     * @param syms the symbol table
+     * @param m the module to check
+     * @return true if {@code m} is participating in the preview of {@code previewSymbol}
+     */
+    public boolean participatesInPreview(Symtab syms, ModuleSymbol m) {
+        // If java.base's jdk.internal.javac package is exported to s's module then
+        // s participates in the preview API
+        return syms.java_base.exports.stream()
+                .filter(ed -> ed.packge.fullname == names.jdk_internal_javac)
+                .anyMatch(ed -> ed.modules.contains(m));
     }
 
     /**
      * Report usage of a preview feature. Usages reported through this method will affect the
      * set of sourcefiles with dependencies on preview features.
+     * @param flag a flag to set on the diagnostic
      * @param pos the position at which the preview feature was used.
      * @param feature the preview feature used.
      */
-    public void warnPreview(DiagnosticPosition pos, Feature feature) {
+    public void warnPreview(DiagnosticFlag flag, int pos, Feature feature) {
+        warnPreview(flag, new SimpleDiagnosticPosition(pos), feature);
+    }
+
+    /**
+     * Report usage of a preview feature. Usages reported through this method will affect the
+     * set of sourcefiles with dependencies on preview features.
+     * @param flag a flag to set on the diagnostic
+     * @param pos the position at which the preview feature was used.
+     * @param feature the preview feature used.
+     */
+    public void warnPreview(DiagnosticFlag flag, DiagnosticPosition pos, Feature feature) {
         Assert.check(isEnabled());
         Assert.check(isPreview(feature));
-        if (!lint.isSuppressed(LintCategory.PREVIEW)) {
-            sourcesWithPreviewFeatures.add(log.currentSourceFile());
-            previewHandler.report(pos, feature.isPlural() ?
-                    Warnings.PreviewFeatureUsePlural(feature.nameFragment()) :
-                    Warnings.PreviewFeatureUse(feature.nameFragment()));
-        }
+        markUsesPreview(pos);
+        log.warning(flag, pos,
+            feature.isPlural() ?
+                LintWarnings.PreviewFeatureUsePlural(feature.nameFragment()) :
+                LintWarnings.PreviewFeatureUse(feature.nameFragment()));
     }
 
     /**
@@ -151,19 +183,16 @@ public class Preview {
      */
     public void warnPreview(JavaFileObject classfile, int majorVersion) {
         Assert.check(isEnabled());
-        if (lint.isEnabled(LintCategory.PREVIEW)) {
-            sourcesWithPreviewFeatures.add(log.currentSourceFile());
-            log.mandatoryWarning(LintCategory.PREVIEW, null,
-                    Warnings.PreviewFeatureUseClassfile(classfile, majorVersionToSource.get(majorVersion).name));
-        }
+        log.warning(LintWarnings.PreviewFeatureUseClassfile(classfile, majorVersionToSource.get(majorVersion).name));
     }
 
+    /**
+     * Mark the current source file as using a preview feature. The corresponding classfile
+     * will be generated with minor version {@link ClassFile#PREVIEW_MINOR_VERSION}.
+     * @param pos the position at which the preview feature was used.
+     */
     public void markUsesPreview(DiagnosticPosition pos) {
         sourcesWithPreviewFeatures.add(log.currentSourceFile());
-    }
-
-    public void reportPreviewWarning(DiagnosticPosition pos, Warning warnKey) {
-        previewHandler.report(pos, warnKey);
     }
 
     public boolean usesPreview(JavaFileObject file) {
@@ -185,9 +214,7 @@ public class Preview {
      */
     public boolean isPreview(Feature feature) {
         return switch (feature) {
-            case CASE_NULL -> true;
-            case PATTERN_SWITCH -> true;
-
+            case PRIMITIVE_PATTERNS -> true;
             //Note: this is a backdoor which allows to optionally treat all features as 'preview' (for testing).
             //When real preview features will be added, this method can be implemented to return 'true'
             //for those selected features, and 'false' for all the others.
@@ -230,28 +257,16 @@ public class Preview {
         return false;
     }
 
-    /**
-     * Report any deferred diagnostics.
-     */
-    public void reportDeferredDiagnostics() {
-        previewHandler.reportDeferredDiagnostic();
-    }
-
-    public void clear() {
-        previewHandler.clear();
-    }
-
     public void checkSourceLevel(DiagnosticPosition pos, Feature feature) {
         if (isPreview(feature) && !isEnabled()) {
             //preview feature without --preview flag, error
-            log.error(JCDiagnostic.DiagnosticFlag.SOURCE_LEVEL, pos, disabledError(feature));
+            log.error(pos, disabledError(feature));
         } else {
             if (!feature.allowedInSource(source)) {
-                log.error(JCDiagnostic.DiagnosticFlag.SOURCE_LEVEL, pos,
-                          feature.error(source.name));
+                log.error(pos, feature.error(source.name));
             }
             if (isEnabled() && isPreview(feature)) {
-                warnPreview(pos, feature);
+                warnPreview(null, pos, feature);
             }
         }
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,6 +28,8 @@
  * @library /test/lib
  * @build jdk.test.lib.Platform
  * @requires os.family == "linux"
+ * @requires os.arch != "ppc64le"
+ * @requires os.arch != "riscv64" | !(vm.cpu.features ~= ".*qemu.*")
  * @run main/othervm -XX:+AlwaysPreTouch -Xlog:pagesize:ps-%p.log TestTracePageSizes
  */
 
@@ -51,18 +53,22 @@
  * @library /test/lib
  * @build jdk.test.lib.Platform
  * @requires os.family == "linux"
- * @requires vm.gc != "Z"
+ * @requires os.arch != "ppc64le"
+ * @requires os.arch != "riscv64" | !(vm.cpu.features ~= ".*qemu.*")
+ * @requires vm.gc != "Z" & vm.gc != "Shenandoah"
  * @run main/othervm -XX:+AlwaysPreTouch -Xmx128m -Xlog:pagesize:ps-%p.log -XX:-SegmentedCodeCache TestTracePageSizes
  * @run main/othervm -XX:+AlwaysPreTouch -Xmx128m -Xlog:pagesize:ps-%p.log -XX:-SegmentedCodeCache -XX:+UseLargePages TestTracePageSizes
  * @run main/othervm -XX:+AlwaysPreTouch -Xmx128m -Xlog:pagesize:ps-%p.log -XX:-SegmentedCodeCache -XX:+UseTransparentHugePages TestTracePageSizes
  */
 
 /*
- * @test id=with-G1
+ * @test id=G1
  * @summary Run tests with G1
  * @library /test/lib
  * @build jdk.test.lib.Platform
  * @requires os.family == "linux"
+ * @requires os.arch != "ppc64le"
+ * @requires os.arch != "riscv64" | !(vm.cpu.features ~= ".*qemu.*")
  * @requires vm.gc.G1
  * @run main/othervm -XX:+AlwaysPreTouch -Xmx128m -Xlog:pagesize:ps-%p.log -XX:+UseG1GC TestTracePageSizes
  * @run main/othervm -XX:+AlwaysPreTouch -Xmx128m -Xlog:pagesize:ps-%p.log -XX:+UseG1GC -XX:+UseLargePages TestTracePageSizes
@@ -70,11 +76,13 @@
 */
 
 /*
- * @test id=with-Parallel
+ * @test id=Parallel
  * @summary Run tests with Parallel
  * @library /test/lib
  * @build jdk.test.lib.Platform
  * @requires os.family == "linux"
+ * @requires os.arch != "ppc64le"
+ * @requires os.arch != "riscv64" | !(vm.cpu.features ~= ".*qemu.*")
  * @requires vm.gc.Parallel
  * @run main/othervm -XX:+AlwaysPreTouch -Xmx128m -Xlog:pagesize:ps-%p.log -XX:+UseParallelGC TestTracePageSizes
  * @run main/othervm -XX:+AlwaysPreTouch -Xmx128m -Xlog:pagesize:ps-%p.log -XX:+UseParallelGC -XX:+UseLargePages TestTracePageSizes
@@ -82,11 +90,13 @@
 */
 
 /*
- * @test id=with-Serial
+ * @test id=Serial
  * @summary Run tests with Serial
  * @library /test/lib
  * @build jdk.test.lib.Platform
  * @requires os.family == "linux"
+ * @requires os.arch != "ppc64le"
+ * @requires os.arch != "riscv64" | !(vm.cpu.features ~= ".*qemu.*")
  * @requires vm.gc.Serial
  * @run main/othervm -XX:+AlwaysPreTouch -Xmx128m -Xlog:pagesize:ps-%p.log -XX:+UseSerialGC TestTracePageSizes
  * @run main/othervm -XX:+AlwaysPreTouch -Xmx128m -Xlog:pagesize:ps-%p.log -XX:+UseSerialGC -XX:+UseLargePages TestTracePageSizes
@@ -94,121 +104,20 @@
 */
 
 import java.io.File;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
-import java.util.LinkedList;
 import java.util.Scanner;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import jdk.test.lib.Platform;
+import jdk.test.lib.os.linux.Smaps;
+import jdk.test.lib.os.linux.Smaps.Range;
 import jtreg.SkippedException;
 
 // Check that page sizes logged match what is recorded in /proc/self/smaps.
 // For transparent huge pages the matching is best effort since we can't
 // know for sure what the underlying page size is.
 public class TestTracePageSizes {
-    // Store address ranges with known page size.
-    private static LinkedList<RangeWithPageSize> ranges = new LinkedList<>();
     private static boolean debug;
     private static int run;
-
-    // Copy smaps locally
-    // (To minimize chances of concurrent modification when parsing, as well as helping with error analysis)
-    private static Path copySmaps() throws Exception {
-        Path p1 = Paths.get("/proc/self/smaps");
-        Path p2 = Paths.get("smaps-copy-" +  ProcessHandle.current().pid() + "-" + (run++) + ".txt");
-        Files.copy(p1, p2, StandardCopyOption.REPLACE_EXISTING);
-        debug("Copied " + p1 + " to " + p2 + "...");
-        return p2;
-    }
-
-    // Parse /proc/self/smaps.
-    private static void parseSmaps() throws Exception {
-        // We can override the smaps file to parse to pass in a pre-fetched one
-        String smapsFileToParse = System.getProperty("smaps-file");
-        if (smapsFileToParse != null) {
-            parseSmaps(Paths.get(smapsFileToParse));
-        } else {
-            Path smapsCopy = copySmaps();
-            parseSmaps(smapsCopy);
-        }
-    }
-
-    static class SmapsParser {
-        // This is a simple smaps parser; it will recognize smaps section start lines
-        //  (e.g. "40fa00000-439b80000 rw-p 00000000 00:00 0 ") and look for keywords inside the section.
-        // Section will be finished and written into a RangeWithPageSize when either the next section is found
-        //  or the end of file is encountered.
-        static final Pattern SECTION_START_PATT = Pattern.compile("^([a-f0-9]+)-([a-f0-9]+) [\\-rwpsx]{4}.*");
-        static final Pattern KERNEL_PAGESIZE_PATT = Pattern.compile("^KernelPageSize:\\s*(\\d*) kB");
-        static final Pattern VMFLAGS_PATT = Pattern.compile("^VmFlags: ([\\w\\? ]*)");
-        String start;
-        String end;
-        String ps;
-        String vmFlags;
-        int lineno;
-
-        void reset() {
-            start = null;
-            end = null;
-            ps = null;
-            vmFlags = null;
-        }
-
-        public void finish() {
-            if (start != null) {
-                RangeWithPageSize range = new RangeWithPageSize(start, end, ps, vmFlags);
-                ranges.add(range);
-                debug("Added range: " + range);
-                reset();
-            }
-        }
-
-        void eatNext(String line) {
-            debug("" + (lineno++) + " " + line);
-            Matcher matSectionStart = SECTION_START_PATT.matcher(line);
-            if (matSectionStart.matches()) {
-                finish();
-                start = matSectionStart.group(1);
-                end = matSectionStart.group(2);
-                ps = null;
-                vmFlags = null;
-                return;
-            } else {
-                Matcher matKernelPageSize = KERNEL_PAGESIZE_PATT.matcher(line);
-                if (matKernelPageSize.matches()) {
-                    ps = matKernelPageSize.group(1);
-                    return;
-                }
-                Matcher matVmFlags = VMFLAGS_PATT.matcher(line);
-                if (matVmFlags.matches()) {
-                    vmFlags = matVmFlags.group(1);
-                    return;
-                }
-            }
-        }
-    }
-
-    // Parse /proc/self/smaps
-    private static void parseSmaps(Path smapsFileToParse) throws Exception {
-        debug("Parsing: " + smapsFileToParse.getFileName() + "...");
-        SmapsParser parser = new SmapsParser();
-        Files.lines(smapsFileToParse).forEach(parser::eatNext);
-        parser.finish();
-    }
-
-    // Search for a range including the given address.
-    private static RangeWithPageSize getRange(String addr) {
-        long laddr = Long.decode(addr);
-        for (RangeWithPageSize range : ranges) {
-            if (range.includes(laddr)) {
-                return range;
-            }
-        }
-        return null;
-    }
 
     // Helper to get the page size in KB given a page size parsed
     // from log_info(pagesize) output.
@@ -248,17 +157,11 @@ public class TestTracePageSizes {
             throw new SkippedException("Kernel older than 3.8 - skipping this test.");
         }
 
-        // For similar reasons, we skip the test on ppc platforms, since there the smaps
-        //  format may follow a different logic.
-        if (Platform.isPPC()) {
-            throw new SkippedException("PPC - skipping this test.");
-        }
-
         // Parse /proc/self/smaps to compare with values logged in the VM.
-        parseSmaps();
+        Smaps smaps = Smaps.parseSelf();
 
         // Setup patters for the JVM page size logging.
-        String traceLinePatternString = ".*base=(0x[0-9A-Fa-f]*).*page_size=([^ ]+).*";
+        String traceLinePatternString = ".*base=(0x[0-9A-Fa-f]*).* page_size=(\\d+[BKMG]).*";
         Pattern traceLinePattern = Pattern.compile(traceLinePatternString);
 
         // The test needs to be run with page size logging printed to ps-$pid.log.
@@ -272,7 +175,7 @@ public class TestTracePageSizes {
                 String address = trace.group(1);
                 String pageSize = trace.group(2);
 
-                RangeWithPageSize range = getRange(address);
+                Range range = smaps.getRange(address);
                 if (range == null) {
                     debug("Could not find range for: " + line);
                     throw new AssertionError("No memory range found for address: " + address);
@@ -306,68 +209,5 @@ public class TestTracePageSizes {
         if (debug) {
             System.out.println(str);
         }
-    }
-}
-
-// Class used to store information about memory ranges parsed
-// from /proc/self/smaps. The file contain a lot of information
-// about the different mappings done by an application, but the
-// lines we care about are:
-// 700000000-73ea00000 rw-p 00000000 00:00 0
-// ...
-// KernelPageSize:        4 kB
-// ...
-// VmFlags: rd wr mr mw me ac sd
-//
-// We use the VmFlags to know what kind of huge pages are used.
-// For transparent huge pages the KernelPageSize field will not
-// report the large page size.
-class RangeWithPageSize {
-    private long start;
-    private long end;
-    private long pageSize;
-    private boolean vmFlagHG;
-    private boolean vmFlagHT;
-
-    public RangeWithPageSize(String start, String end, String pageSize, String vmFlags) {
-        // Note: since we insist on kernels >= 3.8, all the following information should be present
-        //  (none of the input strings be null).
-        this.start = Long.parseUnsignedLong(start, 16);
-        this.end = Long.parseUnsignedLong(end, 16);
-        this.pageSize = Long.parseLong(pageSize);
-
-        vmFlagHG = false;
-        vmFlagHT = false;
-        // Check if the vmFlags line include:
-        // * ht - Meaning the range is mapped using explicit huge pages.
-        // * hg - Meaning the range is madvised huge.
-        for (String flag : vmFlags.split(" ")) {
-            if (flag.equals("ht")) {
-                vmFlagHT = true;
-            } else if (flag.equals("hg")) {
-                vmFlagHG = true;
-            }
-        }
-    }
-
-    public long getPageSize() {
-        return pageSize;
-    }
-
-    public boolean isTransparentHuge() {
-        return vmFlagHG;
-    }
-
-    public boolean isExplicitHuge() {
-        return vmFlagHT;
-    }
-
-    public boolean includes(long addr) {
-        return start <= addr && addr < end;
-    }
-
-    public String toString() {
-        return "[" + Long.toHexString(start) + ", " + Long.toHexString(end) + ") " +
-               "pageSize=" + pageSize + "KB isTHP=" + vmFlagHG + " isHUGETLB=" + vmFlagHT;
     }
 }

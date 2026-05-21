@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,10 +25,13 @@
 
 package sun.net.www.protocol.https;
 
+import java.net.Authenticator;
 import java.net.URL;
 import java.net.Proxy;
 import java.net.SecureCacheResponse;
 import java.security.Principal;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
@@ -36,6 +39,7 @@ import javax.net.ssl.SSLSession;
 import javax.net.ssl.SSLPeerUnverifiedException;
 import sun.net.www.http.*;
 import sun.net.www.protocol.http.HttpURLConnection;
+import sun.net.www.protocol.http.HttpCallerInfo;
 
 /**
  * HTTPS URL connection support.
@@ -47,6 +51,7 @@ import sun.net.www.protocol.http.HttpURLConnection;
 public abstract class AbstractDelegateHttpsURLConnection extends
         HttpURLConnection {
 
+    private SSLSession savedSession = null;
     protected AbstractDelegateHttpsURLConnection(URL url,
             sun.net.www.protocol.http.Handler handler) throws IOException {
         this(url, null, handler);
@@ -61,7 +66,7 @@ public abstract class AbstractDelegateHttpsURLConnection extends
 
     protected abstract javax.net.ssl.HostnameVerifier getHostnameVerifier();
 
-    /**
+    /*
      * No user application is able to call these routines, as no one
      * should ever get access to an instance of
      * DelegateHttpsURLConnection (sun.* or com.*)
@@ -88,6 +93,7 @@ public abstract class AbstractDelegateHttpsURLConnection extends
     public void setNewClient (URL url, boolean useCache)
         throws IOException {
         int readTimeout = getReadTimeout();
+        savedSession = null;
         http = HttpsClient.New (getSSLSocketFactory(),
                                 url,
                                 getHostnameVerifier(),
@@ -180,6 +186,7 @@ public abstract class AbstractDelegateHttpsURLConnection extends
         if (!http.isCachedConnection() && http.needsTunneling()) {
             doTunneling();
         }
+        savedSession = null;
         ((HttpsClient)http).afterConnect();
     }
 
@@ -200,6 +207,19 @@ public abstract class AbstractDelegateHttpsURLConnection extends
                                useCache, connectTimeout, this);
     }
 
+    @Override
+    protected void noResponseBody() {
+        savedSession = ((HttpsClient)http).getSSLSession();
+        super.noResponseBody();
+    }
+
+    private SSLSession session() {
+        if (http instanceof HttpsClient https) {
+            return https.getSSLSession();
+        }
+        return savedSession;
+    }
+
     /**
      * Returns the cipher suite in use on this connection.
      */
@@ -207,11 +227,12 @@ public abstract class AbstractDelegateHttpsURLConnection extends
         if (cachedResponse != null) {
             return ((SecureCacheResponse)cachedResponse).getCipherSuite();
         }
-        if (http == null) {
+
+        var session = session();
+        if (session == null) {
             throw new IllegalStateException("connection not yet open");
-        } else {
-           return ((HttpsClient)http).getCipherSuite ();
         }
+        return session.getCipherSuite();
     }
 
     /**
@@ -227,11 +248,12 @@ public abstract class AbstractDelegateHttpsURLConnection extends
                 return l.toArray(new java.security.cert.Certificate[0]);
             }
         }
-        if (http == null) {
+
+        var session = session();
+        if (session == null) {
             throw new IllegalStateException("connection not yet open");
-        } else {
-            return (((HttpsClient)http).getLocalCertificates ());
         }
+        return session.getLocalCertificates();
     }
 
     /**
@@ -252,11 +274,11 @@ public abstract class AbstractDelegateHttpsURLConnection extends
             }
         }
 
-        if (http == null) {
+        var session = session();
+        if (session == null) {
             throw new IllegalStateException("connection not yet open");
-        } else {
-            return (((HttpsClient)http).getServerCertificates ());
         }
+        return session.getPeerCertificates();
     }
 
     /**
@@ -270,11 +292,11 @@ public abstract class AbstractDelegateHttpsURLConnection extends
             return ((SecureCacheResponse)cachedResponse).getPeerPrincipal();
         }
 
-        if (http == null) {
+        var session = session();
+        if (session == null) {
             throw new IllegalStateException("connection not yet open");
-        } else {
-            return (((HttpsClient)http).getPeerPrincipal());
         }
+        return getPeerPrincipal(session);
     }
 
     /**
@@ -287,11 +309,11 @@ public abstract class AbstractDelegateHttpsURLConnection extends
             return ((SecureCacheResponse)cachedResponse).getLocalPrincipal();
         }
 
-        if (http == null) {
+        var session = session();
+        if (session == null) {
             throw new IllegalStateException("connection not yet open");
-        } else {
-            return (((HttpsClient)http).getLocalPrincipal());
         }
+        return getLocalPrincipal(session);
     }
 
     SSLSession getSSLSession() {
@@ -303,10 +325,133 @@ public abstract class AbstractDelegateHttpsURLConnection extends
             }
         }
 
-        if (http == null) {
+        var session = session();
+        if (session == null) {
             throw new IllegalStateException("connection not yet open");
         }
 
-        return ((HttpsClient)http).getSSLSession();
+        return session;
     }
+
+    /*
+     * If no SSL Session available or if the system config does not allow it
+     * don't use the extended caller info (the server cert).
+     * Otherwise return true to include the server cert
+     */
+    private boolean useExtendedCallerInfo(URL url) {
+        HttpsClient https = (HttpsClient)http;
+        if (https.getSSLSession() == null) {
+            return false;
+        }
+        String prop = http.getSpnegoCBT();
+        if (prop.equals("never")) {
+            return false;
+        }
+        String target = url.getHost();
+        if (prop.startsWith("domain:")) {
+            String[] domains = prop.substring(7).split(",");
+            for (String domain : domains) {
+                if (target.equalsIgnoreCase(domain)) {
+                    return true;
+                }
+                if (domain.startsWith("*.") && target.regionMatches(
+                        true, target.length() - domain.length() + 1, domain, 1, domain.length() - 1)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return true;
+    }
+
+    @Override
+    protected HttpCallerInfo getHttpCallerInfo(URL url, String proxy, int port,
+                                               Authenticator authenticator)
+    {
+        if (!useExtendedCallerInfo(url)) {
+            return super.getHttpCallerInfo(url, proxy, port, authenticator);
+        }
+        HttpsClient https = (HttpsClient)http;
+        try {
+            Certificate[] certs = https.getSSLSession().getPeerCertificates();
+            if (certs[0] instanceof X509Certificate x509Cert) {
+                return new HttpCallerInfo(url, proxy, port, x509Cert, authenticator);
+            }
+        } catch (SSLPeerUnverifiedException e) {
+            // ignore
+        }
+        return super.getHttpCallerInfo(url, proxy, port, authenticator);
+    }
+
+    @Override
+    protected HttpCallerInfo getHttpCallerInfo(URL url, Authenticator authenticator)
+    {
+        if (!useExtendedCallerInfo(url)) {
+            return super.getHttpCallerInfo(url, authenticator);
+        }
+        HttpsClient https = (HttpsClient)http;
+        try {
+            Certificate[] certs = https.getSSLSession().getPeerCertificates();
+            if (certs[0] instanceof X509Certificate x509Cert) {
+                return new HttpCallerInfo(url, x509Cert, authenticator);
+            }
+        } catch (SSLPeerUnverifiedException e) {
+            // ignore
+        }
+        return super.getHttpCallerInfo(url, authenticator);
+    }
+
+    @Override
+    public void disconnect() {
+        super.disconnect();
+        savedSession = null;
+    }
+
+    /**
+     * Returns the principal with which the server authenticated
+     * itself, or throw a SSLPeerUnverifiedException if the
+     * server did not authenticate.
+     * @param session The {@linkplain #getSSLSession() SSL session}
+     */
+    private static Principal getPeerPrincipal(SSLSession session)
+            throws SSLPeerUnverifiedException
+    {
+        Principal principal;
+        try {
+            principal = session.getPeerPrincipal();
+        } catch (AbstractMethodError e) {
+            // if the provider does not support it, fallback to peer certs.
+            // return the X500Principal of the end-entity cert.
+            java.security.cert.Certificate[] certs =
+                    session.getPeerCertificates();
+            principal = ((X509Certificate)certs[0]).getSubjectX500Principal();
+        }
+        return principal;
+    }
+
+    /**
+     * Returns the principal the client sent to the
+     * server, or null if the client did not authenticate.
+     * @param session The {@linkplain #getSSLSession() SSL session}
+     */
+    private static Principal getLocalPrincipal(SSLSession session)
+    {
+        Principal principal;
+        try {
+            principal = session.getLocalPrincipal();
+        } catch (AbstractMethodError e) {
+            principal = null;
+            // if the provider does not support it, fallback to local certs.
+            // return the X500Principal of the end-entity cert.
+            java.security.cert.Certificate[] certs =
+                    session.getLocalCertificates();
+            if (certs != null) {
+                principal = ((X509Certificate)certs[0]).getSubjectX500Principal();
+            }
+        }
+        return principal;
+    }
+
+
+
 }

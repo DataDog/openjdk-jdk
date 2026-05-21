@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,12 +28,9 @@ package sun.nio.cs;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.Charset;
-import java.nio.charset.CharsetDecoder;
-import java.nio.charset.CharsetEncoder;
 import java.nio.charset.CoderResult;
 import java.util.Arrays;
-import sun.nio.cs.DoubleByte;
-import sun.nio.cs.Surrogate;
+
 import static sun.nio.cs.CharsetMapping.*;
 
 public class HKSCS {
@@ -42,9 +39,9 @@ public class HKSCS {
         static int b2Min = 0x40;
         static int b2Max = 0xfe;
 
-        private char[][] b2cBmp;
-        private char[][] b2cSupp;
-        private DoubleByte.Decoder big5Dec;
+        private final char[][] b2cBmp;
+        private final char[][] b2cSupp;
+        private final DoubleByte.Decoder big5Dec;
 
         protected Decoder(Charset cs,
                           DoubleByte.Decoder big5Dec,
@@ -94,7 +91,6 @@ public class HKSCS {
                     int b1 = sa[sp] & 0xff;
                     char c = decodeSingle(b1);
                     int inSize = 1, outSize = 1;
-                    char[] cc = null;
                     if (c == UNMAPPABLE_DECODING) {
                         if (sl - sp < 2)
                             return CoderResult.UNDERFLOW;
@@ -137,7 +133,6 @@ public class HKSCS {
             int mark = src.position();
             try {
                 while (src.hasRemaining()) {
-                    char[] cc = null;
                     int b1 = src.get() & 0xff;
                     int inSize = 1, outSize = 1;
                     char c = decodeSingle(b1);
@@ -230,9 +225,9 @@ public class HKSCS {
     }
 
     public static class Encoder extends DoubleByte.Encoder {
-        private DoubleByte.Encoder big5Enc;
-        private char[][] c2bBmp;
-        private char[][] c2bSupp;
+        private final DoubleByte.Encoder big5Enc;
+        private final char[][] c2bBmp;
+        private final char[][] c2bSupp;
 
         protected Encoder(Charset cs,
                           DoubleByte.Encoder big5Enc,
@@ -357,42 +352,9 @@ public class HKSCS {
                 return encodeBufferLoop(src, dst);
         }
 
-        private byte[] repl = replacement();
-        protected void implReplaceWith(byte[] newReplacement) {
-            repl = newReplacement;
-        }
-
-        public int encode(char[] src, int sp, int len, byte[] dst) {
-            int dp = 0;
+        @Override
+        public int encodeFromUTF16(byte[] src, int sp, int len, byte[] dst, int dp) {
             int sl = sp + len;
-            while (sp < sl) {
-                char c = src[sp++];
-                int bb = encodeChar(c);
-                if (bb == UNMAPPABLE_ENCODING) {
-                    if (!Character.isHighSurrogate(c) || sp == sl ||
-                        !Character.isLowSurrogate(src[sp]) ||
-                        (bb = encodeSupp(Character.toCodePoint(c, src[sp++])))
-                        == UNMAPPABLE_ENCODING) {
-                        dst[dp++] = repl[0];
-                        if (repl.length > 1)
-                            dst[dp++] = repl[1];
-                        continue;
-                    }
-                }
-                if (bb > MAX_SINGLEBYTE) {        // DoubleByte
-                    dst[dp++] = (byte)(bb >> 8);
-                    dst[dp++] = (byte)bb;
-                } else {                          // SingleByte
-                    dst[dp++] = (byte)bb;
-                }
-            }
-            return dp;
-        }
-
-        public int encodeFromUTF16(byte[] src, int sp, int len, byte[] dst) {
-            int dp = 0;
-            int sl = sp + len;
-            int dl = dst.length;
             while (sp < sl) {
                 char c = StringUTF16.getChar(src, sp++);
                 int bb = encodeChar(c);

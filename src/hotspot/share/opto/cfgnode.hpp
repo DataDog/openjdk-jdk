@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,6 +28,7 @@
 #include "opto/multnode.hpp"
 #include "opto/node.hpp"
 #include "opto/opcodes.hpp"
+#include "opto/predicates_enums.hpp"
 #include "opto/type.hpp"
 
 // Portions of code courtesy of Clifford Click
@@ -47,6 +48,7 @@ class       PCTableNode;
 class         JumpNode;
 class         CatchNode;
 class       NeverBranchNode;
+class     BlackholeNode;
 class   ProjNode;
 class     CProjNode;
 class       IfTrueNode;
@@ -56,6 +58,8 @@ class     JProjNode;
 class       JumpProjNode;
 class     SCMemProjNode;
 class PhaseIdealLoop;
+enum class AssertionPredicateType;
+enum class PredicateState;
 
 //------------------------------RegionNode-------------------------------------
 // The class of RegionNodes, which can be mapped to basic blocks in the
@@ -64,10 +68,23 @@ class PhaseIdealLoop;
 // correspond 1-to-1 with RegionNode inputs.  The zero input of a PhiNode is
 // the RegionNode, and the zero input of the RegionNode is itself.
 class RegionNode : public Node {
+public:
+  enum LoopStatus {
+    // No guarantee: the region may be an irreducible loop entry, thus we have to
+    // be careful when removing entry control to it.
+    MaybeIrreducibleEntry,
+    // Limited guarantee: this region may be (nested) inside an irreducible loop,
+    // but it will never be an irreducible loop entry.
+    NeverIrreducibleEntry,
+    // Strong guarantee: this region is not (nested) inside an irreducible loop.
+    Reducible,
+  };
+
 private:
   bool _is_unreachable_region;
+  LoopStatus _loop_status;
 
-  bool is_possible_unsafe_loop(const PhaseGVN* phase) const;
+  bool is_possible_unsafe_loop() const;
   bool is_unreachable_from_root(const PhaseGVN* phase) const;
 public:
   // Node layout (parallels PhiNode):
@@ -75,34 +92,48 @@ public:
          Control                // Control arcs are [1..len)
   };
 
-  RegionNode(uint required) : Node(required), _is_unreachable_region(false) {
+  RegionNode(uint required)
+    : Node(required),
+      _is_unreachable_region(false),
+      _loop_status(LoopStatus::NeverIrreducibleEntry)
+  {
     init_class_id(Class_Region);
     init_req(0, this);
   }
 
   Node* is_copy() const {
     const Node* r = _in[Region];
-    if (r == NULL)
+    if (r == nullptr)
       return nonnull_req();
-    return NULL;  // not a copy!
+    return nullptr;  // not a copy!
   }
-  PhiNode* has_phi() const;        // returns an arbitrary phi user, or NULL
-  PhiNode* has_unique_phi() const; // returns the unique phi user, or NULL
+  PhiNode* has_phi() const;        // returns an arbitrary phi user, or null
+  PhiNode* has_unique_phi() const; // returns the unique phi user, or null
   // Is this region node unreachable from root?
   bool is_unreachable_region(const PhaseGVN* phase);
+#ifdef ASSERT
+  bool is_in_infinite_subgraph();
+  static bool are_all_nodes_in_infinite_subgraph(Unique_Node_List& worklist);
+#endif //ASSERT
+  LoopStatus loop_status() const { return _loop_status; };
+  void set_loop_status(LoopStatus status);
+  bool can_be_irreducible_entry() const;
+
   virtual int Opcode() const;
   virtual uint size_of() const { return sizeof(*this); }
   virtual bool pinned() const { return (const Node*)in(0) == this; }
   virtual bool is_CFG() const { return true; }
   virtual uint hash() const { return NO_HASH; } // CFG nodes do not hash
-  virtual bool depends_only_on_test() const { return false; }
   virtual const Type* bottom_type() const { return Type::CONTROL; }
   virtual const Type* Value(PhaseGVN* phase) const;
   virtual Node* Identity(PhaseGVN* phase);
   virtual Node* Ideal(PhaseGVN* phase, bool can_reshape);
+  void remove_unreachable_subgraph(PhaseIterGVN* igvn);
   virtual const RegMask &out_RegMask() const;
-  bool try_clean_mem_phi(PhaseGVN* phase);
+  bool is_diamond() const;
+  void try_clean_mem_phis(PhaseIterGVN* phase);
   bool optimize_trichotomy(PhaseIterGVN* igvn);
+  NOT_PRODUCT(virtual void dump_spec(outputStream* st) const;)
 };
 
 //------------------------------JProjNode--------------------------------------
@@ -143,13 +174,23 @@ class PhiNode : public TypeNode {
   bool wait_for_region_igvn(PhaseGVN* phase);
   bool is_data_loop(RegionNode* r, Node* uin, const PhaseGVN* phase);
 
+  static Node* clone_through_phi(Node* root_phi, const Type* t, uint c, PhaseIterGVN* igvn);
+  static Node* merge_through_phi(Node* root_phi, PhaseIterGVN* igvn);
+
+  bool must_wait_for_region_in_irreducible_loop(PhaseGVN* phase) const;
+
+  bool is_split_through_mergemem_terminating() const;
+
+  void verify_type_stability(const PhaseGVN* phase, const Type* union_of_input_types, const Type* new_type) const NOT_DEBUG_RETURN;
+  bool wait_for_cast_input_igvn(const PhaseIterGVN* igvn) const;
+
 public:
   // Node layout (parallels RegionNode):
   enum { Region,                // Control input is the Phi's region.
          Input                  // Input values are [1..len)
   };
 
-  PhiNode( Node *r, const Type *t, const TypePtr* at = NULL,
+  PhiNode( Node *r, const Type *t, const TypePtr* at = nullptr,
            const int imid = -1,
            const int iid = TypeOopPtr::InstanceTop,
            const int iidx = Compile::AliasIdxTop,
@@ -168,7 +209,7 @@ public:
   // create a new phi with in edges matching r and set (initially) to x
   static PhiNode* make( Node* r, Node* x );
   // extra type arguments override the new phi's bottom_type and adr_type
-  static PhiNode* make( Node* r, Node* x, const Type *t, const TypePtr* at = NULL );
+  static PhiNode* make( Node* r, Node* x, const Type *t, const TypePtr* at = nullptr );
   // create a new phi with narrowed memory type
   PhiNode* slice_memory(const TypePtr* adr_type) const;
   PhiNode* split_out_instance(const TypePtr* at, PhaseIterGVN *igvn) const;
@@ -181,11 +222,11 @@ public:
   bool is_tripcount(BasicType bt) const;
 
   // Determine a unique non-trivial input, if any.
-  // Ignore casts if it helps.  Return NULL on failure.
-  Node* unique_input(PhaseTransform *phase, bool uncast);
-  Node* unique_input(PhaseTransform *phase) {
+  // Ignore casts if it helps.  Return null on failure.
+  Node* unique_input(PhaseValues* phase, bool uncast);
+  Node* unique_input(PhaseValues* phase) {
     Node* uin = unique_input(phase, false);
-    if (uin == NULL) {
+    if (uin == nullptr) {
       uin = unique_input(phase, true);
     }
     return uin;
@@ -196,16 +237,17 @@ public:
   LoopSafety simple_data_loop_check(Node *in) const;
   // Is it unsafe data loop? It becomes a dead loop if this phi node removed.
   bool is_unsafe_data_reference(Node *in) const;
-  int  is_diamond_phi(bool check_control_only = false) const;
+  int is_diamond_phi() const;
+  bool try_clean_memory_phi(PhaseIterGVN* igvn);
   virtual int Opcode() const;
-  virtual bool pinned() const { return in(0) != 0; }
+  virtual bool pinned() const { return in(0) != nullptr; }
   virtual const TypePtr *adr_type() const { verify_adr_type(true); return _adr_type; }
 
   void  set_inst_mem_id(int inst_mem_id) { _inst_mem_id = inst_mem_id; }
-  const int inst_mem_id() const { return _inst_mem_id; }
-  const int inst_id()     const { return _inst_id; }
-  const int inst_index()  const { return _inst_index; }
-  const int inst_offset() const { return _inst_offset; }
+  int inst_mem_id() const { return _inst_mem_id; }
+  int inst_id()     const { return _inst_id; }
+  int inst_index()  const { return _inst_index; }
+  int inst_offset() const { return _inst_offset; }
   bool is_same_inst_field(const Type* tp, int mem_id, int id, int index, int offset) {
     return type()->basic_type() == tp->basic_type() &&
            inst_mem_id() == mem_id &&
@@ -221,7 +263,6 @@ public:
   virtual const RegMask &out_RegMask() const;
   virtual const RegMask &in_RegMask(uint) const;
 #ifndef PRODUCT
-  virtual void related(GrowableArray<Node*> *in_rel, GrowableArray<Node*> *out_rel, bool compact) const;
   virtual void dump_spec(outputStream *st) const;
 #endif
 #ifdef ASSERT
@@ -230,6 +271,9 @@ public:
 #else //ASSERT
   void verify_adr_type(bool recursive = false) const {}
 #endif //ASSERT
+
+  const TypeTuple* collect_types(PhaseGVN* phase) const;
+  bool can_be_replaced_by(const PhiNode* other) const;
 };
 
 //------------------------------GotoNode---------------------------------------
@@ -242,15 +286,10 @@ public:
   virtual bool  is_CFG() const { return true; }
   virtual uint hash() const { return NO_HASH; }  // CFG nodes do not hash
   virtual const Node *is_block_proj() const { return this; }
-  virtual bool depends_only_on_test() const { return false; }
   virtual const Type *bottom_type() const { return Type::CONTROL; }
   virtual const Type* Value(PhaseGVN* phase) const;
   virtual Node* Identity(PhaseGVN* phase);
   virtual const RegMask &out_RegMask() const;
-
-#ifndef PRODUCT
-  virtual void related(GrowableArray<Node*> *in_rel, GrowableArray<Node*> *out_rel, bool compact) const;
-#endif
 };
 
 //------------------------------CProjNode--------------------------------------
@@ -276,36 +315,47 @@ public:
     init_class_id(Class_MultiBranch);
   }
   // returns required number of users to be well formed.
-  virtual int required_outcnt() const = 0;
+  virtual uint required_outcnt() const = 0;
 };
 
 //------------------------------IfNode-----------------------------------------
 // Output selected Control, based on a boolean test
 class IfNode : public MultiBranchNode {
+ public:
+  float _prob;                           // Probability of true path being taken.
+  float _fcnt;                           // Frequency counter
+
+ private:
+  AssertionPredicateType _assertion_predicate_type;
+
+  void init_node(Node* control, Node* bol) {
+    init_class_id(Class_If);
+    init_req(0, control);
+    init_req(1, bol);
+  }
+
   // Size is bigger to hold the probability field.  However, _prob does not
   // change the semantics so it does not appear in the hash & cmp functions.
   virtual uint size_of() const { return sizeof(*this); }
 
-private:
   // Helper methods for fold_compares
   bool cmpi_folds(PhaseIterGVN* igvn, bool fold_ne = false);
   bool is_ctrl_folds(Node* ctrl, PhaseIterGVN* igvn);
-  bool has_shared_region(ProjNode* proj, ProjNode*& success, ProjNode*& fail);
-  bool has_only_uncommon_traps(ProjNode* proj, ProjNode*& success, ProjNode*& fail, PhaseIterGVN* igvn);
-  Node* merge_uncommon_traps(ProjNode* proj, ProjNode* success, ProjNode* fail, PhaseIterGVN* igvn);
+  bool has_shared_region(IfProjNode* proj, IfProjNode*& success, IfProjNode*& fail) const;
+  bool has_only_uncommon_traps(IfProjNode* proj, IfProjNode*& success, IfProjNode*& fail, PhaseIterGVN* igvn) const;
+  Node* merge_uncommon_traps(IfProjNode* proj, IfProjNode* success, IfProjNode* fail, PhaseIterGVN* igvn);
   static void improve_address_types(Node* l, Node* r, ProjNode* fail, PhaseIterGVN* igvn);
-  bool is_cmp_with_loadrange(ProjNode* proj);
-  bool is_null_check(ProjNode* proj, PhaseIterGVN* igvn);
-  bool is_side_effect_free_test(ProjNode* proj, PhaseIterGVN* igvn);
-  void reroute_side_effect_free_unc(ProjNode* proj, ProjNode* dom_proj, PhaseIterGVN* igvn);
-  ProjNode* uncommon_trap_proj(CallStaticJavaNode*& call) const;
-  bool fold_compares_helper(ProjNode* proj, ProjNode* success, ProjNode* fail, PhaseIterGVN* igvn);
+  bool is_cmp_with_loadrange(IfProjNode* proj) const;
+  bool is_null_check(IfProjNode* proj, PhaseIterGVN* igvn) const;
+  bool is_side_effect_free_test(IfProjNode* proj, PhaseIterGVN* igvn) const;
+  static void reroute_side_effect_free_unc(IfProjNode* proj, IfProjNode* dom_proj, PhaseIterGVN* igvn);
+  bool fold_compares_helper(IfProjNode* proj, IfProjNode* success, IfProjNode* fail, PhaseIterGVN* igvn);
   static bool is_dominator_unc(CallStaticJavaNode* dom_unc, CallStaticJavaNode* unc);
 
 protected:
-  ProjNode* range_check_trap_proj(int& flip, Node*& l, Node*& r);
+  IfProjNode* range_check_trap_proj(int& flip, Node*& l, Node*& r) const;
   Node* Ideal_common(PhaseGVN *phase, bool can_reshape);
-  Node* search_identical(int dist);
+  Node* search_identical(int dist, PhaseIterGVN* igvn);
 
   Node* simple_subsuming(PhaseIterGVN* igvn);
 
@@ -377,43 +427,70 @@ public:
   // Magic manifest probabilities such as 0.83, 0.7, ... can be found in
   // gen_subtype_check() and catch_inline_exceptions().
 
-  float _prob;                  // Probability of true path being taken.
-  float _fcnt;                  // Frequency counter
-  IfNode( Node *control, Node *b, float p, float fcnt )
-    : MultiBranchNode(2), _prob(p), _fcnt(fcnt) {
-    init_class_id(Class_If);
-    init_req(0,control);
-    init_req(1,b);
+  IfNode(Node* control, Node* bol, float p, float fcnt);
+  IfNode(Node* control, Node* bol, float p, float fcnt, AssertionPredicateType assertion_predicate_type);
+
+  static IfNode* make_with_same_profile(IfNode* if_node_profile, Node* ctrl, Node* bol);
+
+  IfTrueNode* true_proj() const {
+    return proj_out(true)->as_IfTrue();
   }
+
+  IfTrueNode* true_proj_or_null() const {
+    ProjNode* true_proj = proj_out_or_null(true);
+    return true_proj == nullptr ? nullptr : true_proj->as_IfTrue();
+  }
+
+  IfFalseNode* false_proj() const {
+    return proj_out(false)->as_IfFalse();
+  }
+
+  IfFalseNode* false_proj_or_null() const {
+    ProjNode* false_proj = proj_out_or_null(false);
+    return false_proj == nullptr ? nullptr : false_proj->as_IfFalse();
+  }
+
   virtual int Opcode() const;
   virtual bool pinned() const { return true; }
   virtual const Type *bottom_type() const { return TypeTuple::IFBOTH; }
   virtual Node *Ideal(PhaseGVN *phase, bool can_reshape);
   virtual const Type* Value(PhaseGVN* phase) const;
-  virtual int required_outcnt() const { return 2; }
+  virtual uint required_outcnt() const { return 2; }
   virtual const RegMask &out_RegMask() const;
   Node* fold_compares(PhaseIterGVN* phase);
   static Node* up_one_dom(Node* curr, bool linear_only = false);
-  Node* dominated_by(Node* prev_dom, PhaseIterGVN* igvn);
+  bool is_zero_trip_guard() const;
+  Node* dominated_by(Node* prev_dom, PhaseIterGVN* igvn, bool prev_dom_not_imply_this);
+  ProjNode* uncommon_trap_proj(CallStaticJavaNode*& call, Deoptimization::DeoptReason reason = Deoptimization::Reason_none) const;
 
   // Takes the type of val and filters it through the test represented
   // by if_proj and returns a more refined type if one is produced.
-  // Returns NULL is it couldn't improve the type.
+  // Returns null is it couldn't improve the type.
   static const TypeInt* filtered_int_type(PhaseGVN* phase, Node* val, Node* if_proj);
+
+  AssertionPredicateType assertion_predicate_type() const {
+    return _assertion_predicate_type;
+  }
 
 #ifndef PRODUCT
   virtual void dump_spec(outputStream *st) const;
-  virtual void related(GrowableArray <Node *> *in_rel, GrowableArray <Node *> *out_rel, bool compact) const;
 #endif
+
+  bool same_condition(const Node* dom, PhaseIterGVN* igvn) const;
+  void mark_projections_unsafe_for_fold_compare() const;
 };
 
 class RangeCheckNode : public IfNode {
 private:
-  int is_range_check(Node* &range, Node* &index, jint &offset);
+  int is_range_check(Node*& range, Node*& index, jint& offset);
 
 public:
-  RangeCheckNode(Node* control, Node *b, float p, float fcnt)
-    : IfNode(control, b, p, fcnt) {
+  RangeCheckNode(Node* control, Node* bol, float p, float fcnt) : IfNode(control, bol, p, fcnt) {
+    init_class_id(Class_RangeCheck);
+  }
+
+  RangeCheckNode(Node* control, Node* bol, float p, float fcnt, AssertionPredicateType assertion_predicate_type)
+      : IfNode(control, bol, p, fcnt, assertion_predicate_type) {
     init_class_id(Class_RangeCheck);
   }
 
@@ -421,19 +498,77 @@ public:
   virtual Node* Ideal(PhaseGVN *phase, bool can_reshape);
 };
 
+// Special node that denotes a Parse Predicate added during parsing. A Parse Predicate serves as placeholder to later
+// create Regular Predicates (Runtime Predicates with possible Assertion Predicates) above it. Together they form a
+// Predicate Block. The Parse Predicate and Regular Predicates share the same uncommon trap.
+// There are three kinds of Parse Predicates:
+// Loop Parse Predicate, Profiled Loop Parse Predicate (both used by Loop Predication), and Loop Limit Check Parse
+// Predicate (used for integer overflow checks when creating a counted loop).
+// More information about predicates can be found in loopPredicate.cpp.
+class ParsePredicateNode : public IfNode {
+  Deoptimization::DeoptReason _deopt_reason;
+
+  // When a Parse Predicate loses its connection to a loop head, it will be marked useless by
+  // EliminateUselessPredicates and cleaned up by Value(). It can also become useless when cloning it to both loops
+  // during Loop Multiversioning - we no longer use the old version.
+  PredicateState _predicate_state;
+ public:
+  ParsePredicateNode(Node* control, Deoptimization::DeoptReason deopt_reason, PhaseGVN* gvn);
+  virtual int Opcode() const;
+  virtual uint size_of() const { return sizeof(*this); }
+
+  Deoptimization::DeoptReason deopt_reason() const {
+    return _deopt_reason;
+  }
+
+  bool is_useless() const {
+    return _predicate_state == PredicateState::Useless;
+  }
+
+  void mark_useless(PhaseIterGVN& igvn);
+
+  void mark_maybe_useful() {
+    _predicate_state = PredicateState::MaybeUseful;
+  }
+
+  bool is_useful() const {
+    return _predicate_state == PredicateState::Useful;
+  }
+
+  void mark_useful() {
+    _predicate_state = PredicateState::Useful;
+  }
+
+  // Return the uncommon trap If projection of this Parse Predicate.
+  ParsePredicateUncommonProj* uncommon_proj() const {
+    return false_proj();
+  }
+
+  Node* uncommon_trap() const;
+
+  Node* Ideal(PhaseGVN* phase, bool can_reshape) {
+    return nullptr; // Don't optimize
+  }
+
+  const Type* Value(PhaseGVN* phase) const;
+  NOT_PRODUCT(void dump_spec(outputStream* st) const;)
+};
+
 class IfProjNode : public CProjNode {
 public:
   IfProjNode(IfNode *ifnode, uint idx) : CProjNode(ifnode,idx) {}
   virtual Node* Identity(PhaseGVN* phase);
 
+  // Return the other IfProj node.
+  IfProjNode* other_if_proj() const {
+    return in(0)->as_If()->proj_out(1 - _con)->as_IfProj();
+  }
+
+  void pin_dependent_nodes(PhaseIterGVN* igvn);
+
 protected:
   // Type of If input when this branch is always taken
   virtual bool always_taken(const TypeTuple* t) const = 0;
-
-#ifndef PRODUCT
-public:
-  virtual void related(GrowableArray<Node*> *in_rel, GrowableArray<Node*> *out_rel, bool compact) const;
-#endif
 };
 
 class IfTrueNode : public IfProjNode {
@@ -482,7 +617,7 @@ public:
   virtual Node *Ideal(PhaseGVN *phase, bool can_reshape);
   virtual const Type *bottom_type() const;
   virtual bool pinned() const { return true; }
-  virtual int required_outcnt() const { return _size; }
+  virtual uint required_outcnt() const { return _size; }
 };
 
 //------------------------------JumpNode---------------------------------------
@@ -501,9 +636,6 @@ public:
   virtual int   Opcode() const;
   virtual const RegMask& out_RegMask() const;
   virtual const Node* is_block_proj() const { return this; }
-#ifndef PRODUCT
-  virtual void related(GrowableArray<Node*> *in_rel, GrowableArray<Node*> *out_rel, bool compact) const;
-#endif
 };
 
 class JumpProjNode : public JProjNode {
@@ -529,7 +661,6 @@ class JumpProjNode : public JProjNode {
 #ifndef PRODUCT
   virtual void dump_spec(outputStream *st) const;
   virtual void dump_compact_spec(outputStream *st) const;
-  virtual void related(GrowableArray<Node*> *in_rel, GrowableArray<Node*> *out_rel, bool compact) const;
 #endif
 };
 
@@ -546,7 +677,7 @@ public:
   virtual const Type* Value(PhaseGVN* phase) const;
 };
 
-// CatchProjNode controls which exception handler is targetted after a call.
+// CatchProjNode controls which exception handler is targeted after a call.
 // It is passed in the bci of the target handler, or no_handler_bci in case
 // the projection doesn't lead to an exception handler.
 class CatchProjNode : public CProjNode {
@@ -602,18 +733,46 @@ public:
 // empty.
 class NeverBranchNode : public MultiBranchNode {
 public:
-  NeverBranchNode( Node *ctrl ) : MultiBranchNode(1) { init_req(0,ctrl); }
+  NeverBranchNode(Node* ctrl) : MultiBranchNode(1) {
+    init_req(0, ctrl);
+    init_class_id(Class_NeverBranch);
+  }
   virtual int Opcode() const;
   virtual bool pinned() const { return true; };
   virtual const Type *bottom_type() const { return TypeTuple::IFBOTH; }
   virtual const Type* Value(PhaseGVN* phase) const;
   virtual Node *Ideal(PhaseGVN *phase, bool can_reshape);
-  virtual int required_outcnt() const { return 2; }
-  virtual void emit(CodeBuffer &cbuf, PhaseRegAlloc *ra_) const { }
+  virtual uint required_outcnt() const { return 2; }
+  virtual void emit(C2_MacroAssembler *masm, PhaseRegAlloc *ra_) const { }
   virtual uint size(PhaseRegAlloc *ra_) const { return 0; }
 #ifndef PRODUCT
   virtual void format( PhaseRegAlloc *, outputStream *st ) const;
 #endif
 };
+
+//------------------------------BlackholeNode----------------------------
+// Blackhole all arguments. This node would survive through the compiler
+// the effects on its arguments, and would be finally matched to nothing.
+class BlackholeNode : public MultiNode {
+public:
+  BlackholeNode(Node* ctrl) : MultiNode(1) {
+    init_req(TypeFunc::Control, ctrl);
+  }
+  virtual int   Opcode() const;
+  virtual uint ideal_reg() const { return 0; } // not matched in the AD file
+  virtual const Type* bottom_type() const { return TypeTuple::MEMBAR; }
+  virtual Node* Ideal(PhaseGVN* phase, bool can_reshape);
+
+  const RegMask &in_RegMask(uint idx) const {
+    // Fake the incoming arguments mask for blackholes: accept all registers
+    // and all stack slots. This would avoid any redundant register moves
+    // for blackhole inputs.
+    return RegMask::ALL;
+  }
+#ifndef PRODUCT
+  virtual void format(PhaseRegAlloc* ra, outputStream* st) const;
+#endif
+};
+
 
 #endif // SHARE_OPTO_CFGNODE_HPP

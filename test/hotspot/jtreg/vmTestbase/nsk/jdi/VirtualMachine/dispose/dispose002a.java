@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,6 @@
 
 package nsk.jdi.VirtualMachine.dispose;
 
-import nsk.share.*;
 import nsk.share.jpda.*;
 import nsk.share.jdi.*;
 
@@ -60,6 +59,9 @@ public class dispose002a {
     }
 
     //====================================================== test program
+
+    static Thread test_thread = null;
+
     //----------------------------------------------------   main method
 
     public static void main (String argv[]) {
@@ -95,8 +97,8 @@ public class dispose002a {
     //------------------------------------------------------  section tested
 
                 case 0:
-                         Threaddispose002a test_thread =
-                             new Threaddispose002a("testedThread");
+                        test_thread =
+                            JDIThreadFactory.newThread(new Threaddispose002a("testedThread"));
                          log1("       thread2 is created");
 
                          label:
@@ -134,8 +136,9 @@ public class dispose002a {
                                  }
                                  break;
                              } else if (instruction.equals("check_alive")) {
-                                 log1("checking on: thread2.isAlive");
-                                 if (test_thread.isAlive()) {
+                                 log1("checking if thread2 completed");
+                                 if (!JDIUtils.waitForCompletion(test_thread)) {
+                                     log1("thread2 is alive after vm.dispose().");
                                      pipe.println("alive");
                                      test_thread.interrupt();
                                  } else {
@@ -169,7 +172,7 @@ public class dispose002a {
 }
 
 
-class Threaddispose002a extends Thread {
+class Threaddispose002a extends NamedTask {
 
     public Threaddispose002a(String threadName) {
         super(threadName);

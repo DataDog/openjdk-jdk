@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,11 +33,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.management.MBeanServerConnection;
 
 import jdk.jfr.Event;
+import jdk.jfr.StackTrace;
 import jdk.management.jfr.RemoteRecordingStream;
 
 /**
  * @test
- * @key jfr
+ * @requires vm.flagless
  * @summary Tests that max size can be set for a RemoteRecordingStream
  * @requires vm.hasJFR
  * @library /test/lib /test/jdk
@@ -45,6 +46,7 @@ import jdk.management.jfr.RemoteRecordingStream;
  */
 public class TestMaxSize {
 
+    @StackTrace(false)
     static class Monkey extends Event {
     }
 
@@ -70,12 +72,17 @@ public class TestMaxSize {
             while (directorySize(dir) < 50_000_000) {
                 emitEvents(500_000);
             }
+            System.out.println("Before setMaxSize(1_000_000)");
+            fileCount(dir);
             e.setMaxSize(1_000_000);
+            System.out.println("After setMaxSize(1_000_000)");
             long count = fileCount(dir);
-            if (count > 2) {
-                // Two chunks can happen when header of new chunk is written and previous
-                // chunk is not finalized.
-                throw new Exception("Expected only one or two chunks with setMaxSize(1_000_000). Found " + count);
+            if (count > 3) {
+                // Three files can happen when:
+                // File 1: Header of new chunk is written to disk
+                // File 2: Previous chunk is not yet finalized and added to list of DiskChunks
+                // File 3: Previous previous file is in the list of DiskChunks.
+                throw new Exception("Expected at most three chunks with setMaxSize(1_000_000). Found " + count);
             }
             finished.set(true);
         }
@@ -87,28 +94,31 @@ public class TestMaxSize {
             m.commit();
         }
         System.out.println("Emitted " + count + " events");
-        Thread.sleep(1000);
+        Thread.sleep(100);
     }
 
     private static int fileCount(Path dir) throws IOException {
         System.out.println("Files:");
         AtomicInteger count = new AtomicInteger();
         Files.list(dir).forEach(p -> {
-            System.out.println(p);
+            System.out.println(p + " " + fileSize(p));
             count.incrementAndGet();
         });
         return count.get();
     }
 
     private static long directorySize(Path dir) throws IOException {
-        long p = Files.list(dir).mapToLong(f -> {
-            try {
-                return Files.size(f);
-            } catch (IOException e) {
-                return 0;
-            }
-        }).sum();
+        long p = Files.list(dir).mapToLong(f -> fileSize(f)).sum();
         System.out.println("Directory size: " + p);
         return p;
+    }
+
+    private static long fileSize(Path p) {
+        try {
+            return Files.size(p);
+        } catch (IOException e) {
+            System.out.println("Could not determine file size for " + p);
+            return 0;
+        }
     }
 }

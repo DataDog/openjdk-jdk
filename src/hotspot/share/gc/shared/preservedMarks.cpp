@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,9 +22,10 @@
  *
  */
 
-#include "precompiled.hpp"
+#include "gc/shared/fullGCForwarding.inline.hpp"
 #include "gc/shared/preservedMarks.inline.hpp"
-#include "gc/shared/workgroup.hpp"
+#include "gc/shared/workerThread.hpp"
+#include "gc/shared/workerUtils.hpp"
 #include "memory/allocation.inline.hpp"
 #include "memory/resourceArea.hpp"
 #include "oops/oop.inline.hpp"
@@ -33,48 +34,36 @@
 
 void PreservedMarks::restore() {
   while (!_stack.is_empty()) {
-    const OopAndMarkWord elem = _stack.pop();
+    const PreservedMark elem = _stack.pop();
     elem.set_mark();
   }
   assert_empty();
 }
 
-void PreservedMarks::adjust_during_full_gc() {
-  StackIterator<OopAndMarkWord, mtGC> iter(_stack);
-  while (!iter.is_empty()) {
-    OopAndMarkWord* elem = iter.next_addr();
-
-    oop obj = elem->get_oop();
-    if (obj->is_forwarded()) {
-      elem->set_oop(obj->forwardee());
-    }
+void PreservedMarks::adjust_preserved_mark(PreservedMark* elem) {
+  oop obj = elem->get_oop();
+  if (FullGCForwarding::is_forwarded(obj)) {
+    elem->set_oop(FullGCForwarding::forwardee(obj));
   }
 }
 
-void PreservedMarks::restore_and_increment(volatile size_t* const total_size_addr) {
-  const size_t stack_size = size();
-  restore();
-  // Only do the atomic add if the size is > 0.
-  if (stack_size > 0) {
-    Atomic::add(total_size_addr, stack_size);
+void PreservedMarks::adjust_during_full_gc() {
+  StackIterator<PreservedMark, mtGC> iter(_stack);
+  while (!iter.is_empty()) {
+    PreservedMark* elem = iter.next_addr();
+    adjust_preserved_mark(elem);
   }
 }
 
 #ifndef PRODUCT
 void PreservedMarks::assert_empty() {
-  assert(_stack.is_empty(), "stack expected to be empty, size = " SIZE_FORMAT,
+  assert(_stack.is_empty(), "stack expected to be empty, size = %zu",
          _stack.size());
   assert(_stack.cache_size() == 0,
-         "stack expected to have no cached segments, cache size = " SIZE_FORMAT,
+         "stack expected to have no cached segments, cache size = %zu",
          _stack.cache_size());
 }
 #endif // ndef PRODUCT
-
-void RemoveForwardedPointerClosure::do_object(oop obj) {
-  if (obj->is_forwarded()) {
-    PreservedMarks::init_forwarded_mark(obj);
-  }
-}
 
 void PreservedMarksSet::init(uint num) {
   assert(_stacks == nullptr && _num == 0, "do not re-initialize");
@@ -92,10 +81,10 @@ void PreservedMarksSet::init(uint num) {
   assert_empty();
 }
 
-class RestorePreservedMarksTask : public AbstractGangTask {
+class RestorePreservedMarksTask : public WorkerTask {
   PreservedMarksSet* const _preserved_marks_set;
   SequentialSubTasksDone _sub_tasks;
-  volatile size_t _total_size;
+  Atomic<size_t> _total_size;
 #ifdef ASSERT
   size_t _total_size_before;
 #endif // ASSERT
@@ -104,12 +93,17 @@ public:
   void work(uint worker_id) override {
     uint task_id = 0;
     while (_sub_tasks.try_claim_task(task_id)) {
-      _preserved_marks_set->get(task_id)->restore_and_increment(&_total_size);
+      PreservedMarks* next = _preserved_marks_set->get(task_id);
+      size_t num_restored = next->size();
+      next->restore();
+      if (num_restored > 0) {
+        _total_size.add_then_fetch(num_restored);
+      }
     }
   }
 
   RestorePreservedMarksTask(PreservedMarksSet* preserved_marks_set)
-    : AbstractGangTask("Restore Preserved Marks"),
+    : WorkerTask("Restore Preserved Marks"),
       _preserved_marks_set(preserved_marks_set),
       _sub_tasks(preserved_marks_set->num()),
       _total_size(0)
@@ -123,13 +117,17 @@ public:
   }
 
   ~RestorePreservedMarksTask() {
-    assert(_total_size == _total_size_before, "total_size = %zu before = %zu", _total_size, _total_size_before);
+    size_t local_total_size = _total_size.load_relaxed();
 
-    log_trace(gc)("Restored %zu marks", _total_size);
+    assert(local_total_size == _total_size_before, "total_size = %zu before = %zu", local_total_size, _total_size_before);
+    size_t mem_size = local_total_size * (sizeof(oop) + sizeof(markWord));
+    log_trace(gc)("Restored %zu marks, occupying %zu %s", local_total_size,
+                                                          byte_size_in_proper_unit(mem_size),
+                                                          proper_unit_for_byte_size(mem_size));
   }
 };
 
-void PreservedMarksSet::restore(WorkGang* workers) {
+void PreservedMarksSet::restore(WorkerThreads* workers) {
   {
     RestorePreservedMarksTask cl(this);
     if (workers == nullptr) {
@@ -142,10 +140,6 @@ void PreservedMarksSet::restore(WorkGang* workers) {
   assert_empty();
 }
 
-AbstractGangTask* PreservedMarksSet::create_task() {
-  return new RestorePreservedMarksTask(this);
-}
-
 void PreservedMarksSet::reclaim() {
   assert_empty();
 
@@ -154,7 +148,7 @@ void PreservedMarksSet::reclaim() {
   }
 
   if (_in_c_heap) {
-    FREE_C_HEAP_ARRAY(Padded<PreservedMarks>, _stacks);
+    FREE_C_HEAP_ARRAY(_stacks);
   } else {
     // the array was resource-allocated, so nothing to do
   }

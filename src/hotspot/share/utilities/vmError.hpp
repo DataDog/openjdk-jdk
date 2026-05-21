@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2017, 2020 SAP SE. All rights reserved.
+ * Copyright (c) 2003, 2026, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2022 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,10 @@
 #ifndef SHARE_UTILITIES_VMERROR_HPP
 #define SHARE_UTILITIES_VMERROR_HPP
 
+#include "memory/allStatic.hpp"
+#include "runtime/atomic.hpp"
 #include "utilities/globalDefinitions.hpp"
+#include "utilities/ostream.hpp"
 
 class Decoder;
 class frame;
@@ -42,14 +45,18 @@ class VMError : public AllStatic {
   static const char* _message;
   static char        _detail_msg[1024];
 
-  static Thread*     _thread;           // NULL if it's native thread
+  static Thread*     _thread;           // null if it's native thread
 
   // additional info for crashes
   static address     _pc;               // faulting PC
-  static void*       _siginfo;          // ExceptionRecord on Windows,
+  static const void* _siginfo;          // ExceptionRecord on Windows,
                                         // siginfo_t on Solaris/Linux
-  static void*       _context;          // ContextRecord on Windows,
+  static const void* _context;          // ContextRecord on Windows,
                                         // ucontext_t on Solaris/Linux
+
+  // records if frame-based stack walking was used to
+  // print the native stack instead of os::platform_print_native_stack
+  static bool        _print_stack_from_frame_used;
 
   // additional info for VM internal errors
   static const char* _filename;
@@ -62,9 +69,12 @@ class VMError : public AllStatic {
   static int         _current_step;
   static const char* _current_step_info;
 
+  // used for reattempt step logic
+  static const size_t _reattempt_required_stack_headroom;
+
   // Thread id of the first error. We must be able to handle native thread,
   // so use thread id instead of Thread* to identify thread.
-  static volatile intptr_t _first_error_tid;
+  static Atomic<intptr_t> _first_error_tid;
 
   // Core dump status, false if we have been unable to write a core/minidump for some reason
   static bool coredump_status;
@@ -76,14 +86,16 @@ class VMError : public AllStatic {
 
   // Timeout handling:
   // Timestamp at which error reporting started; -1 if no error reporting in progress.
-  static volatile jlong _reporting_start_time;
+  static Atomic<jlong> _reporting_start_time;
   // Whether or not error reporting did timeout.
-  static volatile bool _reporting_did_timeout;
+  static Atomic<bool> _reporting_did_timeout;
   // Timestamp at which the last error reporting step started; -1 if no error reporting
   //   in progress.
-  static volatile jlong _step_start_time;
+  static Atomic<jlong> _step_start_time;
   // Whether or not the last error reporting step did timeout.
-  static volatile bool _step_did_timeout;
+  static Atomic<bool> _step_did_timeout;
+  // Whether or not the last error reporting step did succeed.
+  static Atomic<bool> _step_did_succeed;
 
   // Install secondary signal handler to handle secondary faults during error reporting
   // (see VMError::crash_handler)
@@ -99,11 +111,7 @@ class VMError : public AllStatic {
   static void print_stack_trace(outputStream* st, JavaThread* jt,
                                 char* buf, int buflen, bool verbose = false);
 
-  // public for use by the internal non-product debugger.
-  NOT_PRODUCT(public:)
-  static void print_native_stack(outputStream* st, frame fr, Thread* t,
-                                 char* buf, int buf_size);
-  NOT_PRODUCT(private:)
+  static const char* get_filename_only();
 
   static bool should_report_bug(unsigned int id) {
     return (id != OOM_MALLOC_ERROR) && (id != OOM_MMAP_ERROR);
@@ -113,12 +121,15 @@ class VMError : public AllStatic {
     return should_report_bug(id) && (id != OOM_JAVA_HEAP_FATAL);
   }
 
+  DEBUG_ONLY(static void reattempt_test_hit_stack_limit(outputStream* st));
+  static bool can_reattempt_step(const char* &stop_reason);
+
   // Write a hint to the stream in case siginfo relates to a segv/bus error
   // and the offending address points into CDS store.
   static void check_failing_cds_access(outputStream* st, const void* siginfo);
 
   // Timeout handling.
-  // Hook functions for platform dependend functionality:
+  // Hook functions for platform dependent functionality:
   static void reporting_started();
   static void interrupt_reporting_thread();
 
@@ -132,6 +143,12 @@ class VMError : public AllStatic {
   static jlong get_step_start_time();
   static void clear_step_start_time();
 
+  // Handshake/safepoint timed out threads
+  static Atomic<Thread*> _handshake_timed_out_thread;
+  static Atomic<Thread*> _safepoint_timed_out_thread;
+
+  WINDOWS_ONLY([[noreturn]] static void raise_fail_fast(const void* exrecord, const void* context);)
+
 public:
 
   // return a string to describe the error
@@ -144,22 +161,36 @@ public:
   static void print_vm_info(outputStream* st);
 
   // main error reporting function
-  static void report_and_die(Thread* thread, unsigned int sig, address pc, void* siginfo,
-                             void* context, const char* detail_fmt, ...) ATTRIBUTE_PRINTF(6, 7);
+  [[noreturn]]
+  ATTRIBUTE_PRINTF(6, 7)
+  static void report_and_die(Thread* thread, unsigned int sig, address pc, const void* siginfo,
+                             const void* context, const char* detail_fmt, ...);
 
+  [[noreturn]]
+  ATTRIBUTE_PRINTF(6, 7)
+  static void report_and_die(Thread* thread, const void* context, const char* filename,
+                             int lineno, const char* message, const char* detail_fmt, ...);
+
+  [[noreturn]]
+  ATTRIBUTE_PRINTF(3, 0)
   static void report_and_die(int id, const char* message, const char* detail_fmt, va_list detail_args,
-                             Thread* thread, address pc, void* siginfo, void* context,
-                             const char* filename, int lineno, size_t size) ATTRIBUTE_PRINTF(3, 0);
+                             Thread* thread, address pc, const void* siginfo, const void* context,
+                             const char* filename, int lineno, size_t size);
 
+  [[noreturn]]
   static void report_and_die(Thread* thread, unsigned int sig, address pc,
-                             void* siginfo, void* context);
+                             const void* siginfo, const void* context);
 
-  static void report_and_die(Thread* thread, void* context, const char* filename, int lineno, const char* message,
-                             const char* detail_fmt, va_list detail_args) ATTRIBUTE_PRINTF(6, 0);
+  [[noreturn]]
+  ATTRIBUTE_PRINTF(6, 0)
+  static void report_and_die(Thread* thread, const void* context, const char* filename,
+                             int lineno, const char* message, const char* detail_fmt, va_list detail_args);
 
+  [[noreturn]]
+  ATTRIBUTE_PRINTF(6, 0)
   static void report_and_die(Thread* thread, const char* filename, int lineno, size_t size,
                              VMErrorType vm_err_type, const char* detail_fmt,
-                             va_list detail_args) ATTRIBUTE_PRINTF(6, 0);
+                             va_list detail_args);
 
   // reporting OutOfMemoryError
   static void report_java_out_of_memory(const char* message);
@@ -177,9 +208,11 @@ public:
 
   DEBUG_ONLY(static void controlled_crash(int how);)
 
-  // Address which is guaranteed to generate a fault on read, for test purposes,
-  // which is not NULL and contains bits in every word.
-  static const intptr_t segfault_address = LP64_ONLY(0xABC0000000000ABCULL) NOT_LP64(0x00000ABC);
+  // Non-null address guaranteed to generate a SEGV mapping error on read, for test purposes.
+  static const intptr_t segfault_address;
+
+  // Max value for the ErrorLogPrintCodeLimit flag.
+  static const int max_error_log_print_code = 10;
 
   // Needed when printing signal handlers.
   NOT_WINDOWS(static const void* crash_handler_address;)
@@ -189,5 +222,82 @@ public:
   // permissions.
   static int prepare_log_file(const char* pattern, const char* default_pattern, bool overwrite_existing, char* buf, size_t buflen);
 
+  static bool was_assert_poison_crash(const void* sigInfo);
+
+  static void set_handshake_timed_out_thread(Thread* thread);
+  static void set_safepoint_timed_out_thread(Thread* thread);
+  static Thread* get_handshake_timed_out_thread();
+  static Thread* get_safepoint_timed_out_thread();
 };
+
+class VMErrorCallback {
+  friend class VMError;
+  friend class VMErrorCallbackMark;
+
+  // Link through all callbacks active on a thread
+  VMErrorCallback* _next;
+
+  // Called by VMError reporting
+  virtual void call(outputStream* st) = 0;
+
+public:
+  VMErrorCallback() : _next(nullptr) {}
+};
+
+class VMErrorCallbackMark : public StackObj {
+  Thread* _thread;
+
+public:
+  VMErrorCallbackMark(VMErrorCallback* callback);
+  ~VMErrorCallbackMark();
+};
+
+// Convenient construction for creating ad-hoc VMErrorCallback which automatically
+// calls the provided invocable f if a VM crash occurs within its lifetime.
+// Can be used to instrument a build for more detailed contextual information
+// gathering. Especially useful when hunting down intermittent bugs, or issues
+// only reproducible in environments where access to a debugger is not readily
+// available. Example use:
+/*
+  {
+    // Note the lambda is invoked after an error occurs within this thread,
+    // and during on_error's lifetime. If state prior to the crash is required,
+    // capture a copy of it first.
+    auto important_value = get_the_value();
+
+    OnVMError on_error([&](outputStream* st) {
+      // Dump the important bits.
+      st->print("Prior value: ");
+      important_value.print_on(st);
+      st->print("During crash: ")
+      get_the_value().print_on(st);
+      // Dump whole the whole state.
+      this->print_on(st);
+    });
+
+    // When VM crashes, the above lambda will be invoked and print relevant info.
+    might_cause_vm_crash();
+  }
+*/
+template <typename CallableType>
+class OnVMError : public VMErrorCallback {
+  CallableType _callable;
+  VMErrorCallbackMark _mark;
+
+  void call(outputStream* st) final { _callable(st); }
+
+public:
+  template <typename Callable>
+  OnVMError(Callable&& callable) : VMErrorCallback(), _callable(static_cast<Callable&&>(callable)), _mark(this) {}
+};
+
+// This deduction rule enables creating a type with out using auto, decltype
+// and/or helping construction functions. It enables the generic template type
+// to be deduced in the following code:
+//   OnVMError on_error([&](outputStream* st) { ... })
+// Rather than having to something along the lines of:
+//   auto f = [&](outputStream* st) { ... };
+//   OnVMError<decltype(f)> on_error(f);
+template <typename CallableType> OnVMError(CallableType) -> OnVMError<CallableType>;
+
 #endif // SHARE_UTILITIES_VMERROR_HPP

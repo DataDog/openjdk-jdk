@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,7 @@
  * @modules java.net.http
  *          jdk.httpserver
  *          java.base/sun.net.www
- * @run main MessageHeadersTest
+ * @run main ${test.main.class}
  * @summary Tests expected behavior of MessageHeader. This test
  *          cannot be used to verify 8164704 - it simply verifies
  *          the assumptions on which the fix is based.
@@ -118,7 +118,7 @@ public class MessageHeadersTest {
             }
             // In that case we expect MessageHeader to read the CR but
             // leave the LF in the buffer. We therefore need to consume
-            // the the LF in order to get an empty (all consumed) buffer.
+            // the LF in order to get an empty (all consumed) buffer.
             // This is what ResponseHeaders does.
             byte c = buffer.get();
             if (c != '\n' || bbis.lastRead != '\r') {

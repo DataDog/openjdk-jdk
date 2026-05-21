@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2004, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
  * @test
  * @bug 4891872 4989735 4990789 5020490
  * @summary Check isEnum() method
- * @author Joseph D. Darcy
  */
 
 import java.lang.annotation.*;
@@ -63,7 +62,7 @@ public class IsEnum {
         failures += test(SpecialEnum.GREEN.getClass(), true);
 
         if (failures > 0) {
-            throw new RuntimeException("Unexepcted enum status detected.");
+            throw new RuntimeException("Unexpected enum status detected.");
         }
     }
 }

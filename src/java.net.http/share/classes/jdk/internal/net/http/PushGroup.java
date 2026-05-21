@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@
 
 package jdk.internal.net.http;
 
-import java.security.AccessControlContext;
+import java.net.http.HttpResponse.PushPromiseHandler.PushId;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.net.http.HttpRequest;
@@ -33,6 +33,7 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandler;
 import java.net.http.HttpResponse.PushPromiseHandler;
 import java.util.concurrent.Executor;
+import java.util.concurrent.locks.ReentrantLock;
 
 import jdk.internal.net.http.common.MinimalFuture;
 import jdk.internal.net.http.common.Log;
@@ -42,9 +43,10 @@ import jdk.internal.net.http.common.Log;
  * Streams. This keeps track of all common state associated with the pushes.
  */
 class PushGroup<T> {
-    private final HttpRequest initiatingRequest;
 
-    final CompletableFuture<Void> noMorePushesCF;
+    private final ReentrantLock stateLock = new ReentrantLock();
+
+    private final HttpRequest initiatingRequest;
 
     volatile Throwable error; // any exception that occurred during pushes
 
@@ -55,7 +57,6 @@ class PushGroup<T> {
 
     int numberOfPushes;
     int remainingPushes;
-    boolean noMorePushes = false;
 
     PushGroup(PushPromiseHandler<T> pushPromiseHandler,
               HttpRequestImpl initiatingRequest,
@@ -68,7 +69,6 @@ class PushGroup<T> {
                       HttpRequestImpl initiatingRequest,
                       CompletableFuture<HttpResponse<T>> mainResponse,
                       Executor executor) {
-        this.noMorePushesCF = new MinimalFuture<>();
         this.pushPromiseHandler = pushPromiseHandler;
         this.initiatingRequest = initiatingRequest;
         this.executor = executor;
@@ -106,9 +106,21 @@ class PushGroup<T> {
     }
 
     Acceptor<T> acceptPushRequest(HttpRequest pushRequest) {
+        return doAcceptPushRequest(pushRequest, null);
+    }
+
+    Acceptor<T> acceptPushRequest(HttpRequest pushRequest, PushId pushId) {
+        return doAcceptPushRequest(pushRequest, Objects.requireNonNull(pushId));
+    }
+
+    private Acceptor<T> doAcceptPushRequest(HttpRequest pushRequest, PushId pushId) {
         AcceptorImpl<T> acceptor = new AcceptorImpl<>(executor);
         try {
-            pushPromiseHandler.applyPushPromise(initiatingRequest, pushRequest, acceptor::accept);
+            if (pushId == null) {
+                pushPromiseHandler.applyPushPromise(initiatingRequest, pushRequest, acceptor::accept);
+            } else {
+                pushPromiseHandler.applyPushPromise(initiatingRequest, pushRequest, pushId, acceptor::accept);
+            }
         } catch (Throwable t) {
             if (acceptor.accepted()) {
                 CompletableFuture<?> cf = acceptor.cf();
@@ -117,55 +129,55 @@ class PushGroup<T> {
             throw t;
         }
 
-        synchronized (this) {
+        stateLock.lock();
+        try {
             if (acceptor.accepted()) {
                 numberOfPushes++;
                 remainingPushes++;
             }
             return acceptor;
+        } finally {
+            stateLock.unlock();
         }
     }
 
-    // This is called when the main body response completes because it means
-    // no more PUSH_PROMISEs are possible
-
-    synchronized void noMorePushes(boolean noMore) {
-        noMorePushes = noMore;
-        checkIfCompleted();
-        noMorePushesCF.complete(null);
+    void acceptPushPromiseId(PushId pushId) {
+        pushPromiseHandler.notifyAdditionalPromise(initiatingRequest, pushId);
     }
 
-    synchronized CompletableFuture<Void> pushesCF() {
-        return noMorePushesCF;
+    void pushCompleted() {
+        stateLock.lock();
+        try {
+            remainingPushes--;
+            checkIfCompleted();
+        } finally {
+            stateLock.unlock();
+        }
     }
 
-    synchronized boolean noMorePushes() {
-        return noMorePushes;
-    }
-
-    synchronized void pushCompleted() {
-        remainingPushes--;
-        checkIfCompleted();
-    }
-
-    synchronized void checkIfCompleted() {
+    private void checkIfCompleted() {
+        assert stateLock.isHeldByCurrentThread();
         if (Log.trace()) {
-            Log.logTrace("PushGroup remainingPushes={0} error={1} noMorePushes={2}",
+            Log.logTrace("PushGroup remainingPushes={0} error={1}",
                          remainingPushes,
-                         (error==null)?error:error.getClass().getSimpleName(),
-                         noMorePushes);
+                         (error==null)?error:error.getClass().getSimpleName());
         }
-        if (remainingPushes == 0 && error == null && noMorePushes) {
+        if (remainingPushes == 0 && error == null) {
             if (Log.trace()) {
                 Log.logTrace("push completed");
             }
         }
     }
 
-    synchronized void pushError(Throwable t) {
+    void pushError(Throwable t) {
         if (t == null) {
             return;
         }
-        this.error = t;
+        stateLock.lock();
+        try {
+            this.error = t;
+        } finally {
+            stateLock.unlock();
+        }
     }
 }

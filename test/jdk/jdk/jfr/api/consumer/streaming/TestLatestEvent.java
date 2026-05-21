@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,8 +23,12 @@
 
 package jdk.jfr.api.consumer.streaming;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Comparator;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -34,12 +38,13 @@ import jdk.jfr.FlightRecorder;
 import jdk.jfr.Name;
 import jdk.jfr.Recording;
 import jdk.jfr.consumer.EventStream;
+import jdk.jfr.consumer.RecordingFile;
 import jdk.jfr.consumer.RecordingStream;
 
 /**
  * @test
  * @summary Verifies that EventStream::openRepository() read from the latest flush
- * @key jfr
+ * @requires vm.flagless
  * @requires vm.hasJFR
  * @library /test/lib
  * @run main/othervm jdk.jfr.api.consumer.streaming.TestLatestEvent
@@ -65,7 +70,8 @@ public class TestLatestEvent {
         CountDownLatch beginChunks = new CountDownLatch(1);
 
         try (RecordingStream r = new RecordingStream()) {
-            r.onEvent("MakeChunks", event-> {
+            r.setMaxSize(1_000_000_000);
+            r.onEvent("MakeChunks", event -> {
                 System.out.println(event);
                 beginChunks.countDown();
             });
@@ -100,13 +106,25 @@ public class TestLatestEvent {
             // This latch ensures thatNotLatest has been
             // flushed and a new valid position has been written
             // to the chunk header
-            notLatestEvent.await(80, TimeUnit.SECONDS);
+            boolean timeout = notLatestEvent.await(80, TimeUnit.SECONDS);
             if (notLatestEvent.getCount() != 0) {
+                System.out.println("timeout = " + timeout);
+                Path repo = Path.of(System.getProperty("jdk.jfr.repository"));
+                System.out.println("repo = " + repo);
+                List<Path> files = new ArrayList<>(Files.list(repo).toList());
+                files.sort(Comparator.comparing(Path::toString));
+                for (Path f : files) {
+                    System.out.println("------------");
+                    System.out.println("File: " + f);
+                    for (var event : RecordingFile.readAllEvents(f)) {
+                        System.out.println(event);
+                    }
+                }
                Recording rec =  FlightRecorder.getFlightRecorder().takeSnapshot();
                Path p = Paths.get("error-not-latest.jfr").toAbsolutePath();
                rec.dump(p);
                System.out.println("Dumping repository as a file for inspection at " + p);
-               throw new Exception("Timeout 80 s. Expected 6 event, but got "  + notLatestEvent.getCount());
+               throw new Exception("Timeout 80 s. Expected 6 event, but got "  + (6 - notLatestEvent.getCount()));
             }
 
             try (EventStream s = EventStream.openRepository()) {

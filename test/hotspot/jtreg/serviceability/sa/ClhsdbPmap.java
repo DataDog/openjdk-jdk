@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,19 +31,23 @@ import jdk.test.lib.Platform;
 import jtreg.SkippedException;
 
 /**
- * @test
+ * @test id=process
  * @bug 8190198
  * @summary Test clhsdb pmap command on a live process
  * @requires vm.hasSA
+ * @requires vm.gc != "Z"
+ * @requires (os.arch != "riscv64" | !(vm.cpu.features ~= ".*qemu.*"))
  * @library /test/lib
  * @run main/othervm ClhsdbPmap false
  */
 
 /**
- * @test
+ * @test id=core
  * @bug 8190198
  * @summary Test clhsdb pmap command on a core file
  * @requires vm.hasSA
+ * @requires !vm.ubsan
+ * @requires vm.gc != "Z"
  * @library /test/lib
  * @run main/othervm/timeout=480 ClhsdbPmap true
  */
@@ -60,7 +64,7 @@ public class ClhsdbPmap {
             ClhsdbLauncher test = new ClhsdbLauncher();
             theApp = new LingeredApp();
             theApp.setForceCrash(withCore);
-            LingeredApp.startApp(theApp);
+            LingeredApp.startApp(theApp, CoreUtils.getAlwaysPretouchArg(withCore));
             System.out.println("Started LingeredApp with pid " + theApp.getPid());
 
             if (withCore) {
@@ -74,7 +78,11 @@ public class ClhsdbPmap {
             if (!withCore && Platform.isOSX()) {
                 expStrMap.put("pmap", List.of("Not available for Mac OS X processes"));
             } else {
-                expStrMap.put("pmap", List.of("jvm", "java", "jli", "jimage"));
+                if (Platform.isStatic()) {
+                    expStrMap.put("pmap", List.of("java"));
+                } else {
+                    expStrMap.put("pmap", List.of("jvm", "java", "jli", "jimage"));
+                }
             }
 
             if (withCore) {

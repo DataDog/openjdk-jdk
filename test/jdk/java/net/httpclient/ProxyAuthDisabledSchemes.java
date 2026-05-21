@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,26 +27,20 @@
  *          headers directly when connecting with a server, and
  *          it verifies that the client honor the jdk.http.auth.*.disabledSchemes
  *          net properties.
- * @bug 8087112
- * @library /test/lib http2/server
+ * @bug 8087112 8262294
+ * @library /test/lib /test/jdk/java/net/httpclient/lib
  * @build jdk.test.lib.net.SimpleSSLContext DigestEchoServer DigestEchoClient
  *        ReferenceTracker ProxyAuthDisabledSchemes
- * @modules java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- *          java.logging
- *          java.base/sun.net.www.http
- *          java.base/sun.net.www
- *          java.base/sun.net
+ *        jdk.httpclient.test.lib.common.HttpServerAdapters
  * @run main/othervm -Djdk.http.auth.proxying.disabledSchemes=Basic,Digest
  *                   -Djdk.http.auth.tunneling.disabledSchemes=Digest,Basic
- *                   ProxyAuthDisabledSchemes
+ *                   ${test.main.class}
  * @run main/othervm -Djdk.http.auth.proxying.disabledSchemes=Basic
  *                   -Djdk.http.auth.tunneling.disabledSchemes=Basic
- *                   ProxyAuthDisabledSchemes CLEAR PROXY
+ *                   ${test.main.class} CLEAR PROXY
  * @run main/othervm -Djdk.http.auth.proxying.disabledSchemes=Digest
  *                   -Djdk.http.auth.tunneling.disabledSchemes=Digest
- *                   ProxyAuthDisabledSchemes CLEAR PROXY
+ *                   ${test.main.class} CLEAR PROXY
  */
 
 public class ProxyAuthDisabledSchemes {

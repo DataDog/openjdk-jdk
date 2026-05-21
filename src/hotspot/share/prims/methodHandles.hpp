@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,8 +28,8 @@
 #include "classfile/vmClasses.hpp"
 #include "classfile/vmSymbols.hpp"
 #include "oops/method.hpp"
-#include "runtime/frame.hpp"
 #include "runtime/fieldDescriptor.hpp"
+#include "runtime/frame.hpp"
 #include "runtime/globals.hpp"
 #include "runtime/stubCodeGenerator.hpp"
 #include "utilities/macros.hpp"
@@ -70,9 +70,6 @@ class MethodHandles: AllStatic {
   static oop init_MemberName(Handle mname_h, Handle target_h, TRAPS); // compute vmtarget/vmindex from target
   static oop init_field_MemberName(Handle mname_h, fieldDescriptor& fd, bool is_setter = false);
   static oop init_method_MemberName(Handle mname_h, CallInfo& info);
-  static int find_MemberNames(Klass* k, Symbol* name, Symbol* sig,
-                              int mflags, Klass* caller,
-                              int skip, objArrayHandle results, TRAPS);
   static Handle resolve_MemberName_type(Handle mname, Klass* caller, TRAPS);
 
   // bit values for suppress argument to expand_MemberName:
@@ -80,10 +77,9 @@ class MethodHandles: AllStatic {
 
   // CallSite support
   static void add_dependent_nmethod(oop call_site, nmethod* nm);
-  static void remove_dependent_nmethod(oop call_site, nmethod* nm);
   static void clean_dependency_context(oop call_site);
 
-  static void flush_dependent_nmethods(Handle call_site, Handle target);
+  static void mark_dependent_nmethods(DeoptimizationScope* deopt_scope, Handle call_site, Handle target);
 
   // Generate MethodHandles adapters.
   static void generate_adapters();
@@ -185,6 +181,8 @@ public:
   }
 
   static int ref_kind_to_flags(int ref_kind);
+
+  DEBUG_ONLY( static const char* ref_kind_to_verify_msg(int ref_kind); )
 
 #include CPU_HEADER(methodHandles)
 

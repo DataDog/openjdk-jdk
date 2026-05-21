@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,8 +28,6 @@ import static com.sun.tools.jdeps.JdepsFilter.DEFAULT_FILTER;
 import static com.sun.tools.jdeps.Module.*;
 import static java.lang.module.ModuleDescriptor.Requires.Modifier.*;
 import static java.util.stream.Collectors.*;
-
-import com.sun.tools.classfile.Dependency;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -174,16 +172,14 @@ public class ModuleAnalyzer {
         private Graph<Module> buildReducedGraph() {
             ModuleGraphBuilder rpBuilder = new ModuleGraphBuilder(configuration);
             rpBuilder.addModule(root);
-            requiresTransitive.stream()
-                          .forEach(m -> rpBuilder.addEdge(root, m));
+            requiresTransitive.forEach(m -> rpBuilder.addEdge(root, m));
 
             // requires transitive graph
             Graph<Module> rbg = rpBuilder.build().reduce();
 
             ModuleGraphBuilder gb = new ModuleGraphBuilder(configuration);
             gb.addModule(root);
-            requires.stream()
-                    .forEach(m -> gb.addEdge(root, m));
+            requires.forEach(m -> gb.addEdge(root, m));
 
             // transitive reduction
             Graph<Module> newGraph = gb.buildGraph().reduce(rbg);
@@ -310,7 +306,7 @@ public class ModuleAnalyzer {
             dependencyFinder.parse(mods.stream());
 
             // adds to the qualified exports map if a module references it
-            mods.stream().forEach(m ->
+            mods.forEach(m ->
                 m.getDependencies()
                     .map(Dependency.Location::getPackageName)
                     .filter(qualifiedExports::containsKey)

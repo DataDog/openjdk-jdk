@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -45,31 +46,20 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 
-import org.testng.annotations.BeforeMethod;
 
 import jdk.jshell.tool.JavaShellToolBuilder;
 import static java.util.stream.Collectors.toList;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertNotNull;
-import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import org.junit.jupiter.api.BeforeEach;
 
 public class ReplToolTesting {
 
     private final static String DEFAULT_STARTUP_MESSAGE = "|  Welcome to";
-    final static List<ImportInfo> START_UP_IMPORTS = Stream.of(
-                    "java.io.*",
-                    "java.math.*",
-                    "java.net.*",
-                    "java.nio.file.*",
-                    "java.util.*",
-                    "java.util.concurrent.*",
-                    "java.util.function.*",
-                    "java.util.prefs.*",
-                    "java.util.regex.*",
-                    "java.util.stream.*")
-                    .map(s -> new ImportInfo("import " + s + ";", "", s))
-                    .collect(toList());
+    final static List<ImportInfo> START_UP_IMPORTS = List.of(
+            new ImportInfo("import module java.base;", "", "java.base"));
     final static List<MethodInfo> START_UP_METHODS = Stream.<MethodInfo>of()
                     .collect(toList());
     final static List<String> START_UP_CMD_METHOD = Stream.<String>of()
@@ -142,7 +132,7 @@ public class ReplToolTesting {
                     .filter(l -> !l.isEmpty())
                     .collect(Collectors.toList());
             int previousId = Integer.MIN_VALUE;
-            assertEquals(lines.size(), keys.size(), "Number of keys");
+            assertEquals(keys.size(), lines.size(), "Number of keys");
             for (int i = 0; i < lines.size(); ++i) {
                 String line = lines.get(i);
                 Matcher matcher = idPattern.matcher(line);
@@ -165,7 +155,7 @@ public class ReplToolTesting {
                     .filter(l -> !l.isEmpty())
                     .filter(l -> !l.startsWith("|     ")) // error/unresolved info
                     .collect(Collectors.toList());
-            assertEquals(lines.size(), set.size(), message + " : expected: " + set.keySet() + "\ngot:\n" + lines);
+            assertEquals(set.size(), lines.size(), message + " : expected: " + set.keySet() + "\ngot:\n" + lines);
             for (String line : lines) {
                 Matcher matcher = extractPattern.matcher(line);
                 assertTrue(matcher.find(), line);
@@ -221,12 +211,23 @@ public class ReplToolTesting {
         return s;
     }
 
+    public String getTerminalOutput() {
+        String s = normalizeLineEndings("\r\n", console.data.toString());
+        console.data.reset();
+        return s;
+    }
+
     public void test(ReplTest... tests) {
         test(new String[0], tests);
     }
 
     public void test(String[] args, ReplTest... tests) {
         test(true, args, tests);
+    }
+
+    public void test(String[] args, String expectedErrorOutput,
+                     ReplTest... tests) {
+        test(Locale.ROOT, true, args, expectedErrorOutput, DEFAULT_STARTUP_MESSAGE, tests);
     }
 
     public void test(boolean isDefaultStartUp, String[] args, ReplTest... tests) {
@@ -238,6 +239,11 @@ public class ReplToolTesting {
     }
 
     public void test(Locale locale, boolean isDefaultStartUp, String[] args, String startUpMessage, ReplTest... tests) {
+        test(locale, isDefaultStartUp, args, "", startUpMessage, tests);
+    }
+
+    public void test(Locale locale, boolean isDefaultStartUp, String[] args,
+                     String expectedErrorOutput, String startUpMessage, ReplTest... tests) {
         this.isDefaultStartUp = isDefaultStartUp;
         initSnippets();
         ReplTest[] wtests = new ReplTest[tests.length + 3];
@@ -246,7 +252,7 @@ public class ReplToolTesting {
         wtests[1] = a -> assertCommand(a, "/debug 0", null);
         System.arraycopy(tests, 0, wtests, 2, tests.length);
         wtests[tests.length + 2] = a -> assertCommand(a, "/exit", null);
-        testRaw(locale, args, wtests);
+        testRaw(locale, args, expectedErrorOutput, wtests);
     }
 
     private void initSnippets() {
@@ -265,7 +271,7 @@ public class ReplToolTesting {
         }
     }
 
-    @BeforeMethod
+    @BeforeEach
     public void setUp() {
         prefsMap = new HashMap<>();
         prefsMap.put("INDENT", "0");
@@ -291,10 +297,11 @@ public class ReplToolTesting {
                     .promptCapture(true);
     }
 
-    private void testRaw(Locale locale, String[] args, ReplTest... tests) {
+    private void testRaw(Locale locale, String[] args,
+                         String expectedErrorOutput, ReplTest... tests) {
         testRawInit(tests);
-        testRawRun(locale, args);
-        testRawCheck(locale);
+        testRawRun(locale, Presets.addExecutionIfMissing(args));
+        testRawCheck(locale, expectedErrorOutput);
     }
 
     private void testRawInit(ReplTest... tests) {
@@ -316,7 +323,7 @@ public class ReplToolTesting {
         }
     }
 
-    private void testRawCheck(Locale locale) {
+    private void testRawCheck(Locale locale, String expectedErrorOutput) {
         // perform internal consistency checks on state, if desired
         String cos = getCommandOutput();
         String ceos = getCommandErrorOutput();
@@ -324,7 +331,9 @@ public class ReplToolTesting {
         String ueos = getUserErrorOutput();
         assertTrue((cos.isEmpty() || cos.startsWith("|  Goodbye") || !locale.equals(Locale.ROOT)),
                 "Expected a goodbye, but got: " + cos);
-        assertTrue(ceos.isEmpty(), "Expected empty command error output, got: " + ceos);
+        assertEquals(                     expectedErrorOutput, ceos,
+                     "Expected \"" + expectedErrorOutput +
+                     "\" command error output, got: \"" + ceos + "\"");
         assertTrue(uos.isEmpty(), "Expected empty user output, got: " + uos);
         assertTrue(ueos.isEmpty(), "Expected empty user error output, got: " + ueos);
     }
@@ -462,6 +471,7 @@ public class ReplToolTesting {
 
     public void dropClass(boolean after, String cmd, String name, String output) {
         dropKey(after, cmd, name, classes, output);
+
     }
 
     public void dropImport(boolean after, String cmd, String name, String output) {
@@ -496,8 +506,33 @@ public class ReplToolTesting {
         }
     }
 
+    public void assertCommandUserOutputContains(boolean after, String cmd, String... hasThese) {
+        assertCommandCheckUserOutput(after, cmd, (s)
+                -> assertTrue(Arrays.stream(hasThese)
+                        .allMatch(has -> s.contains(has)),
+                "User output: \'" + s + "' does not contain: "
+                        + Arrays.stream(hasThese)
+                        .filter(has -> !s.contains(has))
+                        .collect(Collectors.joining(", "))));
+    }
+
+    public void assertCommandCheckUserOutput(boolean after, String cmd, Consumer<String> check) {
+        if (!after) {
+            assertCommand(false, cmd, null);
+        } else {
+            String got = getUserOutput();
+            check.accept(got);
+            assertCommand(true, cmd, null);
+        }
+    }
+
     public void assertCommand(boolean after, String cmd, String out, String err,
             String userinput, String print, String usererr) {
+        assertCommand(after, cmd, out, err, userinput, print, usererr, null);
+    }
+
+    public void assertCommand(boolean after, String cmd, String out, String err,
+            String userinput, String print, String usererr, String terminalOut) {
         if (!after) {
             if (userinput != null) {
                 setUserInput(userinput);
@@ -512,6 +547,7 @@ public class ReplToolTesting {
             assertOutput(getCommandErrorOutput(), err, "command error: " + cmd);
             assertOutput(getUserOutput(), print, "user output: " + cmd);
             assertOutput(getUserErrorOutput(), usererr, "user error: " + cmd);
+            assertOutput(getTerminalOutput(), terminalOut, "terminal output: " + cmd);
         }
     }
 
@@ -526,12 +562,46 @@ public class ReplToolTesting {
 
     public void assertOutput(String got, String expected, String display) {
         if (expected != null) {
-            assertEquals(got, expected, display + ".\n");
+            assertEquals(expected, got, display + ".\n");
+        }
+    }
+
+    public void assertCompletions(boolean after, String input, String expectedCompletionsPattern) {
+        if (!after) {
+            try {
+                Class<?> sourceCodeAnalysisImpl = Class.forName("jdk.jshell.SourceCodeAnalysisImpl");
+                Method waitBackgroundTaskFinished = sourceCodeAnalysisImpl.getDeclaredMethod("waitCurrentBackgroundTasksFinished");
+
+                waitBackgroundTaskFinished.setAccessible(true);
+                waitBackgroundTaskFinished.invoke(null);
+            } catch (ReflectiveOperationException ex) {
+                throw new AssertionError(ex.getMessage(), ex);
+            }
+
+            setCommandInput(input + "\t");
+        } else {
+            assertOutput(getCommandOutput().trim(), "", "command output: " + input);
+            assertOutput(getCommandErrorOutput(), "", "command error: " + input);
+            assertOutput(getUserOutput(), "", "user output: " + input);
+            assertOutput(getUserErrorOutput(), "", "user error: " + input);
+            String actualOutput = getTerminalOutput();
+            Pattern compiledPattern =
+                    Pattern.compile(expectedCompletionsPattern, Pattern.DOTALL);
+            if (!compiledPattern.asMatchPredicate().test(actualOutput)) {
+                throw new AssertionError("Actual output:\n" +
+                                         actualOutput + "\n" +
+                                         "does not match expected pattern: " +
+                                         expectedCompletionsPattern);
+            }
         }
     }
 
     private String normalizeLineEndings(String text) {
-        return ANSI_CODE_PATTERN.matcher(text.replace(System.getProperty("line.separator"), "\n")).replaceAll("");
+        return normalizeLineEndings(System.getProperty("line.separator"), text);
+    }
+
+    private String normalizeLineEndings(String lineSeparator, String text) {
+        return ANSI_CODE_PATTERN.matcher(text.replace(lineSeparator, "\n")).replaceAll("");
     }
         private static final Pattern ANSI_CODE_PATTERN = Pattern.compile("\033\\[[\060-\077]*[\040-\057]*[\100-\176]");
 
@@ -812,6 +882,7 @@ public class ReplToolTesting {
 
     class PromptedCommandOutputStream extends OutputStream {
         private final ReplTest[] tests;
+        private final ByteArrayOutputStream data = new ByteArrayOutputStream();
         private int index = 0;
         PromptedCommandOutputStream(ReplTest[] tests) {
             this.tests = tests;
@@ -827,7 +898,8 @@ public class ReplToolTesting {
                     fail("Did not exit Repl tool after test");
                 }
                 ++index;
-            } // For now, anything else is thrown away
+            }
+            data.write(b);
         }
 
         @Override
@@ -842,7 +914,7 @@ public class ReplToolTesting {
         }
     }
 
-    public static final class MemoryPreferences extends AbstractPreferences {
+    public static class MemoryPreferences extends AbstractPreferences {
 
         private final Map<String, String> values = new HashMap<>();
         private final Map<String, MemoryPreferences> nodes = new HashMap<>();
@@ -871,17 +943,17 @@ public class ReplToolTesting {
         }
 
         @Override
-        protected void removeNodeSpi() throws BackingStoreException {
+        protected void removeNodeSpi() {
             ((MemoryPreferences) parent()).nodes.remove(name());
         }
 
         @Override
-        protected String[] keysSpi() throws BackingStoreException {
+        protected String[] keysSpi() {
             return values.keySet().toArray(new String[0]);
         }
 
         @Override
-        protected String[] childrenNamesSpi() throws BackingStoreException {
+        protected String[] childrenNamesSpi() {
             return nodes.keySet().toArray(new String[0]);
         }
 
@@ -891,11 +963,11 @@ public class ReplToolTesting {
         }
 
         @Override
-        protected void syncSpi() throws BackingStoreException {
+        protected void syncSpi() {
         }
 
         @Override
-        protected void flushSpi() throws BackingStoreException {
+        protected void flushSpi() {
         }
 
     }

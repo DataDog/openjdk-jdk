@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,7 +28,6 @@
  *          generated to access to private methods and fields.
  * @modules jdk.compiler/com.sun.tools.javac.api
  *          jdk.compiler/com.sun.tools.javac.main
- *          jdk.jdeps/com.sun.tools.classfile
  * @library /tools/lib /tools/javac/lib ../lib
  * @build toolbox.ToolBox InMemoryFileManager TestResult TestBase
  * @build AccessToPrivateSiblingsTest SyntheticTestDriver ExpectedClass ExpectedClasses
@@ -43,14 +42,12 @@
  * 3. access method for private method function().
  * 4. getter/setter for private field staticVar.
  * 5. access method for private method staticFunction().
- * 6. field this in Inner1.
- * 7. constructor for Inner*.
+ * 6. constructor for Inner*.
  */
 @ExpectedClass(className = "AccessToPrivateSiblingsTest", expectedMethods = "<init>()")
 @ExpectedClass(className = "AccessToPrivateSiblingsTest$Inner1",
         expectedMethods = {"function()", "<init>(AccessToPrivateSiblingsTest)"},
-        expectedFields = "var",
-        expectedNumberOfSyntheticFields = 1)
+        expectedFields = "var")
 @ExpectedClass(className = "AccessToPrivateSiblingsTest$Inner2",
         expectedMethods = "<init>(AccessToPrivateSiblingsTest)",
         expectedNumberOfSyntheticFields = 1)

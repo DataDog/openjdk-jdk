@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,13 +22,12 @@
  */
 
 import java.nio.file.Path;
-import java.io.IOException;
 import jdk.jpackage.test.AdditionalLauncher;
+import jdk.jpackage.test.Annotations.Test;
+import jdk.jpackage.test.JPackageCommand;
 import jdk.jpackage.test.PackageTest;
 import jdk.jpackage.test.PackageType;
 import jdk.jpackage.test.TKit;
-import jdk.jpackage.test.Annotations.Test;
-import jdk.jpackage.test.JPackageCommand;
 
 /**
  * Test multiple launchers in two phases. First test creates app image and then
@@ -43,20 +42,19 @@ import jdk.jpackage.test.JPackageCommand;
 /*
  * @test
  * @summary Multiple launchers in two phases
- * @library ../helpers
- * @library /test/lib
+ * @library /test/jdk/tools/jpackage/helpers
  * @key jpackagePlatformPackage
  * @build jdk.jpackage.test.*
- * @modules jdk.jpackage/jdk.jpackage.internal
- * @compile MultiLauncherTwoPhaseTest.java
- * @run main/othervm/timeout=360 -Xmx512m jdk.jpackage.test.Main
+ * @compile -Xlint:all -Werror MultiLauncherTwoPhaseTest.java
+ * @run main/othervm/timeout=360 -Xmx512m
+ *  jdk.jpackage.test.Main
  *  --jpt-run=MultiLauncherTwoPhaseTest
  */
 
 public class MultiLauncherTwoPhaseTest {
 
     @Test
-    public static void test() throws IOException {
+    public static void test() {
         Path appimageOutput = TKit.createTempDirectory("appimage");
 
         JPackageCommand appImageCmd = JPackageCommand.helloAppImage()
@@ -69,14 +67,9 @@ public class MultiLauncherTwoPhaseTest {
         launcher2.applyTo(appImageCmd);
 
         PackageTest packageTest = new PackageTest()
-                .addLauncherName("bar") // Add launchers name for verification
-                .addLauncherName("foo")
-                .addRunOnceInitializer(() -> appImageCmd.execute())
+                .addRunOnceInitializer(appImageCmd::execute)
                 .addBundleDesktopIntegrationVerifier(true)
-                .addInitializer(cmd -> {
-                    cmd.addArguments("--app-image", appImageCmd.outputBundle());
-                    cmd.removeArgumentWithValue("--input");
-                })
+                .usePredefinedAppImage(appImageCmd)
                 .forTypes(PackageType.WINDOWS)
                 .addInitializer(cmd -> {
                     cmd.addArguments("--win-shortcut", "--win-menu",

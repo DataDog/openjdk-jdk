@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,6 +29,7 @@
  * @run junit/othervm/timeout=2500 -XX:+IgnoreUnrecognizedVMOptions
  *                                 -XX:-VerifyDependencies
  *                                 -esa
+ *                                 --enable-final-field-mutation=ALL-UNNAMED
  *                                 test.java.lang.invoke.MethodHandlesGeneralTest
  */
 
@@ -59,6 +60,7 @@ import java.util.Map;
 
 import static java.lang.invoke.MethodType.methodType;
 import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 public class MethodHandlesGeneralTest extends MethodHandlesTest {
 
@@ -187,14 +189,9 @@ public class MethodHandlesGeneralTest extends MethodHandlesTest {
         // test some ad hoc system methods
         testFindVirtual(false, PUBLIC, Object.class, Object.class, "clone");
 
-        // ##### FIXME - disable tests for clone until we figure out how they should work with modules
-
-        /*
-        testFindVirtual(true, PUBLIC, Object[].class, Object.class, "clone");
-        testFindVirtual(true, PUBLIC, int[].class, Object.class, "clone");
-        for (Class<?> cls : new Class<?>[]{ boolean[].class, long[].class, float[].class, char[].class })
+        for (Class<?> cls : new Class<?>[]{ Object[].class, int[].class, boolean[].class, long[].class, float[].class, char[].class }) {
             testFindVirtual(true, PUBLIC, cls, Object.class, "clone");
-         */
+        }
     }
 
     void testFindVirtual(Class<?> defc, Class<?> ret, String name, Class<?>... params) throws Throwable {
@@ -264,8 +261,8 @@ public class MethodHandlesGeneralTest extends MethodHandlesTest {
             assertEquals(MethodType.methodType(Object.class, rcvc), target.type());
             Object orig = argsWithSelf[0];
             assertEquals(orig.getClass(), res.getClass());
-            if (res instanceof Object[])
-                assertArrayEquals((Object[])res, (Object[])argsWithSelf[0]);
+            if (res instanceof Object[] arr)
+                assertArrayEquals(arr, (Object[])argsWithSelf[0]);
             assert(Arrays.deepEquals(new Object[]{res}, new Object[]{argsWithSelf[0]}));
         } else {
             assert(false) : Arrays.asList(positive, lookup, rcvc, defc, ret, name, deepToString(params));
@@ -402,7 +399,7 @@ public class MethodHandlesGeneralTest extends MethodHandlesTest {
         Object obj = target.invokeWithArguments(args);
         if (!(defc == Example.class && params.length < 2))
             assertCalled(defc.getSimpleName()+".<init>", args);
-        assertTrue("instance of "+defc.getName(), defc.isInstance(obj));
+        assertInstanceOf(defc, obj);
     }
 
     @Test
@@ -975,8 +972,7 @@ public class MethodHandlesGeneralTest extends MethodHandlesTest {
                 arrayToMH = new SubIntExample[length];
             else
                 return;  // can't make an ArrayStoreException test
-            assert(arrayType.isInstance(arrayToMH))
-                : Arrays.asList(arrayType, arrayToMH.getClass(), testSetter, negTest);
+            assertInstanceOf(arrayType, arrayToMH, () -> Arrays.asList(testSetter, negTest).toString());
             break;
         }
         countTest(positive);

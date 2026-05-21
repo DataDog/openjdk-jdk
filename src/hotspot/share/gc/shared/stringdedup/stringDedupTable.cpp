@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,8 @@
  *
  */
 
-#include "precompiled.hpp"
+#include "cds/aotMappedHeapLoader.hpp"
+#include "cds/heapShared.inline.hpp"
 #include "classfile/altHashing.hpp"
 #include "classfile/javaClasses.inline.hpp"
 #include "classfile/stringTable.hpp"
@@ -34,10 +35,10 @@
 #include "gc/shared/stringdedup/stringDedupConfig.hpp"
 #include "gc/shared/stringdedup/stringDedupStat.hpp"
 #include "gc/shared/stringdedup/stringDedupTable.hpp"
-#include "memory/allocation.hpp"
-#include "memory/resourceArea.hpp"
 #include "logging/log.hpp"
 #include "logging/logStream.hpp"
+#include "memory/allocation.hpp"
+#include "memory/resourceArea.hpp"
 #include "oops/access.hpp"
 #include "oops/oopsHierarchy.hpp"
 #include "oops/typeArrayOop.inline.hpp"
@@ -56,10 +57,11 @@
 // the vectors.  The size of the table is the size of either vector.
 //
 // The capacity of the vectors is explicitly controlled, based on the size.
-// Given N > 0 and 2^N <= size < 2^(N+1), then capacity = 2^N + k * 2^(N-1)
+// Given N > 0 and 2^N <= size < 2^(N+1), then capacity <= 2^N + k * 2^(N-1)
 // for the smallest integer k in [0,2] such that size <= capacity.  That is,
 // use a power of 2 or the midpoint between consecutive powers of 2 that is
-// minimally at least size.
+// minimally at least size.  When adding an entry and the capacity has been
+// reached, capacity is increased to the next of those values.
 //
 // The main benefit of this representation is that it uses less space than a
 // more traditional linked-list of entry nodes representation.  Such a
@@ -89,12 +91,11 @@ class StringDedup::Table::Bucket {
   GrowableArrayCHeap<uint, mtStringDedup> _hashes;
   GrowableArrayCHeap<TableValue, mtStringDedup> _values;
 
-  void adjust_capacity(int new_capacity);
   void expand_if_full();
 
 public:
   // precondition: reserve == 0 or is the result of needed_capacity.
-  Bucket(int reserve = 0);
+  explicit Bucket(int reserve = 0);
 
   ~Bucket() {
     while (!_values.is_empty()) {
@@ -107,7 +108,7 @@ public:
   const GrowableArrayView<uint>& hashes() const { return _hashes; }
   const GrowableArrayView<TableValue>& values() const { return _values; }
 
-  bool is_empty() const { return _hashes.length() == 0; }
+  bool is_empty() const { return _hashes.is_empty(); }
   int length() const { return _hashes.length(); }
 
   void add(uint hash_code, TableValue value) {
@@ -150,33 +151,17 @@ int StringDedup::Table::Bucket::needed_capacity(int needed) {
   return (needed <= low) ? low : high;
 }
 
-void StringDedup::Table::Bucket::adjust_capacity(int new_capacity) {
-  GrowableArrayCHeap<uint, mtStringDedup> new_hashes{new_capacity};
-  GrowableArrayCHeap<TableValue, mtStringDedup> new_values{new_capacity};
-  while (!_hashes.is_empty()) {
-    new_hashes.push(_hashes.pop());
-    new_values.push(_values.pop());
-  }
-  _hashes.swap(&new_hashes);
-  _values.swap(&new_values);
-}
-
 void StringDedup::Table::Bucket::expand_if_full() {
-  if (_hashes.length() == _hashes.max_length()) {
-    adjust_capacity(needed_capacity(_hashes.max_length() + 1));
+  if (_hashes.is_full()) {
+    int needed = needed_capacity(_hashes.capacity() + 1);
+    _hashes.reserve(needed);
+    _values.reserve(needed);
   }
 }
 
 void StringDedup::Table::Bucket::shrink() {
-  if (_hashes.is_empty()) {
-    _hashes.clear_and_deallocate();
-    _values.clear_and_deallocate();
-  } else {
-    int target = needed_capacity(_hashes.length());
-    if (target < _hashes.max_length()) {
-      adjust_capacity(target);
-    }
-  }
+  _hashes.shrink_to_fit();
+  _values.shrink_to_fit();
 }
 
 StringDedup::Table::TableValue
@@ -228,7 +213,7 @@ void StringDedup::Table::Bucket::verify(size_t bucket_index,
 // If a dead count report is received while cleaning, further cleaning may
 // reduce the number of dead entries.  With STW reference processing one
 // could maintain an accurate dead count by deducting cleaned entries.  But
-// that doesn't work for concurrent reference processsing.  In that case the
+// that doesn't work for concurrent reference processing.  In that case the
 // dead count being reported may include entries that have already been
 // removed by concurrent cleaning.
 //
@@ -260,20 +245,20 @@ void StringDedup::Table::num_dead_callback(size_t num_dead) {
   // Lock while modifying dead count and state.
   MonitorLocker ml(StringDedup_lock, Mutex::_no_safepoint_check_flag);
 
-  switch (Atomic::load(&_dead_state)) {
+  switch (_dead_state.load_relaxed()) {
   case DeadState::good:
-    Atomic::store(&_dead_count, num_dead);
+    _dead_count.store_relaxed(num_dead);
     break;
 
   case DeadState::wait1:
     // Set count first, so dedup thread gets this or a later value if it
     // sees the good state.
-    Atomic::store(&_dead_count, num_dead);
-    Atomic::release_store(&_dead_state, DeadState::good);
+    _dead_count.store_relaxed(num_dead);
+    _dead_state.release_store(DeadState::good);
     break;
 
   case DeadState::wait2:
-    Atomic::release_store(&_dead_state, DeadState::wait1);
+    _dead_state.release_store(DeadState::wait1);
     break;
 
   case DeadState::cleaning:
@@ -299,7 +284,6 @@ public:
   virtual bool step() = 0;
   virtual TableValue find(typeArrayOop obj, uint hash_code) const = 0;
   virtual void report_end() const = 0;
-  virtual Stat::Phase phase() const = 0;
   virtual void verify() const = 0;
 };
 
@@ -335,10 +319,6 @@ public:
 
   virtual void report_end() const {
     _cur_stat.report_resize_table_end();
-  }
-
-  virtual Stat::Phase phase() const {
-    return Stat::Phase::resize_table;
   }
 
   virtual void verify() const;
@@ -405,10 +385,6 @@ public:
     _cur_stat.report_cleanup_table_end();
   }
 
-  virtual Stat::Phase phase() const {
-    return Stat::Phase::cleanup_table;
-  }
-
   virtual void verify() const {} // Nothing to do here.
 };
 
@@ -447,8 +423,10 @@ size_t StringDedup::Table::_number_of_entries = 0;
 size_t StringDedup::Table::_grow_threshold;
 StringDedup::Table::CleanupState* StringDedup::Table::_cleanup_state = nullptr;
 bool StringDedup::Table::_need_bucket_shrinking = false;
-volatile size_t StringDedup::Table::_dead_count = 0;
-volatile StringDedup::Table::DeadState StringDedup::Table::_dead_state = DeadState::good;
+Atomic<size_t> StringDedup::Table::_dead_count{};
+
+Atomic<StringDedup::Table::DeadState>
+StringDedup::Table::_dead_state{DeadState::good};
 
 void StringDedup::Table::initialize_storage() {
   assert(_table_storage == nullptr, "storage already created");
@@ -477,7 +455,7 @@ void StringDedup::Table::free_buckets(Bucket* buckets, size_t number_of_buckets)
   while (number_of_buckets > 0) {
     buckets[--number_of_buckets].~Bucket();
   }
-  FREE_C_HEAP_ARRAY(Bucket, buckets);
+  FREE_C_HEAP_ARRAY(buckets);
 }
 
 // Compute the hash code for obj using halfsiphash_32.  As this is a high
@@ -501,19 +479,19 @@ void StringDedup::Table::add(TableValue tv, uint hash_code) {
 }
 
 bool StringDedup::Table::is_dead_count_good_acquire() {
-  return Atomic::load_acquire(&_dead_state) == DeadState::good;
+  return _dead_state.load_acquire() == DeadState::good;
 }
 
 // Should be consistent with cleanup_start_if_needed.
 bool StringDedup::Table::is_grow_needed() {
   return is_dead_count_good_acquire() &&
-         ((_number_of_entries - Atomic::load(&_dead_count)) > _grow_threshold);
+         ((_number_of_entries - _dead_count.load_relaxed()) > _grow_threshold);
 }
 
 // Should be consistent with cleanup_start_if_needed.
 bool StringDedup::Table::is_dead_entry_removal_needed() {
   return is_dead_count_good_acquire() &&
-         Config::should_cleanup_table(_number_of_entries, Atomic::load(&_dead_count));
+         Config::should_cleanup_table(_number_of_entries, _dead_count.load_relaxed());
 }
 
 StringDedup::Table::TableValue
@@ -540,6 +518,7 @@ void StringDedup::Table::install(typeArrayOop obj, uint hash_code) {
 // access to a String that is incompletely constructed; the value could be
 // set before the coder.
 bool StringDedup::Table::try_deduplicate_shared(oop java_string) {
+  assert(!HeapShared::is_loading_streaming_mode(), "should not reach here");
   typeArrayOop value = java_lang_String::value(java_string);
   assert(value != nullptr, "precondition");
   assert(TypeArrayKlass::cast(value->klass())->element_type() == T_BYTE, "precondition");
@@ -585,6 +564,7 @@ bool StringDedup::Table::try_deduplicate_shared(oop java_string) {
 }
 
 bool StringDedup::Table::try_deduplicate_found_shared(oop java_string, oop found) {
+  assert(!HeapShared::is_loading_streaming_mode(), "should not reach here");
   _cur_stat.inc_known_shared();
   typeArrayOop found_value = java_lang_String::value(found);
   if (found_value == java_lang_String::value(java_string)) {
@@ -635,7 +615,8 @@ bool StringDedup::Table::deduplicate_if_permitted(oop java_string,
 void StringDedup::Table::deduplicate(oop java_string) {
   assert(java_lang_String::is_instance(java_string), "precondition");
   _cur_stat.inc_inspected();
-  if ((StringTable::shared_entry_count() > 0) &&
+  if (AOTMappedHeapLoader::is_in_use() &&
+      (StringTable::shared_entry_count() > 0) &&
       try_deduplicate_shared(java_string)) {
     return;                     // Done if deduplicated against shared StringTable.
   }
@@ -672,7 +653,7 @@ bool StringDedup::Table::cleanup_start_if_needed(bool grow_only, bool force) {
   // If dead count is good then we can read it once and use it below
   // without needing any locking.  The recorded count could increase
   // after the read, but that's okay.
-  size_t dead_count = Atomic::load(&_dead_count);
+  size_t dead_count = _dead_count.load_relaxed();
   // This assertion depends on dead state tracking.  Otherwise, concurrent
   // reference processing could detect some, but a cleanup operation could
   // remove them before they are reported.
@@ -696,8 +677,8 @@ bool StringDedup::Table::cleanup_start_if_needed(bool grow_only, bool force) {
 
 void StringDedup::Table::set_dead_state_cleaning() {
   MutexLocker ml(StringDedup_lock, Mutex::_no_safepoint_check_flag);
-  Atomic::store(&_dead_count, size_t(0));
-  Atomic::store(&_dead_state, DeadState::cleaning);
+  _dead_count.store_relaxed(0);
+  _dead_state.store_relaxed(DeadState::cleaning);
 }
 
 bool StringDedup::Table::start_resizer(bool grow_only, size_t number_of_entries) {
@@ -731,12 +712,7 @@ void StringDedup::Table::cleanup_end() {
   delete _cleanup_state;
   _cleanup_state = nullptr;
   MutexLocker ml(StringDedup_lock, Mutex::_no_safepoint_check_flag);
-  Atomic::store(&_dead_state, DeadState::wait2);
-}
-
-StringDedup::Stat::Phase StringDedup::Table::cleanup_phase() {
-  assert(_cleanup_state != nullptr, "precondition");
-  return _cleanup_state->phase();
+  _dead_state.store_relaxed(DeadState::wait2);
 }
 
 void StringDedup::Table::verify() {
@@ -754,12 +730,16 @@ void StringDedup::Table::verify() {
 }
 
 void StringDedup::Table::log_statistics() {
+  if (!log_is_enabled(Debug, stringdedup)) {
+    return;
+  }
+
   size_t dead_count;
   int dead_state;
   {
     MutexLocker ml(StringDedup_lock, Mutex::_no_safepoint_check_flag);
-    dead_count = _dead_count;
-    dead_state = static_cast<int>(_dead_state);
+    dead_count = _dead_count.load_relaxed();
+    dead_state = static_cast<int>(_dead_state.load_relaxed());
   }
   log_debug(stringdedup)("Table: %zu values in %zu buckets, %zu dead (%d)",
                          _number_of_entries, _number_of_buckets,

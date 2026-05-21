@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,7 @@
 package jdk.test.lib.util;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
@@ -33,9 +34,11 @@ import java.lang.management.ManagementFactory;
 import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -47,6 +50,8 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import jdk.test.lib.Platform;
 
@@ -60,6 +65,14 @@ public final class FileUtils {
     private static final int RETRY_DELETE_MILLIS = IS_WINDOWS ? 500 : 0;
     private static final int MAX_RETRY_DELETE_TIMES = IS_WINDOWS ? 15 : 0;
     private static volatile boolean nativeLibLoaded;
+
+    @SuppressWarnings("restricted")
+    private static void loadNativeLib() {
+        if (!nativeLibLoaded) {
+            System.loadLibrary("FileUtils");
+            nativeLibLoaded = true;
+        }
+    }
 
     /**
      * Deletes a file, retrying if necessary.
@@ -266,7 +279,7 @@ public final class FileUtils {
                     (new InputStreamReader(proc.getInputStream()));
                 // Skip the first line as it is the "df" output header.
                 if (reader.readLine() != null ) {
-                    Set mountPoints = new HashSet();
+                    Set<String> mountPoints = new HashSet<>();
                     String mountPoint = null;
                     while ((mountPoint = reader.readLine()) != null) {
                         if (!mountPoints.add(mountPoint)) {
@@ -299,8 +312,8 @@ public final class FileUtils {
             };
         });
 
-        final AtomicReference throwableReference =
-            new AtomicReference<Throwable>();
+        final AtomicReference<Throwable> throwableReference =
+            new AtomicReference<>();
         thr.setUncaughtExceptionHandler(
             new Thread.UncaughtExceptionHandler() {
                 public void uncaughtException(Thread t, Throwable e) {
@@ -315,7 +328,7 @@ public final class FileUtils {
             throw new RuntimeException(ie);
         }
 
-        Throwable uncaughtException = (Throwable)throwableReference.get();
+        Throwable uncaughtException = throwableReference.get();
         if (uncaughtException != null) {
             throw new RuntimeException(uncaughtException);
         }
@@ -364,20 +377,95 @@ public final class FileUtils {
         });
     }
 
+    /**
+     * Copies a directory and all entries in the directory to a destination path.
+     * Makes the access permission of the destination entries writable.
+     *
+     * @param src the path of the source directory
+     * @param dst the path of the destination directory
+     * @throws IOException      if an I/O error occurs while walking the file tree
+     * @throws RuntimeException if an I/O error occurs during the copy operation
+     *                          or if the source or destination paths are invalid
+     */
+    public static void copyDirectory(Path src, Path dst) throws IOException {
+        try (Stream<Path> stream = Files.walk(src)) {
+            stream.forEach(sourcePath -> {
+                try {
+                    Path destPath = dst.resolve(src.relativize(sourcePath));
+                    Files.copy(sourcePath, destPath, StandardCopyOption.REPLACE_EXISTING);
+                    destPath.toFile().setWritable(true);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+        }
+    }
+
     // Return the current process handle count
     public static long getProcessHandleCount() {
         if (IS_WINDOWS) {
-            if (!nativeLibLoaded) {
-                System.loadLibrary("FileUtils");
-                nativeLibLoaded = true;
-            }
-            return getWinProcessHandleCount();
+            loadNativeLib();
+            return getWinProcessHandleCount0();
         } else {
             return ((UnixOperatingSystemMXBean)ManagementFactory.getOperatingSystemMXBean()).getOpenFileDescriptorCount();
         }
     }
 
-    private static native long getWinProcessHandleCount();
+    /**
+     * Patches a part of a file.
+     *
+     * @param path the file
+     * @param fromLine the first line to patch. This is the number you see in an editor, 1-based, inclusive.
+     * @param toLine the last line to patch. This is the number you see in an editor, inclusive.
+     *               Set {@code toLine} to {@code fromLine - 1} if you only want to insert lines.
+     * @param from lines to remove, used to ensure the correct lines are removed. Can be multiple lines or empty.
+     *            It's compared to existing lines with all lines trimmed and no new lines at both ends. Ignored if null.
+     * @param to the newly added lines, can be multiple lines or empty. New line at end is optional. Cannot be null.
+     * @throws IOException if there's an I/O error or {@code from} does not match the existing lines
+     * @throws IndexOutOfBoundsException if {@code fromLine} or {@code toLine} is invalid
+     */
+    public static void patch(Path path, int fromLine, int toLine, String from, String to) throws IOException {
+        var lines = Files.readAllLines(path);
+        // The next line does a from/to as well
+        var subList = lines.subList(fromLine - 1, toLine);
+        if (from != null) {
+            // Each line is trimmed so caller needs not care about indentation.
+            // Caller also needs not care about new lines on both ends.
+            // New lines inside are preserved.
+            String actuallyRemoved = subList.stream()
+                            .map(String::trim)
+                            .collect(Collectors.joining("\n")).trim();
+            String wantToRemove = from.lines()
+                            .map(String::trim)
+                            .collect(Collectors.joining("\n")).trim();
+            if (!actuallyRemoved.equals(wantToRemove)) {
+                throw new IOException("Removed not the same: ["
+                        + String.join("\\n", subList) + "] and ["
+                        + from.replaceAll("\\n", "\\\\n") + "]");
+            }
+        }
+        subList.clear();
+        lines.addAll(fromLine - 1, to.lines().toList());
+        Files.write(path, lines);
+    }
+
+    // Create a directory junction with the specified target
+    public static boolean createWinDirectoryJunction(Path junction, Path target)
+        throws IOException
+    {
+        assert IS_WINDOWS;
+
+        // Convert "target" to its real path
+        target = target.toRealPath();
+
+        // Create a directory junction
+        loadNativeLib();
+        return createWinDirectoryJunction0(junction.toString(), target.toString());
+    }
+
+    private static native long getWinProcessHandleCount0();
+    private static native boolean createWinDirectoryJunction0(String junction,
+        String target) throws IOException;
 
     // Possible command locations and arguments
     static String[][] lsCommands = new String[][] {

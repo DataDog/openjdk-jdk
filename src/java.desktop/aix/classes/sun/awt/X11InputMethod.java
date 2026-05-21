@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -49,7 +49,7 @@ public abstract class X11InputMethod extends X11InputMethodBase {
      * Constructs an X11InputMethod instance. It initializes the XIM
      * environment if it's not done yet.
      *
-     * @exception AWTException if XOpenIM() failed.
+     * @throws AWTException if XOpenIM() failed.
      */
     public X11InputMethod() throws AWTException {
         super();
@@ -125,7 +125,7 @@ public abstract class X11InputMethod extends X11InputMethodBase {
         /* Usually as the client component, let's call it component A,
            loses the focus, this method is called. Then when another client
            component, let's call it component B,  gets the focus, activate is first called on
-           the previous focused compoent which is A, then endComposition is called on A,
+           the previous focused component which is A, then endComposition is called on A,
            deactivate is called on A again. And finally activate is called on the newly
            focused component B. Here is the call sequence.
 
@@ -466,7 +466,7 @@ public abstract class X11InputMethod extends X11InputMethodBase {
            return.
            setCompositionEnabledNative may throw UnsupportedOperationException.
            Don't try to catch it since the method may be called by clients.
-           Use package private mthod 'resetCompositionState' if you want the
+           Use package private method 'resetCompositionState' if you want the
            exception to be caught.
         */
         boolean pre, post;

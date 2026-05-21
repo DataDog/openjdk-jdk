@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
  * @test
  * @bug 8262271
  * @requires vm.hasSA
+ * @requires vm.gc != "Z"
  * @library /test/lib
  * @run main/timeout=240 JStackStressTest
  */
@@ -93,7 +94,9 @@ public class JStackStressTest {
         System.out.println("Starting Jshell");
         long startTime = System.currentTimeMillis();
         try {
-            ProcessBuilder pb = new ProcessBuilder(JDKToolFinder.getTestJDKTool("jshell"));
+            JDKToolLauncher launcher = JDKToolLauncher.createUsingTestJDK("jshell");
+            launcher.addVMArgs(Utils.getTestJavaOpts());
+            ProcessBuilder pb = new ProcessBuilder(launcher.getCommand());
             jShellProcess = ProcessTools.startProcess("JShell", pb);
         } catch (Exception ex) {
             throw new RuntimeException("Test ERROR " + ex, ex);

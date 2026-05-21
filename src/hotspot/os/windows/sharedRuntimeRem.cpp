@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+* Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
 * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 *
 * This code is free software; you can redistribute it and/or modify it
@@ -22,17 +22,14 @@
 *
 */
 
-#include "precompiled.hpp"
 #include "runtime/sharedRuntime.hpp"
 
-#ifdef _WIN64
-// These are copied defines from fdlibm.h, this allows us to keep the code
-// the same as in the JDK, for easier maintenance.
+// These are copied defines originally from fdlibm.h.
 
 #define __HI(x) *(1+(int*)&x)
 #define __LO(x) *(int*)&x
 
-// This code is a copy of __ieee754_fmod() from the JDK's libfdlibm and is
+// This code is a copy of __ieee754_fmod() formerly from the JDK's libfdlibm and is
 // used as a workaround for issues with the Windows x64 CRT implementation
 // of fmod. Microsoft has acknowledged that this is an issue in Visual Studio
 // 2012 and forward, but has not provided a time frame for a fix other than that
@@ -53,11 +50,9 @@ double SharedRuntime::fmod_winx64(double x, double y)
   hx ^= sx;                /* |x| */
   hy &= 0x7fffffff;       /* |y| */
 
-#pragma warning( disable : 4146 )
   /* purge off exception values */
   if ((hy | ly) == 0 || (hx >= 0x7ff00000) ||       /* y=0,or x not finite */
-    ((hy | ((ly | -ly) >> 31))>0x7ff00000))     /* or y is NaN */
-#pragma warning( default : 4146 )
+      ((hy | ((ly | -ly) >> 31))>0x7ff00000))       /* or y is NaN */
     return (x*y) / (x*y);
   if (hx <= hy) {
     if ((hx<hy) || (lx<ly)) return x;      /* |x|<|y| return x */
@@ -159,5 +154,3 @@ double SharedRuntime::fmod_winx64(double x, double y)
   }
   return x;               /* exact output */
 }
-
-#endif

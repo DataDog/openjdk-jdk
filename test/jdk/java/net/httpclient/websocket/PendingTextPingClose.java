@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,14 +24,12 @@
 /*
  * @test
  * @build DummyWebSocketServer
- * @run testng/othervm
+ * @run junit/othervm
  *      -Djdk.internal.httpclient.debug=true
  *      -Djdk.internal.httpclient.websocket.debug=true
  *      -Djdk.httpclient.sendBufferSize=8192
- *       PendingTextPingClose
+ *       ${test.main.class}
  */
-
-import org.testng.annotations.Test;
 
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
@@ -40,13 +38,17 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+
 public class PendingTextPingClose extends PendingOperations {
 
     CompletableFuture<WebSocket> cfText;
     CompletableFuture<WebSocket> cfPing;
     CompletableFuture<WebSocket> cfClose;
 
-    @Test(dataProvider = "booleans")
+    @ParameterizedTest
+    @MethodSource("booleans")
     public void pendingTextPingClose(boolean last) throws Exception {
         repeatable(() -> {
             server = Support.notReadingServer();
@@ -62,7 +64,7 @@ public class PendingTextPingClose extends PendingOperations {
                 cfText = webSocket.sendText(data, last);
                 try {
                     if (!cfText.isDone()) System.gc();
-                    cfText.get(MAX_WAIT_SEC, TimeUnit.SECONDS);
+                    cfText.get(waitSec, TimeUnit.SECONDS);
                     data.clear();
                 } catch (TimeoutException e) {
                     break;
@@ -76,17 +78,16 @@ public class PendingTextPingClose extends PendingOperations {
             assertFails(ISE, webSocket.sendBinary(ByteBuffer.allocate(0), true));
             assertFails(ISE, webSocket.sendBinary(ByteBuffer.allocate(0), false));
             cfPing = webSocket.sendPing(ByteBuffer.allocate(125));
-            assertHangs(cfPing);
             assertFails(ISE, webSocket.sendPing(ByteBuffer.allocate(125)));
             assertFails(ISE, webSocket.sendPong(ByteBuffer.allocate(125)));
             cfClose = webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "ok");
-            assertHangs(cfClose);
+            assertAllHang(cfPing, cfClose);
             assertNotDone(cfText);
+            webSocket.abort();
+            assertFails(IOE, cfText);
+            assertFails(IOE, cfPing);
+            assertFails(IOE, cfClose);
             return null;
         }, () -> cfText.isDone());
-        webSocket.abort();
-        assertFails(IOE, cfText);
-        assertFails(IOE, cfPing);
-        assertFails(IOE, cfClose);
     }
 }

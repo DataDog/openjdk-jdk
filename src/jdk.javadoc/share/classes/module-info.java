@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -42,23 +42,26 @@
  * or the {@linkplain java.util.ServiceLoader service loader} with the name
  * {@code "javadoc"}.
  *
+ * @spec javadoc/doc-comment-spec.html Documentation Comment Specification for the Standard Doclet
  * @toolGuide javadoc
  *
  * @provides java.util.spi.ToolProvider
+ *     Use {@link java.util.spi.ToolProvider#findFirst ToolProvider.findFirst("javadoc")}
+ *     to obtain an instance of a {@code ToolProvider} that provides the equivalent
+ *     of command-line access to the {@code javadoc} tool.
  * @provides javax.tools.DocumentationTool
  * @provides javax.tools.Tool
- *
- * @see <a href="{@docRoot}/../specs/javadoc/doc-comment-spec.html">
- *      Documentation Comment Specification for the Standard Doclet</a>
  *
  * @moduleGraph
  * @since 9
  */
 module jdk.javadoc {
-    requires java.xml;
 
     requires transitive java.compiler;
     requires transitive jdk.compiler;
+
+    requires jdk.internal.md;
+    requires jdk.internal.opt;
 
     exports jdk.javadoc.doclet;
 

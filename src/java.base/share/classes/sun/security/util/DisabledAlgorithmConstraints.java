@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,36 +25,37 @@
 
 package sun.security.util;
 
+import sun.security.ssl.SSLScope;
 import sun.security.validator.Validator;
 
+import java.lang.ref.SoftReference;
 import java.security.AlgorithmParameters;
 import java.security.CryptoPrimitive;
 import java.security.Key;
 import java.security.cert.CertPathValidatorException;
 import java.security.cert.CertPathValidatorException.BasicReason;
 import java.security.interfaces.ECKey;
-import java.security.interfaces.XECKey;
 import java.security.spec.AlgorithmParameterSpec;
 import java.security.spec.InvalidParameterSpecException;
 import java.security.spec.MGF1ParameterSpec;
-import java.security.spec.NamedParameterSpec;
 import java.security.spec.PSSParameterSpec;
-import java.text.SimpleDateFormat;
+import java.time.DateTimeException;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Calendar;
-import java.util.Date;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.Collection;
 import java.util.StringTokenizer;
-import java.util.TimeZone;
-import java.util.regex.Pattern;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Algorithm constraints for disabled algorithms property
@@ -99,7 +100,10 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
     }
 
     private final Set<String> disabledAlgorithms;
+    private final List<Pattern> disabledPatterns;
     private final Constraints algorithmConstraints;
+    private volatile SoftReference<Map<String, Boolean>> cacheRef =
+            new SoftReference<>(null);
 
     public static DisabledAlgorithmConstraints certPathConstraints() {
         return CertPathHolder.CONSTRAINTS;
@@ -132,6 +136,13 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
         super(decomposer);
         disabledAlgorithms = getAlgorithms(propertyName);
 
+        // Support patterns only for jdk.tls.disabledAlgorithms
+        if (PROPERTY_TLS_DISABLED_ALGS.equals(propertyName)) {
+            disabledPatterns = getDisabledPatterns();
+        } else {
+            disabledPatterns = null;
+        }
+
         // Check for alias
         for (String s : disabledAlgorithms) {
             Matcher matcher = INCLUDE_PATTERN.matcher(s);
@@ -156,8 +167,11 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
             throw new IllegalArgumentException("The primitives cannot be null" +
                     " or empty.");
         }
+        if (algorithm == null || algorithm.isEmpty()) {
+            throw new IllegalArgumentException("No algorithm name specified");
+        }
 
-        if (!checkAlgorithm(disabledAlgorithms, algorithm, decomposer)) {
+        if (!cachedCheckAlgorithm(algorithm)) {
             return false;
         }
 
@@ -166,6 +180,12 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
         }
 
         return true;
+    }
+
+    // Checks if algorithm is disabled for the given TLS scopes.
+    public boolean permits(String algorithm, Set<SSLScope> scopes) {
+        List<Constraint> list = algorithmConstraints.getConstraints(algorithm);
+        return list == null || list.stream().allMatch(c -> c.permits(scopes));
     }
 
     /*
@@ -193,15 +213,15 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
     }
 
     public final void permits(String algorithm, AlgorithmParameters ap,
-        ConstraintsParameters cp) throws CertPathValidatorException {
-
-        permits(algorithm, cp);
+            ConstraintsParameters cp, boolean checkKey)
+            throws CertPathValidatorException {
+        permits(algorithm, cp, checkKey);
         if (ap != null) {
             permits(ap, cp);
         }
     }
 
-    private void permits(AlgorithmParameters ap, ConstraintsParameters cp)
+    public void permits(AlgorithmParameters ap, ConstraintsParameters cp)
         throws CertPathValidatorException {
 
         switch (ap.getAlgorithm().toUpperCase(Locale.ENGLISH)) {
@@ -220,13 +240,13 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
             PSSParameterSpec pssParams =
                 ap.getParameterSpec(PSSParameterSpec.class);
             String digestAlg = pssParams.getDigestAlgorithm();
-            permits(digestAlg, cp);
+            permits(digestAlg, cp, false);
             AlgorithmParameterSpec mgfParams = pssParams.getMGFParameters();
             if (mgfParams instanceof MGF1ParameterSpec) {
                 String mgfDigestAlg =
                     ((MGF1ParameterSpec)mgfParams).getDigestAlgorithm();
                 if (!mgfDigestAlg.equalsIgnoreCase(digestAlg)) {
-                    permits(mgfDigestAlg, cp);
+                    permits(mgfDigestAlg, cp, false);
                 }
             }
         } catch (InvalidParameterSpecException ipse) {
@@ -234,35 +254,41 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
         }
     }
 
-    public final void permits(String algorithm, ConstraintsParameters cp)
-            throws CertPathValidatorException {
-
-        // Check if named curves in the key are disabled.
-        for (Key key : cp.getKeys()) {
-            for (String curve : getNamedCurveFromKey(key)) {
-                if (!checkAlgorithm(disabledAlgorithms, curve, decomposer)) {
-                    throw new CertPathValidatorException(
+    public final void permits(String algorithm, ConstraintsParameters cp,
+            boolean checkKey) throws CertPathValidatorException {
+        if (checkKey) {
+            // Check if named curves in the key are disabled.
+            for (Key key : cp.getKeys()) {
+                for (String curve : getNamedParametersFromKey(key)) {
+                    if (!cachedCheckAlgorithm(curve)) {
+                        throw new CertPathValidatorException(
                             "Algorithm constraints check failed on disabled " +
                                     "algorithm: " + curve,
                             null, null, -1, BasicReason.ALGORITHM_CONSTRAINED);
+                    }
                 }
             }
         }
-
-        algorithmConstraints.permits(algorithm, cp);
+        algorithmConstraints.permits(algorithm, cp, checkKey);
     }
 
-    private static List<String> getNamedCurveFromKey(Key key) {
-        if (key instanceof ECKey) {
-            NamedCurve nc = CurveDB.lookup(((ECKey)key).getParams());
-            return (nc == null ? List.of()
-                               : Arrays.asList(nc.getNameAndAliases()));
-        } else if (key instanceof XECKey) {
-            return List.of(
-                ((NamedParameterSpec)((XECKey)key).getParams()).getName());
-        } else {
-            return List.of();
-        }
+    private static List<String> getNamedParametersFromKey(Key key) {
+        return switch (key) {
+            case ECKey ecKey -> {
+                NamedCurve nc = CurveDB.lookup(ecKey.getParams());
+                if (nc == null) {
+                    yield List.of();
+                }
+                yield List.of(nc.getNameAndAliases());
+            }
+            default -> {
+                String n = KeyUtil.getAlgorithm(key);
+                if (n.equalsIgnoreCase(key.getAlgorithm())) {
+                    yield List.of(n);
+                }
+                yield List.of(key.getAlgorithm(), n);
+            }
+        };
     }
 
     // Check algorithm constraints with key and algorithm
@@ -286,12 +312,12 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
         }
 
         // check the key algorithm
-        if (!permits(primitives, key.getAlgorithm(), null)) {
+        if (!permits(primitives, KeyUtil.getAlgorithm(key), null)) {
             return false;
         }
 
         // If this is an elliptic curve, check if it is disabled
-        for (String curve : getNamedCurveFromKey(key)) {
+        for (String curve : getNamedParametersFromKey(key)) {
             if (!permits(primitives, curve, null)) {
                 return false;
             }
@@ -305,10 +331,6 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
     /**
      * Key and Certificate Constraints
      *
-     * The complete disabling of an algorithm is not handled by Constraints or
-     * Constraint classes.  That is addressed with
-     *   permit(Set<CryptoPrimitive>, String, AlgorithmParameters)
-     *
      * When passing a Key to permit(), the boolean return values follow the
      * same as the interface class AlgorithmConstraints.permit().  This is to
      * maintain compatibility:
@@ -319,9 +341,8 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
      * will be thrown on a failure to better identify why the operation was
      * disallowed.
      */
-
     private static class Constraints {
-        private Map<String, List<Constraint>> constraintsMap = new HashMap<>();
+        private final Map<String, List<Constraint>> constraintsMap = new HashMap<>();
 
         private static class Holder {
             private static final Pattern DENY_AFTER_PATTERN = Pattern.compile(
@@ -342,9 +363,9 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
                 // Check if constraint is a complete disabling of an
                 // algorithm or has conditions.
                 int space = constraintEntry.indexOf(' ');
-                String algorithm = AlgorithmDecomposer.hashName(
-                        ((space > 0 ? constraintEntry.substring(0, space) :
-                                constraintEntry)));
+                String algorithm = AlgorithmDecomposer.decomposeDigestName(
+                        space > 0 ? constraintEntry.substring(0, space) :
+                                constraintEntry);
                 List<Constraint> constraintList =
                         constraintsMap.getOrDefault(
                                 algorithm.toUpperCase(Locale.ENGLISH),
@@ -356,7 +377,7 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
                             alias.toUpperCase(Locale.ENGLISH), constraintList);
                 }
 
-                // If there is no whitespace, it is a algorithm name; however,
+                // If there is no whitespace, it is an algorithm name; however,
                 // if there is a whitespace, could be a multi-word EC curve too.
                 if (space <= 0 || CurveDB.lookup(constraintEntry) != null) {
                     constraintList.add(new DisabledConstraint(algorithm));
@@ -421,8 +442,8 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
                                 day);
                         denyAfterLimit = true;
                     } else if (entry.startsWith("usage")) {
-                        String s[] = (entry.substring(5)).trim().split(" ");
-                        c = new UsageConstraint(algorithm, s);
+                        String[] s = (entry.substring(5)).trim().split(" ");
+                        c = new UsageConstraint(algorithm, s, propertyName);
                         if (debug != null) {
                             debug.println("Constraints usage length is " + s.length);
                         }
@@ -450,14 +471,14 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
 
         // Check if KeySizeConstraints permit the specified key
         public boolean permits(Key key) {
-            List<Constraint> list = getConstraints(key.getAlgorithm());
+            List<Constraint> list = getConstraints(KeyUtil.getAlgorithm(key));
             if (list == null) {
                 return true;
             }
             for (Constraint constraint : list) {
                 if (!constraint.permits(key)) {
                     if (debug != null) {
-                        debug.println("Constraints: failed key size" +
+                        debug.println("Constraints: failed key size " +
                                 "constraint check " + KeyUtil.getKeySize(key));
                     }
                     return false;
@@ -487,8 +508,8 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
             return true;
         }
 
-        public void permits(String algorithm, ConstraintsParameters cp)
-                throws CertPathValidatorException {
+        public void permits(String algorithm, ConstraintsParameters cp,
+                boolean checkKey) throws CertPathValidatorException {
 
             if (debug != null) {
                 debug.println("Constraints.permits(): " + algorithm + ", "
@@ -498,12 +519,14 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
             // Get all signature algorithms to check for constraints
             Set<String> algorithms = new HashSet<>();
             if (algorithm != null) {
-                algorithms.addAll(AlgorithmDecomposer.decomposeOneHash(algorithm));
+                algorithms.addAll(AlgorithmDecomposer.decomposeName(algorithm));
                 algorithms.add(algorithm);
             }
 
-            for (Key key : cp.getKeys()) {
-                algorithms.add(key.getAlgorithm());
+            if (checkKey) {
+                for (Key key : cp.getKeys()) {
+                    algorithms.add(KeyUtil.getAlgorithm(key));
+                }
             }
 
             // Check all applicable constraints
@@ -513,6 +536,9 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
                     continue;
                 }
                 for (Constraint constraint : list) {
+                    if (!checkKey && constraint instanceof KeySizeConstraint) {
+                        continue;
+                    }
                     constraint.permits(cp);
                 }
             }
@@ -582,9 +608,20 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
          *
          * @param parameters the cryptographic parameters
          * @return 'true' if the cryptographic parameters is allowed,
-         *         'false' ortherwise.
+         *         'false' otherwise.
          */
         public boolean permits(AlgorithmParameters parameters) {
+            return true;
+        }
+
+        /**
+         * Check if the algorithm constraint permits the given TLS scopes.
+         *
+         * @param scopes TLS scopes
+         * @return 'true' if TLS scopes are allowed,
+         *         'false' otherwise.
+         */
+        public boolean permits(Set<SSLScope> scopes) {
             return true;
         }
 
@@ -687,43 +724,30 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
      * timezone.
      */
     private static class DenyAfterConstraint extends Constraint {
-        private Date denyAfterDate;
-        private static final SimpleDateFormat dateFormat =
-                new SimpleDateFormat("EEE, MMM d HH:mm:ss z yyyy");
+        private final ZonedDateTime zdt;
+        private final Instant denyAfterDate;
 
         DenyAfterConstraint(String algo, int year, int month, int day) {
-            Calendar c;
 
             algorithm = algo;
 
             if (debug != null) {
-                debug.println("DenyAfterConstraint read in as:  year " +
+                debug.println("DenyAfterConstraint read in as: year " +
                         year + ", month = " + month + ", day = " + day);
             }
 
-            c = new Calendar.Builder().setTimeZone(TimeZone.getTimeZone("GMT"))
-                    .setDate(year, month - 1, day).build();
-
-            if (year > c.getActualMaximum(Calendar.YEAR) ||
-                    year < c.getActualMinimum(Calendar.YEAR)) {
+            try {
+                zdt = ZonedDateTime
+                    .of(year, month, day, 0, 0, 0, 0, ZoneId.of("GMT"));
+                denyAfterDate = zdt.toInstant();
+            } catch (DateTimeException dte) {
                 throw new IllegalArgumentException(
-                        "Invalid year given in constraint: " + year);
-            }
-            if ((month - 1) > c.getActualMaximum(Calendar.MONTH) ||
-                    (month - 1) < c.getActualMinimum(Calendar.MONTH)) {
-                throw new IllegalArgumentException(
-                        "Invalid month given in constraint: " + month);
-            }
-            if (day > c.getActualMaximum(Calendar.DAY_OF_MONTH) ||
-                    day < c.getActualMinimum(Calendar.DAY_OF_MONTH)) {
-                throw new IllegalArgumentException(
-                        "Invalid Day of Month given in constraint: " + day);
+                    "Invalid denyAfter date", dte);
             }
 
-            denyAfterDate = c.getTime();
             if (debug != null) {
                 debug.println("DenyAfterConstraint date set to: " +
-                        dateFormat.format(denyAfterDate));
+                        zdt.toLocalDate());
             }
         }
 
@@ -738,24 +762,23 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
         @Override
         public void permits(ConstraintsParameters cp)
                 throws CertPathValidatorException {
-            Date currentDate;
-            String errmsg;
+            Instant currentDate;
 
             if (cp.getDate() != null) {
-                currentDate = cp.getDate();
+                currentDate = cp.getDate().toInstant();
             } else {
-                currentDate = new Date();
+                currentDate = Instant.now();
             }
 
-            if (!denyAfterDate.after(currentDate)) {
+            if (!denyAfterDate.isAfter(currentDate)) {
                 if (next(cp)) {
                     return;
                 }
                 throw new CertPathValidatorException(
                         "denyAfter constraint check failed: " + algorithm +
                         " used with Constraint date: " +
-                        dateFormat.format(denyAfterDate) + "; params date: " +
-                        dateFormat.format(currentDate) + cp.extendedExceptionMsg(),
+                        zdt.toLocalDate() + "; params date: " +
+                        currentDate + cp.extendedExceptionMsg(),
                         null, null, -1, BasicReason.ALGORITHM_CONSTRAINED);
             }
         }
@@ -773,20 +796,55 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
                 debug.println("DenyAfterConstraints.permits(): " + algorithm);
             }
 
-            return denyAfterDate.after(new Date());
+            return denyAfterDate.isAfter(Instant.now());
         }
     }
 
     /*
      * The usage constraint is for the "usage" keyword.  It checks against the
-     * variant value in ConstraintsParameters.
+     * variant value in ConstraintsParameters and against TLS scopes.
      */
     private static class UsageConstraint extends Constraint {
         String[] usages;
+        Set<SSLScope> scopes;
 
-        UsageConstraint(String algorithm, String[] usages) {
+        UsageConstraint(
+                String algorithm, String[] usages, String propertyName) {
             this.algorithm = algorithm;
-            this.usages = usages;
+
+            // Support TLS scopes only for jdk.tls.disabledAlgorithms property.
+            if (PROPERTY_TLS_DISABLED_ALGS.equals(propertyName)) {
+                for (String usage : usages) {
+                    SSLScope scope = SSLScope.nameOf(usage);
+
+                    if (scope != null) {
+                        if (this.scopes == null) {
+                            this.scopes = new HashSet<>(usages.length);
+                        }
+                        this.scopes.add(scope);
+                    } else {
+                        this.usages = usages;
+                    }
+                }
+
+                if (this.scopes != null && this.usages != null) {
+                    throw new IllegalArgumentException(
+                            "Can't mix TLS protocol specific constraints"
+                            + " with other usage constraints");
+                }
+
+            } else {
+                this.usages = usages;
+            }
+        }
+
+        @Override
+        public boolean permits(Set<SSLScope> scopes) {
+            if (this.scopes == null || scopes == null) {
+                return true;
+            }
+
+            return Collections.disjoint(this.scopes, scopes);
         }
 
         @Override
@@ -796,7 +854,7 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
             for (String usage : usages) {
 
                 boolean match = false;
-                switch (usage.toLowerCase()) {
+                switch (usage.toLowerCase(Locale.ENGLISH)) {
                     case "tlsserver":
                         match = variant.equals(Validator.VAR_TLS_SERVER);
                         break;
@@ -838,8 +896,8 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
      */
     private static class KeySizeConstraint extends Constraint {
 
-        private int minSize;            // the minimal available key size
-        private int maxSize;            // the maximal available key size
+        private final int minSize;          // the minimal available key size
+        private final int maxSize;          // the maximal available key size
         private int prohibitedSize = -1;    // unavailable key sizes
 
         public KeySizeConstraint(String algo, Operator operator, int length) {
@@ -958,6 +1016,62 @@ public class DisabledAlgorithmConstraints extends AbstractAlgorithmConstraints {
 
             return true;
         }
+    }
+
+    private boolean cachedCheckAlgorithm(String algorithm) {
+        Map<String, Boolean> cache;
+        if ((cache = cacheRef.get()) == null) {
+            synchronized (this) {
+                if ((cache = cacheRef.get()) == null) {
+                    cache = new ConcurrentHashMap<>();
+                    cacheRef = new SoftReference<>(cache);
+                }
+            }
+        }
+        Boolean result = cache.get(algorithm);
+        if (result != null) {
+            return result;
+        }
+        // We won't check patterns if algorithm check fails.
+        result = checkAlgorithm(disabledAlgorithms, algorithm, decomposer)
+                && checkDisabledPatterns(algorithm);
+        cache.put(algorithm, result);
+        return result;
+    }
+
+    private boolean checkDisabledPatterns(final String algorithm) {
+        return disabledPatterns == null || disabledPatterns.stream().noneMatch(
+                p -> p.matcher(algorithm).matches());
+    }
+
+    private List<Pattern> getDisabledPatterns() {
+        List<Pattern> ret = null;
+        List<String> patternStrings = new ArrayList<>(4);
+
+        for (String p : disabledAlgorithms) {
+            if (p.contains("*")) {
+                if (!p.startsWith("TLS_")) {
+                    throw new IllegalArgumentException(
+                            "Wildcard pattern must start with \"TLS_\"");
+                }
+                patternStrings.add(p);
+            }
+        }
+
+        if (!patternStrings.isEmpty()) {
+            ret = new ArrayList<>(patternStrings.size());
+
+            for (String p : patternStrings) {
+                // Exclude patterns from algorithm code flow.
+                disabledAlgorithms.remove(p);
+
+                // Ignore all regex characters but asterisk.
+                ret.add(Pattern.compile(
+                        "^\\Q" + p.replace("*", "\\E.*\\Q") + "\\E$"));
+            }
+        }
+
+        return ret;
     }
 
     /*

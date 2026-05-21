@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -65,7 +65,7 @@ class LayoutRawBlock : public ResourceObj {
  private:
   LayoutRawBlock* _next_block;
   LayoutRawBlock* _prev_block;
-  Kind _kind;
+  Kind _block_kind;
   int _offset;
   int _alignment;
   int _size;
@@ -79,7 +79,7 @@ class LayoutRawBlock : public ResourceObj {
   void set_next_block(LayoutRawBlock* next) { _next_block = next; }
   LayoutRawBlock* prev_block() const { return _prev_block; }
   void set_prev_block(LayoutRawBlock* prev) { _prev_block = prev; }
-  Kind kind() const { return _kind; }
+  Kind block_kind() const { return _block_kind; }
   int offset() const {
     assert(_offset >= 0, "Must be initialized");
     return _offset;
@@ -101,17 +101,13 @@ class LayoutRawBlock : public ResourceObj {
   // sort fields in decreasing order.
   // Note: with line types, the comparison should include alignment constraint if sizes are equals
   static int compare_size_inverted(LayoutRawBlock** x, LayoutRawBlock** y)  {
-#ifdef _WINDOWS
-    // qsort() on Windows reverse the order of fields with the same size
-    // the extension of the comparison function below preserves this order
     int diff = (*y)->size() - (*x)->size();
+    // qsort() may reverse the order of fields with the same size.
+    // The extension is to ensure stable sort.
     if (diff == 0) {
       diff = (*x)->field_index() - (*y)->field_index();
     }
     return diff;
-#else
-    return (*y)->size() - (*x)->size();
-#endif // _WINDOWS
   }
 
 };
@@ -141,8 +137,8 @@ class FieldGroup : public ResourceObj {
   int contended_group() const { return _contended_group; }
   int oop_count() const { return _oop_count; }
 
-  void add_primitive_field(AllFieldStream fs, BasicType type);
-  void add_oop_field(AllFieldStream fs);
+  void add_primitive_field(int idx, BasicType type);
+  void add_oop_field(int idx);
   void sort_by_size();
 };
 
@@ -164,20 +160,20 @@ class FieldGroup : public ResourceObj {
 //
 class FieldLayout : public ResourceObj {
  private:
-  Array<u2>* _fields;
+  GrowableArray<FieldInfo>* _field_info;
   ConstantPool* _cp;
   LayoutRawBlock* _blocks;  // the layout being computed
   LayoutRawBlock* _start;   // points to the first block where a field can be inserted
   LayoutRawBlock* _last;    // points to the last block of the layout (big empty block)
 
  public:
-  FieldLayout(Array<u2>* fields, ConstantPool* cp);
+  FieldLayout(GrowableArray<FieldInfo>* field_info, ConstantPool* cp);
   void initialize_static_layout();
-  void initialize_instance_layout(const InstanceKlass* ik);
+  void initialize_instance_layout(const InstanceKlass* ik, bool& super_ends_with_oop);
 
   LayoutRawBlock* first_empty_block() {
     LayoutRawBlock* block = _start;
-    while (block->kind() != LayoutRawBlock::EMPTY) {
+    while (block->block_kind() != LayoutRawBlock::EMPTY) {
       block = block->next_block();
     }
     return block;
@@ -188,11 +184,11 @@ class FieldLayout : public ResourceObj {
   LayoutRawBlock* last_block() { return _last; }
 
   LayoutRawBlock* first_field_block();
-  void add(GrowableArray<LayoutRawBlock*>* list, LayoutRawBlock* start = NULL);
-  void add_field_at_offset(LayoutRawBlock* blocks, int offset, LayoutRawBlock* start = NULL);
-  void add_contiguously(GrowableArray<LayoutRawBlock*>* list, LayoutRawBlock* start = NULL);
+  void add(GrowableArray<LayoutRawBlock*>* list, LayoutRawBlock* start = nullptr);
+  void add_field_at_offset(LayoutRawBlock* blocks, int offset, LayoutRawBlock* start = nullptr);
+  void add_contiguously(GrowableArray<LayoutRawBlock*>* list, LayoutRawBlock* start = nullptr);
   LayoutRawBlock* insert_field_block(LayoutRawBlock* slot, LayoutRawBlock* block);
-  bool reconstruct_layout(const InstanceKlass* ik);
+  void reconstruct_layout(const InstanceKlass* ik, bool& has_instance_fields, bool& ends_with_oop);
   void fill_holes(const InstanceKlass* ik);
   LayoutRawBlock* insert(LayoutRawBlock* slot, LayoutRawBlock* block);
   void remove(LayoutRawBlock* block);
@@ -230,7 +226,7 @@ class FieldLayoutBuilder : public ResourceObj {
   const Symbol* _classname;
   const InstanceKlass* _super_klass;
   ConstantPool* _constant_pool;
-  Array<u2>* _fields;
+  GrowableArray<FieldInfo>* _field_info;
   FieldLayoutInfo* _info;
   FieldGroup* _root_group;
   GrowableArray<FieldGroup*> _contended_groups;
@@ -241,10 +237,11 @@ class FieldLayoutBuilder : public ResourceObj {
   int _alignment;
   bool _has_nonstatic_fields;
   bool _is_contended; // is a contended class?
+  bool _super_ends_with_oop;
 
  public:
   FieldLayoutBuilder(const Symbol* classname, const InstanceKlass* super_klass, ConstantPool* constant_pool,
-                     Array<u2>* fields, bool is_contended, FieldLayoutInfo* info);
+                     GrowableArray<FieldInfo>* field_info, bool is_contended, FieldLayoutInfo* info);
 
   int get_alignment() {
     assert(_alignment != -1, "Uninitialized");
@@ -253,7 +250,7 @@ class FieldLayoutBuilder : public ResourceObj {
 
   void build_layout();
   void compute_regular_layout();
-  void insert_contended_padding(LayoutRawBlock* slot);
+  LayoutRawBlock* insert_contended_padding(LayoutRawBlock* slot);
 
  private:
   void prologue();

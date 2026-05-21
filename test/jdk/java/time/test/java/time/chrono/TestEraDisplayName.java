@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -32,19 +30,20 @@ import java.util.Arrays;
 import java.util.Locale;
 import java.util.stream.Stream;
 
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * Tests Era.getDisplayName() correctly returns the name based on each
  * chrono implementation.
  * Note: The exact result may depend on locale data provider's implementation.
  *
- * @bug 8171049 8224105 8240626
+ * @bug 8171049 8224105 8240626 8354548
  */
-@Test
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class TestEraDisplayName {
     private static final Locale THAI = Locale.forLanguageTag("th-TH");
     private static final Locale EGYPT = Locale.forLanguageTag("ar-EG");
@@ -54,7 +53,6 @@ public class TestEraDisplayName {
          DateTimeFormatter.ofPattern("yyyy MM dd GGGG G GGGGG")
             .withChronology(JapaneseChronology.INSTANCE);
 
-    @DataProvider(name="eraDisplayName")
     Object[][] eraDisplayName() {
         return new Object[][] {
             // Era, text style, displyay locale, expected name
@@ -120,21 +118,21 @@ public class TestEraDisplayName {
             { ThaiBuddhistEra.BE,           TextStyle.NARROW, THAI,         "\u0e1e.\u0e28." },
 
             // MinguoEra
-            { MinguoEra.BEFORE_ROC, TextStyle.FULL,     Locale.US,      "Before R.O.C." },
+            { MinguoEra.BEFORE_ROC, TextStyle.FULL,     Locale.US,      "B.R.O.C." },
             { MinguoEra.ROC,        TextStyle.FULL,     Locale.US,      "Minguo" },
             { MinguoEra.BEFORE_ROC, TextStyle.FULL,     Locale.TAIWAN,  "\u6c11\u570b\u524d" },
             { MinguoEra.ROC,        TextStyle.FULL,     Locale.TAIWAN,  "\u6c11\u570b" },
-            { MinguoEra.BEFORE_ROC, TextStyle.SHORT,    Locale.US,      "Before R.O.C." },
+            { MinguoEra.BEFORE_ROC, TextStyle.SHORT,    Locale.US,      "B.R.O.C." },
             { MinguoEra.ROC,        TextStyle.SHORT,    Locale.US,      "Minguo" },
             { MinguoEra.BEFORE_ROC, TextStyle.SHORT,    Locale.TAIWAN,  "\u6c11\u570b\u524d" },
             { MinguoEra.ROC,        TextStyle.SHORT,    Locale.TAIWAN,  "\u6c11\u570b" },
-            { MinguoEra.BEFORE_ROC, TextStyle.NARROW,   Locale.US,      "Before R.O.C." },
+            { MinguoEra.BEFORE_ROC, TextStyle.NARROW,   Locale.US,      "B.R.O.C." },
             { MinguoEra.ROC,        TextStyle.NARROW,   Locale.US,      "Minguo" },
             { MinguoEra.BEFORE_ROC, TextStyle.NARROW,   Locale.TAIWAN,  "\u6c11\u570b\u524d" },
             { MinguoEra.ROC,        TextStyle.NARROW,   Locale.TAIWAN,  "\u6c11\u570b" },
 
             // HijrahEra
-            { HijrahEra.AH, TextStyle.FULL,     Locale.US,  "AH" },
+            { HijrahEra.AH, TextStyle.FULL,     Locale.US,  "Anno Hegirae" },
             { HijrahEra.AH, TextStyle.FULL,     EGYPT,      "\u0647\u0640" },
             { HijrahEra.AH, TextStyle.SHORT,    Locale.US,  "AH" },
             { HijrahEra.AH, TextStyle.SHORT,    EGYPT,      "\u0647\u0640" },
@@ -143,7 +141,6 @@ public class TestEraDisplayName {
         };
     }
 
-    @DataProvider
     Object[][] allLocales() {
         return Arrays.stream(Locale.getAvailableLocales())
             .map(Stream::of)
@@ -151,7 +148,6 @@ public class TestEraDisplayName {
             .toArray(Object[][]::new);
     }
 
-    @DataProvider
     Object[][] allEras() {
         return Stream.of(IsoEra.values(),
                         JapaneseEra.values(),
@@ -164,29 +160,28 @@ public class TestEraDisplayName {
             .toArray(Object[][]::new);
     }
 
-    @Test(dataProvider="eraDisplayName")
+    @ParameterizedTest
+    @MethodSource("eraDisplayName")
     public void test_eraDisplayName(Era era, TextStyle style, Locale locale, String expected) {
-        assertEquals(era.getDisplayName(style, locale), expected);
+        assertEquals(expected, era.getDisplayName(style, locale));
     }
 
-    @Test(dataProvider="allLocales")
+    @ParameterizedTest
+    @MethodSource("allLocales")
     public void test_reiwaNames(Locale locale) throws DateTimeParseException {
         DateTimeFormatter f = JAPANESE_FORMATTER.withLocale(locale);
-        assertEquals(LocalDate.parse(REIWA_1ST.format(f), f), REIWA_1ST);
+        assertEquals(REIWA_1ST, LocalDate.parse(REIWA_1ST.format(f), f));
     }
 
     // Make sure era display names aren't empty
     // @bug 8240626
-    @Test(dataProvider="allEras")
+    @ParameterizedTest
+    @MethodSource("allEras")
     public void test_noEmptyEraNames(Era era) {
         Arrays.stream(Locale.getAvailableLocales())
-            .forEach(l -> {
-                Arrays.stream(TextStyle.values())
-                    .forEach(s -> {
-                        assertFalse(era.getDisplayName(s, l).isEmpty(),
-                            "getDisplayName() returns empty display name for era: " + era
-                            + ", style: " + s + ", locale: " + l);
-                    });
-            });
+            .forEach(l -> Arrays.stream(TextStyle.values())
+                .forEach(s -> assertFalse(era.getDisplayName(s, l).isEmpty(),
+                    "getDisplayName() returns empty display name for era: " + era
+                    + ", style: " + s + ", locale: " + l)));
     }
 }

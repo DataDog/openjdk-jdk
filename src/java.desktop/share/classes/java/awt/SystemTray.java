@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,8 +32,6 @@ import java.beans.PropertyChangeSupport;
 import java.util.Vector;
 
 import sun.awt.AWTAccessor;
-import sun.awt.AWTPermissions;
-import sun.awt.AppContext;
 import sun.awt.HeadlessToolkit;
 import sun.awt.SunToolkit;
 
@@ -131,15 +129,7 @@ public class SystemTray {
     private static final TrayIcon[] EMPTY_TRAY_ARRAY = new TrayIcon[0];
 
     static {
-        AWTAccessor.setSystemTrayAccessor(
-            new AWTAccessor.SystemTrayAccessor() {
-                public void firePropertyChange(SystemTray tray,
-                                               String propertyName,
-                                               Object oldValue,
-                                               Object newValue) {
-                    tray.firePropertyChange(propertyName, oldValue, newValue);
-                }
-            });
+        AWTAccessor.setSystemTrayAccessor(SystemTray::firePropertyChange);
     }
 
     /**
@@ -157,27 +147,17 @@ public class SystemTray {
      * supported.  You may use the {@link #isSupported} method to
      * check if the system tray is supported.
      *
-     * <p>If a SecurityManager is installed, the AWTPermission
-     * {@code accessSystemTray} must be granted in order to get the
-     * {@code SystemTray} instance. Otherwise this method will throw a
-     * SecurityException.
-     *
      * @return the {@code SystemTray} instance that represents
      * the desktop's tray area
      * @throws UnsupportedOperationException if the system tray isn't
      * supported by the current platform
      * @throws HeadlessException if
      * {@code GraphicsEnvironment.isHeadless()} returns {@code true}
-     * @throws SecurityException if {@code accessSystemTray} permission
-     * is not granted
      * @see #add(TrayIcon)
      * @see TrayIcon
      * @see #isSupported
-     * @see SecurityManager#checkPermission
-     * @see AWTPermission
      */
     public static SystemTray getSystemTray() {
-        checkSystemTrayAllowed();
         if (GraphicsEnvironment.isHeadless()) {
             throw new HeadlessException();
         }
@@ -232,6 +212,8 @@ public class SystemTray {
         }
     }
 
+    private Vector<TrayIcon> icons;
+
     /**
      * Adds a {@code TrayIcon} to the {@code SystemTray}.
      * The tray icon becomes visible in the system tray once it is
@@ -257,16 +239,12 @@ public class SystemTray {
         if (trayIcon == null) {
             throw new NullPointerException("adding null TrayIcon");
         }
-        TrayIcon[] oldArray = null, newArray = null;
-        Vector<TrayIcon> icons = null;
+        TrayIcon[] oldArray;
+        TrayIcon[] newArray;
         synchronized (this) {
             oldArray = systemTray.getTrayIcons();
-            @SuppressWarnings("unchecked")
-            Vector<TrayIcon> tmp = (Vector<TrayIcon>)AppContext.getAppContext().get(TrayIcon.class);
-            icons = tmp;
             if (icons == null) {
-                icons = new Vector<TrayIcon>(3);
-                AppContext.getAppContext().put(TrayIcon.class, icons);
+                icons = new Vector<>(3);
 
             } else if (icons.contains(trayIcon)) {
                 throw new IllegalArgumentException("adding TrayIcon that is already added");
@@ -305,11 +283,10 @@ public class SystemTray {
         if (trayIcon == null) {
             return;
         }
-        TrayIcon[] oldArray = null, newArray = null;
+        TrayIcon[] oldArray;
+        TrayIcon[] newArray;
         synchronized (this) {
             oldArray = systemTray.getTrayIcons();
-            @SuppressWarnings("unchecked")
-            Vector<TrayIcon> icons = (Vector<TrayIcon>)AppContext.getAppContext().get(TrayIcon.class);
             // TrayIcon with no peer is not contained in the array.
             if (icons == null || !icons.remove(trayIcon)) {
                 return;
@@ -323,10 +300,7 @@ public class SystemTray {
     /**
      * Returns an array of all icons added to the tray by this
      * application.  You can't access the icons added by another
-     * application.  Some browsers partition applets in different
-     * code bases into separate contexts, and establish walls between
-     * these contexts.  In such a scenario, only the tray icons added
-     * from this context will be returned.
+     * application.
      *
      * <p> The returned array is a copy of the actual array and may be
      * modified in any way without affecting the system tray.  To
@@ -340,20 +314,20 @@ public class SystemTray {
      * @see TrayIcon
      */
     public TrayIcon[] getTrayIcons() {
-        @SuppressWarnings("unchecked")
-        Vector<TrayIcon> icons = (Vector<TrayIcon>)AppContext.getAppContext().get(TrayIcon.class);
-        if (icons != null) {
-            return icons.toArray(new TrayIcon[icons.size()]);
+        synchronized (this) {
+            if (icons != null) {
+                return icons.toArray(EMPTY_TRAY_ARRAY);
+            }
+            return EMPTY_TRAY_ARRAY;
         }
-        return EMPTY_TRAY_ARRAY;
     }
 
     /**
      * Returns the size, in pixels, of the space that a tray icon will
-     * occupy in the system tray.  Developers may use this methods to
-     * acquire the preferred size for the image property of a tray icon
-     * before it is created.  For convenience, there is a similar
-     * method {@link TrayIcon#getSize} in the {@code TrayIcon} class.
+     * occupy in the system tray. Developers may use this method to
+     * acquire the preferred size for the tray icon before it is created.
+     * For convenience, there is a similar method {@link TrayIcon#getSize}
+     * in the {@code TrayIcon} class.
      *
      * @return the default size of a tray icon, in pixels
      * @see TrayIcon#setImageAutoSize(boolean)
@@ -394,8 +368,6 @@ public class SystemTray {
      * </tbody>
      * </table>
      * <p>
-     * The {@code listener} listens to property changes only in this context.
-     * <p>
      * If {@code listener} is {@code null}, no exception is thrown
      * and no action is performed.
      *
@@ -418,8 +390,6 @@ public class SystemTray {
      * Removes a {@code PropertyChangeListener} from the listener list
      * for a specific property.
      * <p>
-     * The {@code PropertyChangeListener} must be from this context.
-     * <p>
      * If {@code propertyName} or {@code listener} is {@code null} or invalid,
      * no exception is thrown and no action is taken.
      *
@@ -441,8 +411,6 @@ public class SystemTray {
     /**
      * Returns an array of all the listeners that have been associated
      * with the named property.
-     * <p>
-     * Only the listeners in this context are returned.
      *
      * @param propertyName the specified property
      * @return all of the {@code PropertyChangeListener}s associated with
@@ -475,25 +443,22 @@ public class SystemTray {
     private void firePropertyChange(String propertyName,
                                     Object oldValue, Object newValue)
     {
-        if (oldValue != null && newValue != null && oldValue.equals(newValue)) {
+        if (oldValue != null && oldValue.equals(newValue)) {
             return;
         }
         getCurrentChangeSupport().firePropertyChange(propertyName, oldValue, newValue);
     }
 
+    private PropertyChangeSupport changeSupport;
+
     /**
-     * Returns the current PropertyChangeSupport instance for the
-     * calling thread's context.
+     * Returns the current PropertyChangeSupport instance
      *
-     * @return this thread's context's PropertyChangeSupport
+     * @return the current PropertyChangeSupport for this {@code SystemTray}
      */
     private synchronized PropertyChangeSupport getCurrentChangeSupport() {
-        PropertyChangeSupport changeSupport =
-            (PropertyChangeSupport)AppContext.getAppContext().get(SystemTray.class);
-
         if (changeSupport == null) {
             changeSupport = new PropertyChangeSupport(this);
-            AppContext.getAppContext().put(SystemTray.class, changeSupport);
         }
         return changeSupport;
     }
@@ -506,14 +471,6 @@ public class SystemTray {
             } else if (toolkit instanceof HeadlessToolkit) {
                 peer = ((HeadlessToolkit)Toolkit.getDefaultToolkit()).createSystemTray(this);
             }
-        }
-    }
-
-    static void checkSystemTrayAllowed() {
-        @SuppressWarnings("removal")
-        SecurityManager security = System.getSecurityManager();
-        if (security != null) {
-            security.checkPermission(AWTPermissions.ACCESS_SYSTEM_TRAY_PERMISSION);
         }
     }
 

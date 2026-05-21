@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -66,9 +66,8 @@ class TrialParser extends JavacParser {
     public TrialParser(ParserFactory fac,
             com.sun.tools.javac.parser.Lexer S,
             boolean keepDocComments,
-            boolean keepLineMap,
-            boolean keepEndPositions) {
-        super(fac, S, keepDocComments, keepLineMap, keepEndPositions);
+            boolean keepLineMap) {
+        super(fac, S, keepDocComments, keepLineMap);
     }
 
     @Override
@@ -95,14 +94,14 @@ class TrialParser extends JavacParser {
             JCExpression pid = qualident(false);
             accept(SEMI);
             JCPackageDecl pd = F.at(packagePos).PackageDecl(annotations, pid);
-            attach(pd, firstToken.comment(CommentStyle.JAVADOC));
+            attach(pd, firstToken.docComment());
             storeEnd(pd, token.pos);
             defs.append(pd);
         }
 
         boolean firstTypeDecl = true;
         while (token.kind != EOF) {
-            if (token.pos > 0 && token.pos <= endPosTable.errorEndPos) {
+            if (token.pos > 0 && token.pos <= errorEndPos) {
                 // error recovery
                 skip(true, false, false, false);
                 if (token.kind == EOF) {
@@ -114,9 +113,9 @@ class TrialParser extends JavacParser {
                 defs.append(importDeclaration());
                 break;
             } else {
-                Comment docComment = token.comment(CommentStyle.JAVADOC);
+                Comment docComment = token.docComment();
                 if (firstTypeDecl && !seenImport && !seenPackage) {
-                    docComment = firstToken.comment(CommentStyle.JAVADOC);
+                    docComment = firstToken.docComment();
                 }
                 List<? extends JCTree> udefs = aUnit(mods, docComment);
                 for (JCTree def : udefs) {
@@ -139,8 +138,6 @@ class TrialParser extends JavacParser {
             storeEnd(toplevel, S.prevToken().endPos);
         }
         toplevel.lineMap = S.getLineMap();
-        this.endPosTable.setParser(null); // remove reference to parser
-        toplevel.endPositions = this.endPosTable;
         return toplevel;
     }
 
@@ -188,7 +185,6 @@ class TrialParser extends JavacParser {
                     List<JCAnnotation> annosAfterParams = annotationsOpt(Tag.ANNOTATION);
 
                     if (annosAfterParams.nonEmpty()) {
-                        checkSourceLevel(annosAfterParams.head.pos, Feature.ANNOTATIONS_AFTER_TYPE_PARAMS);
                         mods.annotations = mods.annotations.appendList(annosAfterParams);
                         if (mods.pos == Position.NOPOS) {
                             mods.pos = mods.annotations.head.pos;

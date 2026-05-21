@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -347,8 +347,8 @@ OGLTR_UpdateLCDTextContrast(jint contrast)
     double ig = 1.0 / g;
     GLint loc;
 
-    J2dTraceLn1(J2D_TRACE_INFO,
-                "OGLTR_UpdateLCDTextContrast: contrast=%d", contrast);
+    J2dTraceLn(J2D_TRACE_INFO,
+               "OGLTR_UpdateLCDTextContrast: contrast=%d", contrast);
 
     loc = j2d_glGetUniformLocationARB(lcdTextProgram, "gamma");
     j2d_glUniform3fARB(loc, g, g, g);
@@ -376,8 +376,8 @@ OGLTR_UpdateLCDTextColor(jint contrast)
     GLfloat clr[4];
     GLint loc;
 
-    J2dTraceLn1(J2D_TRACE_INFO,
-                "OGLTR_UpdateLCDTextColor: contrast=%d", contrast);
+    J2dTraceLn(J2D_TRACE_INFO,
+               "OGLTR_UpdateLCDTextColor: contrast=%d", contrast);
 
     /*
      * Note: Ideally we would update the "src_adj" uniform parameter only
@@ -1035,7 +1035,7 @@ OGLTR_DrawGlyphList(JNIEnv *env, OGLContext *oglc, OGLSDOps *dstOps,
 
     // We have to obtain an information about destination content
     // in order to render lcd glyphs. It could be done by copying
-    // a part of desitination buffer into an intermediate texture
+    // a part of destination buffer into an intermediate texture
     // using glCopyTexSubImage2D(). However, on macosx this path is
     // slow, and it dramatically reduces the overall speed of lcd
     // text rendering.

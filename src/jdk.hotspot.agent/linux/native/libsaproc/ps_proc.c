@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,6 +35,17 @@
 #include <sys/ptrace.h>
 #include <sys/uio.h>
 #include "libproc_impl.h"
+
+#ifdef __aarch64__
+#include <sys/auxv.h>
+
+// HWCAP_PACA was introduced in glibc 2.30
+// https://sourceware.org/git/?p=glibc.git;a=commit;h=a2e57f89a35e6056c9488428e68c4889e114ef71
+#ifndef HWCAP_PACA
+#define HWCAP_PACA (1 << 30)
+#endif
+
+#endif
 
 #if defined(x86_64) && !defined(amd64)
 #define amd64 1
@@ -125,10 +136,6 @@ static bool process_write_data(struct ps_prochandle* ph,
 static bool process_get_lwp_regs(struct ps_prochandle* ph, pid_t pid, struct user_regs_struct *user) {
   // we have already attached to all thread 'pid's, just use ptrace call
   // to get regset now. Note that we don't cache regset upfront for processes.
-// Linux on x86 and sparc are different.  On x86 ptrace(PTRACE_GETREGS, ...)
-// uses pointer from 4th argument and ignores 3rd argument.  On sparc it uses
-// pointer from 3rd argument and ignores 4th argument
-#define ptrace_getregs(request, pid, addr, data) ptrace(request, pid, data, addr)
 
 #if defined(_LP64) && defined(PTRACE_GETREGS64)
 #define PTRACE_GETREGS_REQ PTRACE_GETREGS64
@@ -138,19 +145,19 @@ static bool process_get_lwp_regs(struct ps_prochandle* ph, pid_t pid, struct use
 #define PTRACE_GETREGS_REQ PT_GETREGS
 #endif
 
-#ifdef PTRACE_GETREGS_REQ
- if (ptrace_getregs(PTRACE_GETREGS_REQ, pid, user, NULL) < 0) {
+#if defined(PTRACE_GETREGSET)
+  struct iovec iov;
+  iov.iov_base = user;
+  iov.iov_len = sizeof(*user);
+  if (ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, (void*) &iov) < 0) {
+    print_debug("ptrace(PTRACE_GETREGSET, ...) failed for lwp %d\n", pid);
+    return false;
+  }
+  return true;
+#elif defined(PTRACE_GETREGS_REQ)
+ if (ptrace(PTRACE_GETREGS_REQ, pid, NULL, user) < 0) {
    print_debug("ptrace(PTRACE_GETREGS, ...) failed for lwp(%d) errno(%d) \"%s\"\n", pid,
                errno, strerror(errno));
-   return false;
- }
- return true;
-#elif defined(PTRACE_GETREGSET)
- struct iovec iov;
- iov.iov_base = user;
- iov.iov_len = sizeof(*user);
- if (ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, (void*) &iov) < 0) {
-   print_debug("ptrace(PTRACE_GETREGSET, ...) failed for lwp %d\n", pid);
    return false;
  }
  return true;
@@ -231,7 +238,7 @@ static bool process_doesnt_exist(pid_t pid) {
   FILE *fp = NULL;
   const char state_string[] = "State:";
 
-  sprintf(fname, "/proc/%d/status", pid);
+  snprintf(fname, sizeof(fname), "/proc/%d/status", pid);
   fp = fopen(fname, "r");
   if (fp == NULL) {
     print_debug("can't open /proc/%d/status file\n", pid);
@@ -246,7 +253,7 @@ static bool process_doesnt_exist(pid_t pid) {
       found_state = true;
       state = buf + state_len;
       // Skip the spaces
-      while (isspace(*state)) {
+      while (isspace((unsigned char) *state)) {
         state++;
       }
       // A state value of 'X' indicates that the thread is dead. 'Z'
@@ -350,10 +357,10 @@ static bool read_lib_info(struct ps_prochandle* ph) {
   char buf[PATH_MAX];
   FILE *fp = NULL;
 
-  sprintf(fname, "/proc/%d/maps", ph->pid);
+  snprintf(fname, sizeof(fname), "/proc/%d/maps", ph->pid);
   fp = fopen(fname, "r");
   if (fp == NULL) {
-    print_debug("can't open /proc/%d/maps file\n", ph->pid);
+    print_error("can't open /proc/%d/maps file\n", ph->pid);
     return false;
   }
 
@@ -451,21 +458,31 @@ Pgrab(pid_t pid, char* err_buf, size_t err_buf_len) {
 
   if ( (ph = (struct ps_prochandle*) calloc(1, sizeof(struct ps_prochandle))) == NULL) {
     snprintf(err_buf, err_buf_len, "can't allocate memory for ps_prochandle");
-    print_debug("%s\n", err_buf);
+    print_error("%s\n", err_buf);
     return NULL;
   }
 
   if ((attach_status = ptrace_attach(pid, err_buf, err_buf_len)) != ATTACH_SUCCESS) {
     if (attach_status == ATTACH_THREAD_DEAD) {
-       print_error("The process with pid %d does not exist.\n", pid);
+       snprintf(err_buf, err_buf_len, "The process with pid %d does not exist.", pid);
+       print_error("%s\n", err_buf);
     }
     free(ph);
     return NULL;
   }
 
+#ifdef __aarch64__
+  ph->pac_enabled = HWCAP_PACA & getauxval(AT_HWCAP);
+#endif
+
   // initialize ps_prochandle
   ph->pid = pid;
-  add_thread_info(ph, ph->pid);
+  if (add_thread_info(ph, ph->pid) == NULL) {
+    snprintf(err_buf, err_buf_len, "failed to add thread info");
+    print_error("%s\n", err_buf);
+    free(ph);
+    return NULL;
+  }
 
   // initialize vtable
   ph->ops = &process_ops;
@@ -473,7 +490,10 @@ Pgrab(pid_t pid, char* err_buf, size_t err_buf_len) {
   // read library info and symbol tables, must do this before attaching threads,
   // as the symbols in the pthread library will be used to figure out
   // the list of threads within the same process.
-  read_lib_info(ph);
+  if (read_lib_info(ph) == false) {
+    snprintf(err_buf, err_buf_len, "failed to read lib info");
+    goto err;
+  }
 
   /*
    * Read thread info.
@@ -495,7 +515,10 @@ Pgrab(pid_t pid, char* err_buf, size_t err_buf_len) {
       continue;
     }
     if (!process_doesnt_exist(lwp_id)) {
-      add_thread_info(ph, lwp_id);
+      if (add_thread_info(ph, lwp_id) == NULL) {
+        snprintf(err_buf, err_buf_len, "failed to add thread info");
+        goto err;
+      }
     }
   }
   closedir(dirp);
@@ -514,11 +537,15 @@ Pgrab(pid_t pid, char* err_buf, size_t err_buf_len) {
           delete_thread_info(ph, current_thr);
         }
         else {
-          Prelease(ph);
-          return NULL;
+          snprintf(err_buf, err_buf_len, "Failed to attach to the thread with lwp_id %d.", current_thr->lwp_id);
+          goto err;
         } // ATTACH_THREAD_DEAD
       } // !ATTACH_SUCCESS
     }
   }
   return ph;
+err:
+  print_error("%s\n", err_buf);
+  Prelease(ph);
+  return NULL;
 }

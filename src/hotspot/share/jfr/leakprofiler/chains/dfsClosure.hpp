@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,10 +25,10 @@
 #ifndef SHARE_JFR_LEAKPROFILER_CHAINS_DFSCLOSURE_HPP
 #define SHARE_JFR_LEAKPROFILER_CHAINS_DFSCLOSURE_HPP
 
+#include "jfr/leakprofiler/chains/jfrbitset.hpp"
 #include "jfr/leakprofiler/utilities/unifiedOopRef.hpp"
 #include "memory/iterator.hpp"
 
-class BitSet;
 class Edge;
 class EdgeStore;
 class EdgeQueue;
@@ -37,26 +37,29 @@ class EdgeQueue;
 class DFSClosure : public BasicOopIterateClosure {
  private:
   // max dfs depth should not exceed size of stack
-  static const size_t max_dfs_depth = 4000;
+  static const size_t max_dfs_depth = 3200;
   static UnifiedOopRef _reference_stack[max_dfs_depth];
 
   EdgeStore* _edge_store;
-  BitSet* _mark_bits;
+  JFRBitSet* _mark_bits;
   const Edge*_start_edge;
   size_t _max_depth;
   size_t _depth;
   bool _ignore_root_set;
+  const address _headroom_limit;
 
-  DFSClosure(EdgeStore* edge_store, BitSet* mark_bits, const Edge* start_edge);
+  DFSClosure(EdgeStore* edge_store, JFRBitSet* mark_bits, const Edge* start_edge);
 
   void add_chain();
   void closure_impl(UnifiedOopRef reference, const oop pointee);
 
+  bool have_headroom() const;
+
  public:
   virtual ReferenceIterationMode reference_iteration_mode() { return DO_FIELDS_EXCEPT_REFERENT; }
 
-  static void find_leaks_from_edge(EdgeStore* edge_store, BitSet* mark_bits, const Edge* start_edge);
-  static void find_leaks_from_root_set(EdgeStore* edge_store, BitSet* mark_bits);
+  static void find_leaks_from_edge(EdgeStore* edge_store, JFRBitSet* mark_bits, const Edge* start_edge);
+  static void find_leaks_from_root_set(EdgeStore* edge_store, JFRBitSet* mark_bits);
   void do_root(UnifiedOopRef ref);
 
   virtual void do_oop(oop* ref);

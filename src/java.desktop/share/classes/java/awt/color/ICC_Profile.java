@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -39,30 +39,32 @@ import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.FilePermission;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InvalidObjectException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.ObjectStreamException;
 import java.io.OutputStream;
 import java.io.Serial;
 import java.io.Serializable;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
+import java.util.Objects;
 import java.util.StringTokenizer;
 
+import sun.awt.AWTAccessor;
+import sun.java2d.cmm.BuiltinProfileInfo;
 import sun.java2d.cmm.CMSManager;
 import sun.java2d.cmm.PCMM;
 import sun.java2d.cmm.Profile;
 import sun.java2d.cmm.ProfileDataVerifier;
-import sun.java2d.cmm.ProfileDeferralInfo;
+
+import static sun.java2d.cmm.ProfileDataVerifier.HEADER_SIZE;
 
 /**
  * A representation of color profile data for device independent and device
  * dependent color spaces based on the International Color Consortium
  * Specification ICC.1:2001-12, File Format for Color Profiles, (see
- * <a href="http://www.color.org"> http://www.color.org</a>).
+ * <a href="https://www.color.org"> https://www.color.org</a>).
  * <p>
  * An {@code ICC_ColorSpace} object can be constructed from an appropriate
  * {@code ICC_Profile}. Typically, an {@code ICC_ColorSpace} would be associated
@@ -83,7 +85,9 @@ import sun.java2d.cmm.ProfileDeferralInfo;
  *
  * @see ICC_ColorSpace
  */
-public class ICC_Profile implements Serializable {
+public sealed class ICC_Profile implements Serializable
+    permits ICC_ProfileGray,
+            ICC_ProfileRGB {
 
     /**
      * Use serialVersionUID from JDK 1.2 for interoperability.
@@ -99,12 +103,11 @@ public class ICC_Profile implements Serializable {
     private transient volatile Profile cmmProfile;
 
     /**
-     * Stores some information about {@code ICC_Profile} without causing a
-     * deferred profile to be loaded. Note that we can defer the loading of
-     * standard profiles only. If this field is null, then {@link #cmmProfile}
-     * should be used to access profile information.
+     * Stores information about a built-in profile without triggering profile
+     * loading. If this field is null, {@link #cmmProfile} should be used to
+     * access profile data. If not null, the profile is considered immutable.
      */
-    private transient volatile ProfileDeferralInfo deferralInfo;
+    private transient final BuiltinProfileInfo builtInInfo;
 
     /**
      * The lazy registry of singleton profile objects for specific built-in
@@ -113,23 +116,27 @@ public class ICC_Profile implements Serializable {
      */
     private interface BuiltInProfile {
         /*
-         * Deferral is only used for standard profiles. Enabling the appropriate
-         * access privileges is handled at a lower level.
+         * BuiltinProfileInfo is used for built-in profile creation only,
+         * and all built-in profiles should be constructed using it.
          */
-        ICC_Profile SRGB = new ICC_ProfileRGB(new ProfileDeferralInfo(
+        ICC_Profile SRGB = new ICC_ProfileRGB(new BuiltinProfileInfo(
                "sRGB.pf", ColorSpace.TYPE_RGB, 3, CLASS_DISPLAY));
 
-        ICC_Profile LRGB = new ICC_ProfileRGB(new ProfileDeferralInfo(
+        ICC_Profile LRGB = new ICC_ProfileRGB(new BuiltinProfileInfo(
                "LINEAR_RGB.pf", ColorSpace.TYPE_RGB, 3, CLASS_DISPLAY));
 
-        ICC_Profile XYZ = new ICC_Profile(new ProfileDeferralInfo(
+        ICC_Profile XYZ = new ICC_Profile(new BuiltinProfileInfo(
                "CIEXYZ.pf", ColorSpace.TYPE_XYZ, 3, CLASS_ABSTRACT));
 
-        ICC_Profile PYCC = new ICC_Profile(new ProfileDeferralInfo(
+        ICC_Profile PYCC = new ICC_Profile(new BuiltinProfileInfo(
                "PYCC.pf", ColorSpace.TYPE_3CLR, 3, CLASS_COLORSPACECONVERSION));
 
-        ICC_Profile GRAY = new ICC_ProfileGray(new ProfileDeferralInfo(
+        ICC_Profile GRAY = new ICC_ProfileGray(new BuiltinProfileInfo(
                "GRAY.pf", ColorSpace.TYPE_GRAY, 1, CLASS_DISPLAY));
+    }
+
+    static {
+        AWTAccessor.setICC_ProfileAccessor(ICC_Profile::cmmProfile);
     }
 
     /**
@@ -751,38 +758,24 @@ public class ICC_Profile implements Serializable {
      */
     public static final int icXYZNumberX = 8;
 
-
     /**
      * Constructs an {@code ICC_Profile} object with a given ID.
      */
     ICC_Profile(Profile p) {
         cmmProfile = p;
+        builtInInfo = null;
     }
 
     /**
      * Constructs an {@code ICC_Profile} object whose loading will be deferred.
      * The ID will be 0 until the profile is loaded.
-     */
-    ICC_Profile(ProfileDeferralInfo pdi) {
-        deferralInfo = pdi;
-    }
-
-    /**
-     * Frees the resources associated with an {@code ICC_Profile} object.
      *
-     * @deprecated The {@code finalize} method has been deprecated. Subclasses
-     *         that override {@code finalize} in order to perform cleanup should
-     *         be modified to use alternative cleanup mechanisms and to remove
-     *         the overriding {@code finalize} method. When overriding the
-     *         {@code finalize} method, its implementation must explicitly
-     *         ensure that {@code super.finalize()} is invoked as described in
-     *         {@link Object#finalize}. See the specification for {@link
-     *         Object#finalize()} for further information about migration
-     *         options.
+     * <p>
+     * Note: {@code BuiltinProfileInfo} is used for built-in profile
+     * creation only, and all built-in profiles should be constructed using it.
      */
-    @Deprecated(since = "9", forRemoval = true)
-    @SuppressWarnings("removal")
-    protected void finalize() {
+    ICC_Profile(BuiltinProfileInfo bpi) {
+        builtInInfo = bpi;
     }
 
     /**
@@ -797,26 +790,19 @@ public class ICC_Profile implements Serializable {
      */
     public static ICC_Profile getInstance(byte[] data) {
         ProfileDataVerifier.verify(data);
+        verifyHeader(data);
         Profile p;
         try {
             p = CMSManager.getModule().loadProfile(data);
         } catch (CMMException c) {
             throw new IllegalArgumentException("Invalid ICC Profile Data");
         }
+
         try {
-            if (getColorSpaceType(p) == ColorSpace.TYPE_GRAY
-                    && getData(p, icSigMediaWhitePointTag) != null
-                    && getData(p, icSigGrayTRCTag) != null) {
+            int type = getColorSpaceType(data);
+            if (type == ColorSpace.TYPE_GRAY) {
                 return new ICC_ProfileGray(p);
-            }
-            if (getColorSpaceType(p) == ColorSpace.TYPE_RGB
-                    && getData(p, icSigMediaWhitePointTag) != null
-                    && getData(p, icSigRedColorantTag) != null
-                    && getData(p, icSigGreenColorantTag) != null
-                    && getData(p, icSigBlueColorantTag) != null
-                    && getData(p, icSigRedTRCTag) != null
-                    && getData(p, icSigGreenTRCTag) != null
-                    && getData(p, icSigBlueTRCTag) != null) {
+            } else if (type == ColorSpace.TYPE_RGB) {
                 return new ICC_ProfileRGB(p);
             }
         } catch (CMMException c) {
@@ -828,8 +814,7 @@ public class ICC_Profile implements Serializable {
     /**
      * Constructs an {@code ICC_Profile} corresponding to one of the specific
      * color spaces defined by the {@code ColorSpace} class (for example
-     * {@code CS_sRGB}). Throws an {@code IllegalArgumentException} if cspace is
-     * not one of the defined color spaces.
+     * {@code CS_sRGB}).
      *
      * @param  cspace the type of color space to create a profile for. The
      *         specified type is one of the color space constants defined in the
@@ -861,10 +846,7 @@ public class ICC_Profile implements Serializable {
      * {@code java.class.path} property; finally, in a directory used to store
      * profiles always available, such as the profile for sRGB. Built-in
      * profiles use {@code .pf} as the file name extension for profiles, e.g.
-     * {@code sRGB.pf}. This method throws an {@code IOException} if the
-     * specified file cannot be opened or if an I/O error occurs while reading
-     * the file. It throws an {@code IllegalArgumentException} if the file does
-     * not contain valid ICC Profile data.
+     * {@code sRGB.pf}.
      *
      * @param  fileName the file that contains the data for the profile
      * @return an {@code ICC_Profile} object corresponding to the data in the
@@ -873,8 +855,7 @@ public class ICC_Profile implements Serializable {
      *         error occurs while reading the file
      * @throws IllegalArgumentException If the file does not contain valid ICC
      *         Profile data
-     * @throws SecurityException If a security manager is installed and it does
-     *         not permit read access to the given file
+     * @throws NullPointerException if {@code fileName} is {@code null}
      */
     public static ICC_Profile getInstance(String fileName) throws IOException {
         InputStream is;
@@ -894,10 +875,7 @@ public class ICC_Profile implements Serializable {
 
     /**
      * Constructs an {@code ICC_Profile} corresponding to the data in an
-     * {@code InputStream}. This method throws an
-     * {@code IllegalArgumentException} if the stream does not contain valid ICC
-     * Profile data. It throws an {@code IOException} if an I/O error occurs
-     * while reading the stream.
+     * {@code InputStream}.
      *
      * @param  s the input stream from which to read the profile data
      * @return an {@code ICC_Profile} object corresponding to the data in the
@@ -905,18 +883,20 @@ public class ICC_Profile implements Serializable {
      * @throws IOException If an I/O error occurs while reading the stream
      * @throws IllegalArgumentException If the stream does not contain valid ICC
      *         Profile data
+     * @throws NullPointerException if {@code s} is {@code null}
      */
     public static ICC_Profile getInstance(InputStream s) throws IOException {
+        Objects.requireNonNull(s);
         return getInstance(getProfileDataFromStream(s));
     }
 
     static byte[] getProfileDataFromStream(InputStream s) throws IOException {
         BufferedInputStream bis = new BufferedInputStream(s);
-        bis.mark(128); // 128 is the length of the ICC profile header
+        bis.mark(HEADER_SIZE);
 
-        byte[] header = bis.readNBytes(128);
-        if (header.length < 128 || header[36] != 0x61 || header[37] != 0x63 ||
-            header[38] != 0x73 || header[39] != 0x70) {
+        byte[] header = bis.readNBytes(HEADER_SIZE);
+        if (header.length < HEADER_SIZE || header[36] != 0x61 ||
+            header[37] != 0x63 || header[38] != 0x73 || header[39] != 0x70) {
             return null;   /* not a valid profile */
         }
         int profileSize = intFromBigEndian(header, 0);
@@ -945,7 +925,7 @@ public class ICC_Profile implements Serializable {
             if (cmmProfile != null) {
                 return cmmProfile;
             }
-            var is = getStandardProfileInputStream(deferralInfo.filename);
+            var is = getStandardProfileInputStream(builtInInfo.filename);
             if (is == null) {
                 return null;
             }
@@ -953,8 +933,6 @@ public class ICC_Profile implements Serializable {
                 byte[] data = getProfileDataFromStream(is);
                 if (data != null) {
                     p = cmmProfile = CMSManager.getModule().loadProfile(data);
-                    // from now we cannot use the deferred value, drop it
-                    deferralInfo = null;
                 }
             } catch (CMMException | IOException ignore) {
             }
@@ -968,7 +946,7 @@ public class ICC_Profile implements Serializable {
      * @return the major version of the profile
      */
     public int getMajorVersion() {
-        return getData(icSigHead)[8];
+        return getData(cmmProfile(), icSigHead)[8];
     }
 
     /**
@@ -977,7 +955,7 @@ public class ICC_Profile implements Serializable {
      * @return the minor version of the profile
      */
     public int getMinorVersion() {
-        return getData(icSigHead)[9];
+        return getData(cmmProfile(), icSigHead)[9];
     }
 
     /**
@@ -986,12 +964,15 @@ public class ICC_Profile implements Serializable {
      * @return one of the predefined profile class constants
      */
     public int getProfileClass() {
-        ProfileDeferralInfo info = deferralInfo;
-        if (info != null) {
-            return info.profileClass;
+        if (builtInInfo != null) {
+            return builtInInfo.profileClass;
         }
-        byte[] theHeader = getData(icSigHead);
-        int theClassSig = intFromBigEndian(theHeader, icHdrDeviceClass);
+        byte[] theHeader = getData(cmmProfile(), icSigHead);
+        return getProfileClass(theHeader);
+    }
+
+    private static int getProfileClass(byte[] data) {
+        int theClassSig = intFromBigEndian(data, icHdrDeviceClass);
         return switch (theClassSig) {
             case icSigInputClass -> CLASS_INPUT;
             case icSigDisplayClass -> CLASS_DISPLAY;
@@ -1019,16 +1000,15 @@ public class ICC_Profile implements Serializable {
      *         {@code ColorSpace} class
      */
     public int getColorSpaceType() {
-        ProfileDeferralInfo info = deferralInfo;
-        if (info != null) {
-            return info.colorSpaceType;
+        if (builtInInfo != null) {
+            return builtInInfo.colorSpaceType;
         }
-        return getColorSpaceType(cmmProfile());
+        byte[] theHeader = getData(cmmProfile(), icSigHead);
+        return getColorSpaceType(theHeader);
     }
 
-    private static int getColorSpaceType(Profile p) {
-        byte[] theHeader = getData(p, icSigHead);
-        int theColorSpaceSig = intFromBigEndian(theHeader, icHdrColorSpace);
+    private static int getColorSpaceType(byte[] data) {
+        int theColorSpaceSig = intFromBigEndian(data, icHdrColorSpace);
         return iccCStoJCS(theColorSpaceSig);
     }
 
@@ -1046,9 +1026,23 @@ public class ICC_Profile implements Serializable {
      *         {@code ColorSpace} class
      */
     public int getPCSType() {
-        byte[] theHeader = getData(icSigHead);
-        int thePCSSig = intFromBigEndian(theHeader, icHdrPcs);
-        return iccCStoJCS(thePCSSig);
+        byte[] theHeader = getData(cmmProfile(), icSigHead);
+        return getPCSType(theHeader);
+    }
+
+    private static int getPCSType(byte[] data) {
+        int thePCSSig = intFromBigEndian(data, icHdrPcs);
+        int theDeviceClass = intFromBigEndian(data, icHdrDeviceClass);
+
+        if (theDeviceClass == icSigLinkClass) {
+            return iccCStoJCS(thePCSSig);
+        } else {
+            return switch (thePCSSig) {
+                case icSigXYZData -> ColorSpace.TYPE_XYZ;
+                case icSigLabData -> ColorSpace.TYPE_Lab;
+                default -> throw new IllegalArgumentException("Unexpected PCS type");
+            };
+        }
     }
 
     /**
@@ -1057,6 +1051,7 @@ public class ICC_Profile implements Serializable {
      * @param  fileName the file to write the profile data to
      * @throws IOException If the file cannot be opened for writing or an I/O
      *         error occurs while writing to the file
+     * @throws NullPointerException if {@code fileName} is {@code null}
      */
     public void write(String fileName) throws IOException {
         try (OutputStream out = new FileOutputStream(fileName)) {
@@ -1069,6 +1064,7 @@ public class ICC_Profile implements Serializable {
      *
      * @param  s the stream to write the profile data to
      * @throws IOException If an I/O error occurs while writing to the stream
+     * @throws NullPointerException if {@code s} is {@code null}
      */
     public void write(OutputStream s) throws IOException {
         s.write(getData());
@@ -1089,8 +1085,8 @@ public class ICC_Profile implements Serializable {
      * Returns a particular tagged data element from the profile as a byte
      * array. Elements are identified by signatures as defined in the ICC
      * specification. The signature icSigHead can be used to get the header.
-     * This method is useful for advanced applets or applications which need to
-     * access profile data directly.
+     * This method is useful for advanced applications which need to access
+     * profile data directly.
      *
      * @param  tagSignature the ICC tag signature for the data element you want
      *         to get
@@ -1099,37 +1095,92 @@ public class ICC_Profile implements Serializable {
      * @see #setData(int, byte[])
      */
     public byte[] getData(int tagSignature) {
-        byte[] t = getData(cmmProfile(), tagSignature);
-        return t != null ? t.clone() : null;
-    }
-
-    private static byte[] getData(Profile p, int tagSignature) {
         try {
-            return CMSManager.getModule().getTagData(p, tagSignature);
+            return getData(cmmProfile(), tagSignature).clone();
         } catch (CMMException c) {
             return null;
         }
     }
 
     /**
+     * Returns a particular tagged data element from the profile as a non-null
+     * byte array. The returned byte array is not cloned. It must not be exposed
+     * to or used by public APIs. It is intended strictly for internal use only.
+     *
+     * @param  p the CMM profile from which to retrieve the tag data
+     * @param  tagSignature the ICC tag signature for the data to retrieve
+     * @return a non-null byte array containing the tag data
+     * @throws CMMException if the specified tag doesn't exist
+     */
+    static byte[] getData(Profile p, int tagSignature) {
+        return CMSManager.getModule().getTagData(p, tagSignature);
+    }
+
+    /**
      * Sets a particular tagged data element in the profile from a byte array.
      * The array should contain data in a format, corresponded to the
      * {@code tagSignature} as defined in the ICC specification, section 10.
-     * This method is useful for advanced applets or applications which need to
-     * access profile data directly.
+     * This method is useful for advanced applications which need to access
+     * profile data directly.
+     *
+     * <p>
+     * Note: JDK built-in ICC Profiles cannot be updated using this method
+     * as it will result in {@code IllegalArgumentException}. JDK built-in
+     * profiles are those obtained by {@code ICC_Profile.getInstance(int colorSpaceID)}
+     * where {@code colorSpaceID} is one of the following:
+     * {@link ColorSpace#CS_sRGB}, {@link ColorSpace#CS_LINEAR_RGB},
+     * {@link ColorSpace#CS_PYCC}, {@link ColorSpace#CS_GRAY} or
+     * {@link ColorSpace#CS_CIEXYZ}.
      *
      * @param  tagSignature the ICC tag signature for the data element you want
      *         to set
      * @param  tagData the data to set for the specified tag signature
      * @throws IllegalArgumentException if {@code tagSignature} is not a
      *         signature as defined in the ICC specification.
-     * @throws IllegalArgumentException if a content of the {@code tagData}
+     * @throws IllegalArgumentException if the content of the {@code tagData}
      *         array can not be interpreted as valid tag data, corresponding to
      *         the {@code tagSignature}
+     * @throws IllegalArgumentException if this is a built-in profile for one
+     *         of the pre-defined color spaces, that is those which can be obtained
+     *         by calling {@code ICC_Profile.getInstance(int colorSpaceID)}
      * @see #getData
+     * @see ColorSpace
      */
     public void setData(int tagSignature, byte[] tagData) {
+        if (builtInInfo != null) {
+            throw new IllegalArgumentException("Can't modify built-in profile");
+        }
+
+        if (tagSignature == ICC_Profile.icSigHead) {
+            verifyHeader(tagData);
+        }
         CMSManager.getModule().setTagData(cmmProfile(), tagSignature, tagData);
+    }
+
+    private static void verifyHeader(byte[] data) {
+        if (data == null || data.length < HEADER_SIZE) {
+            throw new IllegalArgumentException("Invalid header data");
+        }
+        getProfileClass(data);
+        getColorSpaceType(data);
+        getPCSType(data);
+        checkRenderingIntent(data);
+    }
+
+    private static void checkRenderingIntent(byte[] data) {
+        int index = ICC_Profile.icHdrRenderingIntent;
+        /*
+         * ICC spec: only the least-significant 16 bits encode the rendering
+         * intent. The most significant 16 bits must be zero and can be ignored.
+         * https://www.color.org/specification/ICC.1-2022-05.pdf, section 7.2.15
+         */
+        // Extract 16-bit unsigned rendering intent (0–65535)
+        int intent = (data[index + 2] & 0xff) << 8 | data[index + 3] & 0xff;
+        // Only check upper bound since intent can't be negative
+        if (intent > icICCAbsoluteColorimetric) {
+            throw new IllegalArgumentException(
+                    "Unknown Rendering Intent: %d".formatted(intent));
+        }
     }
 
     /**
@@ -1141,11 +1192,10 @@ public class ICC_Profile implements Serializable {
      * @throws ProfileDataException if color space is in the profile is invalid
      */
     public int getNumComponents() {
-        ProfileDeferralInfo info = deferralInfo;
-        if (info != null) {
-            return info.numComponents;
+        if (builtInInfo != null) {
+            return builtInInfo.numComponents;
         }
-        byte[] theHeader = getData(icSigHead);
+        byte[] theHeader = getData(cmmProfile(), icSigHead);
         int theColorSpaceSig = intFromBigEndian(theHeader, icHdrColorSpace);
         return switch (theColorSpaceSig) {
             case icSigGrayData -> 1;
@@ -1184,7 +1234,7 @@ public class ICC_Profile implements Serializable {
      * encoded in an XYZType tag.
      */
     final float[] getXYZTag(int tagSignature) {
-        byte[] theData = getData(tagSignature);
+        byte[] theData = getData(cmmProfile(), tagSignature);
         float[] theXYZNumber = new float[3]; /* array to return */
 
         /* convert s15Fixed16Number to float */
@@ -1208,7 +1258,7 @@ public class ICC_Profile implements Serializable {
      *         single gamma value
      */
     float getGamma(int tagSignature) {
-        byte[] theTRCData = getData(tagSignature);
+        byte[] theTRCData = getData(cmmProfile(), tagSignature);
         if (intFromBigEndian(theTRCData, icCurveCount) != 1) {
             throw new ProfileDataException("TRC is not a gamma");
         }
@@ -1239,7 +1289,7 @@ public class ICC_Profile implements Serializable {
      *         table
      */
     short[] getTRC(int tagSignature) {
-        byte[] theTRCData = getData(tagSignature);
+        byte[] theTRCData = getData(cmmProfile(), tagSignature);
         int nElements = intFromBigEndian(theTRCData, icCurveCount);
         if (nElements == 1) {
             throw new ProfileDataException("TRC is not a table");
@@ -1355,13 +1405,8 @@ public class ICC_Profile implements Serializable {
      * fileName. If there is no built-in profile with such name, then the method
      * returns {@code null}.
      */
-    @SuppressWarnings("removal")
     private static InputStream getStandardProfileInputStream(String fileName) {
-        return AccessController.doPrivileged(
-            (PrivilegedAction<InputStream>) () -> {
-                return PCMM.class.getResourceAsStream("profiles/" + fileName);
-            }, null, new FilePermission("<<ALL FILES>>", "read"),
-                     new RuntimePermission("accessSystemModules"));
+        return PCMM.class.getResourceAsStream("profiles/" + fileName);
     }
 
     /**
@@ -1423,6 +1468,7 @@ public class ICC_Profile implements Serializable {
      *
      * @param  s stream used for serialization
      * @throws IOException thrown by {@code ObjectInputStream}
+     * @throws NullPointerException if {@code s} is {@code null}
      * @serialData the {@code String} is the name of one of
      *         <code>CS_<var>*</var></code> constants defined in the
      *         {@link ColorSpace} class if the profile object is a profile for a
@@ -1478,8 +1524,8 @@ public class ICC_Profile implements Serializable {
      *
      * @param  s stream used for deserialization
      * @throws IOException thrown by {@code ObjectInputStream}
-     * @throws ClassNotFoundException thrown by {@code
-     *         ObjectInputStream}
+     * @throws ClassNotFoundException thrown by {@code ObjectInputStream}
+     * @throws NullPointerException if {@code s} is {@code null}
      * @serialData the {@code String} is the name of one of
      *         <code>CS_<var>*</var></code> constants defined in the
      *         {@link ColorSpace} class if the profile object is a profile for a
@@ -1504,33 +1550,19 @@ public class ICC_Profile implements Serializable {
     private void readObject(ObjectInputStream s)
             throws IOException, ClassNotFoundException {
         s.defaultReadObject();
-
-        String csName = (String) s.readObject();
-        byte[] data = (byte[]) s.readObject();
-
-        int cspace = 0;         // ColorSpace.CS_* constant if known
-        boolean isKnownPredefinedCS = false;
-        if (csName != null) {
-            isKnownPredefinedCS = true;
-            if (csName.equals("CS_sRGB")) {
-                cspace = ColorSpace.CS_sRGB;
-            } else if (csName.equals("CS_CIEXYZ")) {
-                cspace = ColorSpace.CS_CIEXYZ;
-            } else if (csName.equals("CS_PYCC")) {
-                cspace = ColorSpace.CS_PYCC;
-            } else if (csName.equals("CS_GRAY")) {
-                cspace = ColorSpace.CS_GRAY;
-            } else if (csName.equals("CS_LINEAR_RGB")) {
-                cspace = ColorSpace.CS_LINEAR_RGB;
-            } else {
-                isKnownPredefinedCS = false;
-            }
-        }
-
-        if (isKnownPredefinedCS) {
-            resolvedDeserializedProfile = getInstance(cspace);
-        } else {
-            resolvedDeserializedProfile = getInstance(data);
+        try {
+            String csName = (String) s.readObject();
+            byte[] data = (byte[]) s.readObject();
+            resolvedDeserializedProfile = switch (csName) {
+                case "CS_sRGB" -> getInstance(ColorSpace.CS_sRGB);
+                case "CS_CIEXYZ" -> getInstance(ColorSpace.CS_CIEXYZ);
+                case "CS_PYCC" -> getInstance(ColorSpace.CS_PYCC);
+                case "CS_GRAY" -> getInstance(ColorSpace.CS_GRAY);
+                case "CS_LINEAR_RGB" -> getInstance(ColorSpace.CS_LINEAR_RGB);
+                case null, default -> getInstance(data);
+            };
+        } catch (ClassCastException | IllegalArgumentException e) {
+            throw new InvalidObjectException("Invalid ICC Profile Data", e);
         }
     }
 

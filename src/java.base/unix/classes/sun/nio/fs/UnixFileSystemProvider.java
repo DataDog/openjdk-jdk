@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,19 +25,40 @@
 
 package sun.nio.fs;
 
-import java.nio.file.*;
-import java.nio.file.attribute.*;
-import java.nio.file.spi.FileTypeDetector;
-import java.nio.channels.*;
-import java.net.URI;
-import java.util.concurrent.ExecutorService;
 import java.io.IOException;
 import java.io.FilePermission;
-import java.util.*;
+import java.net.URI;
+import java.nio.channels.AsynchronousFileChannel;
+import java.nio.channels.FileChannel;
+import java.nio.channels.SeekableByteChannel;
+import java.nio.file.AccessMode;
+import java.nio.file.CopyOption;
+import java.nio.file.DirectoryNotEmptyException;
+import java.nio.file.DirectoryStream;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileStore;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystemAlreadyExistsException;
+import java.nio.file.LinkOption;
+import java.nio.file.NotDirectoryException;
+import java.nio.file.NotLinkException;
+import java.nio.file.OpenOption;
+import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.BasicFileAttributeView;
+import java.nio.file.attribute.FileAttribute;
+import java.nio.file.attribute.FileAttributeView;
+import java.nio.file.attribute.FileOwnerAttributeView;
+import java.nio.file.attribute.PosixFileAttributes;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.spi.FileTypeDetector;
+import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
 
 import jdk.internal.util.StaticProperty;
 import sun.nio.ch.ThreadPool;
-import sun.security.util.SecurityConstants;
 import static sun.nio.fs.UnixNativeDispatcher.*;
 import static sun.nio.fs.UnixConstants.*;
 
@@ -51,6 +72,7 @@ public abstract class UnixFileSystemProvider
     private static final byte[] EMPTY_PATH = new byte[0];
     private final UnixFileSystem theFileSystem;
 
+    @SuppressWarnings("this-escape")
     public UnixFileSystemProvider() {
         theFileSystem = newFileSystem(StaticProperty.userDir());
     }
@@ -102,14 +124,6 @@ public abstract class UnixFileSystemProvider
         return UnixUriUtils.fromUri(theFileSystem, uri);
     }
 
-    UnixPath checkPath(Path obj) {
-        if (obj == null)
-            throw new NullPointerException();
-        if (!(obj instanceof UnixPath))
-            throw new ProviderMismatchException();
-        return (UnixPath)obj;
-    }
-
     @Override
     @SuppressWarnings("unchecked")
     public <V extends FileAttributeView> V getFileAttributeView(Path obj,
@@ -126,7 +140,7 @@ public abstract class UnixFileSystemProvider
             return (V) UnixFileAttributeViews.createOwnerView(file, followLinks);
         if (type == null)
             throw new NullPointerException();
-        return (V) null;
+        return null;
     }
 
     @Override
@@ -146,6 +160,25 @@ public abstract class UnixFileSystemProvider
         else
             throw new UnsupportedOperationException();
         return (A) getFileAttributeView(file, view, options).readAttributes();
+    }
+
+    @Override
+    public <A extends BasicFileAttributes> A readAttributesIfExists(Path path,
+                                                                    Class<A> type,
+                                                                    LinkOption... options)
+        throws IOException
+    {
+        if (type == BasicFileAttributes.class && Util.followLinks(options)) {
+            UnixPath file = UnixPath.toUnixPath(path);
+            try {
+                @SuppressWarnings("unchecked")
+                A attrs = (A) UnixFileAttributes.getIfExists(file);
+                return attrs;
+            } catch (UnixException e) {
+                e.rethrowAsIOException(file);
+            }
+        }
+        return super.readAttributesIfExists(path, type, options);
     }
 
     @Override
@@ -172,7 +205,7 @@ public abstract class UnixFileSystemProvider
                                       FileAttribute<?>... attrs)
         throws IOException
     {
-        UnixPath file = checkPath(obj);
+        UnixPath file = UnixPath.toUnixPath(obj);
         int mode = UnixFileModeAttribute
             .toUnixMode(UnixFileModeAttribute.ALL_READWRITE, attrs);
         try {
@@ -189,7 +222,7 @@ public abstract class UnixFileSystemProvider
                                                               ExecutorService executor,
                                                               FileAttribute<?>... attrs) throws IOException
     {
-        UnixPath file = checkPath(obj);
+        UnixPath file = UnixPath.toUnixPath(obj);
         int mode = UnixFileModeAttribute
             .toUnixMode(UnixFileModeAttribute.ALL_READWRITE, attrs);
         ThreadPool pool = (executor == null) ? null : ThreadPool.wrap(executor, 0);
@@ -209,21 +242,12 @@ public abstract class UnixFileSystemProvider
                                               FileAttribute<?>... attrs)
          throws IOException
     {
-        UnixPath file = UnixPath.toUnixPath(obj);
-        int mode = UnixFileModeAttribute
-            .toUnixMode(UnixFileModeAttribute.ALL_READWRITE, attrs);
-        try {
-            return UnixChannelFactory.newFileChannel(file, options, mode);
-        } catch (UnixException x) {
-            x.rethrowAsIOException(file);
-            return null;  // keep compiler happy
-        }
+        return newFileChannel(obj, options, attrs);
     }
 
     @Override
     boolean implDelete(Path obj, boolean failIfNotExists) throws IOException {
         UnixPath file = UnixPath.toUnixPath(obj);
-        file.checkDelete();
 
         // need file attributes to know if file is directory
         UnixFileAttributes attrs = null;
@@ -254,18 +278,18 @@ public abstract class UnixFileSystemProvider
     public void copy(Path source, Path target, CopyOption... options)
         throws IOException
     {
-        UnixCopyFile.copy(UnixPath.toUnixPath(source),
-                          UnixPath.toUnixPath(target),
-                          options);
+        theFileSystem.copy(UnixPath.toUnixPath(source),
+                           UnixPath.toUnixPath(target),
+                           options);
     }
 
     @Override
     public void move(Path source, Path target, CopyOption... options)
         throws IOException
     {
-        UnixCopyFile.move(UnixPath.toUnixPath(source),
-                          UnixPath.toUnixPath(target),
-                          options);
+        theFileSystem.move(UnixPath.toUnixPath(source),
+                           UnixPath.toUnixPath(target),
+                           options);
     }
 
     @Override
@@ -281,75 +305,111 @@ public abstract class UnixFileSystemProvider
         } else {
             for (AccessMode mode: modes) {
                 switch (mode) {
-                    case READ : r = true; break;
-                    case WRITE : w = true; break;
-                    case EXECUTE : x = true; break;
-                    default: throw new AssertionError("Should not get here");
+                    case READ -> r = true;
+                    case WRITE -> w = true;
+                    case EXECUTE -> x = true;
                 }
             }
         }
 
         int mode = 0;
         if (e || r) {
-            file.checkRead();
             mode |= (r) ? R_OK : F_OK;
         }
         if (w) {
-            file.checkWrite();
             mode |= W_OK;
         }
         if (x) {
-            @SuppressWarnings("removal")
-            SecurityManager sm = System.getSecurityManager();
-            if (sm != null) {
-                // not cached
-                sm.checkExec(file.getPathForPermissionCheck());
-            }
             mode |= X_OK;
         }
-        try {
-            access(file, mode);
-        } catch (UnixException exc) {
-            exc.rethrowAsIOException(file);
+        int errno = access(file, mode);
+        if (errno != 0) {
+            if (errno == ENOTDIR) {
+                errno = ENOENT;
+            }
+            new UnixException(errno).rethrowAsIOException(file);
         }
     }
 
     @Override
+    public boolean isReadable(Path path) {
+        UnixPath file = UnixPath.toUnixPath(path);
+        return access(file, R_OK) == 0;
+    }
+
+    @Override
+    public boolean isWritable(Path path) {
+        UnixPath file = UnixPath.toUnixPath(path);
+        return access(file, W_OK) == 0;
+    }
+
+    @Override
+    public boolean isExecutable(Path path) {
+        UnixPath file = UnixPath.toUnixPath(path);
+        return access(file, X_OK) == 0;
+    }
+
+    // find the key of the last accessible link in the chain
+    private UnixFileKey lastFileKey(UnixPath path) throws UnixException {
+        var fileKeys = new HashSet<UnixFileKey>();
+        UnixFileKey lastFileKey = null;
+        while (path != null) {
+            UnixFileAttributes attrs = UnixFileAttributes.getIfExists(path, false);
+            if (attrs == null) {
+                break;
+            }
+            UnixFileKey fileKey = attrs.fileKey();
+            if (!attrs.isSymbolicLink()) {
+                break;
+            }
+            if (!fileKeys.add(fileKey)) {
+                throw new UnixException(ELOOP);
+            }
+            lastFileKey = fileKey;
+            byte[] target = readlink(path);
+            path = new UnixPath(theFileSystem, target);
+        }
+        return lastFileKey;
+    }
+
+    @Override
     public boolean isSameFile(Path obj1, Path obj2) throws IOException {
+        // toUnixPath verifies its argument is a non-null UnixPath
         UnixPath file1 = UnixPath.toUnixPath(obj1);
         if (file1.equals(obj2))
             return true;
         if (obj2 == null)
             throw new NullPointerException();
-        if (!(obj2 instanceof UnixPath))
+        if (!(obj2 instanceof UnixPath file2))
             return false;
-        UnixPath file2 = (UnixPath)obj2;
 
-        // check security manager access to both files
-        file1.checkRead();
-        file2.checkRead();
+        UnixFileKey key1;
+        try {
+            UnixFileAttributes attrs = UnixFileAttributes.getIfExists(file1);
+            key1 = (attrs != null) ? attrs.fileKey() : lastFileKey(file1);
+        } catch (UnixException e) {
+            e.rethrowAsIOException(file1);
+            return false;
+        }
 
-        UnixFileAttributes attrs1;
-        UnixFileAttributes attrs2;
+        if (key1 == null)
+            return false;
+
+        UnixFileKey key2;
         try {
-             attrs1 = UnixFileAttributes.get(file1, true);
-        } catch (UnixException x) {
-            x.rethrowAsIOException(file1);
-            return false;    // keep compiler happy
+            UnixFileAttributes attrs = UnixFileAttributes.getIfExists(file2);
+            key2 = (attrs != null) ? attrs.fileKey() : lastFileKey(file2);
+        } catch (UnixException e) {
+            e.rethrowAsIOException(file2);
+            return false;
         }
-        try {
-            attrs2 = UnixFileAttributes.get(file2, true);
-        } catch (UnixException x) {
-            x.rethrowAsIOException(file2);
-            return false;    // keep compiler happy
-        }
-        return attrs1.isSameFile(attrs2);
+
+        return key1.equals(key2);
     }
 
     @Override
     public boolean isHidden(Path obj) {
         UnixPath file = UnixPath.toUnixPath(obj);
-        file.checkRead();
         UnixPath name = file.getFileName();
         if (name == null)
             return false;
@@ -372,12 +432,6 @@ public abstract class UnixFileSystemProvider
     @Override
     public FileStore getFileStore(Path obj) throws IOException {
         UnixPath file = UnixPath.toUnixPath(obj);
-        @SuppressWarnings("removal")
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null) {
-            sm.checkPermission(new RuntimePermission("getFileStoreAttributes"));
-            file.checkRead();
-        }
         return getFileStore(file);
     }
 
@@ -386,7 +440,6 @@ public abstract class UnixFileSystemProvider
         throws IOException
     {
         UnixPath dir = UnixPath.toUnixPath(obj);
-        dir.checkWrite();
 
         int mode = UnixFileModeAttribute.toUnixMode(UnixFileModeAttribute.ALL_PERMISSIONS, attrs);
         try {
@@ -404,7 +457,6 @@ public abstract class UnixFileSystemProvider
         throws IOException
     {
         UnixPath dir = UnixPath.toUnixPath(obj);
-        dir.checkRead();
         if (filter == null)
             throw new NullPointerException();
 
@@ -431,13 +483,14 @@ public abstract class UnixFileSystemProvider
             dfd2 = dup(dfd1);
             dp = fdopendir(dfd1);
         } catch (UnixException x) {
+            IOException ioe = x.errno() == UnixConstants.ENOTDIR ?
+                new NotDirectoryException(dir.getPathForExceptionMessage()) :
+                x.asIOException(dir);
             if (dfd1 != -1)
-                UnixNativeDispatcher.close(dfd1);
+                UnixNativeDispatcher.close(dfd1, e -> null);
             if (dfd2 != -1)
-                UnixNativeDispatcher.close(dfd2);
-            if (x.errno() == UnixConstants.ENOTDIR)
-                throw new NotDirectoryException(dir.getPathForExceptionMessage());
-            x.rethrowAsIOException(dir);
+                UnixNativeDispatcher.close(dfd2, e -> null);
+            throw ioe;
         }
         return new UnixSecureDirectoryStream(dir, dp, dfd2, filter);
     }
@@ -453,15 +506,7 @@ public abstract class UnixFileSystemProvider
         if (attrs.length > 0) {
             UnixFileModeAttribute.toUnixMode(0, attrs);  // may throw NPE or UOE
             throw new UnsupportedOperationException("Initial file attributes" +
-                "not supported when creating symbolic link");
-        }
-
-        // permission check
-        @SuppressWarnings("removal")
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null) {
-            sm.checkPermission(new LinkPermission("symbolic"));
-            link.checkWrite();
+                " not supported when creating symbolic link");
         }
 
         // create link
@@ -477,14 +522,6 @@ public abstract class UnixFileSystemProvider
         UnixPath link = UnixPath.toUnixPath(obj1);
         UnixPath existing = UnixPath.toUnixPath(obj2);
 
-        // permission check
-        @SuppressWarnings("removal")
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null) {
-            sm.checkPermission(new LinkPermission("hard"));
-            link.checkWrite();
-            existing.checkWrite();
-        }
         try {
             link(existing, link);
         } catch (UnixException x) {
@@ -495,14 +532,6 @@ public abstract class UnixFileSystemProvider
     @Override
     public Path readSymbolicLink(Path obj1) throws IOException {
         UnixPath link = UnixPath.toUnixPath(obj1);
-        // permission check
-        @SuppressWarnings("removal")
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null) {
-            FilePermission perm = new FilePermission(link.getPathForPermissionCheck(),
-                SecurityConstants.FILE_READLINK_ACTION);
-            sm.checkPermission(perm);
-        }
         try {
             byte[] target = readlink(link);
             return new UnixPath(link.getFileSystem(), target);
@@ -515,28 +544,15 @@ public abstract class UnixFileSystemProvider
     }
 
     @Override
-    public final boolean isDirectory(Path obj) {
-        UnixPath file = UnixPath.toUnixPath(obj);
-        file.checkRead();
-        int mode = UnixNativeDispatcher.stat(file);
-        return ((mode & UnixConstants.S_IFMT) == UnixConstants.S_IFDIR);
-    }
+    public boolean exists(Path path, LinkOption... options) {
+        if (Util.followLinks(options)) {
+            UnixPath file = UnixPath.toUnixPath(path);
+            return access(file, F_OK) == 0;
+        } else {
+            return super.exists(path, options);
+        }
 
-    @Override
-    public final boolean isRegularFile(Path obj) {
-        UnixPath file = UnixPath.toUnixPath(obj);
-        file.checkRead();
-        int mode = UnixNativeDispatcher.stat(file);
-        return ((mode & UnixConstants.S_IFMT) == UnixConstants.S_IFREG);
     }
-
-    @Override
-    public final boolean exists(Path obj) {
-        UnixPath file = UnixPath.toUnixPath(obj);
-        file.checkRead();
-        return UnixNativeDispatcher.exists(file);
-    }
-
     /**
      * Returns a {@code FileTypeDetector} for this platform.
      */

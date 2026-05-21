@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -164,21 +164,22 @@ final class RSAServerKeyExchange {
         @Override
         public String toString() {
             MessageFormat messageFormat = new MessageFormat(
-                "\"RSA ServerKeyExchange\": '{'\n" +
-                "  \"parameters\": '{'\n" +
-                "    \"rsa_modulus\": '{'\n" +
-                "{0}\n" +
-                "    '}',\n" +
-                "    \"rsa_exponent\": '{'\n" +
-                "{1}\n" +
-                "    '}'\n" +
-                "  '}',\n" +
-                "  \"digital signature\":  '{'\n" +
-                "    \"signature\": '{'\n" +
-                "{2}\n" +
-                "    '}',\n" +
-                "  '}'\n" +
-                "'}'",
+                    """
+                            "RSA ServerKeyExchange": '{'
+                              "parameters": '{'
+                                "rsa_modulus": '{'
+                            {0}
+                                '}',
+                                "rsa_exponent": '{'
+                            {1}
+                                '}'
+                              '}',
+                              "digital signature":  '{'
+                                "signature": '{'
+                            {2}
+                                '}',
+                              '}'
+                            '}'""",
                 Locale.ENGLISH);
 
             HexDumpEncoder hexEncoder = new HexDumpEncoder();
@@ -263,7 +264,7 @@ final class RSAServerKeyExchange {
             RSAServerKeyExchangeMessage skem =
                     new RSAServerKeyExchangeMessage(
                             shc, x509Possession, rsaPossession);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                     "Produced RSA ServerKeyExchange handshake message", skem);
             }
@@ -295,7 +296,7 @@ final class RSAServerKeyExchange {
 
             RSAServerKeyExchangeMessage skem =
                     new RSAServerKeyExchangeMessage(chc, message);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                     "Consuming RSA ServerKeyExchange handshake message", skem);
             }

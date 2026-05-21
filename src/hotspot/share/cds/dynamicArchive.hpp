@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,22 +26,17 @@
 #define SHARE_CDS_DYNAMICARCHIVE_HPP
 
 #include "cds/filemap.hpp"
-#include "classfile/compactHashtable.hpp"
-#include "memory/allocation.hpp"
-#include "memory/memRegion.hpp"
-#include "memory/virtualspace.hpp"
-#include "oops/oop.hpp"
+#include "memory/allStatic.hpp"
 #include "utilities/exceptions.hpp"
 #include "utilities/macros.hpp"
-#include "utilities/resourceHash.hpp"
 
 #if INCLUDE_CDS
 
 class DynamicArchiveHeader : public FileMapHeader {
-  friend class CDSOffsets;
+  friend class CDSConstants;
 private:
   int _base_header_crc;
-  int _base_region_crc[MetaspaceShared::n_regions];
+  int _base_region_crc[AOTMetaspace::n_regions];
 
 public:
   int base_header_crc() const { return _base_header_crc; }
@@ -55,15 +50,17 @@ public:
     assert(is_valid_region(i), "must be");
     _base_region_crc[i] = c;
   }
+  void print(outputStream* st);
 };
 
 class DynamicArchive : AllStatic {
 public:
-  static void prepare_for_dynamic_dumping();
-  static void dump(const char* archive_name, TRAPS);
-  static void dump(TRAPS);
-  static bool is_mapped() { return FileMapInfo::dynamic_info() != NULL; }
+  static void dump_for_jcmd(const char* archive_name, TRAPS);
+  static void dump_at_exit(JavaThread* current);
+  static void dump_impl(bool jcmd_request, const char* archive_name, TRAPS);
+  static bool is_mapped() { return FileMapInfo::dynamic_info() != nullptr; }
   static bool validate(FileMapInfo* dynamic_info);
+  static void serialize(SerializeClosure* soc);
 };
 #endif // INCLUDE_CDS
 #endif // SHARE_CDS_DYNAMICARCHIVE_HPP

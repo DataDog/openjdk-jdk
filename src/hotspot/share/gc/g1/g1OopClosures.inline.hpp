@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,17 +27,19 @@
 
 #include "gc/g1/g1OopClosures.hpp"
 
-#include "gc/g1/g1CollectedHeap.hpp"
+#include "gc/g1/g1CollectedHeap.inline.hpp"
 #include "gc/g1/g1ConcurrentMark.inline.hpp"
+#include "gc/g1/g1HeapRegion.inline.hpp"
+#include "gc/g1/g1HeapRegionRemSet.inline.hpp"
 #include "gc/g1/g1ParScanThreadState.inline.hpp"
 #include "gc/g1/g1RemSet.hpp"
-#include "gc/g1/heapRegion.inline.hpp"
-#include "gc/g1/heapRegionRemSet.inline.hpp"
+#include "logging/log.hpp"
+#include "logging/logStream.hpp"
 #include "memory/iterator.inline.hpp"
 #include "oops/access.inline.hpp"
 #include "oops/compressedOops.inline.hpp"
-#include "oops/oopsHierarchy.hpp"
 #include "oops/oop.inline.hpp"
+#include "oops/oopsHierarchy.hpp"
 #include "runtime/prefetch.inline.hpp"
 #include "utilities/align.hpp"
 
@@ -48,8 +50,8 @@ inline void G1ScanClosureBase::prefetch_and_push(T* p, const oop obj) {
   // stall. We'll try to prefetch the object (for write, given that
   // we might need to install the forwarding reference) and we'll
   // get back to it when pop it from the queue
-  Prefetch::write(obj->mark_addr(), 0);
-  Prefetch::read(obj->mark_addr(), (HeapWordSize*2));
+  Prefetch::write(obj->base_addr(), oopDesc::mark_offset_in_bytes());
+  Prefetch::read(obj->base_addr(), oopDesc::mark_offset_in_bytes() + (HeapWordSize*2));
 
   // slightly paranoid test; I'm trying to catch potential
   // problems before we go into push_on_queue to know where the
@@ -64,7 +66,7 @@ inline void G1ScanClosureBase::prefetch_and_push(T* p, const oop obj) {
 
 template <class T>
 inline void G1ScanClosureBase::handle_non_cset_obj_common(G1HeapRegionAttr const region_attr, T* p, oop const obj) {
-  if (region_attr.is_humongous()) {
+  if (region_attr.is_humongous_candidate()) {
     _g1h->set_humongous_is_live(obj);
   } else if (region_attr.is_optional()) {
     _par_scan_state->remember_reference_into_optional_region(p);
@@ -86,13 +88,13 @@ inline void G1ScanEvacuatedObjClosure::do_oop_work(T* p) {
   const G1HeapRegionAttr region_attr = _g1h->region_attr(obj);
   if (region_attr.is_in_cset()) {
     prefetch_and_push(p, obj);
-  } else if (!HeapRegion::is_in_same_region(p, obj)) {
+  } else if (!G1HeapRegion::is_in_same_region(p, obj)) {
     handle_non_cset_obj_common(region_attr, p, obj);
-    assert(_scanning_in_young != Uninitialized, "Scan location has not been initialized.");
-    if (_scanning_in_young == True) {
+    assert(_skip_card_mark != Uninitialized, "Scan location has not been initialized.");
+    if (_skip_card_mark == True) {
       return;
     }
-    _par_scan_state->enqueue_card_if_tracked(region_attr, p, obj);
+    _par_scan_state->mark_card_if_tracked(region_attr, p, obj);
   }
 }
 
@@ -108,7 +110,7 @@ inline void G1RootRegionScanClosure::do_oop_work(T* p) {
     return;
   }
   oop obj = CompressedOops::decode_not_null(heap_oop);
-  _cm->mark_in_next_bitmap(_worker_id, obj);
+  _cm->mark_in_bitmap(_worker_id, obj);
 }
 
 template <class T>
@@ -117,23 +119,19 @@ inline static void check_obj_during_refinement(T* p, oop const obj) {
   G1CollectedHeap* g1h = G1CollectedHeap::heap();
   // can't do because of races
   // assert(oopDesc::is_oop_or_null(obj), "expected an oop");
-  assert(is_object_aligned(obj), "oop must be aligned");
-  assert(g1h->is_in_reserved(obj), "oop must be in reserved");
-
-  HeapRegion* from = g1h->heap_region_containing(p);
-
-  assert(from != NULL, "from region must be non-NULL");
-  assert(from->is_in_reserved(p) ||
-         (from->is_humongous() &&
-          g1h->heap_region_containing(p)->is_humongous() &&
-          from->humongous_start_region() == g1h->heap_region_containing(p)->humongous_start_region()),
-         "p " PTR_FORMAT " is not in the same region %u or part of the correct humongous object starting at region %u.",
-         p2i(p), from->hrm_index(), from->humongous_start_region()->hrm_index());
+  assert(is_object_aligned(obj), "obj must be aligned");
+  assert(g1h->is_in(obj), "invariant");
+  assert(g1h->is_in(p), "invariant");
 #endif // ASSERT
 }
 
 template <class T>
 inline void G1ConcurrentRefineOopClosure::do_oop_work(T* p) {
+  // Early out if we already found a to-young reference.
+  if (_has_ref_to_cset) {
+    return;
+  }
+
   T o = RawAccess<MO_RELAXED>::oop_load(p);
   if (CompressedOops::is_null(o)) {
     return;
@@ -142,22 +140,33 @@ inline void G1ConcurrentRefineOopClosure::do_oop_work(T* p) {
 
   check_obj_during_refinement(p, obj);
 
-  if (HeapRegion::is_in_same_region(p, obj)) {
+  if (G1HeapRegion::is_in_same_region(p, obj)) {
     // Normally this closure should only be called with cross-region references.
     // But since Java threads are manipulating the references concurrently and we
     // reload the values things may have changed.
     // Also this check lets slip through references from a humongous continues region
     // to its humongous start region, as they are in different regions, and adds a
-    // remembered set entry. This is benign (apart from memory usage), as we never
-    // try to either evacuate or eager reclaim humonguous arrays of j.l.O.
+    // remembered set entry.
+    // This does not affect correctness, but can prevent eager reclaim of humongous
+    // j.l.O. arrays.
     return;
   }
 
-  HeapRegionRemSet* to_rem_set = _g1h->heap_region_containing(obj)->rem_set();
+  G1HeapRegion* to_region = _g1h->heap_region_containing(obj);
+  if (to_region->is_young()) {
+    _has_ref_to_cset = true;
+    return;
+  }
+  G1HeapRegionRemSet* to_rem_set = to_region->rem_set();
 
-  assert(to_rem_set != NULL, "Need per-region 'into' remsets.");
+  assert(to_rem_set != nullptr, "Need per-region 'into' remsets.");
   if (to_rem_set->is_tracked()) {
-    to_rem_set->add_reference(p, _worker_id);
+    G1HeapRegion* from = _g1h->heap_region_containing(p);
+
+    if (from->rem_set()->cset_group() != to_rem_set->cset_group()) {
+      to_rem_set->add_reference(p, _worker_id);
+      _has_ref_to_old = true;
+    }
   }
 }
 
@@ -173,16 +182,17 @@ inline void G1ScanCardClosure::do_oop_work(T* p) {
 
   assert(!_g1h->is_in_cset((HeapWord*)p),
          "Oop originates from " PTR_FORMAT " (region: %u) which is in the collection set.",
-         p2i(p), _g1h->addr_to_region((HeapWord*)p));
+         p2i(p), _g1h->addr_to_region(p));
 
   const G1HeapRegionAttr region_attr = _g1h->region_attr(obj);
   if (region_attr.is_in_cset()) {
     // Since the source is always from outside the collection set, here we implicitly know
     // that this is a cross-region reference too.
     prefetch_and_push(p, obj);
-  } else if (!HeapRegion::is_in_same_region(p, obj)) {
+    _heap_roots_found++;
+  } else if (!G1HeapRegion::is_in_same_region(p, obj)) {
     handle_non_cset_obj_common(region_attr, p, obj);
-    _par_scan_state->enqueue_card_if_tracked(region_attr, p, obj);
+    _par_scan_state->mark_card_if_tracked(region_attr, p, obj);
   }
 }
 
@@ -209,7 +219,7 @@ void G1ParCopyHelper::mark_object(oop obj) {
   assert(!_g1h->heap_region_containing(obj)->in_collection_set(), "should not mark objects in the CSet");
 
   // We know that the object is not moving so it's safe to read its size.
-  _cm->mark_in_next_bitmap(_worker_id, obj);
+  _cm->mark_in_bitmap(_worker_id, obj);
 }
 
 void G1ParCopyHelper::trim_queue_partially() {
@@ -233,19 +243,19 @@ void G1ParCopyClosure<barrier, should_mark>::do_oop_work(T* p) {
   if (state.is_in_cset()) {
     oop forwardee;
     markWord m = obj->mark();
-    if (m.is_marked()) {
-      forwardee = cast_to_oop(m.decode_pointer());
+    if (m.is_forwarded()) {
+      forwardee = obj->forwardee(m);
     } else {
       forwardee = _par_scan_state->copy_to_survivor_space(state, obj, m);
     }
-    assert(forwardee != NULL, "forwardee should not be NULL");
+    assert(forwardee != nullptr, "forwardee should not be null");
     RawAccess<IS_NOT_NULL>::oop_store(p, forwardee);
 
     if (barrier == G1BarrierCLD) {
       do_cld_barrier(forwardee);
     }
   } else {
-    if (state.is_humongous()) {
+    if (state.is_humongous_candidate()) {
       _g1h->set_humongous_is_live(obj);
     } else if ((barrier != G1BarrierNoOptRoots) && state.is_optional()) {
       _par_scan_state->remember_root_into_optional_region(p);
@@ -263,17 +273,27 @@ void G1ParCopyClosure<barrier, should_mark>::do_oop_work(T* p) {
 
 template <class T> void G1RebuildRemSetClosure::do_oop_work(T* p) {
   oop const obj = RawAccess<MO_RELAXED>::oop_load(p);
-  if (obj == NULL) {
+  if (obj == nullptr) {
     return;
   }
 
-  if (HeapRegion::is_in_same_region(p, obj)) {
+  if (G1HeapRegion::is_in_same_region(p, obj)) {
     return;
   }
 
-  HeapRegion* to = _g1h->heap_region_containing(obj);
-  HeapRegionRemSet* rem_set = to->rem_set();
-  rem_set->add_reference(p, _worker_id);
+  G1HeapRegion* to = _g1h->heap_region_containing(obj);
+  G1HeapRegionRemSet* rem_set = to->rem_set();
+  if (rem_set->is_tracked()) {
+    if (to->is_young()) {
+      G1BarrierSet::g1_barrier_set()->write_ref_field_post(p);
+    } else {
+      G1HeapRegion* from = _g1h->heap_region_containing(p);
+
+      if (from->rem_set()->cset_group() != rem_set->cset_group()) {
+        rem_set->add_reference(p, _worker_id);
+      }
+    }
+  }
 }
 
 #endif // SHARE_GC_G1_G1OOPCLOSURES_INLINE_HPP

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,10 +26,12 @@
 #define SHARE_CLASSFILE_PACKAGEENTRY_HPP
 
 #include "classfile/moduleEntry.hpp"
+#include "memory/metaspaceClosureType.hpp"
 #include "oops/symbol.hpp"
-#include "runtime/atomic.hpp"
+#include "oops/symbolHandle.hpp"
+#include "runtime/atomicAccess.hpp"
 #include "utilities/growableArray.hpp"
-#include "utilities/hashtable.hpp"
+#include "utilities/hashTable.hpp"
 #include "utilities/macros.hpp"
 #include "utilities/ostream.hpp"
 #if INCLUDE_JFR
@@ -38,6 +40,7 @@
 
 template <class T> class Array;
 class MetaspaceClosure;
+class ModuleEntry;
 
 // A PackageEntry basically represents a Java package.  It contains:
 //   - Symbol* containing the package's name.
@@ -97,8 +100,9 @@ class MetaspaceClosure;
 #define PKG_EXP_ALLUNNAMED   0x0002
 #define PKG_EXP_UNQUALIFIED_OR_ALL_UNAMED (PKG_EXP_UNQUALIFIED | PKG_EXP_ALLUNNAMED)
 
-class PackageEntry : public HashtableEntry<Symbol*, mtModule> {
+class PackageEntry : public CHeapObj<mtModule> {
 private:
+  Symbol*      _name;
   ModuleEntry* _module;
   // Indicates if package is exported unqualifiedly or to all unnamed. Access to
   // this field is protected by the Module_lock.
@@ -120,17 +124,11 @@ private:
   // a bit map indicating which CDS classpath entries have defined classes in this package.
   volatile int _defined_by_cds_in_class_path;
 public:
-  void init() {
-    _module = NULL;
-    _export_flags = 0;
-    _classpath_index = -1;
-    _must_walk_exports = false;
-    _qualified_exports = NULL;
-    _defined_by_cds_in_class_path = 0;
-  }
+  PackageEntry(Symbol* name, ModuleEntry* module);
+  ~PackageEntry();
 
   // package name
-  Symbol*            name() const               { return literal(); }
+  Symbol*            name() const               { return _name; }
 
   // the module containing the package definition
   ModuleEntry*       module() const             { return _module; }
@@ -154,7 +152,7 @@ public:
   // return true.
   bool has_qual_exports_list() const {
     assert_locked_or_safepoint(Module_lock);
-    return (!is_unqual_exported() && _qualified_exports != NULL);
+    return (!is_unqual_exported() && _qualified_exports != nullptr);
   }
   bool is_exported_allUnnamed() const {
     assert_locked_or_safepoint(Module_lock);
@@ -199,14 +197,6 @@ public:
   void add_qexport(ModuleEntry* m);
   void set_export_walk_required(ClassLoaderData* m_loader_data);
 
-  PackageEntry* next() const {
-    return (PackageEntry*)HashtableEntry<Symbol*, mtModule>::next();
-  }
-
-  PackageEntry** next_addr() {
-    return (PackageEntry**)HashtableEntry<Symbol*, mtModule>::next_addr();
-  }
-
   // iteration of qualified exports
   void package_exports_do(ModuleClosure* f);
 
@@ -216,14 +206,24 @@ public:
   void purge_qualified_exports();
   void delete_qualified_exports();
 
+  void pack_qualified_exports(); // used by AOT
+
+  // methods required by MetaspaceClosure
+  void metaspace_pointers_do(MetaspaceClosure* it);
+  int size_in_heapwords() const { return (int)heap_word_size(sizeof(PackageEntry)); }
+  MetaspaceClosureType type() const { return MetaspaceClosureType::PackageEntryType; }
+  static bool is_read_only_by_default() { return false; }
+
   void print(outputStream* st = tty);
-  void verify();
+
+  char* name_as_C_string() const {
+    assert(_name != nullptr, "name can't be null");
+    return name()->as_C_string();
+  }
 
 #if INCLUDE_CDS_JAVA_HEAP
-  void iterate_symbols(MetaspaceClosure* closure);
-  PackageEntry* allocate_archived_entry() const;
-  void init_as_archived_entry();
-  static PackageEntry* get_archived_entry(PackageEntry* orig_entry);
+  bool should_be_archived() const;
+  void remove_unshareable_info();
   void load_from_archive();
 #endif
 
@@ -233,50 +233,22 @@ public:
 
   bool is_defined_by_cds_in_class_path(int idx) const {
     assert(idx < max_index_for_defined_in_class_path(), "sanity");
-    return((Atomic::load(&_defined_by_cds_in_class_path) & ((int)1 << idx)) != 0);
+    return((AtomicAccess::load(&_defined_by_cds_in_class_path) & ((int)1 << idx)) != 0);
   }
   void set_defined_by_cds_in_class_path(int idx) {
     assert(idx < max_index_for_defined_in_class_path(), "sanity");
-    int old_val = 0;
-    int new_val = 0;
-    do {
-      old_val = Atomic::load(&_defined_by_cds_in_class_path);
-      new_val = old_val | ((int)1 << idx);
-    } while (Atomic::cmpxchg(&_defined_by_cds_in_class_path, old_val, new_val) != old_val);
+    AtomicAccess::fetch_then_or(&_defined_by_cds_in_class_path, ((int)1 << idx));
   }
 };
 
 // The PackageEntryTable is a Hashtable containing a list of all packages defined
 // by a particular class loader.  Each package is represented as a PackageEntry node.
-// The PackageEntryTable's lookup is lock free.
-//
-class PackageEntryTable : public Hashtable<Symbol*, mtModule> {
-  friend class VMStructs;
+class PackageEntryTable : public CHeapObj<mtModule> {
+  HashTable<SymbolHandle, PackageEntry*, 109, AnyObj::C_HEAP, mtModule,
+                    SymbolHandle::compute_hash> _table;
 public:
-  enum Constants {
-    _packagetable_entry_size = 109  // number of entries in package entry table
-  };
-
-private:
-  PackageEntry* new_entry(unsigned int hash, Symbol* name, ModuleEntry* module);
-  void add_entry(int index, PackageEntry* new_entry);
-
-  int entry_size() const { return BasicHashtable<mtModule>::entry_size(); }
-
-  PackageEntry** bucket_addr(int i) {
-    return (PackageEntry**)Hashtable<Symbol*, mtModule>::bucket_addr(i);
-  }
-
-  static unsigned int compute_hash(Symbol* name) { return (unsigned int)(name->identity_hash()); }
-  int index_for(Symbol* name) const { return hash_to_index(compute_hash(name)); }
-
-public:
-  PackageEntryTable(int table_size);
+  PackageEntryTable();
   ~PackageEntryTable();
-
-  PackageEntry* bucket(int i) {
-    return (PackageEntry*)Hashtable<Symbol*, mtModule>::bucket(i);
-  }
 
   // Create package entry in loader's package entry table.  Assume Module
   // lock was taken by caller.
@@ -284,11 +256,11 @@ public:
 
   // Create package entry in loader's package entry table if it does not
   // already exist.  Assume Module lock was taken by caller.
-  void locked_create_entry_if_not_exist(Symbol* name, ModuleEntry* module);
+  PackageEntry* locked_create_entry_if_absent(Symbol* name, ModuleEntry* module);
 
   // Lookup Package with loader's package entry table, add it if not found.
   // This will acquire the Module lock.
-  PackageEntry* lookup(Symbol* name, ModuleEntry* module);
+  PackageEntry* create_entry_if_absent(Symbol* name, ModuleEntry* module);
 
   // Only lookup Package within loader's package entry table.
   // This will acquire the Module lock.
@@ -303,13 +275,14 @@ public:
   // purge dead weak references out of exported list
   void purge_all_package_exports();
 
+  GrowableArray<PackageEntry*>* get_system_packages();
+
+  void packages_do(void f(PackageEntry*));
+
   void print(outputStream* st = tty);
-  void verify();
 
 #if INCLUDE_CDS_JAVA_HEAP
-  void iterate_symbols(MetaspaceClosure* closure);
-  Array<PackageEntry*>* allocate_archived_entries();
-  void init_archived_entries(Array<PackageEntry*>* archived_packages);
+  Array<PackageEntry*>* build_aot_table(ClassLoaderData* loader_data, TRAPS);
   void load_archived_entries(Array<PackageEntry*>* archived_packages);
 #endif
 };

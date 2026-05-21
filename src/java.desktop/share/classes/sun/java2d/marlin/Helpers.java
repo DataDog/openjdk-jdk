@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,13 +31,51 @@ import sun.java2d.marlin.stats.StatLong;
 
 final class Helpers implements MarlinConst {
 
+    private final static double T_ERR = 1e-4;
+    private final static double T_A = T_ERR;
+    private final static double T_B = 1.0 - T_ERR;
+
+    private static final double EPS = 1e-9d;
+
     private Helpers() {
         throw new Error("This is a non instantiable class");
     }
 
+    /** use lower precision like former Pisces and Marlin (float-precision) */
+    static double ulp(final double value) { return Math.ulp((float)value); }
+
+    static boolean within(final double x, final double y) {
+        return within(x, y, EPS);
+    }
+
     static boolean within(final double x, final double y, final double err) {
-        final double d = y - x;
+        return withinD(y - x, err);
+    }
+
+    static boolean withinD(final double d, final double err) {
         return (d <= err && d >= -err);
+    }
+
+    static boolean withinD(final double dx, final double dy, final double err)
+    {
+        assert err > 0 : "";
+        // compare taxicab distance. ERR will always be small, so using
+        // true distance won't give much benefit
+        return (withinD(dx, err) && // we want to avoid calling Math.abs
+                withinD(dy, err));  // this is just as good.
+    }
+
+    static boolean isPointCurve(final double[] curve, final int type) {
+        return isPointCurve(curve, type, EPS);
+    }
+
+    static boolean isPointCurve(final double[] curve, final int type, final double err) {
+        for (int i = 2; i < type; i++) {
+            if (!within(curve[i], curve[i - 2], err)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     static double evalCubic(final double a, final double b,
@@ -58,21 +96,24 @@ final class Helpers implements MarlinConst {
     {
         int ret = off;
         if (a != 0.0d) {
-            final double dis = b*b - 4.0d * a * c;
-            if (dis > 0.0d) {
-                final double sqrtDis = Math.sqrt(dis);
-                // depending on the sign of b we use a slightly different
-                // algorithm than the traditional one to find one of the roots
-                // so we can avoid adding numbers of different signs (which
-                // might result in loss of precision).
-                if (b >= 0.0d) {
-                    zeroes[ret++] = (2.0d * c) / (-b - sqrtDis);
-                    zeroes[ret++] = (-b - sqrtDis) / (2.0d * a);
-                } else {
-                    zeroes[ret++] = (-b + sqrtDis) / (2.0d * a);
-                    zeroes[ret++] = (2.0d * c) / (-b + sqrtDis);
+            double d = b * b - 4.0d * a * c;
+            if (d > 0.0d) {
+                d = Math.sqrt(d);
+                // For accuracy, calculate one root using:
+                //     (-b +/- d) / 2a
+                // and the other using:
+                //     2c / (-b +/- d)
+                // Choose the sign of the +/- so that b+d gets larger in magnitude
+                if (b < 0.0d) {
+                    d = -d;
                 }
-            } else if (dis == 0.0d) {
+                final double q = (b + d) / -2.0d;
+                // We already tested a for being 0 above
+                zeroes[ret++] = q / a;
+                if (q != 0.0d) {
+                    zeroes[ret++] = c / q;
+                }
+            } else if (d == 0.0d) {
                 zeroes[ret++] = -b / (2.0d * a);
             }
         } else if (b != 0.0d) {
@@ -97,10 +138,6 @@ final class Helpers implements MarlinConst {
         // our own customized version).
 
         // normal form: x^3 + ax^2 + bx + c = 0
-
-        /*
-         * TODO: cleanup all that code after reading Roots3And4.c
-         */
         a /= d;
         b /= d;
         c /= d;
@@ -113,18 +150,30 @@ final class Helpers implements MarlinConst {
         // p = P/3
         // q = Q/2
         // instead and use those values for simplicity of the code.
-        final double sub = (1.0d / 3.0d) * a;
         final double sq_A = a * a;
         final double p = (1.0d / 3.0d) * ((-1.0d / 3.0d) * sq_A + b);
+        final double sub = (1.0d / 3.0d) * a;
         final double q = (1.0d / 2.0d) * ((2.0d / 27.0d) * a * sq_A - sub * b + c);
 
         // use Cardano's formula
-
         final double cb_p = p * p * p;
         final double D = q * q + cb_p;
 
         int num;
-        if (D < 0.0d) {
+
+        if (within(D, 0.0d)) {
+            if (within(q, 0.0d)) {
+                /* one triple solution */
+                pts[off    ] = (- sub);
+                num = 1;
+            } else {
+                /* one single and one double solution */
+                final double u = Math.cbrt(-q);
+                pts[off    ] = (2.0d * u - sub);
+                pts[off + 1] = (- u - sub);
+                num = 2;
+            }
+        } else if (D < 0.0d) {
             // see: http://en.wikipedia.org/wiki/Cubic_function#Trigonometric_.28and_hyperbolic.29_method
             final double phi = (1.0d / 3.0d) * Math.acos(-q / Math.sqrt(-cb_p));
             final double t = 2.0d * Math.sqrt(-p);
@@ -140,13 +189,7 @@ final class Helpers implements MarlinConst {
 
             pts[off    ] = (u + v - sub);
             num = 1;
-
-            if (within(D, 0.0d, 1e-8d)) {
-                pts[off + 1] = ((-1.0d / 2.0d) * (u + v) - sub);
-                num = 2;
-            }
         }
-
         return filterOutNotInAB(pts, off, num, A, B) - off;
     }
 
@@ -286,10 +329,10 @@ final class Helpers implements MarlinConst {
 
         // now we must subdivide at points where one of the offset curves will have
         // a cusp. This happens at ts where the radius of curvature is equal to w.
-        ret += c.rootsOfROCMinusW(ts, ret, w2, 0.0001d);
+        ret += c.rootsOfROCMinusW(ts, ret, w2, T_A, T_B);
 
-        ret = filterOutNotInAB(ts, 0, ret, 0.0001d, 0.9999d);
-        isort(ts, ret);
+        ret = filterOutNotInAB(ts, 0, ret, T_A, T_B);
+        isort(ts, 0, ret);
         return ret;
     }
 
@@ -318,7 +361,7 @@ final class Helpers implements MarlinConst {
         if ((outCodeOR & OUTCODE_BOTTOM) != 0) {
             ret += curve.yPoints(ts, ret, clipRect[1]);
         }
-        isort(ts, ret);
+        isort(ts, 0, ret);
         return ret;
     }
 
@@ -338,11 +381,11 @@ final class Helpers implements MarlinConst {
         }
     }
 
-    static void isort(final double[] a, final int len) {
-        for (int i = 1, j; i < len; i++) {
+    static void isort(final double[] a, final int off, final int len) {
+        for (int i = off + 1, j; i < len; i++) {
             final double ai = a[i];
             j = i - 1;
-            for (; j >= 0 && a[j] > ai; j--) {
+            for (; j >= off && a[j] > ai; j--) {
                 a[j + 1] = a[j];
             }
             a[j + 1] = ai;
@@ -621,9 +664,9 @@ final class Helpers implements MarlinConst {
         int numCurves;
 
         // curves ref (dirty)
-        final DoubleArrayCache.Reference curves_ref;
+        final ArrayCacheDouble.Reference curves_ref;
         // curveTypes ref (dirty)
-        final ByteArrayCache.Reference curveTypes_ref;
+        final ArrayCacheByte.Reference curveTypes_ref;
 
         // used marks (stats only)
         int curveTypesUseMark;
@@ -670,7 +713,7 @@ final class Helpers implements MarlinConst {
          * clean up before reusing this instance
          */
         void dispose() {
-            end = 0;
+            end       = 0;
             numCurves = 0;
 
             if (DO_STATS) {
@@ -685,8 +728,12 @@ final class Helpers implements MarlinConst {
 
             // Return arrays:
             // curves and curveTypes are kept dirty
-            curves     = curves_ref.putArray(curves);
-            curveTypes = curveTypes_ref.putArray(curveTypes);
+            if (curves_ref.doCleanRef(curves)) {
+                curves = curves_ref.putArray(curves);
+            }
+            if (curveTypes_ref.doCleanRef(curveTypes)) {
+                curveTypes = curveTypes_ref.putArray(curveTypes);
+            }
         }
 
         private void ensureSpace(final int n) {
@@ -826,7 +873,7 @@ final class Helpers implements MarlinConst {
 
         @Override
         public String toString() {
-            String ret = "";
+            StringBuilder ret = new StringBuilder();
             int nc = numCurves;
             int last = end;
             int len;
@@ -834,24 +881,23 @@ final class Helpers implements MarlinConst {
                 switch(curveTypes[--nc]) {
                 case TYPE_LINETO:
                     len = 2;
-                    ret += "line: ";
+                    ret.append("line: ");
                     break;
                 case TYPE_QUADTO:
                     len = 4;
-                    ret += "quad: ";
+                    ret.append("quad: ");
                     break;
                 case TYPE_CUBICTO:
                     len = 6;
-                    ret += "cubic: ";
+                    ret.append("cubic: ");
                     break;
                 default:
                     len = 0;
                 }
                 last -= len;
-                ret += Arrays.toString(Arrays.copyOfRange(curves, last, last+len))
-                                       + "\n";
+                ret.append(Arrays.toString(Arrays.copyOfRange(curves, last, last + len))).append("\n");
             }
-            return ret;
+            return ret.toString();
         }
     }
 
@@ -865,7 +911,7 @@ final class Helpers implements MarlinConst {
         private int[] indices;
 
         // indices ref (dirty)
-        private final IntArrayCache.Reference indices_ref;
+        private final ArrayCacheInt.Reference indices_ref;
 
         // used marks (stats only)
         private int indicesUseMark;
@@ -911,8 +957,10 @@ final class Helpers implements MarlinConst {
             }
 
             // Return arrays:
-            // values is kept dirty
-            indices = indices_ref.putArray(indices);
+            // indices is kept dirty
+            if (indices_ref.doCleanRef(indices)) {
+                indices = indices_ref.putArray(indices);
+            }
         }
 
         boolean isEmpty() {
@@ -950,14 +998,24 @@ final class Helpers implements MarlinConst {
             }
         }
 
-        void pullAll(final double[] points, final DPathConsumer2D io) {
+        void pullAll(final double[] points, final DPathConsumer2D io,
+                     final boolean moveFirst)
+        {
             final int nc = end;
             if (nc == 0) {
                 return;
             }
             final int[] _values = indices;
 
-            for (int i = 0, j; i < nc; i++) {
+            int i = 0;
+
+            if (moveFirst) {
+                int j = _values[i] << 1;
+                io.moveTo(points[j], points[j + 1]);
+                i++;
+            }
+
+            for (int j; i < nc; i++) {
                 j = _values[i] << 1;
                 io.lineTo(points[j], points[j + 1]);
             }

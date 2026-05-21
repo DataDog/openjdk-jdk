@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,19 +28,15 @@ package javax.imageio;
 import java.awt.image.BufferedImage;
 import java.awt.image.RenderedImage;
 import java.io.File;
-import java.io.FilePermission;
 import java.io.InputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
 import java.net.URL;
-import java.security.AccessController;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.NoSuchElementException;
-import java.util.Set;
 import javax.imageio.spi.IIORegistry;
 import javax.imageio.spi.ImageReaderSpi;
 import javax.imageio.spi.ImageReaderWriterSpi;
@@ -51,8 +47,6 @@ import javax.imageio.spi.ImageTranscoderSpi;
 import javax.imageio.spi.ServiceRegistry;
 import javax.imageio.stream.ImageInputStream;
 import javax.imageio.stream.ImageOutputStream;
-import sun.awt.AppContext;
-import sun.security.action.GetPropertyAction;
 
 /**
  * A class containing static convenience methods for locating
@@ -113,9 +107,7 @@ public final class ImageIO {
     // ImageInputStreams
 
     /**
-     * A class to hold information about caching.  Each
-     * {@code ThreadGroup} will have its own copy
-     * via the {@code AppContext} mechanism.
+     * A class to hold information about caching.
      */
     static class CacheInfo {
         boolean useCache = true;
@@ -149,17 +141,12 @@ public final class ImageIO {
         }
     }
 
+    private static final CacheInfo info = new CacheInfo();
+
     /**
-     * Returns the {@code CacheInfo} object associated with this
-     * {@code ThreadGroup}.
+     * Returns the {@code CacheInfo} object.
      */
     private static synchronized CacheInfo getCacheInfo() {
-        AppContext context = AppContext.getAppContext();
-        CacheInfo info = (CacheInfo)context.get(CacheInfo.class);
-        if (info == null) {
-            info = new CacheInfo();
-            context.put(CacheInfo.class, info);
-        }
         return info;
     }
 
@@ -167,59 +154,20 @@ public final class ImageIO {
      * Returns the default temporary (cache) directory as defined by the
      * java.io.tmpdir system property.
      */
-    @SuppressWarnings("removal")
     private static String getTempDir() {
-        GetPropertyAction a = new GetPropertyAction("java.io.tmpdir");
-        return AccessController.doPrivileged(a);
+        return System.getProperty("java.io.tmpdir");
     }
 
     /**
      * Determines whether the caller has write access to the cache
      * directory, stores the result in the {@code CacheInfo} object,
-     * and returns the decision.  This method helps to prevent mysterious
-     * SecurityExceptions to be thrown when this convenience class is used
-     * in an applet, for example.
+     * and returns the decision.
      */
     private static boolean hasCachePermission() {
         Boolean hasPermission = getCacheInfo().getHasPermission();
-
         if (hasPermission != null) {
             return hasPermission.booleanValue();
         } else {
-            try {
-                @SuppressWarnings("removal")
-                SecurityManager security = System.getSecurityManager();
-                if (security != null) {
-                    File cachedir = getCacheDirectory();
-                    String cachepath;
-
-                    if (cachedir != null) {
-                        cachepath = cachedir.getPath();
-                    } else {
-                        cachepath = getTempDir();
-
-                        if (cachepath == null || cachepath.isEmpty()) {
-                            getCacheInfo().setHasPermission(Boolean.FALSE);
-                            return false;
-                        }
-                    }
-
-                    // we have to check whether we can read, write,
-                    // and delete cache files.
-                    // So, compose cache file path and check it.
-                    String filepath = cachepath;
-                    if (!filepath.endsWith(File.separator)) {
-                        filepath += File.separator;
-                    }
-                    filepath += "*";
-
-                    security.checkPermission(new FilePermission(filepath, "read, write, delete"));
-                }
-            } catch (SecurityException e) {
-                getCacheInfo().setHasPermission(Boolean.FALSE);
-                return false;
-            }
-
             getCacheInfo().setHasPermission(Boolean.TRUE);
             return true;
         }
@@ -279,9 +227,7 @@ public final class ImageIO {
      *
      * @see File#createTempFile(String, String, File)
      *
-     * @exception SecurityException if the security manager denies
-     * access to the directory.
-     * @exception IllegalArgumentException if {@code cacheDir} is
+     * @throws IllegalArgumentException if {@code cacheDir} is
      * non-{@code null} but is not a directory.
      *
      * @see #getCacheDirectory
@@ -328,9 +274,9 @@ public final class ImageIO {
      *
      * @return an {@code ImageInputStream}, or {@code null}.
      *
-     * @exception IllegalArgumentException if {@code input}
+     * @throws IllegalArgumentException if {@code input}
      * is {@code null}.
-     * @exception IOException if a cache file is needed but cannot be
+     * @throws IOException if a cache file is needed but cannot be
      * created.
      *
      * @see javax.imageio.spi.ImageInputStreamSpi
@@ -390,9 +336,9 @@ public final class ImageIO {
      * @return an {@code ImageOutputStream}, or
      * {@code null}.
      *
-     * @exception IllegalArgumentException if {@code output} is
+     * @throws IllegalArgumentException if {@code output} is
      * {@code null}.
-     * @exception IOException if a cache file is needed but cannot be
+     * @throws IOException if a cache file is needed but cannot be
      * created.
      *
      * @see javax.imageio.spi.ImageOutputStreamSpi
@@ -639,7 +585,7 @@ public final class ImageIO {
      *
      * @return an {@code Iterator} containing {@code ImageReader}s.
      *
-     * @exception IllegalArgumentException if {@code input} is
+     * @throws IllegalArgumentException if {@code input} is
      * {@code null}.
      *
      * @see javax.imageio.spi.ImageReaderSpi#canDecodeInput
@@ -699,7 +645,7 @@ public final class ImageIO {
      * @return an {@code Iterator} containing
      * {@code ImageReader}s.
      *
-     * @exception IllegalArgumentException if {@code formatName}
+     * @throws IllegalArgumentException if {@code formatName}
      * is {@code null}.
      *
      * @see javax.imageio.spi.ImageReaderSpi#getFormatNames
@@ -734,7 +680,7 @@ public final class ImageIO {
      * @return an {@code Iterator} containing
      * {@code ImageReader}s.
      *
-     * @exception IllegalArgumentException if {@code fileSuffix}
+     * @throws IllegalArgumentException if {@code fileSuffix}
      * is {@code null}.
      *
      * @see javax.imageio.spi.ImageReaderSpi#getFileSuffixes
@@ -769,7 +715,7 @@ public final class ImageIO {
      * @return an {@code Iterator} containing
      * {@code ImageReader}s.
      *
-     * @exception IllegalArgumentException if {@code MIMEType} is
+     * @throws IllegalArgumentException if {@code MIMEType} is
      * {@code null}.
      *
      * @see javax.imageio.spi.ImageReaderSpi#getMIMETypes
@@ -882,7 +828,7 @@ public final class ImageIO {
      * @return an {@code Iterator} containing
      * {@code ImageWriter}s.
      *
-     * @exception IllegalArgumentException if {@code formatName} is
+     * @throws IllegalArgumentException if {@code formatName} is
      * {@code null}.
      *
      * @see javax.imageio.spi.ImageWriterSpi#getFormatNames
@@ -916,7 +862,7 @@ public final class ImageIO {
      *
      * @return an {@code Iterator} containing {@code ImageWriter}s.
      *
-     * @exception IllegalArgumentException if {@code fileSuffix} is
+     * @throws IllegalArgumentException if {@code fileSuffix} is
      * {@code null}.
      *
      * @see javax.imageio.spi.ImageWriterSpi#getFileSuffixes
@@ -950,7 +896,7 @@ public final class ImageIO {
      *
      * @return an {@code Iterator} containing {@code ImageWriter}s.
      *
-     * @exception IllegalArgumentException if {@code MIMEType} is
+     * @throws IllegalArgumentException if {@code MIMEType} is
      * {@code null}.
      *
      * @see javax.imageio.spi.ImageWriterSpi#getMIMETypes
@@ -997,7 +943,7 @@ public final class ImageIO {
      *
      * @return an {@code ImageWriter}, or null.
      *
-     * @exception IllegalArgumentException if {@code reader} is
+     * @throws IllegalArgumentException if {@code reader} is
      * {@code null}.
      *
      * @see #getImageReader(ImageWriter)
@@ -1077,7 +1023,7 @@ public final class ImageIO {
      *
      * @return an {@code ImageReader}, or null.
      *
-     * @exception IllegalArgumentException if {@code writer} is
+     * @throws IllegalArgumentException if {@code writer} is
      * {@code null}.
      *
      * @see #getImageWriter(ImageReader)
@@ -1153,7 +1099,7 @@ public final class ImageIO {
      *
      * @return an {@code Iterator} containing {@code ImageWriter}s.
      *
-     * @exception IllegalArgumentException if any parameter is
+     * @throws IllegalArgumentException if any parameter is
      * {@code null}.
      *
      * @see javax.imageio.spi.ImageWriterSpi#canEncodeImage(ImageTypeSpecifier)
@@ -1240,7 +1186,7 @@ public final class ImageIO {
      * @return an {@code Iterator} containing
      * {@code ImageTranscoder}s.
      *
-     * @exception IllegalArgumentException if {@code reader} or
+     * @throws IllegalArgumentException if {@code reader} or
      * {@code writer} is {@code null}.
      */
     public static Iterator<ImageTranscoder>
@@ -1297,9 +1243,9 @@ public final class ImageIO {
      * @return a {@code BufferedImage} containing the decoded
      * contents of the input, or {@code null}.
      *
-     * @exception IllegalArgumentException if {@code input} is
+     * @throws IllegalArgumentException if {@code input} is
      * {@code null}.
-     * @exception IOException if an error occurs during reading or when not
+     * @throws IOException if an error occurs during reading or when not
      * able to create required ImageInputStream.
      */
     public static BufferedImage read(File input) throws IOException {
@@ -1348,9 +1294,9 @@ public final class ImageIO {
      * @return a {@code BufferedImage} containing the decoded
      * contents of the input, or {@code null}.
      *
-     * @exception IllegalArgumentException if {@code input} is
+     * @throws IllegalArgumentException if {@code input} is
      * {@code null}.
-     * @exception IOException if an error occurs during reading or when not
+     * @throws IOException if an error occurs during reading or when not
      * able to create required ImageInputStream.
      */
     public static BufferedImage read(InputStream input) throws IOException {
@@ -1392,9 +1338,9 @@ public final class ImageIO {
      * @return a {@code BufferedImage} containing the decoded
      * contents of the input, or {@code null}.
      *
-     * @exception IllegalArgumentException if {@code input} is
+     * @throws IllegalArgumentException if {@code input} is
      * {@code null}.
-     * @exception IOException if an error occurs during reading or when not
+     * @throws IOException if an error occurs during reading or when not
      * able to create required ImageInputStream.
      */
     public static BufferedImage read(URL input) throws IOException {
@@ -1402,7 +1348,7 @@ public final class ImageIO {
             throw new IllegalArgumentException("input == null!");
         }
 
-        InputStream istream = null;
+        InputStream istream;
         try {
             istream = input.openStream();
         } catch (IOException e) {
@@ -1418,13 +1364,11 @@ public final class ImageIO {
             throw new IIOException("Can't create an ImageInputStream!");
         }
         BufferedImage bi;
-        try {
+        try (istream) {
             bi = read(stream);
             if (bi == null) {
                 stream.close();
             }
-        } finally {
-            istream.close();
         }
         return bi;
     }
@@ -1447,9 +1391,9 @@ public final class ImageIO {
      * @return a {@code BufferedImage} containing the decoded
      * contents of the input, or {@code null}.
      *
-     * @exception IllegalArgumentException if {@code stream} is
+     * @throws IllegalArgumentException if {@code stream} is
      * {@code null}.
-     * @exception IOException if an error occurs during reading.
+     * @throws IOException if an error occurs during reading.
      */
     public static BufferedImage read(ImageInputStream stream)
         throws IOException {
@@ -1466,17 +1410,18 @@ public final class ImageIO {
         ImageReadParam param = reader.getDefaultReadParam();
         reader.setInput(stream, true, true);
         BufferedImage bi;
-        try {
+        try (stream) {
             bi = reader.read(0, param);
+        } catch (RuntimeException e) {
+            throw new IIOException(e.toString(), e);
         } finally {
             reader.dispose();
-            stream.close();
         }
         return bi;
     }
 
     /**
-     * Writes an image using the an arbitrary {@code ImageWriter}
+     * Writes an image using an arbitrary {@code ImageWriter}
      * that supports the given format to an
      * {@code ImageOutputStream}.  The image is written to the
      * {@code ImageOutputStream} starting at the current stream
@@ -1494,9 +1439,9 @@ public final class ImageIO {
      *
      * @return {@code false} if no appropriate writer is found.
      *
-     * @exception IllegalArgumentException if any parameter is
+     * @throws IllegalArgumentException if any parameter is
      * {@code null}.
-     * @exception IOException if an error occurs during writing.
+     * @throws IOException if an error occurs during writing.
      */
     public static boolean write(RenderedImage im,
                                 String formatName,
@@ -1527,9 +1472,9 @@ public final class ImageIO {
      *
      * @return {@code false} if no appropriate writer is found.
      *
-     * @exception IllegalArgumentException if any parameter is
+     * @throws IllegalArgumentException if any parameter is
      * {@code null}.
-     * @exception IOException if an error occurs during writing or when not
+     * @throws IOException if an error occurs during writing or when not
      * able to create required ImageOutputStream.
      */
     public static boolean write(RenderedImage im,
@@ -1552,10 +1497,8 @@ public final class ImageIO {
         if (stream == null) {
             throw new IIOException("Can't create an ImageOutputStream!");
         }
-        try {
+        try (stream) {
             return doWrite(im, writer, stream);
-        } finally {
-            stream.close();
         }
     }
 
@@ -1577,9 +1520,9 @@ public final class ImageIO {
      *
      * @return {@code false} if no appropriate writer is found.
      *
-     * @exception IllegalArgumentException if any parameter is
+     * @throws IllegalArgumentException if any parameter is
      * {@code null}.
-     * @exception IOException if an error occurs during writing or when not
+     * @throws IOException if an error occurs during writing or when not
      * able to create required ImageOutputStream.
      */
     public static boolean write(RenderedImage im,
@@ -1592,10 +1535,8 @@ public final class ImageIO {
         if (stream == null) {
             throw new IIOException("Can't create an ImageOutputStream!");
         }
-        try {
+        try (stream) {
             return doWrite(im, getWriter(im, formatName), stream);
-        } finally {
-            stream.close();
         }
     }
 

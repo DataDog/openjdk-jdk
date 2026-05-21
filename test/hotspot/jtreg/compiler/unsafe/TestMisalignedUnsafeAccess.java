@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 THL A29 Limited, a Tencent company. All rights reserved.
+ * Copyright (C) 2020, Tencent. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,7 +37,7 @@ import jdk.test.lib.Asserts;
 
 public class TestMisalignedUnsafeAccess {
 
-    private static final Unsafe UNSAFE = Unsafe.getUnsafe();;
+    private static final Unsafe UNSAFE = Unsafe.getUnsafe();
 
     private static short onHeapStaticMemory; // For static field testing
     private static final Object onHeapStaticMemoryBase;

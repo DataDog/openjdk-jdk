@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,14 +22,13 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "classfile/stringTable.hpp"
 #include "gc/shared/gc_globals.hpp"
 #include "gc/shared/oopStorage.inline.hpp"
 #include "gc/shared/oopStorageParState.inline.hpp"
 #include "gc/shared/oopStorageSet.hpp"
-#include "gc/shared/weakProcessor.inline.hpp"
 #include "gc/shared/oopStorageSetParState.inline.hpp"
+#include "gc/shared/weakProcessor.inline.hpp"
 #include "gc/shared/weakProcessorTimes.hpp"
 #include "memory/allocation.inline.hpp"
 #include "memory/iterator.hpp"
@@ -41,20 +40,13 @@
 #include "prims/jvmtiTagMap.hpp"
 #endif // INCLUDE_JVMTI
 
-void notify_jvmti_tagmaps() {
+static void notify_jvmti_tagmaps() {
 #if INCLUDE_JVMTI
   // Notify JVMTI tagmaps that a STW weak reference processing might be
   // clearing entries, so the tagmaps need cleaning.  Doing this here allows
   // the tagmap's oopstorage notification handler to not care whether it's
   // invoked by STW or concurrent reference processing.
   JvmtiTagMap::set_needs_cleaning();
-
-  // Notify JVMTI tagmaps that a STW collection may have moved objects, so
-  // the tagmaps need rehashing.  This isn't the right place for this, but
-  // is convenient because all the STW collectors use WeakProcessor.  One
-  // problem is that the end of a G1 concurrent collection also comes here,
-  // possibly triggering unnecessary rehashes.
-  JvmtiTagMap::set_needs_rehashing();
 #endif // INCLUDE_JVMTI
 }
 
@@ -80,7 +72,6 @@ void WeakProcessor::oops_do(OopClosure* closure) {
 }
 
 uint WeakProcessor::ergo_workers(uint max_workers) {
-  // Ignore ParallelRefProcEnabled; that's for j.l.r.Reference processing.
   if (ReferencesPerThread == 0) {
     // Configuration says always use all the threads.
     return max_workers;
@@ -125,6 +116,6 @@ void WeakProcessor::Task::report_num_dead() {
   _storage_states.report_num_dead();
 }
 
-void WeakProcessor::GangTask::work(uint worker_id) {
+void WeakProcessor::WeakOopsDoTask::work(uint worker_id) {
   _erased_do_work(this, worker_id);
 }

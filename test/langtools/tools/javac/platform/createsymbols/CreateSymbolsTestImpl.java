@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,15 +21,39 @@
  * questions.
  */
 
+/**
+ * @test
+ * @bug 8072480 8277106 8331027
+ * @summary Unit test for CreateSymbols
+ * @modules java.compiler
+ *          jdk.compiler/com.sun.tools.javac.api
+ *          jdk.compiler/com.sun.tools.javac.jvm
+ *          jdk.compiler/com.sun.tools.javac.main
+ *          jdk.compiler/com.sun.tools.javac.util
+ * @clean *
+ * @run main/othervm CreateSymbolsTest
+ */
+
 import java.io.File;
 import java.io.InputStream;
 import java.io.Writer;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.lang.classfile.ClassFile;
+import java.lang.classfile.ClassModel;
+import java.lang.classfile.attribute.ModuleAttribute;
+import java.lang.classfile.attribute.ModulePackagesAttribute;
+import java.lang.constant.PackageDesc;
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.FileVisitResult;
 import java.nio.file.FileVisitor;
 import java.nio.file.Files;
@@ -52,6 +76,11 @@ import build.tools.symbolgenerator.CreateSymbols.ClassDescription;
 import build.tools.symbolgenerator.CreateSymbols.ClassList;
 import build.tools.symbolgenerator.CreateSymbols.ExcludeIncludeList;
 import build.tools.symbolgenerator.CreateSymbols.VersionDescription;
+import java.io.UncheckedIOException;
+import java.lang.classfile.attribute.ModuleMainClassAttribute;
+import java.lang.constant.ClassDesc;
+import java.util.Objects;
+import java.util.function.Consumer;
 
 public class CreateSymbolsTestImpl {
 
@@ -346,7 +375,7 @@ public class CreateSymbolsTestImpl {
                            "public class T {\n" +
                            "  public static final java.lang.String STR = \"\\u0000\\u0001\\uffff\";\n" +
                            "  public static final java.lang.String EMPTY = \"\";\n" +
-                           "  public static final java.lang.String AMP = \"&amp;&&lt;<&gt;>&apos;\\'\";\n\n" +
+                           "  public static final java.lang.String AMP = \"&amp;&&lt;<&gt;>&apos;'\";\n\n" +
                            "  public T();\n" +
                            "}\n",
                            "t.T",
@@ -641,6 +670,411 @@ public class CreateSymbolsTestImpl {
                            """);
     }
 
+    @Test
+    void testNonExportedSuperclass() throws Exception {
+        doTestComplex("api.Api",
+                      """
+                      package api;
+
+                      public class Api extends nonapi.Impl.Nested.Exp {
+
+                        public Api();
+                      }
+                      """,
+                      """
+                      import api.Api;
+                      public class Test {
+                          private void t(Api api) {
+                            api.run();
+                          }
+                      }
+                      """,
+                      """
+                      import api.Api;
+                      public class Test {
+                          private void t(Api api) {
+                              fail
+                          }
+                      }
+                      """,
+                      """
+                      module m {
+                          exports api;
+                      }
+                      """,
+                      """
+                      package api;
+                      import nonapi.Impl;
+                      public class Api extends Impl.Nested.Exp {
+                      }
+                      """,
+                      """
+                      package api;
+                      public @interface Ann {
+                      }
+                      """,
+                      """
+                      package nonapi;
+                      import api.Ann;
+                      public class Impl {
+                          public static final String C = "";
+                          public void test() {}
+                          @Ann
+                          public static class Nested {
+                              public static class Exp extends Nested implements Runnable {
+                                  public void run() {}
+                                  public OtherNested get() { return null; }
+                              }
+                          }
+                          public static class OtherNested {}
+                      }
+                      """);
+    }
+
+    void doTestComplex(String printClass,
+                      String expected,
+                      String depSuccess,
+                      String depFailure,
+                      String... code) throws Exception {
+        ToolBox tb = new ToolBox();
+        String testClasses = System.getProperty("test.classes");
+        Path output = Paths.get(testClasses, "test-data" + i++);
+        deleteRecursively(output);
+        Files.createDirectories(output);
+        Path ver9Jar = output.resolve("9.jar");
+        compileAndPack(output,
+                       ver9Jar,
+                       code);
+
+
+        Path ctSym = output.resolve("ct.sym");
+
+        deleteRecursively(ctSym);
+
+        CreateSymbols.ALLOW_NON_EXISTING_CLASSES = true;
+        CreateSymbols.EXTENSION = ".class";
+
+        deleteRecursively(ctSym);
+
+        List<VersionDescription> versions =
+                Arrays.asList(new VersionDescription(ver9Jar.toAbsolutePath().toString(), "9", null));
+
+        ExcludeIncludeList acceptAll = new ExcludeIncludeList(null, null) {
+            @Override public boolean accepts(String className, boolean includePrivateClasses) {
+                return true;
+            }
+        };
+        new CreateSymbols().createBaseLine(versions, acceptAll, ctSym, new String[0]);
+        Path symbolsDesc = ctSym.resolve("symbols");
+        Path modules = ctSym.resolve("modules");
+        Path modulesList = ctSym.resolve("modules-list");
+
+        Files.createDirectories(modules);
+        try (Writer w = Files.newBufferedWriter(modulesList)) {}
+
+        Path classesZip = output.resolve("classes.zip");
+        Path classesDir = output.resolve("classes");
+
+        new CreateSymbols().createSymbols(null, symbolsDesc.toAbsolutePath().toString(), classesZip.toAbsolutePath().toString(), 0, "9", "", modules.toString(), modulesList.toString());
+
+        try (JarFile jf = new JarFile(classesZip.toFile())) {
+            Enumeration<JarEntry> en = jf.entries();
+
+            while (en.hasMoreElements()) {
+                JarEntry je = en.nextElement();
+                if (je.isDirectory()) continue;
+                Path target = classesDir.resolve(je.getName());
+                Files.createDirectories(target.getParent());
+                Files.copy(jf.getInputStream(je), target);
+            }
+        }
+
+        Path classes = classesDir;
+        Path scratch = output.resolve("scratch");
+
+        Files.createDirectories(scratch);
+
+        String modulePath;
+
+        try (Stream<Path> elements = Files.list(classes)) {
+            modulePath = elements.filter(el -> el.getFileName().toString().contains("9"))
+                            .map(el -> el.resolve("m"))
+                            .map(el -> el.toAbsolutePath().toString())
+                            .collect(Collectors.joining(File.pathSeparator));
+        }
+
+        {
+            String out = new JavacTask(tb, Task.Mode.CMDLINE)
+                    .options("-d", scratch.toAbsolutePath().toString(), "--module-path", modulePath,
+                             "--add-modules", "m",  "-Xprint", "api.Api")
+                    .run(Expect.SUCCESS)
+                    .getOutput(Task.OutputKind.STDOUT)
+                    .replaceAll("\\R", "\n");
+
+            if (!out.equals(expected)) {
+                throw new AssertionError("out=" + out + "; expected=" + expected);
+            }
+        }
+
+        {
+            new JavacTask(tb)
+                    .options("-d", scratch.toAbsolutePath().toString(), "--module-path", modulePath,
+                             "--add-modules", "m")
+                    .sources(depSuccess)
+                    .run(Expect.SUCCESS)
+                    .writeAll();
+        }
+
+        {
+            String expectedFailure = new JavacTask(tb)
+                    .options("-d", scratch.toAbsolutePath().toString(), "--module-path", output.resolve("temp").toString(),
+                             "--add-modules", "m", "-XDrawDiagnostics")
+                    .sources(depFailure)
+                    .run(Expect.FAIL)
+                    .getOutput(Task.OutputKind.DIRECT)
+                    .replaceAll("\\R", "\n");
+
+            String out = new JavacTask(tb)
+                    .options("-d", scratch.toAbsolutePath().toString(), "--module-path", modulePath,
+                             "--add-modules", "m", "-XDrawDiagnostics")
+                    .sources(depFailure)
+                    .run(Expect.FAIL)
+                    .getOutput(Task.OutputKind.DIRECT)
+                    .replaceAll("\\R", "\n");
+
+            if (!out.equals(expectedFailure)) {
+                throw new AssertionError("out=" + out + "; expected=" + expectedFailure);
+            }
+        }
+    }
+
+    @Test
+    void testExtendsInternalData1() throws Exception {
+        doTestData("""
+                   module name m
+                   header exports api extraModulePackages nonapi requires name\\u0020;java.base\\u0020;flags\\u0020;8000\\u0020;version\\u0020;0 flags 8000
+
+                   class name api/Ann
+                   header extends java/lang/Object implements java/lang/annotation/Annotation flags 2601
+
+                   class name api/Api
+                   header extends nonapi/Impl$Nested$Exp flags 21
+                   innerclass innerClass nonapi/Impl$Nested outerClass nonapi/Impl innerClassName Nested flags 9
+                   innerclass innerClass nonapi/Impl$Nested$Exp outerClass nonapi/Impl$Nested innerClassName Exp flags 9
+                   method name <init> descriptor ()V flags 1
+
+                   class name nonapi/Impl
+                   header extends java/lang/Object nestMembers nonapi/Impl$Nested,nonapi/Impl$Nested$Exp flags 21
+                   innerclass innerClass nonapi/Impl$Nested outerClass nonapi/Impl innerClassName Nested flags 9
+                   innerclass innerClass nonapi/Impl$Nested$Exp outerClass nonapi/Impl$Nested innerClassName Exp flags 9
+                   field name C descriptor Ljava/lang/String; constantValue  flags 19
+                   method name <init> descriptor ()V flags 1
+                   method name test descriptor ()V flags 1
+
+                   class name nonapi/Impl$Nested
+                   header extends java/lang/Object nestHost nonapi/Impl flags 21 classAnnotations @Lapi/Ann;
+                   innerclass innerClass nonapi/Impl$Nested outerClass nonapi/Impl innerClassName Nested flags 9
+                   innerclass innerClass nonapi/Impl$Nested$Exp outerClass nonapi/Impl$Nested innerClassName Exp flags 9
+                   method name <init> descriptor ()V flags 1
+
+                   class name nonapi/Impl$Nested$Exp
+                   header extends nonapi/Impl$Nested implements java/lang/Runnable nestHost nonapi/Impl flags 21
+                   innerclass innerClass nonapi/Impl$Nested outerClass nonapi/Impl innerClassName Nested flags 9
+                   innerclass innerClass nonapi/Impl$Nested$Exp outerClass nonapi/Impl$Nested innerClassName Exp flags 9
+                   method name <init> descriptor ()V flags 1
+                   method name run descriptor ()V flags 1
+                   method name get descriptor ()Lnonapi/Impl$OtherNested; flags 1
+
+                   """,
+                   """
+                   module m {
+                       exports api;
+                       exports nonapi to java.base;
+                   }
+                   """,
+                   """
+                   package api;
+                   import nonapi.Impl;
+                   public class Api extends Impl.Nested.Exp {
+                   }
+                   """,
+                   """
+                   package api;
+                   public @interface Ann {
+                   }
+                   """,
+                   """
+                   package nonapi;
+                   import api.Ann;
+                   public class Impl {
+                       public static final String C = "";
+                       public void test() {}
+                       @Ann
+                       public static class Nested {
+                           public static class Exp extends Nested implements Runnable {
+                               public void run() {}
+                               public OtherNested get() { return null; }
+                           }
+                       }
+                       public static class OtherNested {}
+                   }
+                   """);
+    }
+
+    @Test
+    void testTypeAnnotations() throws Exception {
+        doPrintElementTest("""
+                           package t;
+                           public class T {
+                           }
+                           """,
+                           """
+                           package t;
+                           import java.lang.annotation.*;
+                           import java.util.*;
+                           public class T<@AnnInvisible @AnnVisible E extends @AnnInvisible @AnnVisible ArrayList<@AnnInvisible @AnnVisible ArrayList>> extends @AnnInvisible @AnnVisible ArrayList {
+                               public @AnnInvisible @AnnVisible List<@AnnInvisible @AnnVisible E> field;
+                               public <@AnnInvisible @AnnVisible M extends @AnnInvisible @AnnVisible ArrayList<@AnnInvisible @AnnVisible ArrayList>> @AnnInvisible @AnnVisible List<@AnnInvisible @AnnVisible M> convert(@AnnInvisible @AnnVisible T<E> this, @AnnInvisible @AnnVisible M e1, @AnnInvisible @AnnVisible List<@AnnInvisible @AnnVisible E> e2) throws @AnnInvisible @AnnVisible IllegalStateException, @AnnInvisible @AnnVisible IllegalArgumentException {
+                                   return null;
+                               }
+                           }
+                           @Retention(RetentionPolicy.RUNTIME)
+                           @Target(ElementType.TYPE_USE)
+                           @interface AnnVisible {
+                           }
+                           @Retention(RetentionPolicy.CLASS)
+                           @Target(ElementType.TYPE_USE)
+                           @interface AnnInvisible {
+                           }
+                           """,
+                           "t.T",
+                           """
+                           package t;
+
+                           public class T {
+
+                             public T();
+                           }
+                           """,
+                           "t.T",
+                           """
+                           package t;
+
+                           public class T<@t.AnnInvisible @t.AnnVisible E extends java.util.@t.AnnInvisible @t.AnnVisible ArrayList<java.util.@t.AnnInvisible @t.AnnVisible ArrayList>> extends java.util.@t.AnnInvisible @t.AnnVisible ArrayList {
+                             public java.util.@t.AnnInvisible @t.AnnVisible List<@t.AnnInvisible @t.AnnVisible E> field;
+
+                             public T();
+
+                             public <@t.AnnInvisible @t.AnnVisible M extends java.util.@t.AnnInvisible @t.AnnVisible ArrayList<java.util.@t.AnnInvisible @t.AnnVisible ArrayList>> java.util.@t.AnnInvisible @t.AnnVisible List<@t.AnnInvisible @t.AnnVisible M> convert(@t.AnnInvisible @t.AnnVisible M arg0,
+                               java.util.@t.AnnInvisible @t.AnnVisible List<@t.AnnInvisible @t.AnnVisible E> arg1) throws java.lang.@t.AnnInvisible @t.AnnVisible IllegalStateException,\s
+                               java.lang.@t.AnnInvisible @t.AnnVisible IllegalArgumentException;
+                           }
+                           """);
+    }
+
+    @Test
+    void testParameterAnnotations() throws Exception {
+        doPrintElementTest("""
+                           package t;
+                           public class T {
+                               public void test(int p1, int p2) {
+                               }
+                           }
+                           """,
+                           """
+                           package t;
+                           import java.lang.annotation.*;
+                           import java.util.*;
+                           public class T {
+                               public void test(@AnnVisible int p1, @AnnInvisible int p2) {
+                               }
+                           }
+                           @Retention(RetentionPolicy.RUNTIME)
+                           @Target(ElementType.PARAMETER)
+                           @interface AnnVisible {
+                           }
+                           @Retention(RetentionPolicy.CLASS)
+                           @Target(ElementType.PARAMETER)
+                           @interface AnnInvisible {
+                           }
+                           """,
+                           "t.T",
+                           """
+                           package t;
+
+                           public class T {
+
+                             public T();
+
+                             public void test(int arg0,
+                               int arg1);
+                           }
+                           """,
+                           "t.T",
+                           """
+                           package t;
+
+                           public class T {
+
+                             public T();
+
+                             public void test(@t.AnnVisible int arg0,
+                               @t.AnnInvisible int arg1);
+                           }
+                           """);
+    }
+
+    void doTestData(String data,
+                          String... code) throws Exception {
+        String testClasses = System.getProperty("test.classes");
+        Path output = Paths.get(testClasses, "test-data" + i++);
+        deleteRecursively(output);
+        Files.createDirectories(output);
+        Path ver9Jar = output.resolve("9.jar");
+        compileAndPack(output,
+                       ver9Jar,
+                       code);
+
+        Path ctSym = output.resolve("ct.sym");
+
+        deleteRecursively(ctSym);
+
+        CreateSymbols.ALLOW_NON_EXISTING_CLASSES = true;
+        CreateSymbols.DO_NOT_MODIFY = "";
+        CreateSymbols.EXTENSION = ".class";
+        CreateSymbols.INJECTED_VERSION = "0";
+
+        deleteRecursively(ctSym);
+
+        List<VersionDescription> versions =
+                Arrays.asList(new VersionDescription(ver9Jar.toAbsolutePath().toString(), "9", null));
+
+        ExcludeIncludeList acceptAll = new ExcludeIncludeList(null, null) {
+            @Override public boolean accepts(String className, boolean includePrivateClasses) {
+                return true;
+            }
+        };
+        new CreateSymbols().createBaseLine(versions, acceptAll, ctSym, new String[0]);
+
+        Path symFile = null;
+
+        try (DirectoryStream<Path> ds = Files.newDirectoryStream(ctSym)) {
+            for (Path p : ds) {
+                if (p.toString().endsWith(".sym.txt")) {
+                    if (symFile != null) {
+                        throw new IllegalStateException("Multiple sym files!");
+                    } else {
+                        symFile = p;
+                    }
+                }
+            }
+        }
+        String acutalContent = new String(Files.readAllBytes(symFile), StandardCharsets.UTF_8);
+        if (!acutalContent.equals(data)) {
+            throw new AssertionError("out=" + acutalContent + "; expected=" + data);
+        }
+    }
+
     void doTestIncluded(String code, String... includedClasses) throws Exception {
         boolean oldIncludeAll = includeAll;
         try {
@@ -665,14 +1099,19 @@ public class CreateSymbolsTestImpl {
     }
 
     Path prepareVersionedCTSym(String[] code7, String[] code8) throws Exception {
+        return prepareVersionedCTSym(code7, code8, _ -> {});
+    }
+
+    Path prepareVersionedCTSym(String[] code7, String[] code8,
+                               Consumer<Path> adjustClassFiles) throws Exception {
         String testClasses = System.getProperty("test.classes");
         Path output = Paths.get(testClasses, "test-data" + i++);
         deleteRecursively(output);
         Files.createDirectories(output);
         Path ver7Jar = output.resolve("7.jar");
-        compileAndPack(output, ver7Jar, code7);
+        compileAndPack(output, ver7Jar, adjustClassFiles, code7);
         Path ver8Jar = output.resolve("8.jar");
-        compileAndPack(output, ver8Jar, code8);
+        compileAndPack(output, ver8Jar, adjustClassFiles, code8);
 
         Path classes = output.resolve("classes.zip");
 
@@ -712,7 +1151,7 @@ public class CreateSymbolsTestImpl {
                               new VersionDescription(jar8.toAbsolutePath().toString(), "8", "7"));
 
         ExcludeIncludeList acceptAll = new ExcludeIncludeList(null, null) {
-            @Override public boolean accepts(String className) {
+            @Override public boolean accepts(String className, boolean includePrivateClasses) {
                 return true;
             }
         };
@@ -723,19 +1162,121 @@ public class CreateSymbolsTestImpl {
             }
         }.createBaseLine(versions, acceptAll, descDest, new String[0]);
         Path symbolsDesc = descDest.resolve("symbols");
-        Path systemModules = descDest.resolve("systemModules");
+        Path modules = descDest.resolve("modules");
+        Path modulesList = descDest.resolve("modules-list");
 
-        Files.newBufferedWriter(systemModules).close();
+        Files.createDirectories(modules);
+        try (Writer w = Files.newBufferedWriter(modulesList)) {}
 
-        try {
-        new CreateSymbols().createSymbols(null, symbolsDesc.toAbsolutePath().toString(), classDest, 0, "8", systemModules.toString());
-        } catch (Throwable t) {
-            t.printStackTrace();
-            throw t;
+        new CreateSymbols().createSymbols(null, symbolsDesc.toAbsolutePath().toString(), classDest, 0, "8", "", modules.toString(), modulesList.toString());
+    }
+
+    @Test
+    void testModuleMainClass() throws Exception {
+        ClassFile cf = ClassFile.of();
+        ToolBox tb = new ToolBox();
+        String testClasses = System.getProperty("test.classes");
+        Path output = Paths.get(testClasses, "test-data" + i++);
+        deleteRecursively(output);
+        Files.createDirectories(output);
+        Path ver9Jar = output.resolve("9.jar");
+        compileAndPack(output,
+                       ver9Jar,
+                       classesDir -> {
+                           try {
+                               Path moduleInfo = classesDir.resolve("module-info.class");
+                               byte[] newClassData =
+                                       cf.transformClass(cf.parse(moduleInfo),
+                                                    (builder, element) -> {
+                                                        builder.with(element);
+                                                        if (element instanceof ModuleAttribute) {
+                                                            builder.with(ModuleMainClassAttribute.of(ClassDesc.of("main.Main")));
+                                                        }
+                                                    });
+                               try (OutputStream out = Files.newOutputStream(moduleInfo)) {
+                                   out.write(newClassData);
+                               }
+                           } catch (IOException ex) {
+                               throw new UncheckedIOException(ex);
+                           }
+                       },
+                       """
+                       module m {
+                       }
+                       """,
+                       """
+                       package main;
+                       public class Main {}
+                       """);
+
+
+        Path ctSym = output.resolve("ct.sym");
+
+        deleteRecursively(ctSym);
+
+        CreateSymbols.ALLOW_NON_EXISTING_CLASSES = true;
+        CreateSymbols.EXTENSION = ".class";
+
+        List<VersionDescription> versions =
+                Arrays.asList(new VersionDescription(ver9Jar.toAbsolutePath().toString(), "9", null));
+
+        ExcludeIncludeList acceptAll = new ExcludeIncludeList(null, null) {
+            @Override public boolean accepts(String className, boolean includePrivateClasses) {
+                return true;
+            }
+        };
+        new CreateSymbols().createBaseLine(versions, acceptAll, ctSym, new String[0]);
+        Path symbolsDesc = ctSym.resolve("symbols");
+        Path modules = ctSym.resolve("modules");
+        Path modulesList = ctSym.resolve("modules-list");
+
+        Files.createDirectories(modules);
+        try (Writer w = Files.newBufferedWriter(modulesList)) {}
+
+        Path classesZip = output.resolve("classes.zip");
+        Path classesDir = output.resolve("classes");
+
+        new CreateSymbols().createSymbols(null, symbolsDesc.toAbsolutePath().toString(), classesZip.toAbsolutePath().toString(), 0, "9", "", modules.toString(), modulesList.toString());
+
+        try (JarFile jf = new JarFile(classesZip.toFile())) {
+            Enumeration<JarEntry> en = jf.entries();
+
+            while (en.hasMoreElements()) {
+                JarEntry je = en.nextElement();
+                if (je.isDirectory()) continue;
+                Path target = classesDir.resolve(je.getName());
+                Files.createDirectories(target.getParent());
+                Files.copy(jf.getInputStream(je), target);
+            }
         }
+
+        Path moduleInfo = classesDir.resolve("9")
+                                    .resolve("m")
+                                    .resolve("module-info.class");
+
+        cf.parse(moduleInfo)
+          .attributes()
+          .stream()
+          .filter(attr -> attr instanceof ModuleMainClassAttribute)
+          .forEach(attr -> {
+              String expectedMain = "Lmain/Main;";
+              String mainClass =
+                      ((ModuleMainClassAttribute) attr).mainClass()
+                                                       .asSymbol()
+                                                       .descriptorString();
+              if (!Objects.equals(expectedMain, mainClass)) {
+                  throw new AssertionError("Expected " + expectedMain + " as a main class, " +
+                                           "but got: " + mainClass);
+              }
+          });
     }
 
     void compileAndPack(Path output, Path outputFile, String... code) throws Exception {
+        compileAndPack(output, outputFile, _ -> {}, code);
+    }
+
+    void compileAndPack(Path output, Path outputFile,
+                        Consumer<Path> adjustClassFiles, String... code) throws Exception {
         ToolBox tb = new ToolBox();
         Path scratch = output.resolve("temp");
         deleteRecursively(scratch);
@@ -743,6 +1284,30 @@ public class CreateSymbolsTestImpl {
         System.err.println(Arrays.asList(code));
         new JavacTask(tb).sources(code).options("-d", scratch.toAbsolutePath().toString()).run(Expect.SUCCESS);
         List<String> classFiles = collectClassFile(scratch);
+        Path moduleInfo = scratch.resolve("module-info.class");
+        if (Files.exists(moduleInfo)) {
+            Set<String> packages = new HashSet<>();
+            for (String cf : classFiles) {
+                int sep = cf.lastIndexOf(scratch.getFileSystem().getSeparator());
+                if (sep != (-1)) {
+                    packages.add(cf.substring(0, sep));
+                }
+            }
+            ClassFile cf = ClassFile.of();
+            ClassModel cm = cf.parse(moduleInfo);
+            byte[] newData = cf.transformClass(cm, (builder, element) -> {
+                builder.with(element);
+                if (element instanceof ModuleAttribute) {
+                    builder.with(ModulePackagesAttribute.ofNames(packages.stream()
+                                                                         .map(pack -> PackageDesc.of(pack))
+                                                                         .toList()));
+                }
+            });
+            try (OutputStream out = Files.newOutputStream(moduleInfo)) {
+                out.write(newData);
+            }
+        }
+        adjustClassFiles.accept(scratch);
         try (Writer out = Files.newBufferedWriter(outputFile)) {
             for (String classFile : classFiles) {
                 try (InputStream in = Files.newInputStream(scratch.resolve(classFile))) {

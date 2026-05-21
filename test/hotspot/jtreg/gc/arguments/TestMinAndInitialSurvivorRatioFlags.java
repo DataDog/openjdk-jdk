@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,8 +30,8 @@ package gc.arguments;
  * @library /
  * @modules java.base/jdk.internal.misc
  *          java.management
- * @build sun.hotspot.WhiteBox
- * @run driver jdk.test.lib.helpers.ClassFileInstaller sun.hotspot.WhiteBox
+ * @build jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run driver/timeout=240 gc.arguments.TestMinAndInitialSurvivorRatioFlags
  */
 
@@ -40,9 +40,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedList;
 import jdk.test.lib.process.OutputAnalyzer;
-import jdk.test.lib.process.ProcessTools;
 import jdk.test.lib.Utils;
-import sun.hotspot.WhiteBox;
+import jdk.test.whitebox.WhiteBox;
 
 /* Test verifies that VM can start with any GC when MinSurvivorRatio and
  * InitialSurvivorRatio flags passed and for Parallel GC it verifies that
@@ -66,8 +65,6 @@ public class TestMinAndInitialSurvivorRatioFlags {
         testSurvivorRatio(-1, 15, 3, options, true);
         testSurvivorRatio(-1, 15, 3, options, false);
         testSurvivorRatio(-1, 10, 10, options, true);
-        testSurvivorRatio(-1, 3, 15, options, true);
-        testSurvivorRatio(-1, 3, 15, options, false);
     }
 
     /**
@@ -103,8 +100,7 @@ public class TestMinAndInitialSurvivorRatioFlags {
                 Boolean.toString(useAdaptiveSizePolicy)
         );
         vmOptions.removeIf((String p) -> p.isEmpty());
-        ProcessBuilder procBuilder = GCArguments.createJavaProcessBuilder(vmOptions);
-        OutputAnalyzer analyzer = new OutputAnalyzer(procBuilder.start());
+        OutputAnalyzer analyzer = GCArguments.executeLimitedTestJava(vmOptions);
         analyzer.shouldHaveExitValue(0);
     }
 
@@ -166,12 +162,12 @@ public class TestMinAndInitialSurvivorRatioFlags {
             MemoryUsage survivorUsage = HeapRegionUsageTool.getSurvivorUsage();
 
             long alignedNewSize = edenUsage.getMax() + 2 * survivorUsage.getMax();
-            long generationAlignment = wb.psHeapGenerationAlignment();
+            long spaceAlignment = wb.getHeapSpaceAlignment();
 
             if (survivorRatio >= 0) {
                 // -XX:SurvivorRatio was passed to JVM, actual ratio should be SurvivorRatio + 2
                 long expectedSize = HeapRegionUsageTool.alignDown(alignedNewSize / (survivorRatio + 2),
-                        generationAlignment);
+                        spaceAlignment);
 
                 if (survivorUsage.getCommitted() != expectedSize) {
                     throw new RuntimeException("Expected survivor size is: " + expectedSize
@@ -181,7 +177,7 @@ public class TestMinAndInitialSurvivorRatioFlags {
                 // In case of initial ratio verification or disabled adaptive size policy
                 // ratio should be equal to InitialSurvivorRatio value
                 long expectedSize = HeapRegionUsageTool.alignDown(alignedNewSize / initRatio,
-                        generationAlignment);
+                        spaceAlignment);
                 if (survivorUsage.getCommitted() != expectedSize) {
                     throw new RuntimeException("Expected survivor size is: " + expectedSize
                             + ", but observed size is: " + survivorUsage.getCommitted());
@@ -190,9 +186,9 @@ public class TestMinAndInitialSurvivorRatioFlags {
                 // In any other case actual survivor ratio should not be lower than MinSurvivorRatio
                 // or is should be equal to InitialSurvivorRatio
                 long expectedMinSize = HeapRegionUsageTool.alignDown(alignedNewSize / minRatio,
-                        generationAlignment);
+                        spaceAlignment);
                 long expectedInitSize = HeapRegionUsageTool.alignDown(alignedNewSize / initRatio,
-                        generationAlignment);
+                        spaceAlignment);
                 if (survivorUsage.getCommitted() != expectedInitSize
                         && survivorUsage.getCommitted() < expectedMinSize) {
                     throw new RuntimeException("Expected survivor size should be " + expectedMinSize

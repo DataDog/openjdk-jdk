@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  */
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
@@ -84,7 +84,7 @@ import org.w3c.dom.traversal.TreeWalker;
  * @author Andy Clark, IBM
  * @author Ralf Pfeiffer, IBM
  * @since  PR-DOM-Level-1-19980818.
- * @LastModified: Nov 2017
+ * @LastModified: Jan 2025
  */
 public class DocumentImpl
     extends CoreDocumentImpl
@@ -507,6 +507,7 @@ public class DocumentImpl
 
         private static final long serialVersionUID = -8426757059492421631L;
         String type;
+        @SuppressWarnings("serial") // Type of field is not Serializable
         EventListener listener;
         boolean useCapture;
 
@@ -680,7 +681,7 @@ public class DocumentImpl
      *              method was invoked by an EventListener; otherwise false.
     */
     @Override
-    @SuppressWarnings({"rawtypes", "unchecked"})
+    @SuppressWarnings("unchecked")
     protected boolean dispatchEvent(NodeImpl node, Event event) {
         if (event == null) return false;
 

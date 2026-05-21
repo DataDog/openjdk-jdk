@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -106,7 +106,7 @@ final class WDesktopProperties {
     private synchronized void setBooleanProperty(String key, boolean value) {
         assert( key != null );
         if (log.isLoggable(PlatformLogger.Level.FINE)) {
-            log.fine(key + "=" + String.valueOf(value));
+            log.fine(key + "=" + value);
         }
         map.put(key, Boolean.valueOf(value));
     }
@@ -117,7 +117,7 @@ final class WDesktopProperties {
     private synchronized void setIntegerProperty(String key, int value) {
         assert( key != null );
         if (log.isLoggable(PlatformLogger.Level.FINE)) {
-            log.fine(key + "=" + String.valueOf(value));
+            log.fine(key + "=" + value);
         }
         map.put(key, Integer.valueOf(value));
     }
@@ -198,7 +198,7 @@ final class WDesktopProperties {
      */
     private native void playWindowsSound(String winEventName);
 
-    class WinPlaySound implements Runnable {
+    final class WinPlaySound implements Runnable {
         String  winEventName;
 
         WinPlaySound(String winEventName) {
@@ -210,10 +210,12 @@ final class WDesktopProperties {
             WDesktopProperties.this.playWindowsSound(winEventName);
         }
 
+        @Override
         public String toString() {
             return "WinPlaySound("+winEventName+")";
         }
 
+        @Override
         public boolean equals(Object o) {
             if (o == this) {
                 return true;
@@ -225,6 +227,7 @@ final class WDesktopProperties {
             }
         }
 
+        @Override
         public int hashCode() {
             return winEventName.hashCode();
         }
@@ -268,7 +271,7 @@ final class WDesktopProperties {
 
         Boolean smoothingOn = (Boolean)map.get("win.text.fontSmoothingOn");
 
-        if (smoothingOn != null && smoothingOn.equals(Boolean.TRUE)) {
+        if (Boolean.TRUE.equals(smoothingOn)) {
             Integer typeID = (Integer)map.get("win.text.fontSmoothingType");
             /* "1" is GASP/Standard but we'll also use that if the return
              * value is anything other than "2" for LCD.

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,184 +27,505 @@ package sun.security.util.math.intpoly;
 
 import java.math.BigInteger;
 
-/**
- * An IntegerFieldModuloP designed for use with the Curve25519.
- * The representation uses 10 signed long values.
- */
+public final class IntegerPolynomial25519 extends IntegerPolynomial {
+    private static final int BITS_PER_LIMB = 51;
+    private static final int NUM_LIMBS = 5;
+    private static final int MAX_ADDS = 1;
+    public static final BigInteger MODULUS = evaluateModulus();
+    private static final long CARRY_ADD = 1L << (BITS_PER_LIMB - 1);
+    private static final long LIMB_MASK = -1L >>> (64 - BITS_PER_LIMB);
 
-public class IntegerPolynomial25519 extends IntegerPolynomial {
+    public static final IntegerPolynomial25519 ONE =
+            new IntegerPolynomial25519();
 
-    private static final int POWER = 255;
-    private static final int SUBTRAHEND = 19;
-    private static final int NUM_LIMBS = 10;
-    private static final int BITS_PER_LIMB = 26;
-    public static final BigInteger MODULUS
-        = TWO.pow(POWER).subtract(BigInteger.valueOf(SUBTRAHEND));
-
-    // BITS_PER_LIMB does not divide POWER, so reduction is a bit complicated
-    // The constants below help split up values during reduction
-    private static final int BIT_OFFSET = NUM_LIMBS * BITS_PER_LIMB - POWER;
-    private static final int LIMB_MASK = -1 >>> (64 - BITS_PER_LIMB);
-    private static final int RIGHT_BIT_OFFSET = BITS_PER_LIMB - BIT_OFFSET;
-
-    public IntegerPolynomial25519() {
-        super(BITS_PER_LIMB, NUM_LIMBS, 1, MODULUS);
+    private IntegerPolynomial25519() {
+        super(BITS_PER_LIMB, NUM_LIMBS, MAX_ADDS, MODULUS);
     }
 
+    private static BigInteger evaluateModulus() {
+        BigInteger result = BigInteger.valueOf(2).pow(255);
+        result = result.subtract(BigInteger.valueOf(19));
+
+        return result;
+    }
+
+    /**
+     * Carry from a range of limb positions.
+     * Override for performance (unnesting).
+     *
+     * @param limbs [in|out] the limbs for carry operation.
+     * @param start [in] the starting position of carry.
+     * @param end [in] the ending position of carry.
+     */
     @Override
+    protected void carry(long[] limbs, int start, int end) {
+        long carry;
+
+        for (int i = start; i < end; i++) {
+            carry = (limbs[i] + CARRY_ADD) >> BITS_PER_LIMB;
+            limbs[i] -= (carry << BITS_PER_LIMB);
+            limbs[i + 1] += carry;
+        }
+    }
+
+    /**
+     * Carry operation for all limb positions.
+     * Override for performance (unroll and unnesting).
+     *
+     * @param limbs [in|out] the limbs for carry operation.
+     */
+    @Override
+    protected void carry(long[] limbs) {
+        long carry = (limbs[0] + CARRY_ADD) >> BITS_PER_LIMB;
+        limbs[0] -= carry << BITS_PER_LIMB;
+        limbs[1] += carry;
+
+        carry = (limbs[1] + CARRY_ADD) >> BITS_PER_LIMB;
+        limbs[1] -= carry << BITS_PER_LIMB;
+        limbs[2] += carry;
+
+        carry = (limbs[2] + CARRY_ADD) >> BITS_PER_LIMB;
+        limbs[2] -= carry << BITS_PER_LIMB;
+        limbs[3] += carry;
+
+        carry = (limbs[3] + CARRY_ADD) >> BITS_PER_LIMB;
+        limbs[3] -= carry << BITS_PER_LIMB;
+        limbs[4] += carry;
+    }
+
+    /**
+     * Multiply limbs by scalar value.
+     * Superclass assumes that limb primitive radix > (bits per limb * 2)
+     *
+     * @param a [in|out] the limbs to multiply a carry operation. 'a' is
+     * assumed to be reduced.
+     * @param b [in] the scalar value to be muliplied with the limbs.
+     */
+    @Override
+    protected void multByInt(long[] a, long b) {
+        long aa0 = a[0];
+        long aa1 = a[1];
+        long aa2 = a[2];
+        long aa3 = a[3];
+        long aa4 = a[4];
+
+        long bb0 = b;
+
+        final long shift1 = 64 - BITS_PER_LIMB;
+        final long shift2 = BITS_PER_LIMB;
+
+        long d0;      // low digit from multiplication
+        long dd0;     // high digit from multiplication
+        // multiplication result digits for each column
+        long c0, c1, c2, c3, c4, c5;
+
+        // Row 0 - multiply by aa0
+        d0 = aa0 * bb0;
+        dd0 = Math.multiplyHigh(aa0, bb0) << shift1 | (d0 >>> shift2);
+        d0 &= LIMB_MASK;
+
+        c0 = d0;
+        c1 = dd0;
+
+        // Row 1 - multiply by aa1
+        d0 = aa1 * bb0;
+        dd0 = Math.multiplyHigh(aa1, bb0) << shift1 | (d0 >>> shift2);
+        d0 &= LIMB_MASK;
+
+        c1 += d0;
+        c2 = dd0;
+
+        // Row 2 - multiply by aa2
+        d0 = aa2 * bb0;
+        dd0 = Math.multiplyHigh(aa2, bb0) << shift1 | (d0 >>> shift2);
+        d0 &= LIMB_MASK;
+
+        c2 += d0;
+        c3 = dd0;
+
+        // Row 3 - multiply by aa3
+        d0 = aa3 * bb0;
+        dd0 = Math.multiplyHigh(aa3, bb0) << shift1 | (d0 >>> shift2);
+        d0 &= LIMB_MASK;
+
+        c3 += d0;
+        c4 = dd0;
+
+        // Row 4 - multiply by aa4
+        d0 = aa4 * bb0;
+        dd0 = Math.multiplyHigh(aa4, bb0) << shift1 | (d0 >>> shift2);
+        d0 &= LIMB_MASK;
+
+        c4 += d0;
+        c5 = dd0;
+
+        // Perform pseudo-Mersenne reduction
+        a[0] = c0 + (19 * c5);
+
+        a[1] = c1;
+        a[2] = c2;
+        a[3] = c3;
+        a[4] = c4;
+
+        reduce(a);
+    }
+
+    /**
+     * Carry in all positions and reduce high order limb.
+     *
+     * @param limbs [in|out] the limbs to carry and reduce.
+     */
+    protected void reduce(long[] limbs) {
+        long carry = (limbs[3] + CARRY_ADD) >> BITS_PER_LIMB;
+        limbs[3] -= carry << BITS_PER_LIMB;
+        limbs[4] += carry;
+
+        carry = (limbs[4] + CARRY_ADD) >> BITS_PER_LIMB;
+        limbs[4] -= carry << BITS_PER_LIMB;
+
+        limbs[0] += 19 * carry;
+
+        carry = (limbs[0] + CARRY_ADD) >> BITS_PER_LIMB;
+        limbs[0] -= carry << BITS_PER_LIMB;
+        limbs[1] += carry;
+
+        carry = (limbs[1] + CARRY_ADD) >> BITS_PER_LIMB;
+        limbs[1] -= carry << BITS_PER_LIMB;
+        limbs[2] += carry;
+
+        carry = (limbs[2] + CARRY_ADD) >> BITS_PER_LIMB;
+        limbs[2] -= carry << BITS_PER_LIMB;
+        limbs[3] += carry;
+
+        carry = (limbs[3] + CARRY_ADD) >> BITS_PER_LIMB;
+        limbs[3] -= carry << BITS_PER_LIMB;
+        limbs[4] += carry;
+    }
+
+    /**
+     * Reduces digit 'v' at limb position 'i' to a lower limb.
+     *
+     * @param limbs [in|out] the limbs to reduce in.
+     * @param v [in] the digit to reduce to the lower limb.
+     * @param i [in] the limbs to reduce from.
+     */
     protected void reduceIn(long[] limbs, long v, int i) {
-        long t0 = 19 * v;
-        limbs[i - 10] += (t0 << 5) & LIMB_MASK;
-        limbs[i - 9] += t0 >> 21;
+        limbs[i - NUM_LIMBS] += 19 * v;
     }
 
-    @Override
+    /**
+     * Carry from high order limb and reduce to the lower order limb.  Assumed
+     * to be called two times to propagate the carries.
+     *
+     * @param limbs [in|out] the limbs to fully carry and reduce.
+     */
     protected void finalCarryReduceLast(long[] limbs) {
+        long carry = limbs[4] >> BITS_PER_LIMB;
 
-        long reducedValue = limbs[numLimbs - 1] >> RIGHT_BIT_OFFSET;
-        limbs[numLimbs - 1] -= reducedValue << RIGHT_BIT_OFFSET;
-        limbs[0] += reducedValue * SUBTRAHEND;
+        limbs[4] -= carry << BITS_PER_LIMB;
+        limbs[0] += 19 * carry;
     }
 
-    @Override
-    protected void reduce(long[] a) {
-
-        // carry(8, 2)
-        long carry8 = carryValue(a[8]);
-        a[8] -= (carry8 << BITS_PER_LIMB);
-        a[9] += carry8;
-
-        long carry9 = carryValue(a[9]);
-        a[9] -= (carry9 << BITS_PER_LIMB);
-
-        // reduce(0, 1)
-        long reducedValue10 = (carry9 * SUBTRAHEND);
-        a[0] += ((reducedValue10 << BIT_OFFSET) & LIMB_MASK);
-        a[1] += reducedValue10 >> RIGHT_BIT_OFFSET;
-
-        // carry(0, 9)
-        carry(a, 0, 9);
-    }
-
-    @Override
+    /**
+     * Multiply two limbs using a high/low digit technique that allows for
+     * larger limb sizes.  It is assumed that both limbs have already been
+     * reduced.
+     *
+     * @param a [in] the limb operand to multiply.
+     * @param b [in] the limb operand to multiply.
+     * @param r [out] the product of the limbs operands that is fully reduced.
+     */
     protected void mult(long[] a, long[] b, long[] r) {
-        long c0 = (a[0] * b[0]);
-        long c1 = (a[0] * b[1]) + (a[1] * b[0]);
-        long c2 = (a[0] * b[2]) + (a[1] * b[1]) + (a[2] * b[0]);
-        long c3 = (a[0] * b[3]) + (a[1] * b[2]) + (a[2] * b[1]) + (a[3] * b[0]);
-        long c4 = (a[0] * b[4]) + (a[1] * b[3]) + (a[2] * b[2]) + (a[3] * b[1]) + (a[4] * b[0]);
-        long c5 = (a[0] * b[5]) + (a[1] * b[4]) + (a[2] * b[3]) + (a[3] * b[2]) + (a[4] * b[1]) + (a[5] * b[0]);
-        long c6 = (a[0] * b[6]) + (a[1] * b[5]) + (a[2] * b[4]) + (a[3] * b[3]) + (a[4] * b[2]) + (a[5] * b[1]) + (a[6] * b[0]);
-        long c7 = (a[0] * b[7]) + (a[1] * b[6]) + (a[2] * b[5]) + (a[3] * b[4]) + (a[4] * b[3]) + (a[5] * b[2]) + (a[6] * b[1]) + (a[7] * b[0]);
-        long c8 = (a[0] * b[8]) + (a[1] * b[7]) + (a[2] * b[6]) + (a[3] * b[5]) + (a[4] * b[4]) + (a[5] * b[3]) + (a[6] * b[2]) + (a[7] * b[1]) + (a[8] * b[0]);
-        long c9 = (a[0] * b[9]) + (a[1] * b[8]) + (a[2] * b[7]) + (a[3] * b[6]) + (a[4] * b[5]) + (a[5] * b[4]) + (a[6] * b[3]) + (a[7] * b[2]) + (a[8] * b[1]) + (a[9] * b[0]);
-        long c10 = (a[1] * b[9]) + (a[2] * b[8]) + (a[3] * b[7]) + (a[4] * b[6]) + (a[5] * b[5]) + (a[6] * b[4]) + (a[7] * b[3]) + (a[8] * b[2]) + (a[9] * b[1]);
-        long c11 = (a[2] * b[9]) + (a[3] * b[8]) + (a[4] * b[7]) + (a[5] * b[6]) + (a[6] * b[5]) + (a[7] * b[4]) + (a[8] * b[3]) + (a[9] * b[2]);
-        long c12 = (a[3] * b[9]) + (a[4] * b[8]) + (a[5] * b[7]) + (a[6] * b[6]) + (a[7] * b[5]) + (a[8] * b[4]) + (a[9] * b[3]);
-        long c13 = (a[4] * b[9]) + (a[5] * b[8]) + (a[6] * b[7]) + (a[7] * b[6]) + (a[8] * b[5]) + (a[9] * b[4]);
-        long c14 = (a[5] * b[9]) + (a[6] * b[8]) + (a[7] * b[7]) + (a[8] * b[6]) + (a[9] * b[5]);
-        long c15 = (a[6] * b[9]) + (a[7] * b[8]) + (a[8] * b[7]) + (a[9] * b[6]);
-        long c16 = (a[7] * b[9]) + (a[8] * b[8]) + (a[9] * b[7]);
-        long c17 = (a[8] * b[9]) + (a[9] * b[8]);
-        long c18 = a[9] * b[9];
+        long aa0 = a[0];
+        long aa1 = a[1];
+        long aa2 = a[2];
+        long aa3 = a[3];
+        long aa4 = a[4];
 
-        carryReduce(r, c0, c1, c2, c3, c4, c5, c6, c7, c8,
-            c9, c10, c11, c12, c13, c14, c15, c16, c17, c18);
+        long bb0 = b[0];
+        long bb1 = b[1];
+        long bb2 = b[2];
+        long bb3 = b[3];
+        long bb4 = b[4];
 
+        final long shift1 = 64 - BITS_PER_LIMB;
+        final long shift2 = BITS_PER_LIMB;
+
+        long d0, d1, d2, d3, d4;      // low digits from multiplication
+        long dd0, dd1, dd2, dd3, dd4; // high digits from multiplication
+        // multiplication result digits for each column
+        long c0, c1, c2, c3, c4, c5, c6, c7, c8, c9;
+
+        // Row 0 - multiply by aa0
+        d0 = aa0 * bb0;
+        dd0 = Math.multiplyHigh(aa0, bb0) << shift1 | (d0 >>> shift2);
+        d0 &= LIMB_MASK;
+
+        d1 = aa0 * bb1;
+        dd1 = Math.multiplyHigh(aa0, bb1) << shift1 | (d1 >>> shift2);
+        d1 &= LIMB_MASK;
+
+        d2 = aa0 * bb2;
+        dd2 = Math.multiplyHigh(aa0, bb2) << shift1 | (d2 >>> shift2);
+        d2 &= LIMB_MASK;
+
+        d3 = aa0 * bb3;
+        dd3 = Math.multiplyHigh(aa0, bb3) << shift1 | (d3 >>> shift2);
+        d3 &= LIMB_MASK;
+
+        d4 = aa0 * bb4;
+        dd4 = Math.multiplyHigh(aa0, bb4) << shift1 | (d4 >>> shift2);
+        d4 &= LIMB_MASK;
+
+        c0 = d0;
+        c1 = d1 + dd0;
+        c2 = d2 + dd1;
+        c3 = d3 + dd2;
+        c4 = d4 + dd3;
+        c5 = dd4;
+
+        // Row 1 - multiply by aa1
+        d0 = aa1 * bb0;
+        dd0 = Math.multiplyHigh(aa1, bb0) << shift1 | (d0 >>> shift2);
+        d0 &= LIMB_MASK;
+
+        d1 = aa1 * bb1;
+        dd1 = Math.multiplyHigh(aa1, bb1) << shift1 | (d1 >>> shift2);
+        d1 &= LIMB_MASK;
+
+        d2 = aa1 * bb2;
+        dd2 = Math.multiplyHigh(aa1, bb2) << shift1 | (d2 >>> shift2);
+        d2 &= LIMB_MASK;
+
+        d3 = aa1 * bb3;
+        dd3 = Math.multiplyHigh(aa1, bb3) << shift1 | (d3 >>> shift2);
+        d3 &= LIMB_MASK;
+
+        d4 = aa1 * bb4;
+        dd4 = Math.multiplyHigh(aa1, bb4) << shift1 | (d4 >>> shift2);
+        d4 &= LIMB_MASK;
+
+        c1 += d0;
+        c2 += d1 + dd0;
+        c3 += d2 + dd1;
+        c4 += d3 + dd2;
+        c5 += d4 + dd3;
+        c6 = dd4;
+
+        // Row 2 - multiply by aa2
+        d0 = aa2 * bb0;
+        dd0 = Math.multiplyHigh(aa2, bb0) << shift1 | (d0 >>> shift2);
+        d0 &= LIMB_MASK;
+
+        d1 = aa2 * bb1;
+        dd1 = Math.multiplyHigh(aa2, bb1) << shift1 | (d1 >>> shift2);
+        d1 &= LIMB_MASK;
+
+        d2 = aa2 * bb2;
+        dd2 = Math.multiplyHigh(aa2, bb2) << shift1 | (d2 >>> shift2);
+        d2 &= LIMB_MASK;
+
+        d3 = aa2 * bb3;
+        dd3 = Math.multiplyHigh(aa2, bb3) << shift1 | (d3 >>> shift2);
+        d3 &= LIMB_MASK;
+
+        d4 = aa2 * bb4;
+        dd4 = Math.multiplyHigh(aa2, bb4) << shift1 | (d4 >>> shift2);
+        d4 &= LIMB_MASK;
+
+        c2 += d0;
+        c3 += d1 + dd0;
+        c4 += d2 + dd1;
+        c5 += d3 + dd2;
+        c6 += d4 + dd3;
+        c7 = dd4;
+
+        // Row 3 - multiply by aa3
+        d0 = aa3 * bb0;
+        dd0 = Math.multiplyHigh(aa3, bb0) << shift1 | (d0 >>> shift2);
+        d0 &= LIMB_MASK;
+
+        d1 = aa3 * bb1;
+        dd1 = Math.multiplyHigh(aa3, bb1) << shift1 | (d1 >>> shift2);
+        d1 &= LIMB_MASK;
+
+        d2 = aa3 * bb2;
+        dd2 = Math.multiplyHigh(aa3, bb2) << shift1 | (d2 >>> shift2);
+        d2 &= LIMB_MASK;
+
+        d3 = aa3 * bb3;
+        dd3 = Math.multiplyHigh(aa3, bb3) << shift1 | (d3 >>> shift2);
+        d3 &= LIMB_MASK;
+
+        d4 = aa3 * bb4;
+        dd4 = Math.multiplyHigh(aa3, bb4) << shift1 | (d4 >>> shift2);
+        d4 &= LIMB_MASK;
+
+        c3 += d0;
+        c4 += d1 + dd0;
+        c5 += d2 + dd1;
+        c6 += d3 + dd2;
+        c7 += d4 + dd3;
+        c8 = dd4;
+
+        // Row 4 - multiply by aa4
+        d0 = aa4 * bb0;
+        dd0 = Math.multiplyHigh(aa4, bb0) << shift1 | (d0 >>> shift2);
+        d0 &= LIMB_MASK;
+
+        d1 = aa4 * bb1;
+        dd1 = Math.multiplyHigh(aa4, bb1) << shift1 | (d1 >>> shift2);
+        d1 &= LIMB_MASK;
+
+        d2 = aa4 * bb2;
+        dd2 = Math.multiplyHigh(aa4, bb2) << shift1 | (d2 >>> shift2);
+        d2 &= LIMB_MASK;
+
+        d3 = aa4 * bb3;
+        dd3 = Math.multiplyHigh(aa4, bb3) << shift1 | (d3 >>> shift2);
+        d3 &= LIMB_MASK;
+
+        d4 = aa4 * bb4;
+        dd4 = Math.multiplyHigh(aa4, bb4) << shift1 | (d4 >>> shift2);
+        d4 &= LIMB_MASK;
+
+        c4 += d0;
+        c5 += d1 + dd0;
+        c6 += d2 + dd1;
+        c7 += d3 + dd2;
+        c8 += d4 + dd3;
+        c9 = dd4;
+
+        // Perform pseudo-Mersenne reduction
+        r[0] = c0 + (19 * c5);
+        r[1] = c1 + (19 * c6);
+        r[2] = c2 + (19 * c7);
+        r[3] = c3 + (19 * c8);
+        r[4] = c4 + (19 * c9);
+
+        reduce(r);
     }
 
-    private void carryReduce(long[] r, long c0, long c1, long c2,
-                             long c3, long c4, long c5, long c6,
-                             long c7, long c8, long c9, long c10,
-                             long c11, long c12, long c13, long c14,
-                             long c15, long c16, long c17, long c18) {
-        // reduce(7,2)
-        long reducedValue17 = (c17 * SUBTRAHEND);
-        c7 += (reducedValue17 << BIT_OFFSET) & LIMB_MASK;
-        c8 += reducedValue17 >> RIGHT_BIT_OFFSET;
-
-        long reducedValue18 = (c18 * SUBTRAHEND);
-        c8 += (reducedValue18 << BIT_OFFSET) & LIMB_MASK;
-        c9 += reducedValue18 >> RIGHT_BIT_OFFSET;
-
-        // carry(8,2)
-        long carry8 = carryValue(c8);
-        r[8] = c8 - (carry8 << BITS_PER_LIMB);
-        c9 += carry8;
-
-        long carry9 = carryValue(c9);
-        r[9] = c9 - (carry9 << BITS_PER_LIMB);
-        c10 += carry9;
-
-        // reduce(0,7)
-        long reducedValue10 = (c10 * SUBTRAHEND);
-        r[0] = c0 + ((reducedValue10 << BIT_OFFSET) & LIMB_MASK);
-        c1 += reducedValue10 >> RIGHT_BIT_OFFSET;
-
-        long reducedValue11 = (c11 * SUBTRAHEND);
-        r[1] = c1 + ((reducedValue11 << BIT_OFFSET) & LIMB_MASK);
-        c2 += reducedValue11 >> RIGHT_BIT_OFFSET;
-
-        long reducedValue12 = (c12 * SUBTRAHEND);
-        r[2] = c2 + ((reducedValue12 << BIT_OFFSET) & LIMB_MASK);
-        c3 += reducedValue12 >> RIGHT_BIT_OFFSET;
-
-        long reducedValue13 = (c13 * SUBTRAHEND);
-        r[3] = c3 + ((reducedValue13 << BIT_OFFSET) & LIMB_MASK);
-        c4 += reducedValue13 >> RIGHT_BIT_OFFSET;
-
-        long reducedValue14 = (c14 * SUBTRAHEND);
-        r[4] = c4 + ((reducedValue14 << BIT_OFFSET) & LIMB_MASK);
-        c5 += reducedValue14 >> RIGHT_BIT_OFFSET;
-
-        long reducedValue15 = (c15 * SUBTRAHEND);
-        r[5] = c5 + ((reducedValue15 << BIT_OFFSET) & LIMB_MASK);
-        c6 += reducedValue15 >> RIGHT_BIT_OFFSET;
-
-        long reducedValue16 = (c16 * SUBTRAHEND);
-        r[6] = c6 + ((reducedValue16 << BIT_OFFSET) & LIMB_MASK);
-        r[7] = c7 + (reducedValue16 >> RIGHT_BIT_OFFSET);
-
-        // carry(0,9)
-        carry(r, 0, 9);
-    }
-    @Override
+    /**
+     * Takes a single limb and squares it using a high/low digit technique that
+     * allows for larger limb sizes.  It is assumed that the limb input has
+     * already been reduced.
+     *
+     * @param a [in] the limb operand to square.
+     * @param r [out] the resulting square of the limb which is fully reduced.
+     */
     protected void square(long[] a, long[] r) {
+        long aa0 = a[0];
+        long aa1 = a[1];
+        long aa2 = a[2];
+        long aa3 = a[3];
+        long aa4 = a[4];
 
-        // Use grade-school multiplication with a simple squaring optimization.
-        // Multiply into primitives to avoid the temporary array allocation.
-        // This is equivalent to the following code:
-        //  long[] c = new long[2 * NUM_LIMBS - 1];
-        //  for(int i = 0; i < NUM_LIMBS; i++) {
-        //      c[2 * i] = a[i] * a[i];
-        //      for(int j = i + 1; j < NUM_LIMBS; j++) {
-        //          c[i + j] += 2 * a[i] * a[j]
-        //      }
-        //  }
+        final long shift1 = 64 - BITS_PER_LIMB;
+        final long shift2 = BITS_PER_LIMB;
 
-        long c0 = a[0] * a[0];
-        long c1 = 2 * a[0] * a[1];
-        long c2 = a[1] * a[1] + 2 * a[0] * a[2];
-        long c3 = 2 * (a[0] * a[3] + a[1] * a[2]);
-        long c4 = a[2] * a[2] + 2 * (a[0] * a[4] + a[1] * a[3]);
-        long c5 = 2 * (a[0] * a[5] + a[1] * a[4] + a[2] * a[3]);
-        long c6 = a[3] * a[3] + 2 * (a[0] * a[6] + a[1] * a[5] + a[2] * a[4]);
-        long c7 = 2 * (a[0] * a[7] + a[1] * a[6] + a[2] * a[5] + a[3] * a[4]);
-        long c8 = a[4] * a[4] + 2 * (a[0] * a[8] + a[1] * a[7] + a[2] * a[6] + a[3] * a[5]);
-        long c9 = 2 * (a[0] * a[9] + a[1] * a[8] + a[2] * a[7] + a[3] * a[6] + a[4] * a[5]);
-        long c10 = a[5] * a[5] + 2 * (a[1] * a[9] + a[2] * a[8] + a[3] * a[7] + a[4] * a[6]);
-        long c11 = 2 * (a[2] * a[9] + a[3] * a[8] + a[4] * a[7] + a[5] * a[6]);
-        long c12 = a[6] * a[6] + 2 * (a[3] * a[9] + a[4] * a[8] + a[5] * a[7]);
-        long c13 = 2 * (a[4] * a[9] + a[5] * a[8] + a[6] * a[7]);
-        long c14 = a[7] * a[7] + 2 * (a[5] * a[9] + a[6] * a[8]);
-        long c15 = 2 * (a[6] * a[9] + a[7] * a[8]);
-        long c16 = a[8] * a[8] + 2 * a[7] * a[9];
-        long c17 = 2 * a[8] * a[9];
-        long c18 = a[9] * a[9];
+        long d0, d1, d2, d3, d4;      // low digits from multiplication
+        long dd0, dd1, dd2, dd3, dd4; // high digits from multiplication
+        // multiplication result digits for each column
+        long c0, c1, c2, c3, c4, c5, c6, c7, c8, c9;
 
-        carryReduce(r, c0, c1, c2, c3, c4, c5, c6, c7, c8,
-            c9, c10, c11, c12, c13, c14, c15, c16, c17, c18);
+        // Row 0 - multiply by aa0
+        d0 = aa0 * aa0;
+        dd0 = Math.multiplyHigh(aa0, aa0) << shift1 | (d0 >>> shift2);
+        d0 &= LIMB_MASK;
+
+        d1 = aa0 * aa1;
+        dd1 = Math.multiplyHigh(aa0, aa1) << shift1 | (d1 >>> shift2);
+        d1 &= LIMB_MASK;
+
+        d2 = aa0 * aa2;
+        dd2 = Math.multiplyHigh(aa0, aa2) << shift1 | (d2 >>> shift2);
+        d2 &= LIMB_MASK;
+
+        d3 = aa0 * aa3;
+        dd3 = Math.multiplyHigh(aa0, aa3) << shift1 | (d3 >>> shift2);
+        d3 &= LIMB_MASK;
+
+        d4 = aa0 * aa4;
+        dd4 = Math.multiplyHigh(aa0, aa4) << shift1 | (d4 >>> shift2);
+        d4 &= LIMB_MASK;
+
+        c0 = d0;
+        c1 = (d1 << 1) + dd0;
+        c2 = (d2 + dd1) << 1;
+        c3 = (d3 + dd2) << 1;
+        c4 = (d4 + dd3) << 1;
+        c5 = dd4 << 1;
+
+        // Row 1 - multiply by aa1
+        d1 = aa1 * aa1;
+        dd1 = Math.multiplyHigh(aa1, aa1) << shift1 | (d1 >>> shift2);
+        d1 &= LIMB_MASK;
+
+        d2 = aa1 * aa2;
+        dd2 = Math.multiplyHigh(aa1, aa2) << shift1 | (d2 >>> shift2);
+        d2 &= LIMB_MASK;
+
+        d3 = aa1 * aa3;
+        dd3 = Math.multiplyHigh(aa1, aa3) << shift1 | (d3 >>> shift2);
+        d3 &= LIMB_MASK;
+
+        d4 = aa1 * aa4;
+        dd4 = Math.multiplyHigh(aa1, aa4) << shift1 | (d4 >>> shift2);
+        d4 &= LIMB_MASK;
+
+        c2 += d1;
+        c3 += (d2 << 1) + dd1;
+        c4 += (d3 + dd2) << 1;
+        c5 += (d4 + dd3) << 1;
+        c6 = dd4 << 1;
+
+        // Row 2 - multiply by aa2
+        d2 = aa2 * aa2;
+        dd2 = Math.multiplyHigh(aa2, aa2) << shift1 | (d2 >>> shift2);
+        d2 &= LIMB_MASK;
+
+        d3 = aa2 * aa3;
+        dd3 = Math.multiplyHigh(aa2, aa3) << shift1 | (d3 >>> shift2);
+        d3 &= LIMB_MASK;
+
+        d4 = aa2 * aa4;
+        dd4 = Math.multiplyHigh(aa2, aa4) << shift1 | (d4 >>> shift2);
+        d4 &= LIMB_MASK;
+
+        c4 += d2;
+        c5 += (d3 << 1) + dd2;
+        c6 += (d4 + dd3) << 1;
+        c7 = dd4 << 1;
+
+        // Row 3 - multiply by aa3
+        d3 = aa3 * aa3;
+        dd3 = Math.multiplyHigh(aa3, aa3) << shift1 | (d3 >>> shift2);
+        d3 &= LIMB_MASK;
+
+        d4 = aa3 * aa4;
+        dd4 = Math.multiplyHigh(aa3, aa4) << shift1 | (d4 >>> shift2);
+        d4 &= LIMB_MASK;
+
+        c6 += d3;
+        c7 += (d4 << 1) + dd3;
+        c8 = dd4 << 1;
+
+        // Row 4 - multiply by aa4
+        d4 = aa4 * aa4;
+        dd4 = Math.multiplyHigh(aa4, aa4) << shift1 | (d4 >>> shift2);
+        d4 &= LIMB_MASK;
+
+        c8 += d4;
+        c9 = dd4;
+
+        // Perform pseudo-Mersenne reduction
+        r[0] = c0 + (19 * c5);
+        r[1] = c1 + (19 * c6);
+        r[2] = c2 + (19 * c7);
+        r[3] = c3 + (19 * c8);
+        r[4] = c4 + (19 * c9);
+
+        reduce(r);
     }
-
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,12 +28,10 @@ package com.sun.imageio.plugins.wbmp;
 import java.util.Locale;
 import javax.imageio.spi.ImageReaderSpi;
 import javax.imageio.stream.ImageInputStream;
-import javax.imageio.spi.IIORegistry;
 import javax.imageio.spi.ServiceRegistry;
 import java.io.IOException;
 import javax.imageio.ImageReader;
 import javax.imageio.IIOException;
-import com.sun.imageio.plugins.common.ReaderUtil;
 
 public class WBMPImageReaderSpi extends ImageReaderSpi {
 
@@ -43,7 +41,7 @@ public class WBMPImageReaderSpi extends ImageReaderSpi {
     private static String [] writerSpiNames =
         {"com.sun.imageio.plugins.wbmp.WBMPImageWriterSpi"};
     private static String[] formatNames = {"wbmp", "WBMP"};
-    private static String[] entensions = {"wbmp"};
+    private static String[] extensions = {"wbmp"};
     private static String[] mimeType = {"image/vnd.wap.wbmp"};
 
     private boolean registered = false;
@@ -52,7 +50,7 @@ public class WBMPImageReaderSpi extends ImageReaderSpi {
         super("Oracle Corporation",
               "1.0",
               formatNames,
-              entensions,
+              extensions,
               mimeType,
               "com.sun.imageio.plugins.wbmp.WBMPImageReader",
               new Class<?>[] { ImageInputStream.class },
@@ -65,6 +63,7 @@ public class WBMPImageReaderSpi extends ImageReaderSpi {
               null, null);
     }
 
+    @Override
     public void onRegistration(ServiceRegistry registry,
                                Class<?> category) {
         if (registered) {
@@ -73,10 +72,12 @@ public class WBMPImageReaderSpi extends ImageReaderSpi {
         registered = true;
     }
 
+    @Override
     public String getDescription(Locale locale) {
         return "Standard WBMP Image Reader";
     }
 
+    @Override
     public boolean canDecodeInput(Object source) throws IOException {
         if (!(source instanceof ImageInputStream)) {
             return false;
@@ -86,16 +87,16 @@ public class WBMPImageReaderSpi extends ImageReaderSpi {
 
         stream.mark();
         try {
-            int type = stream.readByte();   // TypeField
-            int fixHeaderField = stream.readByte();
+            int type = stream.read();   // TypeField, or -1 if EOF
+            int fixHeaderField = stream.read();
             // check WBMP "header"
             if (type != 0 || fixHeaderField != 0) {
                 // while WBMP reader does not support ext WBMP headers
                 return false;
             }
 
-            int width = ReaderUtil.readMultiByteInteger(stream);
-            int height = ReaderUtil.readMultiByteInteger(stream);
+            int width = tryReadMultiByteInteger(stream);
+            int height = tryReadMultiByteInteger(stream);
             // check image dimension
             if (width <= 0 || height <= 0) {
                 return false;
@@ -123,6 +124,35 @@ public class WBMPImageReaderSpi extends ImageReaderSpi {
         }
     }
 
+    /**
+     * Reads a positive integer value encoded on a variable number of bytes,
+     * but stops the reading on end-of-file (EOF) or on integer overflow.
+     *
+     * @param  stream  the image input stream to read.
+     * @return the integer value, or -1 if EOF or integer overflow.
+     */
+    private static int tryReadMultiByteInteger(ImageInputStream stream)
+        throws IOException {
+        int value = stream.read();
+        if (value < 0) {
+            return -1;          // EOF
+        }
+        int result = value & 0x7f;
+        while ((value & 0x80) == 0x80) {
+            if ((result & 0xfe000000) != 0) {
+                return -1;      // 7 highest bits already used
+            }
+            result <<= 7;
+            value = stream.read();
+            if (value < 0) {
+                return -1;      // EOF
+            }
+            result |= (value & 0x7f);
+        }
+        return result;
+    }
+
+    @Override
     public ImageReader createReaderInstance(Object extension)
         throws IIOException {
         return new WBMPImageReader(this);

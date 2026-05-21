@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,10 +24,11 @@
 
 /*
  * @test
- * @bug 8267574
+ * @bug 8267574 8378228
  * @summary check stylesheet names against HtmlStyle
- * @modules jdk.javadoc/jdk.javadoc.internal.doclets.formats.html.markup
- *          jdk.javadoc/jdk.javadoc.internal.doclets.toolkit.resources:open
+ * @modules jdk.javadoc/jdk.javadoc.internal.html
+ *          jdk.javadoc/jdk.javadoc.internal.doclets.formats.html.markup
+ *          jdk.javadoc/jdk.javadoc.internal.doclets.formats.html.resources:open
  */
 
 import java.io.BufferedWriter;
@@ -44,10 +45,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import jdk.javadoc.internal.doclets.formats.html.markup.HtmlStyle;
+import jdk.javadoc.internal.html.HtmlStyle;
+import jdk.javadoc.internal.doclets.formats.html.markup.HtmlStyles;
 
 /**
- * This test compares the set of CSS class names defined in HtmlStyle
+ * This test compares the set of CSS class names defined in HtmlStyles
  * and other files (such as search.js) against the set of CSS class names
  * defined in the main stylesheet.css provided by the doclet.
  *
@@ -112,45 +114,37 @@ public class CheckStylesheetClasses {
         // summary and details tables; styles for these may be present in the stylesheet
         // using constructs like these:
         //      .summary section[class$="-summary"], .details section[class$="-details"],
-        htmlStyleNames.removeIf(s -> s.endsWith("-details"));
+        htmlStyleNames.removeIf(s -> s.endsWith("-details") && !styleSheetNames.contains(s));
         htmlStyleNames.removeIf(s -> s.endsWith("-summary") && !styleSheetNames.contains(s));
 
         // signature classes
-        removeAll(htmlStyleNames, "annotations", "element-name", "extends-implements",
+        removeAll(htmlStyleNames, "element-name", "extends-implements",
                 "modifiers", "permits", "return-type");
 
         // misc: these are defined in HtmlStyle, and used by the doclet
-        removeAll(htmlStyleNames, "col-plain", "external-link",
-                "hierarchy", "index", "package-uses", "packages", "permits-note",
-                "serialized-package-container", "source-container");
+        removeAll(htmlStyleNames, "col-plain", "external-link", "header",
+                "package-uses", "packages", "permits-note", "serialized-package-container",
+                "source-container");
 
         // Remove names from styleSheetNames if they are false positives,
         // or used by other code (i.e. not HtmlStyle),
         // or if they are unused and therefore candidates to be deleted.
 
         // false positives: file extensions and URL components
-        removeAll(styleSheetNames, "css", "png", "w3");
+        removeAll(styleSheetNames, "css", "svg", "w3", "org");
 
         // for doc-comment authors; maybe worthy of inclusion in HtmlStyle, just to be documented
         removeAll(styleSheetNames, "borderless", "plain", "striped");
 
         // used in search.js; may be worth documenting in HtmlStyle
-        removeAll(styleSheetNames, "result-highlight", "result-item",
-                "search-tag-desc-result", "search-tag-holder-result",
-                "ui-autocomplete", "ui-autocomplete-category",
-                "watermark");
+        removeAll(styleSheetNames, "result-highlight", "anchor-link", "expanded", "overlay",
+                "page-search-header", "result-table", "search-result-desc", "search-result-label",
+                "search-result-link", "selected", "sort-asc", "sort-desc", "two-column-search-results",
+                "visible");
 
         // very JDK specific
         styleSheetNames.remove("module-graph");
-
-        // apparently unused
-        // "tab" is commented implying it is in the header/footer, but
-        // (a) it is a poorly chosen name
-        // (b) it does not seem to be used in make/Docs.gmk or anywhere else
-        removeAll(styleSheetNames, "all-classes-container", "all-packages-container",
-                "bottom-nav", "clear", "constant-values-container", "deprecated-content",
-                "footer", "hidden", "override-specify-label", "serialized-class-details",
-                "tab", "table-sub-heading-color");
+        styleSheetNames.remove("sealed-graph");
 
         boolean ok = check(htmlStyleNames, "HtmlStyle", styleSheetNames, "stylesheet")
                     & check(styleSheetNames, "stylesheet", htmlStyleNames, "HtmlStyle");
@@ -192,15 +186,15 @@ public class CheckStylesheetClasses {
     }
 
     Set<String> getHtmlStyleNames() {
-        return Arrays.stream(HtmlStyle.values())
+        return Arrays.stream(HtmlStyles.values())
                 .map(HtmlStyle::cssName)
                 .collect(Collectors.toCollection(TreeSet::new));
     }
 
     Set<String> getStylesheetNames() throws IOException {
         Set<String> names = new TreeSet<>();
-        String stylesheet = "/jdk/javadoc/internal/doclets/toolkit/resources/stylesheet.css";
-        URL url = HtmlStyle.class.getResource(stylesheet);
+        String stylesheet = "/jdk/javadoc/internal/doclets/formats/html/resources/stylesheet.css";
+        URL url = HtmlStyles.class.getResource(stylesheet);
         readStylesheet(url, names);
         return names;
     }
@@ -210,8 +204,9 @@ public class CheckStylesheetClasses {
             if (in == null) {
                 throw new AssertionError("Cannot find or access resource " + resource);
             }
-            String s = new String(in.readAllBytes());
-            Pattern p = Pattern.compile("(?i)(\\s|([a-z][a-z0-9-]*))\\.(?<name>[a-z0-9-]+)\\b");
+            String s = new String(in.readAllBytes())
+                    .replaceAll("(?s)/\\*.*?\\*/", ""); // remove comments
+            Pattern p = Pattern.compile("(?i)\\.(?<name>[a-z][a-z0-9-]+)\\b");
             Matcher m = p.matcher(s);
             while (m.find()) {
                 names.add(m.group("name"));

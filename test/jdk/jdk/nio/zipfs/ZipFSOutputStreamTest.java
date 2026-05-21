@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2022, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,11 +22,6 @@
  *
  */
 
-import org.testng.Assert;
-import org.testng.annotations.AfterMethod;
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -35,16 +30,26 @@ import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Map;
-import java.util.Random;
+import java.util.stream.Stream;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 
 /**
  * @test
  * @summary Verify that the outputstream created for zip file entries, through the ZipFileSystem
  * works fine for varying sizes of the zip file entries
- * @bug 8190753 8011146
- * @run testng/timeout=300 ZipFSOutputStreamTest
+ * @bug 8190753 8011146 8279536
+ * @run junit/timeout=300 ZipFSOutputStreamTest
  */
 public class ZipFSOutputStreamTest {
     // List of files to be added to the ZIP file along with their sizes in bytes
@@ -56,12 +61,12 @@ public class ZipFSOutputStreamTest {
 
     private static final Path ZIP_FILE = Path.of("zipfs-outputstream-test.zip");
 
-    @BeforeMethod
+    @BeforeEach
     public void setUp() throws IOException {
         deleteFiles();
     }
 
-    @AfterMethod
+    @AfterEach
     public void tearDown() throws IOException {
         deleteFiles();
     }
@@ -70,13 +75,12 @@ public class ZipFSOutputStreamTest {
         Files.deleteIfExists(ZIP_FILE);
     }
 
-    @DataProvider(name = "zipFSCreationEnv")
-    private Object[][] zipFSCreationEnv() {
-        return new Object[][]{
-                {Map.of("create", "true", "noCompression", "true")}, // STORED
-                {Map.of("create", "true", "noCompression", "false")} // DEFLATED
+    private static Stream<Arguments> zipFSCreationEnv() {
+        return Stream.of(
+                Arguments.of(Map.of("create", "true", "noCompression", "true")), // STORED
+                Arguments.of(Map.of("create", "true", "noCompression", "false")) // DEFLATED
 
-        };
+        );
     }
 
     /**
@@ -84,10 +88,13 @@ public class ZipFSOutputStreamTest {
      * by the ZipFileSystem. Then verify that the generated zip file entries are as expected,
      * both in size and content
      */
-    @Test(dataProvider = "zipFSCreationEnv")
+    @ParameterizedTest
+    @MethodSource("zipFSCreationEnv")
     public void testOutputStream(final Map<String, ?> env) throws Exception {
         final byte[] chunk = new byte[1024];
-        new Random().nextBytes(chunk);
+        // fill it with some fixed content (the fixed content will later on help ease
+        // the verification of the content written out)
+        Arrays.fill(chunk, (byte) 42);
         try (final FileSystem zipfs = FileSystems.newFileSystem(ZIP_FILE, env)) {
             // create the zip with varying sized entries
             for (final Map.Entry<String, Long> entry : ZIP_ENTRIES.entrySet()) {
@@ -95,9 +102,12 @@ public class ZipFSOutputStreamTest {
                 if (entryPath.getParent() != null) {
                     Files.createDirectories(entryPath.getParent());
                 }
+                long start = System.currentTimeMillis();
                 try (final OutputStream os = Files.newOutputStream(entryPath)) {
                     writeAsChunks(os, chunk, entry.getValue());
                 }
+                System.out.println("Wrote entry " + entryPath + " of bytes " + entry.getValue()
+                        + " in " + (System.currentTimeMillis() - start) + " milli seconds");
             }
         }
         // now verify the written content
@@ -108,16 +118,16 @@ public class ZipFSOutputStreamTest {
                     final byte[] buf = new byte[chunk.length];
                     int numRead;
                     long totalRead = 0;
+                    long start = System.currentTimeMillis();
                     while ((numRead = is.read(buf)) != -1) {
                         totalRead += numRead;
                         // verify the content
-                        for (int i = 0, chunkoffset = (int) ((totalRead - numRead) % chunk.length);
-                             i < numRead; i++, chunkoffset++) {
-                            Assert.assertEquals(buf[i], chunk[chunkoffset % chunk.length],
-                                    "Unexpected content in " + entryPath);
-                        }
+                        assertEquals(-1, Arrays.mismatch(buf, 0, numRead, chunk, 0, numRead),
+                                "Unexpected content in " + entryPath);
                     }
-                    Assert.assertEquals(totalRead, (long) entry.getValue(),
+                    System.out.println("Read entry " + entryPath + " of bytes " + totalRead
+                            + " in " + (System.currentTimeMillis() - start) + " milli seconds");
+                    assertEquals((long) entry.getValue(), totalRead,
                             "Unexpected number of bytes read from zip entry " + entryPath);
                 }
             }

@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2026, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2025, Alibaba Group Holding Limited. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,55 +28,110 @@ package java.lang;
 
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Spliterator;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+
+import jdk.internal.lang.CaseFolding;
+import jdk.internal.misc.Unsafe;
 import jdk.internal.util.ArraysSupport;
-import jdk.internal.vm.annotation.DontInline;
 import jdk.internal.vm.annotation.ForceInline;
 import jdk.internal.vm.annotation.IntrinsicCandidate;
 
 import static java.lang.String.UTF16;
-import static java.lang.String.LATIN1;
 
+/// UTF16 String operations.
+///
+/// UTF16 byte arrays have the identical layout as char arrays. They share the
+/// same base offset and scale, and for each two-byte unit interpreted as a char,
+/// it has the same endianness as a char, which is the platform endianness.
+/// This is ensured in the static initializer of StringUTF16.
+///
+/// Unless stated otherwise, all methods assume that
+///
+/// - `byte[]` arguments denote a UTF-16 string byte array
+/// - indices, offsets, and lengths (typically of type `int`) are in number of
+///   characters, i.e., the number of
+///   [Unicode code units](Character.html#unicode) for UTF-16 strings, and the
+///   number of `byte`s/`char`s for Latin-1 strings
 final class StringUTF16 {
 
-    public static byte[] newBytesFor(int len) {
-        if (len < 0) {
-            throw new NegativeArraySizeException();
-        }
-        if (len > MAX_LENGTH) {
-            throw new OutOfMemoryError("UTF16 String size is " + len +
-                                       ", should be less than " + MAX_LENGTH);
-        }
-        return new byte[len << 1];
+    // Return a new byte array for a UTF16-coded string for len chars
+    // Throw an exception if out of range
+    static byte[] newBytesFor(int len) {
+        return new byte[newBytesLength(len)];
     }
 
+    // Check the size of a UTF16-coded string
+    // Throw an exception if out of range
+    private static int newBytesLength(int len) {
+        checkBytesLength(len);
+        return len << 1;
+    }
+
+    /**
+     * Checks if the provided length is a valid UTF-16 string byte array length.
+     *
+     * @param length a UTF-16 string byte array length
+     *
+     * @throws NegativeArraySizeException if {@code length < 0}
+     * @throws OutOfMemoryError if {@code length > (Integer.MAX_VALUE / 2)}
+     */
+    private static void checkBytesLength(int length) {
+        if (length < 0) {
+            throw new NegativeArraySizeException();
+        }
+        if (length >= MAX_LENGTH) {
+            throw new OutOfMemoryError("UTF16 String size is " + length +
+                    ", should be less than " + MAX_LENGTH);
+        }
+    }
+
+    /**
+     * Writes the given code point to the specified position of the provided
+     * UTF-16 string byte array.
+     * <p>
+     * <b>WARNING: This method does not perform any input validations.</b>
+     *
+     * @param val a UTF-16 string byte array
+     * @param index the index of the character to write the code point to
+     * @param c a code point
+     */
+    // vmIntrinsics::_putCharStringU
     @IntrinsicCandidate
-    // intrinsic performs no bounds checks
     static void putChar(byte[] val, int index, int c) {
-        assert index >= 0 && index < length(val) : "Trusted caller missed bounds check";
+        assert val != null && index >= 0 && index < length(val) : "Trusted caller violated input constraints";
         index <<= 1;
         val[index++] = (byte)(c >> HI_BYTE_SHIFT);
         val[index]   = (byte)(c >> LO_BYTE_SHIFT);
     }
 
+    /**
+     * {@return the code point at the the specified position of the provided
+     * UTF-16 string byte array}
+     * <p>
+     * <b>WARNING: This method does not perform any input validations.</b>
+     *
+     * @param val a UTF-16 string byte array
+     * @param index the index of the character to get the code point from
+     */
+    // vmIntrinsics::_getCharStringU
     @IntrinsicCandidate
-    // intrinsic performs no bounds checks
     static char getChar(byte[] val, int index) {
-        assert index >= 0 && index < length(val) : "Trusted caller missed bounds check";
+        assert val != null && index >= 0 && index < length(val) : "Trusted caller violated input constraints";
         index <<= 1;
         return (char)(((val[index++] & 0xff) << HI_BYTE_SHIFT) |
                       ((val[index]   & 0xff) << LO_BYTE_SHIFT));
     }
 
-    public static int length(byte[] value) {
+    static int length(byte[] value) {
         return value.length >> 1;
     }
 
-    private static int codePointAt(byte[] value, int index, int end, boolean checked) {
+    static int codePointAt(byte[] value, int index, int end, boolean checked) {
         assert index < end;
         if (checked) {
             checkIndex(index, value);
@@ -93,7 +149,7 @@ final class StringUTF16 {
         return c1;
     }
 
-    public static int codePointAt(byte[] value, int index, int end) {
+    static int codePointAt(byte[] value, int index, int end) {
        return codePointAt(value, index, end, false /* unchecked */);
     }
 
@@ -116,7 +172,7 @@ final class StringUTF16 {
         return c2;
     }
 
-    public static int codePointBefore(byte[] value, int index) {
+    static int codePointBefore(byte[] value, int index) {
         return codePointBefore(value, index, false /* unchecked */);
     }
 
@@ -137,18 +193,38 @@ final class StringUTF16 {
         return count;
     }
 
-    public static int codePointCount(byte[] value, int beginIndex, int endIndex) {
+    static int codePointCount(byte[] value, int beginIndex, int endIndex) {
         return codePointCount(value, beginIndex, endIndex, false /* unchecked */);
     }
 
-    public static char[] toChars(byte[] value) {
+    static char[] toChars(byte[] value) {
         char[] dst = new char[value.length >> 1];
         getChars(value, 0, dst.length, dst, 0);
         return dst;
     }
 
+    /**
+     * {@return a UTF-16 string byte array produced by encoding the characters
+     * in the provided character array sub-range}
+     *
+     * @param value a character array to encode
+     * @param off the index of the character to start encoding from
+     * @param len the number of characters to encode
+     *
+     * @throws NegativeArraySizeException if {@code len < 0}
+     * @throws NullPointerException if {@code value} is null
+     * @throws OutOfMemoryError if {@code len > (Integer.MAX_VALUE / 2)}
+     * @throws StringIndexOutOfBoundsException if the sub-range is out of bounds
+     */
+    static byte[] toBytes(char[] value, int off, int len) {
+        checkBytesLength(len);
+        String.checkBoundsOffCount(off, len, value.length);     // Implicit null check on `value`
+        return toBytes0(value, off, len);
+    }
+
+    // vmIntrinsics::_toBytesStringU
     @IntrinsicCandidate
-    public static byte[] toBytes(char[] value, int off, int len) {
+    private static byte[] toBytes0(char[] value, int off, int len) {
         byte[] val = newBytesFor(len);
         for (int i = 0; i < len; i++) {
             putChar(val, i, value[off]);
@@ -157,30 +233,242 @@ final class StringUTF16 {
         return val;
     }
 
-    public static byte[] compress(char[] val, int off, int len) {
-        byte[] ret = new byte[len];
-        if (compress(val, off, ret, 0, len) == len) {
-            return ret;
-        }
-        return null;
+    // Clever way to get the coder from a byte array returned from compress
+    // that maybe either latin1 or UTF16-coded
+    // Equivalent to (len == val.length) ? LATIN1 : UTF16
+    @ForceInline
+    static byte coderFromArrayLen(byte[] value, int len) {
+        return (byte) ((len - value.length) >>> Integer.SIZE - 1);
     }
 
-    public static byte[] compress(byte[] val, int off, int len) {
-        byte[] ret = new byte[len];
-        if (compress(val, off, ret, 0, len) == len) {
-            return ret;
+    /**
+     * {@return Compress the char array (containing UTF16) into a compact strings byte array}
+     * If all the chars are LATIN1, it returns an array with len == count,
+     * otherwise, it contains UTF16 characters.
+     * <p>
+     * A UTF16 array is returned *only* if at least 1 non-latin1 character is present.
+     * This must be true even if the input array is modified while this method is executing.
+     * This is assured by copying the characters while checking for latin1.
+     * If all characters are latin1, a byte array with length equals count is returned,
+     * indicating all latin1 chars. The scan may be implemented as an intrinsic,
+     * which returns the index of the first non-latin1 character.
+     * When the first non-latin1 character is found, it switches to creating a new
+     * buffer; the saved prefix of latin1 characters is copied to the new buffer;
+     * and the remaining input characters are copied to the buffer.
+     * The index of the known non-latin1 character is checked, if it is latin1,
+     * the input has been changed. In this case, a second attempt is made to compress to
+     * latin1 from the copy made in the first pass to the originally allocated latin1 buffer.
+     * If it succeeds the return value is latin1, otherwise, the utf16 value is returned.
+     * In this unusual case, the result is correct for the snapshot of the value.
+     * The resulting string contents are unspecified if the input array is modified during this
+     * operation, but it is ensured that at least 1 non-latin1 character is present in
+     * the non-latin1 buffer.
+     *
+     * @param val   a char array
+     * @param off   starting offset
+     * @param count count of chars to be compressed, {@code count} > 0
+     */
+    @ForceInline
+    static byte[] compress(final char[] val, final int off, final int count) {
+        byte[] latin1 = new byte[count];
+        int ndx = compress(val, off, latin1, 0, count);
+        if (ndx != count) {
+            // Switch to UTF16
+            byte[] utf16 = toBytes(val, off, count);
+            // If the original character that was found to be non-latin1 is latin1 in the copy
+            // try to make a latin1 string from the copy
+            if (getChar(utf16, ndx) > 0xff
+                    || compress(utf16, 0, latin1, 0, count) != count) {
+                return utf16;
+            }
         }
-        return null;
+        return latin1;     // latin1 success
     }
 
-    // compressedCopy char[] -> byte[]
+    /**
+     * {@return Compress the internal byte array (containing UTF16) into a compact strings byte array}
+     * If all the chars are LATIN1, it returns an array with len == count,
+     * otherwise, it contains UTF16 characters.
+     * <p>
+     * Refer to the description of the algorithm in {@link #compress(char[], int, int)}.
+     *
+     * @param val   a byte array with UTF16 coding
+     * @param off   starting offset
+     * @param count count of chars to be compressed, {@code count} > 0
+     */
+    static byte[] compress(final byte[] val, final int off, final int count) {
+        byte[] latin1 = new byte[count];
+        int ndx = compress(val, off, latin1, 0, count);
+        if (ndx != count) {// Switch to UTF16
+            byte[] utf16 = Arrays.copyOfRange(val, off << 1, newBytesLength(off + count));
+            // If the original character that was found to be non-latin1 is latin1 in the copy
+            // try to make a latin1 string from the copy
+            if (getChar(utf16, ndx) > 0xff
+                    || compress(utf16, 0, latin1, 0, count) != count) {
+                return utf16;
+            }
+        }
+        return latin1;     // latin1 success
+    }
+
+    /**
+     * {@return compress the code points into a compact strings byte array}
+     * If all the chars are LATIN1, returns an array with len == count.
+     * If not, a new byte array is allocated and code points converted to UTF16.
+     * The algorithm is similar to that of {@link #compress(char[], int, int)}.
+     * <p>
+     * The resulting encoding is attempted in several steps:
+     * <UL>
+     *     <LI>If no non-latin1 characters are found, the encoding is latin1</LI>
+     *     <LI>If an estimate of the number of characters needed to represent the codepoints is
+     *         equal to the string length, they are all BMP with at least 1 UTF16 character
+     *         and are copied to the result. </LI>
+     *     <LI>The extractCodePoints method is called to carefully expand surrogates. </LI>
+     * </UL>
+     *
+     * @param val   an int array of code points
+     * @param off   starting offset
+     * @param count length of code points to be compressed, length > 0
+     */
+    static byte[] compress(final int[] val, int off, final int count) {
+        // Optimistically copy all latin1 code points to the destination
+        byte[] latin1 = new byte[count];
+        final int end = off + count;
+        for (int ndx = 0; ndx < count; ndx++, off++) {
+            int cp = val[off];
+            if (cp >= 0 && cp <= 0xff) {
+                latin1[ndx] = (byte)cp;
+            } else {
+                // Pass 1: Compute precise size of char[]; see extractCodePoints for caveat
+                int estSize = ndx + computeCodePointSize(val, off, end);
+
+                // Pass 2: Switch to UTF16
+                // cp = val[ndx] is at least one code point known to be UTF16
+                byte[] utf16 = newBytesFor(estSize);
+                if (ndx > 0) {
+                    StringLatin1.inflate(latin1, 0, utf16, 0, ndx); // inflate latin1 bytes
+                }
+
+                if (estSize == count) {
+                    // Based on the computed size, all remaining code points are BMP and
+                    // can be copied without checking again
+                    putChar(utf16, ndx, cp);        // ensure utf16 has a UTF16 char
+                    off++;
+                    for (int i = ndx + 1; i < count; i++, off++) {
+                        putChar(utf16, i, val[off]);
+                    }
+                } else {
+                    // Some codepoint is a surrogate pair
+                    utf16 = extractCodepoints(val, off, end, utf16, ndx);
+
+                    // The original character that was found to be UTF16 is not UTF16 in the copy
+                    // Try to make a latin1 string from the copy
+                    if (getChar(utf16, ndx) <= 0xff &&
+                            compress(utf16, 0, latin1, 0, count) == count) {
+                        return latin1;     // latin1 success
+                    }
+                }
+                return utf16;
+            }
+        }
+        return latin1;     // Latin1 success
+    }
+
+    // Extract code points into chars in the byte array
+    //
+    // Guard against possible races with the input array changing between the previous
+    // computation of the required output size and storing the bmp or surrogates.
+    // If a BMP code point is changed to a supplementary code point it would require 2 chars
+    // in the output. Changing a supplementary char to BMP would reduce the size.
+    // If the utf16 destination is not large enough, it is resized to fit the
+    // remaining codepoints assuming they occupy 2 characters.
+    // The destination may be copied to return exactly the final length.
+    // The additional allocations and compression only occur if the input array is modified.
+    private static byte[] extractCodepoints(int[] val, int off, int end, byte[] dst, int dstOff) {
+        while (off < end) {
+            // Compute a minimum estimate on the number of characters can be put into the dst
+            // given the current codepoint and the number of remaining codepoints
+            int codePoint = val[off];           // read each codepoint from val only once
+            int dstLimit = dstOff
+                    + Character.charCount(codePoint)
+                    + (end - off - 1);
+            if (dstLimit > (dst.length >> 1)) {
+                // Resize to hold the remaining codepoints assuming they are all surrogates.
+                // By resizing to the maximum that might be needed, only a single resize will occur.
+                // dstLimit includes only a single char per codepoint, pad with an additional for each.
+                int maxRemaining = dstLimit + (end - off - 1);
+                dst = Arrays.copyOf(dst, newBytesLength(maxRemaining));
+            }
+            // Efficiently copy as many codepoints as fit within the current estimated limit
+            // The dst at least enough space for the current codepoint.
+            while (true) {
+                if (Character.isBmpCodePoint(codePoint)) {
+                    putChar(dst, dstOff++, codePoint);
+                } else {
+                    putChar(dst, dstOff++, Character.highSurrogate(codePoint));
+                    putChar(dst, dstOff++, Character.lowSurrogate(codePoint));
+                }
+                off++;
+                if (dstOff + 2 > dstLimit)
+                    break;      // no space for another surrogate; recompute limit
+                codePoint = val[off];
+            }
+        }
+        if (dstOff != (dst.length >> 1)) {
+            // Truncate to actual length; should only occur if a codepoint was racily
+            // changed from a surrogate to a BMP character.
+            return Arrays.copyOf(dst, newBytesLength(dstOff));
+        }
+        return dst;
+    }
+
+    // Compute the number of chars needed to represent the code points from off to end-1
+    private static int computeCodePointSize(int[] val, int off, int end) {
+        int n = end - off;
+        while (off < end) {
+            int codePoint = val[off++];
+            if (Character.isBmpCodePoint(codePoint)) {
+                continue;
+            } else if (Character.isValidCodePoint(codePoint)) {
+                n++;
+            } else {
+                throw new IllegalArgumentException(Integer.toString(codePoint));
+            }
+        }
+        return n;
+    }
+
+    /**
+     * Copies the prefix of Latin-1 characters from a {@code char} array
+     * sub-range to a Latin-1 string byte array sub-range.
+     * <p>
+     * This effectively <em>compresses</em> the content from a 2 byte per
+     * character representation to a 1 byte one.
+     *
+     * @param src the source {@code char} array
+     * @param srcOff the index (inclusive) of the first character in {@code src}
+     * @param dst the target Latin-1 string byte array
+     * @param dstOff the index (inclusive) of the first character in {@code dst}
+     * @param len the maximum number of characters to copy
+     *
+     * @return the number of characters copied
+     *
+     * @throws NullPointerException if {@code src} or {@code dst} is null
+     * @throws StringIndexOutOfBoundsException if the sub-ranges are out of bounds
+     */
+    static int compress(char[] src, int srcOff, byte[] dst, int dstOff, int len) {
+        String.checkBoundsOffCount(srcOff, len, src.length);    // Implicit null check on `src`
+        String.checkBoundsOffCount(dstOff, len, dst.length);    // Implicit null check on `dst`
+        return compress0(src, srcOff, dst, dstOff, len);
+    }
+
+    // vmIntrinsics::_compressStringC
     @IntrinsicCandidate
-    public static int compress(char[] src, int srcOff, byte[] dst, int dstOff, int len) {
+    private static int compress0(char[] src, int srcOff, byte[] dst, int dstOff, int len) {
         for (int i = 0; i < len; i++) {
             char c = src[srcOff];
-            if (c > 0xFF) {
-                len = 0;
-                break;
+            if (c > 0xff) {
+                return i;  // return index of non-latin1 char
             }
             dst[dstOff] = (byte)c;
             srcOff++;
@@ -189,16 +477,38 @@ final class StringUTF16 {
         return len;
     }
 
-    // compressedCopy byte[] -> byte[]
+    /**
+     * Copies the prefix of Latin-1 characters from a UTF-16 string byte array
+     * sub-range to a Latin-1 one.
+     * <p>
+     * This effectively <em>compresses</em> the content from a 2 byte per
+     * character representation to a 1 byte one.
+     *
+     * @param src the source UTF-16 string byte array
+     * @param srcOff the index (inclusive) of the first character in {@code src}
+     * @param dst the target Latin-1 string byte array
+     * @param dstOff the index (inclusive) of the first character in {@code dst}
+     * @param len the maximum number of characters to copy
+     *
+     * @return the number of characters copied
+     *
+     * @throws NullPointerException if {@code src} or {@code dst} is null
+     * @throws StringIndexOutOfBoundsException if the sub-ranges are out of bounds
+     */
+    static int compress(byte[] src, int srcOff, byte[] dst, int dstOff, int len) {
+        Objects.requireNonNull(src);
+        String.checkBoundsOffCount(srcOff, len, length(src));
+        String.checkBoundsOffCount(dstOff, len, dst.length);    // Implicit null check on `dst`
+        return compress0(src, srcOff, dst, dstOff, len);
+    }
+
+    // vmIntrinsics::_compressStringB
     @IntrinsicCandidate
-    public static int compress(byte[] src, int srcOff, byte[] dst, int dstOff, int len) {
-        // We need a range check here because 'getChar' has no checks
-        checkBoundsOffCount(srcOff, len, src);
+    private static int compress0(byte[] src, int srcOff, byte[] dst, int dstOff, int len) {
         for (int i = 0; i < len; i++) {
             char c = getChar(src, srcOff);
-            if (c > 0xFF) {
-                len = 0;
-                break;
+            if (c > 0xff) {
+                return i;  // return index of non-latin1 char
             }
             dst[dstOff] = (byte)c;
             srcOff++;
@@ -207,33 +517,16 @@ final class StringUTF16 {
         return len;
     }
 
-    public static byte[] toBytes(int[] val, int index, int len) {
+    // Create the UTF16 buffer for !COMPACT_STRINGS
+    static byte[] toBytes(int[] val, int index, int len) {
         final int end = index + len;
-        // Pass 1: Compute precise size of char[]
-        int n = len;
-        for (int i = index; i < end; i++) {
-            int cp = val[i];
-            if (Character.isBmpCodePoint(cp))
-                continue;
-            else if (Character.isValidCodePoint(cp))
-                n++;
-            else throw new IllegalArgumentException(Integer.toString(cp));
-        }
-        // Pass 2: Allocate and fill in <high, low> pair
-        byte[] buf = newBytesFor(n);
-        for (int i = index, j = 0; i < end; i++, j++) {
-            int cp = val[i];
-            if (Character.isBmpCodePoint(cp)) {
-                putChar(buf, j, cp);
-            } else {
-                putChar(buf, j++, Character.highSurrogate(cp));
-                putChar(buf, j, Character.lowSurrogate(cp));
-            }
-        }
-        return buf;
-    }
+        int n = computeCodePointSize(val, index, end);
 
-    public static byte[] toBytes(char c) {
+        byte[] buf = newBytesFor(n);
+        return extractCodepoints(val, index, end, buf, 0);
+     }
+
+    static byte[] toBytes(char c) {
         byte[] result = new byte[2];
         putChar(result, 0, c);
         return result;
@@ -246,19 +539,35 @@ final class StringUTF16 {
         return result;
     }
 
+    /**
+     * Copies the specified sub-range of characters from a UTF-16 string byte
+     * array to the specified character array sub-range.
+     *
+     * @param value the source UTF-16 string byte array to copy from
+     * @param srcBegin the index (inclusive) of the first character in the source sub-range
+     * @param srcEnd the index (exclusive) of the last character in the source sub-range
+     * @param dst the target character array to copy to
+     * @param dstBegin the index (inclusive) of the first character in the target sub-range
+     *
+     * @throws NullPointerException if {@code value} or {@code dst} is null
+     * @throws StringIndexOutOfBoundsException if the sub-ranges are out of bounds
+     */
+    static void getChars(byte[] value, int srcBegin, int srcEnd, char[] dst, int dstBegin) {
+        checkBoundsBeginEnd(srcBegin, srcEnd, value);                           // Implicit null check on `value` via `checkBoundsBeginEnd()`
+        String.checkBoundsOffCount(dstBegin, srcEnd - srcBegin, dst.length);    // Implicit null check on `dst`
+        getChars0(value, srcBegin, srcEnd, dst, dstBegin);
+    }
+
+    // vmIntrinsics::_getCharsStringU
     @IntrinsicCandidate
-    public static void getChars(byte[] value, int srcBegin, int srcEnd, char[] dst, int dstBegin) {
-        // We need a range check here because 'getChar' has no checks
-        if (srcBegin < srcEnd) {
-            checkBoundsOffCount(srcBegin, srcEnd - srcBegin, value);
-        }
+    private static void getChars0(byte[] value, int srcBegin, int srcEnd, char[] dst, int dstBegin) {
         for (int i = srcBegin; i < srcEnd; i++) {
             dst[dstBegin++] = getChar(value, i);
         }
     }
 
     /* @see java.lang.String.getBytes(int, int, byte[], int) */
-    public static void getBytes(byte[] value, int srcBegin, int srcEnd, byte[] dst, int dstBegin) {
+    static void getBytes(byte[] value, int srcBegin, int srcEnd, byte[] dst, int dstBegin) {
         srcBegin <<= 1;
         srcEnd <<= 1;
         for (int i = srcBegin + (1 >> LO_BYTE_SHIFT); i < srcEnd; i += 2) {
@@ -266,34 +575,50 @@ final class StringUTF16 {
         }
     }
 
-    @IntrinsicCandidate
-    public static boolean equals(byte[] value, byte[] other) {
-        if (value.length == other.length) {
-            int len = value.length >> 1;
-            for (int i = 0; i < len; i++) {
-                if (getChar(value, i) != getChar(other, i)) {
-                    return false;
-                }
-            }
-            return true;
-        }
-        return false;
+    /**
+     * Lexicographically compares two UTF-16 strings as specified in
+     * {@link String#compareTo(String) String::compareTo}.
+     *
+     * @param value a UTF-16 string byte array
+     * @param other a UTF-16 string byte array
+     *
+     * @return {@code 0} if {@code value} is equal to {@code other}, a value
+     * less than {@code 0} if {@code value} is lexicographically less than
+     * {@code other}; a value greater than {@code 0} otherwise.
+     *
+     * @throws NullPointerException if {@code value} or {@code other} is null
+     */
+    static int compareTo(byte[] value, byte[] other) {
+        Objects.requireNonNull(value);
+        Objects.requireNonNull(other);
+        return compareTo0(value, other);
     }
 
+    // vmIntrinsics::_compareToU
     @IntrinsicCandidate
-    public static int compareTo(byte[] value, byte[] other) {
+    private static int compareTo0(byte[] value, byte[] other) {
         int len1 = length(value);
         int len2 = length(other);
         return compareValues(value, other, len1, len2);
     }
 
-    /*
-     * Checks the boundary and then compares the byte arrays.
+    /**
+     * Lexicographically compares two UTF-16 string prefixes as specified in
+     * {@link String#compareTo(String) String::compareTo}.
+     *
+     * @param value a UTF-16 string byte array
+     * @param other a UTF-16 string byte array
+     * @param len1 the number of characters in {@code value} to compare
+     * @param len2 the number of characters in {@code other} to compare
+     *
+     * @throws NullPointerException if {@code value} or {@code other} is null
+     * @throws StringIndexOutOfBoundsException if the sub-ranges are out of bounds
      */
-    public static int compareTo(byte[] value, byte[] other, int len1, int len2) {
+    static int compareTo(byte[] value, byte[] other, int len1, int len2) {
+        Objects.requireNonNull(value);
+        Objects.requireNonNull(other);
         checkOffset(len1, value);
         checkOffset(len2, other);
-
         return compareValues(value, other, len1, len2);
     }
 
@@ -309,16 +634,58 @@ final class StringUTF16 {
         return len1 - len2;
     }
 
+    /**
+     * Lexicographically compares a UTF-16 string to a Latin-1 one as specified
+     * in {@link String#compareTo(String) String::compareTo}.
+     *
+     * @param value a UTF-16 string byte array
+     * @param other a Latin-1 string byte array
+     *
+     * @return {@code 0} if {@code value} is equal to {@code other}, a value
+     * less than {@code 0} if {@code value} is lexicographically less than
+     * {@code other}; a value greater than {@code 0} otherwise.
+     *
+     * @throws NullPointerException if {@code value} or {@code other} is null
+     */
+    static int compareToLatin1(byte[] value, byte[] other) {
+        Objects.requireNonNull(value);
+        Objects.requireNonNull(other);
+        return compareToLatin1_0(value, other);
+    }
+
+    // vmIntrinsics::_compareToUL
     @IntrinsicCandidate
-    public static int compareToLatin1(byte[] value, byte[] other) {
+    private static int compareToLatin1_0(byte[] value, byte[] other) {
         return -StringLatin1.compareToUTF16(other, value);
     }
 
-    public static int compareToLatin1(byte[] value, byte[] other, int len1, int len2) {
+    /**
+     * Lexicographically compares a UTF-16 string prefix to a Latin-1 one as
+     * specified in {@link String#compareTo(String) String::compareTo}.
+     *
+     * @param value a UTF-16 string byte array
+     * @param other a Latin-1 string byte array
+     * @param len1 the number of characters from {@code value} to compare
+     * @param len2 the number of characters from {@code other} to compare
+     *
+     * @return {@code 0} if the {@code value} prefix is equal to the
+     * {@code other} prefix, a value less than {@code 0} if the {@code value}
+     * prefix is lexicographically less than the {@code other} prefix; a
+     * value greater than {@code 0} otherwise.
+     *
+     * @throws NullPointerException if {@code value} or {@code other} is null
+     * @throws StringIndexOutOfBoundsException if the sub-ranges are out of bounds
+     */
+    static int compareToLatin1(byte[] value, byte[] other, int len1, int len2) {
         return -StringLatin1.compareToUTF16(other, value, len2, len1);
     }
 
-    public static int compareToCI(byte[] value, byte[] other) {
+    /**
+     * Case-insensitive {@link #compareTo(byte[], byte[]) compareTo}.
+     */
+    static int compareToCI(byte[] value, byte[] other) {
+        Objects.requireNonNull(value);
+        Objects.requireNonNull(other);
         return compareToCIImpl(value, 0, length(value), other, 0, length(other));
     }
 
@@ -331,8 +698,8 @@ final class StringUTF16 {
         assert olast <= length(other);
 
         for (int k1 = toffset, k2 = ooffset; k1 < tlast && k2 < olast; k1++, k2++) {
-            int cp1 = (int)getChar(value, k1);
-            int cp2 = (int)getChar(other, k2);
+            int cp1 = getChar(value, k1);
+            int cp2 = getChar(other, k2);
 
             if (cp1 == cp2 || compareCodePointCI(cp1, cp2) == 0) {
                 continue;
@@ -407,38 +774,134 @@ final class StringUTF16 {
         return cp;
     }
 
-    public static int compareToCI_Latin1(byte[] value, byte[] other) {
+    /**
+     * Case-insensitive {@link #compareToLatin1(byte[], byte[]) compareToLatin1}.
+     */
+    static int compareToCI_Latin1(byte[] value, byte[] other) {
         return -StringLatin1.compareToCI_UTF16(other, value);
     }
 
-    public static int hashCode(byte[] value) {
-        int h = 0;
-        int length = value.length >> 1;
-        for (int i = 0; i < length; i++) {
-            h = 31 * h + getChar(value, i);
-        }
-        return h;
+    static int compareToFC_Latin1(byte[] value, byte[] other) {
+        return -StringLatin1.compareToFC_UTF16(other, value);
     }
 
-    public static int indexOf(byte[] value, int ch, int fromIndex) {
-        int max = value.length >> 1;
-        if (fromIndex < 0) {
-            fromIndex = 0;
-        } else if (fromIndex >= max) {
-            // Note: fromIndex might be near -1>>>1.
+    private static int compareToFC0(byte[] value, int off, int last, byte[] other, int ooff, int olast) {
+        int f1 = 0, f2 = 0;
+        int k1 = off, k2 = ooff;
+        while ((k1 < last || f1 != 0) && (k2 < olast || f2 != 0)) {
+            int c1, c2;
+            if (f1 != 0) {
+                c1 = f1 & 0xffff; f1 >>>= 16;
+            } else {
+                c1 = StringUTF16.codePointAt(value, k1, last, true);
+                k1 += Character.charCount(c1);
+                var f = CaseFolding.fold(c1);
+                if (CaseFolding.isSingleCodePoint(f)) {
+                    c1 = (int)(f & 0xfffff);
+                } else {
+                    c1 = (int)(f & 0xffff);
+                    f1 = (int)(f >> 16);
+                }
+            }
+            if (f2 != 0) {
+                c2 = f2 & 0xffff; f2 >>>= 16;
+            } else {
+                c2 = StringUTF16.codePointAt(other, k2, olast, true);
+                k2 += Character.charCount(c2);
+                var f = CaseFolding.fold(c2);
+                if (CaseFolding.isSingleCodePoint(f)) {
+                    c2 = (int)(f & 0xfffff);
+                } else {
+                    c2 = (int)(f & 0xffff);
+                    f2 = (int)(f >>> 16);
+                }
+            }
+            if (c1 != c2) {
+                return c1 - c2;
+            }
+        }
+        if (k1 < last || f1 != 0) {
+            return 1;
+        }
+        if (k2 < olast || f2 != 0) {
             return -1;
         }
+        return 0;
+    }
+
+    static int compareToFC(byte[] value, byte[] other) {
+        int tlast = length(value);
+        int olast = length(other);
+        int lim = Math.min(tlast, olast);
+        int k = 0;
+        while (k < lim) {
+            int cp1 = codePointAt(value, k, tlast, true);
+            int cp2 = codePointAt(other, k, olast, true);
+            if (cp1 != cp2) {
+                long cf1 = CaseFolding.fold(cp1);
+                long cf2 = CaseFolding.fold(cp2);
+                if (cf1 != cf2) {
+                    if (!CaseFolding.isSingleCodePoint(cf1) || !CaseFolding.isSingleCodePoint(cf2)) {
+                        return compareToFC0(value, k, tlast, other, k, olast);
+                    }
+                    return (int) cf1 - (int) cf2;
+                }
+            }
+            k += Character.charCount(cp1);
+        }
+        return tlast - olast;
+    }
+
+    static int hashCode(byte[] value) {
+        return ArraysSupport.hashCodeOfUTF16(value, 0, value.length >> 1, 0);
+    }
+
+    /**
+     * {@return the index of the first character matching the provided one in
+     * the given UTF-16 string byte array sub-range; {@code -1} otherwise}
+     *
+     * @param value a UTF-16 string byte array to search in
+     * @param ch a character to search for
+     * @param fromIndex the index (inclusive) of the first character in the sub-range
+     * @param toIndex the index (exclusive) of the last character in the sub-range
+     *
+     * @throws NullPointerException if {@code value} is null
+     * @throws StringIndexOutOfBoundsException if the sub-range is out of bounds
+     */
+    static int indexOf(byte[] value, int ch, int fromIndex, int toIndex) {
+        Objects.requireNonNull(value);
+        checkBoundsBeginEnd(fromIndex, toIndex, value);
         if (ch < Character.MIN_SUPPLEMENTARY_CODE_POINT) {
             // handle most cases here (ch is a BMP code point or a
             // negative value (invalid code point))
-            return indexOfChar(value, ch, fromIndex, max);
+            return indexOfChar0(value, ch, fromIndex, toIndex);
         } else {
-            return indexOfSupplementary(value, ch, fromIndex, max);
+            return indexOfSupplementary(value, ch, fromIndex, toIndex);
         }
     }
 
+    /**
+     * Searches for the first occurrence of {@code str} in {@code value}, and,
+     * if found, returns the index of the first character of the matching
+     * {@code value} sub-range; {@code -1} otherwise.
+     *
+     * @param value a UTF-16 string byte array to search in
+     * @param str a UTF-16 string byte array to search for
+     *
+     * @return the index of the first character of the matching {@code value}
+     * sub-range if a match is found; {@code -1} otherwise
+     *
+     * @throws NullPointerException if {@code value} or {@code str} is null
+     */
+    static int indexOf(byte[] value, byte[] str) {
+        Objects.requireNonNull(value);
+        Objects.requireNonNull(str);
+        return indexOf0(value, str);
+    }
+
+    // vmIntrinsics::_indexOfU
     @IntrinsicCandidate
-    public static int indexOf(byte[] value, byte[] str) {
+    private static int indexOf0(byte[] value, byte[] str) {
         if (str.length == 0) {
             return 0;
         }
@@ -448,22 +911,58 @@ final class StringUTF16 {
         return indexOfUnsafe(value, length(value), str, length(str), 0);
     }
 
-    @IntrinsicCandidate
-    public static int indexOf(byte[] value, int valueCount, byte[] str, int strCount, int fromIndex) {
-        checkBoundsBeginEnd(fromIndex, valueCount, value);
-        checkBoundsBeginEnd(0, strCount, str);
-        return indexOfUnsafe(value, valueCount, str, strCount, fromIndex);
+    /**
+     * Searches for the first occurrence of the given {@code str} sub-range in
+     * the given {@code value} sub-range, and, if found, returns the index of
+     * the first character of the matching {@code value} sub-range; {@code -1}
+     * otherwise.
+     *
+     * @param value a UTF-16 string byte array to search in
+     * @param valueToIndex the index (exclusive) of the last character in {@code value}
+     * @param str a UTF-16 string byte array to search for
+     * @param strToIndex the index (exclusive) of the last character in {@code str}
+     * @param valueFromIndex the index (inclusive) of the first character in {@code value}
+     *
+     * @return the index of the first character of the matching {@code value}
+     * sub-range if a match is found; {@code -1} otherwise
+     *
+     * @throws NullPointerException if {@code value} or {@code str} is null
+     * @throws StringIndexOutOfBoundsException if the sub-ranges are out of bounds
+     */
+    static int indexOf(byte[] value, int valueToIndex, byte[] str, int strToIndex, int valueFromIndex) {
+        Objects.requireNonNull(value);
+        checkBoundsBeginEnd(valueFromIndex, valueToIndex, value);
+        Objects.requireNonNull(str);
+        checkBoundsBeginEnd(0, strToIndex, str);
+        return indexOf0(value, valueToIndex, str, strToIndex, valueFromIndex);
     }
 
+    // vmIntrinsics::_indexOfIU
+    @IntrinsicCandidate
+    private static int indexOf0(byte[] value, int valueToIndex, byte[] str, int strToIndex, int valueFromIndex) {
+        if (strToIndex == 0) {
+            return 0;
+        }
+        if ((valueToIndex - valueFromIndex) < strToIndex) {
+            return -1;
+        }
+        return indexOfUnsafe(value, valueToIndex, str, strToIndex, valueFromIndex);
+    }
 
-    private static int indexOfUnsafe(byte[] value, int valueCount, byte[] str, int strCount, int fromIndex) {
-        assert fromIndex >= 0;
-        assert strCount > 0;
-        assert strCount <= length(str);
-        assert valueCount >= strCount;
+    // This method has the following assumptions on its inputs:
+    //
+    // - Arrays are not null
+    // - Sub-ranges are valid
+    // - The `str` sub-range is not empty
+    // - The `value` sub-range length is greater than or equal to the `str` sub-range length
+    private static int indexOfUnsafe(byte[] value, int valueToIndex, byte[] str, int strToIndex, int valueFromIndex) {
+        assert valueFromIndex >= 0;
+        assert strToIndex > 0;
+        assert strToIndex <= length(str);
+        assert (valueToIndex - valueFromIndex) >= strToIndex;
         char first = getChar(str, 0);
-        int max = (valueCount - strCount);
-        for (int i = fromIndex; i <= max; i++) {
+        int max = (valueToIndex - strToIndex);
+        for (int i = valueFromIndex; i <= max; i++) {
             // Look for first character.
             if (getChar(value, i) != first) {
                 while (++i <= max && getChar(value, i) != first);
@@ -471,7 +970,7 @@ final class StringUTF16 {
             // Found first character, now look at the rest of value
             if (i <= max) {
                 int j = i + 1;
-                int end = j + strCount - 1;
+                int end = j + strToIndex - 1;
                 for (int k = 1; j < end && getChar(value, j) == getChar(str, k); j++, k++);
                 if (j == end) {
                     // Found whole string.
@@ -482,12 +981,29 @@ final class StringUTF16 {
         return -1;
     }
 
-
     /**
-     * Handles indexOf Latin1 substring in UTF16 string.
+     * Searches for the first occurrence of the given Latin-1 string byte array
+     * {@code str} in the given UTF-16 string byte array {@code value}, and, if
+     * found, returns the index of the first character of the matching
+     * {@code value} sub-range; {@code -1} otherwise.
+     *
+     * @param value a UTF-16 string byte array to search in
+     * @param str a Latin-1 string byte array to search for
+     *
+     * @return the index of the first character of the matching {@code value}
+     * sub-range if a match is found; {@code -1} otherwise
+     *
+     * @throws NullPointerException if {@code value} or {@code str} is null
      */
+    static int indexOfLatin1(byte[] value, byte[] str) {
+        Objects.requireNonNull(value);
+        Objects.requireNonNull(str);
+        return indexOfLatin1_0(value, str);
+    }
+
+    // vmIntrinsics::_indexOfUL
     @IntrinsicCandidate
-    public static int indexOfLatin1(byte[] value, byte[] str) {
+    private static int indexOfLatin1_0(byte[] value, byte[] str) {
         if (str.length == 0) {
             return 0;
         }
@@ -497,18 +1013,54 @@ final class StringUTF16 {
         return indexOfLatin1Unsafe(value, length(value), str, str.length, 0);
     }
 
-    @IntrinsicCandidate
-    public static int indexOfLatin1(byte[] src, int srcCount, byte[] tgt, int tgtCount, int fromIndex) {
-        checkBoundsBeginEnd(fromIndex, srcCount, src);
-        String.checkBoundsBeginEnd(0, tgtCount, tgt.length);
-        return indexOfLatin1Unsafe(src, srcCount, tgt, tgtCount, fromIndex);
+    /**
+     * Searches for the first occurrence of the given Latin-1 string byte array
+     * {@code tgt} sub-range in the given UTF-16 string byte array {@code src}
+     * sub-range, and, if found, returns the index of the first character in
+     * {@code src}; {@code -1} otherwise.
+     *
+     * @param src a UTF-16 string byte array to search in
+     * @param srcToIndex the index (exclusive) of the last character in {@code src}
+     * @param tgt a Latin-1 string byte array to search for
+     * @param tgtToIndex the index (exclusive) of the last character in {@code tgt}
+     * @param tgtFromIndex the index (inclusive) of the first character in {@code src}
+     *
+     * @return the index of the first character of the matching {@code src}
+     * sub-range if a match is found; {@code -1} otherwise
+     *
+     * @throws NullPointerException if {@code src} or {@code tgt} is null
+     * @throws StringIndexOutOfBoundsException if the sub-ranges are out of bounds
+     */
+    static int indexOfLatin1(byte[] src, int srcToIndex, byte[] tgt, int tgtToIndex, int tgtFromIndex) {
+        Objects.requireNonNull(src);
+        checkBoundsBeginEnd(tgtFromIndex, srcToIndex, src);
+        String.checkBoundsBeginEnd(0, tgtToIndex, tgt.length);
+        return indexOfLatin1_0(src, srcToIndex, tgt, tgtToIndex, tgtFromIndex);
     }
 
-    public static int indexOfLatin1Unsafe(byte[] src, int srcCount, byte[] tgt, int tgtCount, int fromIndex) {
+    // vmIntrinsics::_indexOfIUL
+    @IntrinsicCandidate
+    private static int indexOfLatin1_0(byte[] src, int srcToIndex, byte[] tgt, int tgtToIndex, int srcFromIndex) {
+        if (tgtToIndex == 0) {
+            return 0;
+        }
+        if ((srcToIndex - srcFromIndex) < tgtToIndex) {
+            return -1;
+        }
+        return indexOfLatin1Unsafe(src, srcToIndex, tgt, tgtToIndex, srcFromIndex);
+    }
+
+    // This method has the following assumptions on its inputs:
+    //
+    // - Arrays are not null
+    // - Sub-ranges are valid
+    // - The `tgt` sub-range is not empty
+    // - The `src` sub-range length is greater than or equal to the `tgt` sub-range length
+    private static int indexOfLatin1Unsafe(byte[] src, int srcCount, byte[] tgt, int tgtCount, int fromIndex) {
         assert fromIndex >= 0;
         assert tgtCount > 0;
         assert tgtCount <= tgt.length;
-        assert srcCount >= tgtCount;
+        assert (srcCount - fromIndex) >= tgtCount;
         char first = (char)(tgt[0] & 0xff);
         int max = (srcCount - tgtCount);
         for (int i = fromIndex; i <= max; i++) {
@@ -532,13 +1084,9 @@ final class StringUTF16 {
         return -1;
     }
 
+    // vmIntrinsics::_indexOfU_char
     @IntrinsicCandidate
-    private static int indexOfChar(byte[] value, int ch, int fromIndex, int max) {
-        checkBoundsBeginEnd(fromIndex, max, value);
-        return indexOfCharUnsafe(value, ch, fromIndex, max);
-    }
-
-    private static int indexOfCharUnsafe(byte[] value, int ch, int fromIndex, int max) {
+    private static int indexOfChar0(byte[] value, int ch, int fromIndex, int max) {
         for (int i = fromIndex; i < max; i++) {
             if (getChar(value, i) == ch) {
                 return i;
@@ -565,8 +1113,8 @@ final class StringUTF16 {
     }
 
     // srcCoder == UTF16 && tgtCoder == UTF16
-    public static int lastIndexOf(byte[] src, int srcCount,
-                                  byte[] tgt, int tgtCount, int fromIndex) {
+    static int lastIndexOf(byte[] src, int srcCount,
+                           byte[] tgt, int tgtCount, int fromIndex) {
         assert fromIndex >= 0;
         assert tgtCount > 0;
         assert tgtCount <= length(tgt);
@@ -600,7 +1148,7 @@ final class StringUTF16 {
         }
     }
 
-    public static int lastIndexOf(byte[] value, int ch, int fromIndex) {
+    static int lastIndexOf(byte[] value, int ch, int fromIndex) {
         if (ch < Character.MIN_SUPPLEMENTARY_CODE_POINT) {
             // handle most cases here (ch is a BMP code point or a
             // negative value (invalid code point))
@@ -633,7 +1181,7 @@ final class StringUTF16 {
         return -1;
     }
 
-    public static String replace(byte[] value, char oldChar, char newChar) {
+    static String replace(byte[] value, char oldChar, char newChar) {
         int len = value.length >> 1;
         int i = -1;
         while (++i < len) {
@@ -655,19 +1203,18 @@ final class StringUTF16 {
             if (String.COMPACT_STRINGS &&
                 !StringLatin1.canEncode(oldChar) &&
                 StringLatin1.canEncode(newChar)) {
-                byte[] val = compress(buf, 0, len);
-                if (val != null) {
-                    return new String(val, LATIN1);
-                }
+                byte[] res = StringUTF16.compress(buf, 0, len);
+                byte coder = StringUTF16.coderFromArrayLen(res, len);
+                return new String(res, coder);
             }
             return new String(buf, UTF16);
         }
         return null;
     }
 
-    public static String replace(byte[] value, int valLen, boolean valLat1,
-                                 byte[] targ, int targLen, boolean targLat1,
-                                 byte[] repl, int replLen, boolean replLat1)
+    static String replace(byte[] value, int valLen, boolean valLat1,
+                          byte[] targ, int targLen, boolean targLat1,
+                          byte[] repl, int replLen, boolean replLat1)
     {
         assert targLen > 0;
         assert !valLat1 || !targLat1 || !replLat1;
@@ -773,26 +1320,25 @@ final class StringUTF16 {
 
         if (String.COMPACT_STRINGS && replLat1 && !targLat1) {
             // combination 6
-            byte[] lat1Result = compress(result, 0, resultLen);
-            if (lat1Result != null) {
-                return new String(lat1Result, LATIN1);
-            }
+            byte[] res = StringUTF16.compress(result, 0, resultLen);
+            byte coder = StringUTF16.coderFromArrayLen(res, resultLen);
+            return new String(res, coder);    // combination 6
         }
         return new String(result, UTF16);
     }
 
-    public static boolean regionMatchesCI(byte[] value, int toffset,
-                                          byte[] other, int ooffset, int len) {
+    static boolean regionMatchesCI(byte[] value, int toffset,
+                                   byte[] other, int ooffset, int len) {
         return compareToCIImpl(value, toffset, len, other, ooffset, len) == 0;
     }
 
-    public static boolean regionMatchesCI_Latin1(byte[] value, int toffset,
-                                                 byte[] other, int ooffset,
-                                                 int len) {
+    static boolean regionMatchesCI_Latin1(byte[] value, int toffset,
+                                          byte[] other, int ooffset,
+                                          int len) {
         return StringLatin1.regionMatchesCI_UTF16(other, ooffset, value, toffset, len);
     }
 
-    public static String toLowerCase(String str, byte[] value, Locale locale) {
+    static String toLowerCase(String str, byte[] value, Locale locale) {
         if (locale == null) {
             throw new NullPointerException();
         }
@@ -802,7 +1348,7 @@ final class StringUTF16 {
 
         // Now check if there are any characters that need to be changed, or are surrogate
         for (first = 0 ; first < len; first++) {
-            int cp = (int)getChar(value, first);
+            int cp = getChar(value, first);
             if (Character.isSurrogate((char)cp)) {
                 hasSurr = true;
                 break;
@@ -825,7 +1371,7 @@ final class StringUTF16 {
         }
         int bits = 0;
         for (int i = first; i < len; i++) {
-            int cp = (int)getChar(value, i);
+            int cp = getChar(value, i);
             if (cp == '\u03A3' ||                       // GREEK CAPITAL LETTER SIGMA
                 Character.isSurrogate((char)cp)) {
                 return toLowerCaseEx(str, value, result, i, locale, false);
@@ -840,7 +1386,7 @@ final class StringUTF16 {
             bits |= cp;
             putChar(result, i, cp);
         }
-        if (bits > 0xFF) {
+        if (bits > 0xff) {
             return new String(result, UTF16);
         } else {
             return newString(result, 0, len);
@@ -896,7 +1442,7 @@ final class StringUTF16 {
         return newString(result, 0, resultOffset);
     }
 
-    public static String toUpperCase(String str, byte[] value, Locale locale) {
+    static String toUpperCase(String str, byte[] value, Locale locale) {
         if (locale == null) {
             throw new NullPointerException();
         }
@@ -906,7 +1452,7 @@ final class StringUTF16 {
 
         // Now check if there are any characters that need to be changed, or are surrogate
         for (first = 0 ; first < len; first++) {
-            int cp = (int)getChar(value, first);
+            int cp = getChar(value, first);
             if (Character.isSurrogate((char)cp)) {
                 hasSurr = true;
                 break;
@@ -930,7 +1476,7 @@ final class StringUTF16 {
         }
         int bits = 0;
         for (int i = first; i < len; i++) {
-            int cp = (int)getChar(value, i);
+            int cp = getChar(value, i);
             if (Character.isSurrogate((char)cp)) {
                 return toUpperCaseEx(str, value, result, i, locale, false);
             }
@@ -941,7 +1487,7 @@ final class StringUTF16 {
             bits |= cp;
             putChar(result, i, cp);
         }
-        if (bits > 0xFF) {
+        if (bits > 0xff) {
             return new String(result, UTF16);
         } else {
             return newString(result, 0, len);
@@ -1001,7 +1547,7 @@ final class StringUTF16 {
         return newString(result, 0, resultOffset);
     }
 
-    public static String trim(byte[] value) {
+    static String trim(byte[] value) {
         int length = value.length >> 1;
         int len = length;
         int st = 0;
@@ -1016,7 +1562,7 @@ final class StringUTF16 {
             null;
     }
 
-    public static int indexOfNonWhitespace(byte[] value) {
+    static int indexOfNonWhitespace(byte[] value) {
         int length = value.length >> 1;
         int left = 0;
         while (left < length) {
@@ -1029,9 +1575,8 @@ final class StringUTF16 {
         return left;
     }
 
-    public static int lastIndexOfNonWhitespace(byte[] value) {
-        int length = value.length >>> 1;
-        int right = length;
+    static int lastIndexOfNonWhitespace(byte[] value) {
+        int right = value.length >>> 1;
         while (0 < right) {
             int codepoint = codePointBefore(value, right);
             if (codepoint != ' ' && codepoint != '\t' && !Character.isWhitespace(codepoint)) {
@@ -1042,7 +1587,7 @@ final class StringUTF16 {
         return right;
     }
 
-    public static String strip(byte[] value) {
+    static String strip(byte[] value) {
         int length = value.length >>> 1;
         int left = indexOfNonWhitespace(value);
         if (left == length) {
@@ -1053,13 +1598,13 @@ final class StringUTF16 {
         return ifChanged ? newString(value, left, right - left) : null;
     }
 
-    public static String stripLeading(byte[] value) {
+    static String stripLeading(byte[] value) {
         int length = value.length >>> 1;
         int left = indexOfNonWhitespace(value);
         return (left != 0) ? newString(value, left, length - left) : null;
     }
 
-    public static String stripTrailing(byte[] value) {
+    static String stripTrailing(byte[] value) {
         int length = value.length >>> 1;
         int right = lastIndexOfNonWhitespace(value);
         return (right != length) ? newString(value, 0, right) : null;
@@ -1159,28 +1704,17 @@ final class StringUTF16 {
         return StreamSupport.stream(LinesSpliterator.spliterator(value), false);
     }
 
-    private static void putChars(byte[] val, int index, char[] str, int off, int end) {
-        while (off < end) {
-            putChar(val, index++, str[off++]);
-        }
-    }
-
-    public static String newString(byte[] val, int index, int len) {
+    static String newString(byte[] val, int index, int len) {
         if (len == 0) {
             return "";
         }
         if (String.COMPACT_STRINGS) {
-            byte[] buf = compress(val, index, len);
-            if (buf != null) {
-                return new String(buf, LATIN1);
-            }
+            byte[] res = StringUTF16.compress(val, index, len);
+            byte coder = StringUTF16.coderFromArrayLen(res, len);
+            return new String(res, coder);
         }
         int last = index + len;
         return new String(Arrays.copyOfRange(val, index << 1, last << 1), UTF16);
-    }
-
-    public static void fillNull(byte[] val, int index, int end) {
-        Arrays.fill(val, index << 1, end << 1, (byte)0);
     }
 
     static class CharsSpliterator implements Spliterator.OfInt {
@@ -1236,7 +1770,7 @@ final class StringUTF16 {
         }
 
         @Override
-        public long estimateSize() { return (long)(fence - index); }
+        public long estimateSize() { return fence - index; }
 
         @Override
         public int characteristics() {
@@ -1321,7 +1855,7 @@ final class StringUTF16 {
         }
 
         @Override
-        public long estimateSize() { return (long)(fence - index); }
+        public long estimateSize() { return fence - index; }
 
         @Override
         public int characteristics() {
@@ -1331,51 +1865,43 @@ final class StringUTF16 {
 
     ////////////////////////////////////////////////////////////////
 
-    public static void putCharSB(byte[] val, int index, int c) {
+    static void putCharSB(byte[] val, int index, int c) {
         checkIndex(index, val);
         putChar(val, index, c);
     }
 
-    public static void putCharsSB(byte[] val, int index, char[] ca, int off, int end) {
+    static void putCharsSB(byte[] val, int index, char[] ca, int off, int end) {
         checkBoundsBeginEnd(index, index + end - off, val);
-        putChars(val, index, ca, off, end);
+        String.checkBoundsBeginEnd(off, end, ca.length);
+        Unsafe.getUnsafe().copyMemory(
+                ca,
+                Unsafe.ARRAY_CHAR_BASE_OFFSET + ((long) off << 1),
+                val,
+                Unsafe.ARRAY_BYTE_BASE_OFFSET + ((long) index << 1),
+                (long) (end - off) << 1);
     }
 
-    public static void putCharsSB(byte[] val, int index, CharSequence s, int off, int end) {
+    static void putCharsSB(byte[] val, int index, CharSequence s, int off, int end) {
         checkBoundsBeginEnd(index, index + end - off, val);
         for (int i = off; i < end; i++) {
             putChar(val, index++, s.charAt(i));
         }
     }
 
-    public static int codePointAtSB(byte[] val, int index, int end) {
+    static int codePointAtSB(byte[] val, int index, int end) {
         return codePointAt(val, index, end, true /* checked */);
     }
 
-    public static int codePointBeforeSB(byte[] val, int index) {
+    static int codePointBeforeSB(byte[] val, int index) {
         return codePointBefore(val, index, true /* checked */);
     }
 
-    public static int codePointCountSB(byte[] val, int beginIndex, int endIndex) {
+    static int codePointCountSB(byte[] val, int beginIndex, int endIndex) {
         return codePointCount(val, beginIndex, endIndex, true /* checked */);
     }
 
-    public static int getChars(int i, int begin, int end, byte[] value) {
-        checkBoundsBeginEnd(begin, end, value);
-        int pos = getChars(i, end, value);
-        assert begin == pos;
-        return pos;
-    }
-
-    public static int getChars(long l, int begin, int end, byte[] value) {
-        checkBoundsBeginEnd(begin, end, value);
-        int pos = getChars(l, end, value);
-        assert begin == pos;
-        return pos;
-    }
-
-    public static boolean contentEquals(byte[] v1, byte[] v2, int len) {
-        checkBoundsOffCount(0, len, v2);
+    static boolean contentEquals(byte[] v1, byte[] v2, int len) {
+        String.checkBoundsOffCount(0, len, length(v2));
         for (int i = 0; i < len; i++) {
             if ((char)(v1[i] & 0xff) != getChar(v2, i)) {
                 return false;
@@ -1384,7 +1910,7 @@ final class StringUTF16 {
         return true;
     }
 
-    public static boolean contentEquals(byte[] value, CharSequence cs, int len) {
+    static boolean contentEquals(byte[] value, CharSequence cs, int len) {
         checkOffset(len, value);
         for (int i = 0; i < len; i++) {
             if (getChar(value, i) != cs.charAt(i)) {
@@ -1394,35 +1920,31 @@ final class StringUTF16 {
         return true;
     }
 
-    public static int putCharsAt(byte[] value, int i, char c1, char c2, char c3, char c4) {
+    static void putCharsAt(byte[] value, int i, char c1, char c2, char c3, char c4) {
         int end = i + 4;
         checkBoundsBeginEnd(i, end, value);
-        putChar(value, i++, c1);
-        putChar(value, i++, c2);
-        putChar(value, i++, c3);
-        putChar(value, i++, c4);
-        assert(i == end);
-        return end;
+        putChar(value, i, c1);
+        putChar(value, i + 1, c2);
+        putChar(value, i + 2, c3);
+        putChar(value, i + 3, c4);
     }
 
-    public static int putCharsAt(byte[] value, int i, char c1, char c2, char c3, char c4, char c5) {
+    static void putCharsAt(byte[] value, int i, char c1, char c2, char c3, char c4, char c5) {
         int end = i + 5;
         checkBoundsBeginEnd(i, end, value);
-        putChar(value, i++, c1);
-        putChar(value, i++, c2);
-        putChar(value, i++, c3);
-        putChar(value, i++, c4);
-        putChar(value, i++, c5);
-        assert(i == end);
-        return end;
+        putChar(value, i, c1);
+        putChar(value, i + 1, c2);
+        putChar(value, i + 2, c3);
+        putChar(value, i + 3, c4);
+        putChar(value, i + 4, c5);
     }
 
-    public static char charAt(byte[] value, int index) {
+    static char charAt(byte[] value, int index) {
         checkIndex(index, value);
         return getChar(value, index);
     }
 
-    public static void reverse(byte[] val, int count) {
+    static void reverse(byte[] val, int count) {
         checkOffset(count, val);
         int n = count - 1;
         boolean hasSurrogates = false;
@@ -1456,17 +1978,8 @@ final class StringUTF16 {
         }
     }
 
-    // inflatedCopy byte[] -> byte[]
-    public static void inflate(byte[] src, int srcOff, byte[] dst, int dstOff, int len) {
-        // We need a range check here because 'putChar' has no checks
-        checkBoundsOffCount(dstOff, len, dst);
-        for (int i = 0; i < len; i++) {
-            putChar(dst, dstOff++, src[srcOff++] & 0xff);
-        }
-    }
-
     // srcCoder == UTF16 && tgtCoder == LATIN1
-    public static int lastIndexOfLatin1(byte[] src, int srcCount,
+    static int lastIndexOfLatin1(byte[] src, int srcCount,
                                         byte[] tgt, int tgtCount, int fromIndex) {
         assert fromIndex >= 0;
         assert tgtCount > 0;
@@ -1502,12 +2015,13 @@ final class StringUTF16 {
 
     ////////////////////////////////////////////////////////////////
 
-    private static native boolean isBigEndian();
-
-    static final int HI_BYTE_SHIFT;
-    static final int LO_BYTE_SHIFT;
+    private static final int HI_BYTE_SHIFT;
+    private static final int LO_BYTE_SHIFT;
     static {
-        if (isBigEndian()) {
+        // Assumptions for StringUTF16 operations. Present in `LibraryCallKit::inline_string_char_access` too.
+        assert Unsafe.ARRAY_CHAR_BASE_OFFSET == Unsafe.ARRAY_BYTE_BASE_OFFSET : "sanity: byte[] and char[] bases agree";
+        assert Unsafe.ARRAY_CHAR_INDEX_SCALE == Unsafe.ARRAY_BYTE_INDEX_SCALE * 2 : "sanity: byte[] and char[] scales agree";
+        if (Unsafe.getUnsafe().isBigEndian()) {
             HI_BYTE_SHIFT = 8;
             LO_BYTE_SHIFT = 0;
         } else {
@@ -1516,124 +2030,18 @@ final class StringUTF16 {
         }
     }
 
-    static final int MAX_LENGTH = Integer.MAX_VALUE >> 1;
+    private static final int MAX_LENGTH = Integer.MAX_VALUE >> 1;
 
-    // Used by trusted callers.  Assumes all necessary bounds checks have
-    // been done by the caller.
-
-    /**
-     * This is a variant of {@link Integer#getChars(int, int, byte[])}, but for
-     * UTF-16 coder.
-     *
-     * @param i     value to convert
-     * @param index next index, after the least significant digit
-     * @param buf   target buffer, UTF16-coded.
-     * @return index of the most significant digit or minus sign, if present
-     */
-    static int getChars(int i, int index, byte[] buf) {
-        int q, r;
-        int charPos = index;
-
-        boolean negative = (i < 0);
-        if (!negative) {
-            i = -i;
-        }
-
-        // Get 2 digits/iteration using ints
-        while (i <= -100) {
-            q = i / 100;
-            r = (q * 100) - i;
-            i = q;
-            putChar(buf, --charPos, Integer.DigitOnes[r]);
-            putChar(buf, --charPos, Integer.DigitTens[r]);
-        }
-
-        // We know there are at most two digits left at this point.
-        q = i / 10;
-        r = (q * 10) - i;
-        putChar(buf, --charPos, '0' + r);
-
-        // Whatever left is the remaining digit.
-        if (q < 0) {
-            putChar(buf, --charPos, '0' - q);
-        }
-
-        if (negative) {
-            putChar(buf, --charPos, '-');
-        }
-        return charPos;
-    }
-
-    /**
-     * This is a variant of {@link Long#getChars(long, int, byte[])}, but for
-     * UTF-16 coder.
-     *
-     * @param i     value to convert
-     * @param index next index, after the least significant digit
-     * @param buf   target buffer, UTF16-coded.
-     * @return index of the most significant digit or minus sign, if present
-     */
-    static int getChars(long i, int index, byte[] buf) {
-        long q;
-        int r;
-        int charPos = index;
-
-        boolean negative = (i < 0);
-        if (!negative) {
-            i = -i;
-        }
-
-        // Get 2 digits/iteration using longs until quotient fits into an int
-        while (i <= Integer.MIN_VALUE) {
-            q = i / 100;
-            r = (int)((q * 100) - i);
-            i = q;
-            putChar(buf, --charPos, Integer.DigitOnes[r]);
-            putChar(buf, --charPos, Integer.DigitTens[r]);
-        }
-
-        // Get 2 digits/iteration using ints
-        int q2;
-        int i2 = (int)i;
-        while (i2 <= -100) {
-            q2 = i2 / 100;
-            r  = (q2 * 100) - i2;
-            i2 = q2;
-            putChar(buf, --charPos, Integer.DigitOnes[r]);
-            putChar(buf, --charPos, Integer.DigitTens[r]);
-        }
-
-        // We know there are at most two digits left at this point.
-        q2 = i2 / 10;
-        r  = (q2 * 10) - i2;
-        putChar(buf, --charPos, '0' + r);
-
-        // Whatever left is the remaining digit.
-        if (q2 < 0) {
-            putChar(buf, --charPos, '0' - q2);
-        }
-
-        if (negative) {
-            putChar(buf, --charPos, '-');
-        }
-        return charPos;
-    }
-    // End of trusted methods.
-
-    public static void checkIndex(int off, byte[] val) {
+    private static void checkIndex(int off, byte[] val) {
         String.checkIndex(off, length(val));
     }
 
-    public static void checkOffset(int off, byte[] val) {
+    private static void checkOffset(int off, byte[] val) {
         String.checkOffset(off, length(val));
     }
 
-    public static void checkBoundsBeginEnd(int begin, int end, byte[] val) {
+    static void checkBoundsBeginEnd(int begin, int end, byte[] val) {
         String.checkBoundsBeginEnd(begin, end, length(val));
-    }
-
-    public static void checkBoundsOffCount(int offset, int count, byte[] val) {
-        String.checkBoundsOffCount(offset, count, length(val));
     }
 
 }

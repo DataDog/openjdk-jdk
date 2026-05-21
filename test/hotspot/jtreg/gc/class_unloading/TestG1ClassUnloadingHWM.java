@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,22 +30,22 @@ package gc.class_unloading;
  * @library /test/lib
  * @modules java.base/jdk.internal.misc
  *          java.management
- * @build sun.hotspot.WhiteBox
- * @run driver jdk.test.lib.helpers.ClassFileInstaller sun.hotspot.WhiteBox
+ * @build jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run driver gc.class_unloading.TestG1ClassUnloadingHWM
  * @summary Test that -XX:-ClassUnloadingWithConcurrentMark will trigger a Full GC when more than MetaspaceSize metadata is allocated.
  */
 
 import jdk.test.lib.process.OutputAnalyzer;
 import jdk.test.lib.process.ProcessTools;
-import sun.hotspot.WhiteBox;
+import jdk.test.whitebox.WhiteBox;
 
 public class TestG1ClassUnloadingHWM {
   private static long MetaspaceSize = 32 * 1024 * 1024;
   private static long YoungGenSize  = 32 * 1024 * 1024;
 
   private static OutputAnalyzer run(boolean enableUnloading) throws Exception {
-    ProcessBuilder pb = ProcessTools.createJavaProcessBuilder(
+    return ProcessTools.executeLimitedTestJava(
       "-Xbootclasspath/a:.",
       "-XX:+UnlockDiagnosticVMOptions",
       "-XX:+WhiteBoxAPI",
@@ -57,7 +57,6 @@ public class TestG1ClassUnloadingHWM {
       TestG1ClassUnloadingHWM.AllocateBeyondMetaspaceSize.class.getName(),
       "" + MetaspaceSize,
       "" + YoungGenSize);
-    return new OutputAnalyzer(pb.start());
   }
 
   public static OutputAnalyzer runWithG1ClassUnloading() throws Exception {
@@ -69,19 +68,21 @@ public class TestG1ClassUnloadingHWM {
   }
 
   public static void testWithoutG1ClassUnloading() throws Exception {
-    // -XX:-ClassUnloadingWithConcurrentMark is used, so we expect a full GC instead of a concurrent cycle.
+    // -XX:-ClassUnloadingWithConcurrentMark is used, so we expect a full GC due to Metadata GC Threshold
+    // instead of a concurrent cycle.
     OutputAnalyzer out = runWithoutG1ClassUnloading();
 
-    out.shouldMatch(".*Pause Full.*");
-    out.shouldNotMatch(".*Pause Young \\(Concurrent Start\\).*");
+    out.shouldMatch(".*Pause Full \\(Metadata GC Threshold\\).*");
+    out.shouldNotMatch(".*Pause Young \\(Concurrent Start\\) \\(Metadata GC Threshold\\).*");
   }
 
   public static void testWithG1ClassUnloading() throws Exception {
-    // -XX:+ClassUnloadingWithConcurrentMark is used, so we expect a concurrent cycle instead of a full GC.
+    // -XX:+ClassUnloadingWithConcurrentMark is used, so we expect a concurrent cycle due to Metadata GC Threshold
+    // instead of a full GC.
     OutputAnalyzer out = runWithG1ClassUnloading();
 
-    out.shouldMatch(".*Pause Young \\(Concurrent Start\\).*");
-    out.shouldNotMatch(".*Pause Full.*");
+    out.shouldMatch(".*Pause Young \\(Concurrent Start\\) \\(Metadata GC Threshold\\).*");
+    out.shouldNotMatch(".*Pause Full \\(Metadata GC Threshold\\).*");
   }
 
   public static void main(String args[]) throws Exception {
@@ -126,4 +127,3 @@ public class TestG1ClassUnloadingHWM {
     }
   }
 }
-

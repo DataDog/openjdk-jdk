@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,8 +29,6 @@ import java.awt.Rectangle;
 import java.awt.geom.*;
 import java.util.*;
 
-import sun.awt.SunHints;
-
 public final class CStrike extends PhysicalStrike {
 
     // Creates the native strike
@@ -41,7 +39,7 @@ public final class CStrike extends PhysicalStrike {
                                                      int fmHint);
 
     // Disposes the native strike
-    private static native void disposeNativeStrikePtr(long nativeStrikePtr);
+    static native void disposeNativeStrikePtr(long nativeStrikePtr);
 
     // Creates a StrikeMetrics from the underlying native system fonts
     private static native StrikeMetrics getFontMetrics(long nativeStrikePtr);
@@ -72,14 +70,11 @@ public final class CStrike extends PhysicalStrike {
     private AffineTransform invDevTx;
     private final GlyphInfoCache glyphInfoCache;
     private final GlyphAdvanceCache glyphAdvanceCache;
-    private long nativeStrikePtr;
+    private final long nativeStrikePtr;
 
     CStrike(final CFont font, final FontStrikeDesc inDesc) {
         nativeFont = font;
         desc = inDesc;
-        glyphInfoCache = new GlyphInfoCache(font, desc);
-        glyphAdvanceCache = new GlyphAdvanceCache();
-        disposer = glyphInfoCache;
 
         // Normally the device transform should be the identity transform
         // for screen operations.  The device transform only becomes
@@ -94,15 +89,32 @@ public final class CStrike extends PhysicalStrike {
                 // so we won't worry about it.
             }
         }
+        nativeStrikePtr = initNativeStrikePtr(); // after setting up invDevTx
+        glyphInfoCache = new GlyphInfoCache(font, desc, nativeStrikePtr);
+        glyphAdvanceCache = new GlyphAdvanceCache();
+        disposer = glyphInfoCache;
     }
 
     public long getNativeStrikePtr() {
-        if (nativeStrikePtr != 0) {
-            return nativeStrikePtr;
-        }
+        return nativeStrikePtr;
+    }
+
+    public long initNativeStrikePtr() {
+        long nativeStrikePtr = 0L;
 
         final double[] glyphTx = new double[6];
         desc.glyphTx.getMatrix(glyphTx);
+
+        for (int i = 0; i < 6; i++) {
+            if (Double.isFinite(glyphTx[i])) {
+                continue;
+            }
+            for (int j = 0; j < 6; j++) {
+                glyphTx[j] = 0;
+            }
+            invDevTx = null;
+            break;
+        }
 
         final double[] invDevTxMatrix = new double[6];
         if (invDevTx == null) {
@@ -126,15 +138,6 @@ public final class CStrike extends PhysicalStrike {
 
         return nativeStrikePtr;
     }
-
-    @SuppressWarnings("deprecation")
-    protected synchronized void finalize() throws Throwable {
-        if (nativeStrikePtr != 0) {
-            disposeNativeStrikePtr(nativeStrikePtr);
-        }
-        nativeStrikePtr = 0;
-    }
-
 
     @Override
     public int getNumGlyphs() {
@@ -171,9 +174,22 @@ public final class CStrike extends PhysicalStrike {
 
     @Override
     Point2D.Float getGlyphMetrics(final int glyphCode) {
-        return new Point2D.Float(getGlyphAdvance(glyphCode), 0.0f);
+        Point2D.Float metrics = new Point2D.Float();
+        long glyphPtr = getGlyphImagePtr(glyphCode);
+        if (glyphPtr != 0L) {
+            metrics.x = StrikeCache.getGlyphXAdvance(glyphPtr);
+            metrics.y = StrikeCache.getGlyphYAdvance(glyphPtr);
+            /* advance is currently in device space, need to convert back
+             * into user space.
+             * This must not include the translation component. */
+            if (invDevTx != null) {
+                invDevTx.deltaTransform(metrics, metrics);
+            }
+        }
+        return metrics;
     }
 
+    @Override
     Rectangle2D.Float getGlyphOutlineBounds(int glyphCode) {
         GeneralPath gp = getGlyphOutline(glyphCode, 0f, 0f);
         Rectangle2D r2d = gp.getBounds2D();
@@ -191,6 +207,7 @@ public final class CStrike extends PhysicalStrike {
     }
 
     // pt, result in device space
+    @Override
     void getGlyphImageBounds(int glyphCode, Point2D.Float pt, Rectangle result) {
         Rectangle2D.Float floatRect = new Rectangle2D.Float();
 
@@ -201,7 +218,7 @@ public final class CStrike extends PhysicalStrike {
         getGlyphImageBounds(glyphCode, pt.x, pt.y, floatRect);
 
         if (floatRect.width == 0 && floatRect.height == 0) {
-            result.setRect(0, 0, -1, -1);
+            result.setRect(0, 0, 0, 0);
             return;
         }
 
@@ -212,16 +229,13 @@ public final class CStrike extends PhysicalStrike {
         getNativeGlyphImageBounds(getNativeStrikePtr(), glyphCode, floatRect, x, y);
     }
 
+    @Override
     GeneralPath getGlyphOutline(int glyphCode, float x, float y) {
         return getNativeGlyphOutline(getNativeStrikePtr(), glyphCode, x, y);
     }
 
-    // should implement, however not called though any path that is publicly exposed
-    GeneralPath getGlyphVectorOutline(int[] glyphs, float x, float y) {
-        throw new Error("not implemented yet");
-    }
-
     // called from the Sun2D renderer
+    @Override
     long getGlyphImagePtr(int glyphCode) {
         synchronized (glyphInfoCache) {
             long ptr = glyphInfoCache.get(glyphCode);
@@ -241,6 +255,7 @@ public final class CStrike extends PhysicalStrike {
     }
 
     // called from the Sun2D renderer
+    @Override
     void getGlyphImagePtrs(int[] glyphCodes, long[] images, int len) {
         synchronized (glyphInfoCache) {
             // fill the image pointer array with existing pointers
@@ -352,7 +367,7 @@ public final class CStrike extends PhysicalStrike {
     // This class stores glyph pointers, and is indexed based on glyph codes,
     // and negative unicode values.  See the comments in
     // CCharToGlyphMapper for more details on our glyph code strategy.
-    private static class GlyphInfoCache extends CStrikeDisposer {
+    private static final class GlyphInfoCache extends CStrikeDisposer {
         private static final int FIRST_LAYER_SIZE = 256;
         private static final int SECOND_LAYER_SIZE = 16384; // 16384 = 128x128
 
@@ -363,8 +378,8 @@ public final class CStrike extends PhysicalStrike {
         private SparseBitShiftingTwoLayerArray secondLayerCache;
         private HashMap<Integer, Long> generalCache;
 
-        GlyphInfoCache(final Font2D nativeFont, final FontStrikeDesc desc) {
-            super(nativeFont, desc);
+        GlyphInfoCache(final Font2D nativeFont, final FontStrikeDesc desc, long pScalerContext) {
+            super(nativeFont, desc, pScalerContext);
             firstLayerCache = new long[FIRST_LAYER_SIZE];
         }
 
@@ -419,6 +434,7 @@ public final class CStrike extends PhysicalStrike {
             generalCache.put(Integer.valueOf(index), Long.valueOf(value));
         }
 
+        @Override
         public synchronized void dispose() {
             // rdar://problem/5204197
             // Note that sun.font.Font2D.getStrike() actively disposes
@@ -444,9 +460,7 @@ public final class CStrike extends PhysicalStrike {
 
             // clean up everyone else
             if (generalCache != null) {
-                final Iterator<Long> i = generalCache.values().iterator();
-                while (i.hasNext()) {
-                    final long longValue = i.next().longValue();
+                for (long longValue : generalCache.values()) {
                     if (longValue != -1 && longValue != 0) {
                         removeGlyphInfoFromCache(longValue);
                         StrikeCache.freeLongPointer(longValue);
@@ -469,7 +483,7 @@ public final class CStrike extends PhysicalStrike {
             }
         }
 
-        private static class SparseBitShiftingTwoLayerArray {
+        private static final class SparseBitShiftingTwoLayerArray {
             final long[][] cache;
             final int shift;
             final int secondLayerLength;
@@ -498,7 +512,7 @@ public final class CStrike extends PhysicalStrike {
         }
     }
 
-    private static class GlyphAdvanceCache {
+    private static final class GlyphAdvanceCache {
         private static final int FIRST_LAYER_SIZE = 256;
         private static final int SECOND_LAYER_SIZE = 16384; // 16384 = 128x128
 
@@ -551,7 +565,7 @@ public final class CStrike extends PhysicalStrike {
             generalCache.put(Integer.valueOf(index), Float.valueOf(value));
         }
 
-        private static class SparseBitShiftingTwoLayerArray {
+        private static final class SparseBitShiftingTwoLayerArray {
             final float[][] cache;
             final int shift;
             final int secondLayerLength;

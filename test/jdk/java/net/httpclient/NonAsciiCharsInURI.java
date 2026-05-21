@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,60 +26,62 @@
  * @summary Verify that non-US-ASCII chars are replaced with a sequence of
  *          escaped octets that represent that char in the UTF-8 character set.
  * @bug 8201238
- * @modules java.base/sun.net.www.http
- *          java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- *          java.logging
- *          jdk.httpserver
- * @library /test/lib http2/server
- * @build Http2TestServer
- * @build jdk.test.lib.net.SimpleSSLContext
+ * @library /test/lib /test/jdk/java/net/httpclient/lib
+ * @build jdk.httpclient.test.lib.http2.Http2TestServer jdk.test.lib.net.SimpleSSLContext
  * @compile -encoding utf-8 NonAsciiCharsInURI.java
- * @run testng/othervm
- *       -Djdk.httpclient.HttpClient.log=reqeusts,headers
- *       NonAsciiCharsInURI
+ * @run junit/othervm
+ *       -Djdk.httpclient.HttpClient.log=requests,headers,errors,quic
+ *       ${test.main.class}
  */
 
-import com.sun.net.httpserver.HttpServer;
-import com.sun.net.httpserver.HttpsConfigurator;
-import com.sun.net.httpserver.HttpsServer;
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.net.URI;
 import javax.net.ssl.SSLContext;
 import java.net.http.HttpClient;
+import java.net.http.HttpClient.Version;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import jdk.httpclient.test.lib.common.HttpServerAdapters;
+import jdk.httpclient.test.lib.http3.Http3TestServer;
 import jdk.test.lib.net.SimpleSSLContext;
-import org.testng.annotations.AfterTest;
-import org.testng.annotations.BeforeTest;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 import static java.lang.System.err;
 import static java.lang.System.out;
+import static java.net.http.HttpClient.Version.HTTP_1_1;
+import static java.net.http.HttpClient.Version.HTTP_2;
+import static java.net.http.HttpClient.Version.HTTP_3;
+import static java.net.http.HttpOption.H3_DISCOVERY;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 import static java.net.http.HttpClient.Builder.NO_PROXY;
-import static org.testng.Assert.assertEquals;
+
+import org.junit.jupiter.api.AfterAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 public class NonAsciiCharsInURI implements HttpServerAdapters {
 
-    SSLContext sslContext;
-    HttpTestServer httpTestServer;         // HTTP/1.1    [ 4 servers ]
-    HttpTestServer httpsTestServer;        // HTTPS/1.1
-    HttpTestServer http2TestServer;        // HTTP/2 ( h2c )
-    HttpTestServer https2TestServer;       // HTTP/2 ( h2  )
-    String httpURI;
-    String httpsURI;
-    String http2URI;
-    String https2URI;
+    private static final SSLContext sslContext = SimpleSSLContext.findSSLContext();
+    private static HttpTestServer httpTestServer;         // HTTP/1.1    [ 5 servers ]
+    private static HttpTestServer httpsTestServer;        // HTTPS/1.1
+    private static HttpTestServer http2TestServer;        // HTTP/2 ( h2c )
+    private static HttpTestServer https2TestServer;       // HTTP/2 ( h2  )
+    private static HttpTestServer http3TestServer;        // HTTP/3 ( h3  )
+    private static String httpURI;
+    private static String httpsURI;
+    private static String http2URI;
+    private static String https2URI;
+    private static String http3URI;
+    private static String http3URI_head;
+
+    private static volatile HttpClient sharedClient;
 
     // € = '\u20AC' => 0xE20x820xAC
     static final String[][] pathsAndQueryStrings = new String[][] {
@@ -92,8 +94,7 @@ public class NonAsciiCharsInURI implements HttpServerAdapters {
             {  "/006/x?url=https://ja.wikipedia.org/wiki/エリザベス1世_(イングランド女王)" },
     };
 
-    @DataProvider(name = "variants")
-    public Object[][] variants() {
+    public static Object[][] variants() {
         List<Object[]> list = new ArrayList<>();
 
         for (boolean sameClient : new boolean[] { false, true }) {
@@ -109,13 +110,90 @@ public class NonAsciiCharsInURI implements HttpServerAdapters {
             Arrays.asList(pathsAndQueryStrings).stream()
                     .map(e -> new Object[] {https2URI + e[0], sameClient})
                     .forEach(list::add);
+            Arrays.asList(pathsAndQueryStrings).stream()
+                    .map(e -> new Object[] {http3URI + e[0], sameClient})
+                    .forEach(list::add);
         }
         return list.stream().toArray(Object[][]::new);
     }
 
+    static final long start = System.nanoTime();
+    public static String now() {
+        long now = System.nanoTime() - start;
+        long secs = now / 1000_000_000;
+        long mill = (now % 1000_000_000) / 1000_000;
+        long nan = now % 1000_000;
+        return String.format("[%d s, %d ms, %d ns] ", secs, mill, nan);
+    }
+
+    static Version version(String uri) {
+        if (uri.contains("/http1/") || uri.contains("/https1/"))
+            return HTTP_1_1;
+        if (uri.contains("/http2/") || uri.contains("/https2/"))
+            return HTTP_2;
+        if (uri.contains("/http3/"))
+            return HTTP_3;
+        return null;
+    }
+
+    static HttpRequest.Builder newRequestBuilder(String uri) {
+        var builder = HttpRequest.newBuilder(URI.create(uri));
+        if (version(uri) == HTTP_3) {
+            builder.version(HTTP_3);
+            builder.setOption(H3_DISCOVERY, http3TestServer.h3DiscoveryConfig());
+        }
+        return builder;
+    }
+
+    static HttpResponse<String> headRequest(HttpClient client)
+            throws IOException, InterruptedException
+    {
+        out.println("\n" + now() + "--- Sending HEAD request ----\n");
+        err.println("\n" + now() + "--- Sending HEAD request ----\n");
+
+        var request = newRequestBuilder(http3URI_head)
+                .HEAD().version(HTTP_2).build();
+        var response = client.send(request, BodyHandlers.ofString());
+        assertEquals(200, response.statusCode());
+        assertEquals(HTTP_2, response.version());
+        out.println("\n" + now() + "--- HEAD request succeeded ----\n");
+        err.println("\n" + now() + "--- HEAD request succeeded ----\n");
+        return response;
+    }
+
+    private static HttpClient makeNewClient() {
+        return HttpServerAdapters.createClientBuilderForH3()
+                .proxy(NO_PROXY)
+                .sslContext(sslContext)
+                .build();
+    }
+
+    private static final Object zis = new Object();
+    static HttpClient newHttpClient(boolean share) {
+        if (!share) return makeNewClient();
+        HttpClient shared = sharedClient;
+        if (shared != null) return shared;
+        synchronized (zis) {
+            shared = sharedClient;
+            if (shared == null) {
+                shared = sharedClient = makeNewClient();
+            }
+            return shared;
+        }
+    }
+
+    record CloseableClient(HttpClient client, boolean shared)
+            implements Closeable {
+        public void close() {
+            if (shared) return;
+            client.close();
+        }
+    }
+
     static final int ITERATION_COUNT = 3; // checks upgrade and re-use
 
-    @Test(dataProvider = "variants")
+    @ParameterizedTest
+    @MethodSource("variants")
     void test(String uriString, boolean sameClient) throws Exception {
         out.println("\n--- Starting ");
         // The single-argument factory requires any illegal characters in its
@@ -125,113 +203,138 @@ public class NonAsciiCharsInURI implements HttpServerAdapters {
 
         HttpClient client = null;
         for (int i=0; i< ITERATION_COUNT; i++) {
-            if (!sameClient || client == null)
-                client = HttpClient.newBuilder()
-                        .proxy(NO_PROXY)
-                        .sslContext(sslContext)
-                        .build();
+            if (!sameClient || client == null) {
+                client = newHttpClient(sameClient);
+                if (!sameClient && version(uriString) == HTTP_3) {
+                    headRequest(client);
+                }
+            }
 
-            HttpRequest request = HttpRequest.newBuilder(uri).build();
-            HttpResponse<String> resp = client.send(request, BodyHandlers.ofString());
 
-            out.println("Got response: " + resp);
-            out.println("Got body: " + resp.body());
-            assertEquals(resp.statusCode(), 200,
-                    "Expected 200, got:" + resp.statusCode());
+            try (var cl = new CloseableClient(client, sameClient)) {
+                HttpRequest request = newRequestBuilder(uriString).build();
+                HttpResponse<String> resp = client.send(request, BodyHandlers.ofString());
 
-            // the response body should contain the toASCIIString
-            // representation of the URI
-            String expectedURIString = uri.toASCIIString();
-            if (!expectedURIString.contains(resp.body())) {
-                err.println("Test failed: " + resp);
-                throw new AssertionError(expectedURIString +
-                                         " does not contain '" + resp.body() + "'");
-            } else {
-                out.println("Found expected " + resp.body() + " in " + expectedURIString);
+                out.println("Got response: " + resp);
+                out.println("Got body: " + resp.body());
+                assertEquals(200, resp.statusCode(),
+                        "Expected 200, got:" + resp.statusCode());
+
+                // the response body should contain the toASCIIString
+                // representation of the URI
+                String expectedURIString = uri.toASCIIString();
+                if (!expectedURIString.contains(resp.body())) {
+                    err.println("Test failed: " + resp);
+                    throw new AssertionError(expectedURIString +
+                            " does not contain '" + resp.body() + "'");
+                } else {
+                    out.println("Found expected " + resp.body() + " in " + expectedURIString);
+                }
+                assertEquals(version(uriString), resp.version());
             }
         }
     }
 
-    @Test(dataProvider = "variants")
-    void testAsync(String uriString, boolean sameClient) {
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testAsync(String uriString, boolean sameClient) throws Exception {
         out.println("\n--- Starting ");
         URI uri = URI.create(uriString);
 
         HttpClient client = null;
         for (int i=0; i< ITERATION_COUNT; i++) {
-            if (!sameClient || client == null)
-                client = HttpClient.newBuilder()
-                        .proxy(NO_PROXY)
-                        .sslContext(sslContext)
-                        .build();
+            if (!sameClient || client == null) {
+                client = newHttpClient(sameClient);
+                if (!sameClient && version(uriString) == HTTP_3) {
+                    headRequest(client);
+                }
+            }
 
-            HttpRequest request = HttpRequest.newBuilder(uri).build();
+            try (var cl = new CloseableClient(client, sameClient)) {
+                HttpRequest request = newRequestBuilder(uriString).build();
 
-            client.sendAsync(request, BodyHandlers.ofString())
-                    .thenApply(response -> {
-                        out.println("Got response: " + response);
-                        out.println("Got body: " + response.body());
-                        assertEquals(response.statusCode(), 200);
-                        return response.body(); })
-                    .thenAccept(body -> {
-                        // the response body should contain the toASCIIString
-                        // representation of the URI
-                        String expectedURIString = uri.toASCIIString();
-                        if (!expectedURIString.contains(body)) {
-                            err.println("Test failed: " + body);
-                            throw new AssertionError(expectedURIString +
-                                    " does not contain '" + body + "'");
-                        } else {
-                            out.println("Found expected " + body + " in "
+                client.sendAsync(request, BodyHandlers.ofString())
+                        .thenApply(response -> {
+                            out.println("Got response: " + response);
+                            out.println("Got body: " + response.body());
+                            assertEquals(200, response.statusCode());
+                            assertEquals(version(uriString), response.version());
+                            return response.body();
+                        })
+                        .thenAccept(body -> {
+                            // the response body should contain the toASCIIString
+                            // representation of the URI
+                            String expectedURIString = uri.toASCIIString();
+                            if (!expectedURIString.contains(body)) {
+                                err.println("Test failed: " + body);
+                                throw new AssertionError(expectedURIString +
+                                        " does not contain '" + body + "'");
+                            } else {
+                                out.println("Found expected " + body + " in "
                                         + expectedURIString);
-                        } })
-                    .join();
+                            }
+                        })
+                        .join();
+            }
         }
     }
 
-    static String serverAuthority(HttpTestServer server) {
-        return InetAddress.getLoopbackAddress().getHostName() + ":"
-                + server.getAddress().getPort();
-    }
-
-    @BeforeTest
-    public void setup() throws Exception {
-        sslContext = new SimpleSSLContext().get();
-        if (sslContext == null)
-            throw new AssertionError("Unexpected null sslContext");
+    @BeforeAll
+    public static void setup() throws Exception {
+        out.println(now() + "begin setup");
 
         HttpTestHandler handler = new HttpUriStringHandler();
-        InetSocketAddress sa = new InetSocketAddress(InetAddress.getLoopbackAddress(), 0);
-        httpTestServer = HttpTestServer.of(HttpServer.create(sa, 0));
-        httpTestServer.addHandler(handler, "/http1");
-        httpURI = "http://" + serverAuthority(httpTestServer) + "/http1";
+        httpTestServer = HttpTestServer.create(HTTP_1_1);
+        httpTestServer.addHandler(handler, "/http1/get");
+        httpURI = "http://" + httpTestServer.serverAuthority() + "/http1/get";
 
-        HttpsServer httpsServer = HttpsServer.create(sa, 0);
-        httpsServer.setHttpsConfigurator(new HttpsConfigurator(sslContext));
-        httpsTestServer = HttpTestServer.of(httpsServer);
-        httpsTestServer.addHandler(handler, "/https1");
-        httpsURI = "https://" + serverAuthority(httpsTestServer) + "/https1";
+        httpsTestServer = HttpTestServer.create(HTTP_1_1, sslContext);
+        httpsTestServer.addHandler(handler, "/https1/get");
+        httpsURI = "https://" + httpsTestServer.serverAuthority() + "/https1/get";
 
-        http2TestServer = HttpTestServer.of(new Http2TestServer("localhost", false, 0));
-        http2TestServer.addHandler(handler, "/http2");
-        http2URI = "http://" + http2TestServer.serverAuthority() + "/http2";
+        http2TestServer = HttpTestServer.create(HTTP_2);
+        http2TestServer.addHandler(handler, "/http2/get");
+        http2URI = "http://" + http2TestServer.serverAuthority() + "/http2/get";
 
-        https2TestServer = HttpTestServer.of(new Http2TestServer("localhost", true, sslContext));
-        https2TestServer.addHandler(handler, "/https2");
-        https2URI = "https://" + https2TestServer.serverAuthority() + "/https2";
+        https2TestServer = HttpTestServer.create(HTTP_2, sslContext);
+        https2TestServer.addHandler(handler, "/https2/get");
+        https2URI = "https://" + https2TestServer.serverAuthority() + "/https2/get";
 
+        http3TestServer = HttpTestServer.create(HTTP_3, sslContext);
+        http3TestServer.addHandler(new HttpUriStringHandler(), "/http3/get");
+        http3TestServer.addHandler(new HttpHeadOrGetHandler(), "/http3/head");
+        http3URI = "https://" + http3TestServer.serverAuthority() + "/http3/get";
+        http3URI_head = "https://" + http3TestServer.serverAuthority() + "/http3/head/x";
+
+        err.println(now() + "Starting servers");
         httpTestServer.start();
         httpsTestServer.start();
         http2TestServer.start();
         https2TestServer.start();
+        http3TestServer.start();
+
+        out.println("HTTP/1.1 server (http) listening at: " + httpTestServer.serverAuthority());
+        out.println("HTTP/1.1 server (TLS)  listening at: " + httpsTestServer.serverAuthority());
+        out.println("HTTP/2   server (h2c)  listening at: " + http2TestServer.serverAuthority());
+        out.println("HTTP/2   server (h2)   listening at: " + https2TestServer.serverAuthority());
+        out.println("HTTP/3   server (h2)   listening at: " + http3TestServer.serverAuthority());
+        out.println(" + alt endpoint (h3)   listening at: " + http3TestServer.getH3AltService()
+                .map(Http3TestServer::getAddress));
+
+        headRequest(newHttpClient(true));
+
+        out.println(now() + "setup done");
+        err.println(now() + "setup done");
     }
 
-    @AfterTest
-    public void teardown() throws Exception {
+    @AfterAll
+    public static void teardown() throws Exception {
+        sharedClient.close();
         httpTestServer.stop();
         httpsTestServer.stop();
         http2TestServer.stop();
         https2TestServer.stop();
+        http3TestServer.stop();
     }
 
     /** A handler that returns, as its body, the exact received request URI. */
@@ -239,7 +342,7 @@ public class NonAsciiCharsInURI implements HttpServerAdapters {
         @Override
         public void handle(HttpTestExchange t) throws IOException {
             String uri = t.getRequestURI().toString();
-            out.println("Http1UriStringHandler received, uri: " + uri);
+            out.println("HttpUriStringHandler received, uri: " + uri);
             try (InputStream is = t.getRequestBody();
                  OutputStream os = t.getResponseBody()) {
                 is.readAllBytes();

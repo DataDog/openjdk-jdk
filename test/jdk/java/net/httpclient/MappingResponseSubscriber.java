@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,13 +24,10 @@
 /*
  * @test
  * @summary Tests mapped response subscriber
- * @library /test/lib http2/server
- * @build jdk.test.lib.net.SimpleSSLContext
- * @modules java.base/sun.net.www.http
- *          java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- * @run testng/othervm
+ * @library /test/lib /test/jdk/java/net/httpclient/lib
+ * @build jdk.test.lib.net.SimpleSSLContext jdk.httpclient.test.lib.http2.Http2TestServer
+ *        jdk.httpclient.test.lib.common.TestServerConfigurator
+ * @run junit/othervm
  *       -Djdk.internal.httpclient.debug=true
  *      MappingResponseSubscriber
  */
@@ -50,50 +47,57 @@ import java.util.concurrent.Flow;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
-import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsServer;
 import java.net.http.HttpClient;
-import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandler;
-import java.net.http.HttpResponse.BodyHandlers;
 import java.net.http.HttpResponse.BodySubscribers;
 import  java.net.http.HttpResponse.BodySubscriber;
 import java.util.function.Function;
 import javax.net.ssl.SSLContext;
+
+import jdk.httpclient.test.lib.common.TestServerConfigurator;
+import jdk.internal.net.http.common.OperationTrackers.Tracker;
+import jdk.httpclient.test.lib.http2.Http2TestServer;
+import jdk.httpclient.test.lib.http2.Http2TestExchange;
+import jdk.httpclient.test.lib.http2.Http2Handler;
+import jdk.test.lib.Utils;
 import jdk.test.lib.net.SimpleSSLContext;
-import org.testng.annotations.AfterTest;
-import org.testng.annotations.BeforeTest;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 import static java.lang.System.out;
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
+
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 public class MappingResponseSubscriber {
 
-    SSLContext sslContext;
-    HttpServer httpTestServer;         // HTTP/1.1    [ 4 servers ]
-    HttpsServer httpsTestServer;       // HTTPS/1.1
-    Http2TestServer http2TestServer;   // HTTP/2 ( h2c )
-    Http2TestServer https2TestServer;  // HTTP/2 ( h2  )
-    String httpURI_fixed;
-    String httpURI_chunk;
-    String httpsURI_fixed;
-    String httpsURI_chunk;
-    String http2URI_fixed;
-    String http2URI_chunk;
-    String https2URI_fixed;
-    String https2URI_chunk;
+    private static final SSLContext sslContext = SimpleSSLContext.findSSLContext();
+    private static HttpServer httpTestServer;         // HTTP/1.1    [ 4 servers ]
+    private static HttpsServer httpsTestServer;       // HTTPS/1.1
+    private static Http2TestServer http2TestServer;   // HTTP/2 ( h2c )
+    private static Http2TestServer https2TestServer;  // HTTP/2 ( h2  )
+    private static String httpURI_fixed;
+    private static String httpURI_chunk;
+    private static String httpsURI_fixed;
+    private static String httpsURI_chunk;
+    private static String http2URI_fixed;
+    private static String http2URI_chunk;
+    private static String https2URI_fixed;
+    private static String https2URI_chunk;
 
     static final int ITERATION_COUNT = 3;
     // a shared executor helps reduce the amount of threads created by the test
     static final Executor executor = Executors.newCachedThreadPool();
 
-    @DataProvider(name = "variants")
-    public Object[][] variants() {
+    static final ReferenceTracker TRACKER = ReferenceTracker.INSTANCE;
+
+    public static Object[][] variants() {
         return new Object[][]{
                 { httpURI_fixed,    false },
                 { httpURI_chunk,    false },
@@ -122,7 +126,8 @@ public class MappingResponseSubscriber {
                          .build();
     }
 
-    @Test(dataProvider = "variants")
+    @ParameterizedTest
+    @MethodSource("variants")
     public void testAsBytes(String uri, boolean sameClient) throws Exception {
         HttpClient client = null;
         for (int i = 0; i < ITERATION_COUNT; i++) {
@@ -130,18 +135,37 @@ public class MappingResponseSubscriber {
                 client = newHttpClient();
 
             HttpRequest req = HttpRequest.newBuilder(URI.create(uri))
-                                         .build();
+                    .build();
             BodyHandler<byte[]> handler = new CRSBodyHandler();
             HttpResponse<byte[]> response = client.send(req, handler);
             byte[] body = response.body();
-            assertEquals(body, bytes);
+            Assertions.assertArrayEquals(bytes, body);
+
+            // if sameClient we will reuse the client for the next
+            // operation, so there's nothing more to do.
+            if (sameClient) continue;
+
+            // if no error and not same client then wait for the
+            // client to be GC'ed before performing the nex operation
+            Tracker tracker = TRACKER.getTracker(client);
+            client = null;
+            System.gc();
+            AssertionError error = TRACKER.check(tracker, Utils.adjustTimeout(1500));
+            if (error != null) throw error; // the client didn't shut down properly
+        }
+        if (sameClient) {
+            Tracker tracker = TRACKER.getTracker(client);
+            client = null;
+            System.gc();
+            AssertionError error = TRACKER.check(tracker, Utils.adjustTimeout(1500));
+            if (error != null) throw error; // the client didn't shut down properly
         }
     }
 
     static class CRSBodyHandler implements BodyHandler<byte[]> {
         @Override
         public BodySubscriber<byte[]> apply(HttpResponse.ResponseInfo rinfo) {
-            assertEquals(rinfo.statusCode(), 200);
+            assertEquals(200, rinfo.statusCode());
             return BodySubscribers.mapping(
                 new CRSBodySubscriber(), (s) -> s.getBytes(UTF_8)
             );
@@ -191,12 +215,8 @@ public class MappingResponseSubscriber {
                 + server.getAddress().getPort();
     }
 
-    @BeforeTest
-    public void setup() throws Exception {
-        sslContext = new SimpleSSLContext().get();
-        if (sslContext == null)
-            throw new AssertionError("Unexpected null sslContext");
-
+    @BeforeAll
+    public static void setup() throws Exception {
         // HTTP/1.1
         HttpHandler h1_fixedLengthHandler = new HTTP1_FixedLengthHandler();
         HttpHandler h1_chunkHandler = new HTTP1_ChunkedHandler();
@@ -208,7 +228,7 @@ public class MappingResponseSubscriber {
         httpURI_chunk = "http://" + serverAuthority(httpTestServer) + "/http1/chunk";
 
         httpsTestServer = HttpsServer.create(sa, 0);
-        httpsTestServer.setHttpsConfigurator(new HttpsConfigurator(sslContext));
+        httpsTestServer.setHttpsConfigurator(new TestServerConfigurator(sa.getAddress(), sslContext));
         httpsTestServer.createContext("/https1/fixed", h1_fixedLengthHandler);
         httpsTestServer.createContext("/https1/chunk", h1_chunkHandler);
         httpsURI_fixed = "https://" + serverAuthority(httpsTestServer) + "/https1/fixed";
@@ -236,8 +256,8 @@ public class MappingResponseSubscriber {
         https2TestServer.start();
     }
 
-    @AfterTest
-    public void teardown() throws Exception {
+    @AfterAll
+    public static void teardown() throws Exception {
         httpTestServer.stop(0);
         httpsTestServer.stop(0);
         http2TestServer.stop();

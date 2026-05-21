@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,9 @@
 #ifndef SHARE_JFR_UTILITIES_JFRTRYLOCK_HPP
 #define SHARE_JFR_UTILITIES_JFRTRYLOCK_HPP
 
-#include "runtime/atomic.hpp"
-#include "runtime/orderAccess.hpp"
+#include "runtime/atomicAccess.hpp"
 #include "runtime/mutexLocker.hpp"
+#include "runtime/orderAccess.hpp"
 #include "utilities/debug.hpp"
 
 class JfrTryLock {
@@ -36,7 +36,7 @@ class JfrTryLock {
   bool _acquired;
 
  public:
-  JfrTryLock(volatile int* lock) : _lock(lock), _acquired(Atomic::cmpxchg(lock, 0, 1) == 0) {}
+  JfrTryLock(volatile int* lock) : _lock(lock), _acquired(AtomicAccess::cmpxchg(lock, 0, 1) == 0) {}
 
   ~JfrTryLock() {
     if (_acquired) {
@@ -50,25 +50,23 @@ class JfrTryLock {
   }
 };
 
-class JfrMonitorTryLock : public StackObj {
+class JfrMutexTryLock : public StackObj {
  private:
-  Monitor* _lock;
+  Mutex* _mutex;
   bool _acquired;
 
  public:
-  JfrMonitorTryLock(Monitor* lock) : _lock(lock), _acquired(lock->try_lock()) {}
-
-  ~JfrMonitorTryLock() {
+  JfrMutexTryLock(Mutex* mutex) : _mutex(mutex), _acquired(mutex->try_lock()) {}
+  ~JfrMutexTryLock() {
     if (_acquired) {
-      assert(_lock->owned_by_self(), "invariant");
-      _lock->unlock();
+      assert(_mutex->owned_by_self(), "invariant");
+      _mutex->unlock();
     }
   }
 
   bool acquired() const {
     return _acquired;
   }
-
 };
 
 #endif // SHARE_JFR_UTILITIES_JFRTRYLOCK_HPP

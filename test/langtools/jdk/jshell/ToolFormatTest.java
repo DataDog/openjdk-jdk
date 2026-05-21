@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
 
 /*
  * @test
- * @bug 8148316 8148317 8151755 8152246 8153551 8154812 8157261 8163840 8166637 8161969 8173007
+ * @bug 8148316 8148317 8151755 8152246 8153551 8154812 8157261 8163840 8166637 8161969 8173007 8299829
  * @summary Tests for output customization
  * @library /tools/lib
  * @modules jdk.compiler/com.sun.tools.javac.api
@@ -31,21 +31,22 @@
  *          jdk.jdeps/com.sun.tools.javap
  *          jdk.jshell/jdk.internal.jshell.tool
  * @build KullaTesting TestingInputStream toolbox.ToolBox Compiler
- * @run testng ToolFormatTest
+ * @run junit ToolFormatTest
  */
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.List;
-import org.testng.annotations.Test;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 
-@Test
 public class ToolFormatTest extends ReplToolTesting {
 
+    @Test
     public void testSetFormat() {
         try {
             test(
@@ -86,6 +87,7 @@ public class ToolFormatTest extends ReplToolTesting {
         }
     }
 
+    @Test
     public void testSetFormatOverride() {
         test(
                 (a) -> assertCommand(a, "/set mode tm -c", "|  Created new feedback mode: tm"),
@@ -138,6 +140,7 @@ public class ToolFormatTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testSetFormatSelectorSample() {
         test(
                 (a) -> assertCommandOutputStartsWith(a, "/set mode ate -quiet",
@@ -197,7 +200,8 @@ public class ToolFormatTest extends ReplToolTesting {
     // A sampling of these has been added (above: testSetFormatSelectorSample).
     // See 8173007
     // Save for possible future deep testing or debugging
-    @Test(enabled = false)
+    @Test
+    @Disabled
     public void testSetFormatSelector() {
         List<ReplTest> tests = new ArrayList<>();
         tests.add((a) -> assertCommandOutputStartsWith(a, "/set mode ate -quiet",
@@ -278,6 +282,7 @@ public class ToolFormatTest extends ReplToolTesting {
         }
     }
 
+    @Test
     public void testSetTruncation() {
         try {
             test(
@@ -300,7 +305,8 @@ public class ToolFormatTest extends ReplToolTesting {
                     (a) -> assertCommand(a, "/var", "|    String s = \"ABACABADA"),
                     (a) -> assertCommand(a, "String r = s", "String:\"ABACABAD ... BAXYZ\""),
                     (a) -> assertCommand(a, "r", "String:\"ABACABADA"),
-                    (a) -> assertCommand(a, "r=s", "String:\"AB")
+                    (a) -> assertCommand(a, "r=s", "String:\"AB"),
+                    (a) -> assertCommand(a, "\"0\".repeat(49999)+\"2\"", "String:\"00000000 ... 00002\"")
             );
         } finally {
             assertCommandCheckOutput(false, "/set feedback normal", s -> {
@@ -308,6 +314,7 @@ public class ToolFormatTest extends ReplToolTesting {
         }
     }
 
+    @Test
     public void testDefaultTruncation() {
         test(
                     (a) -> assertCommand(a, "char[] cs = new char[2000];", null),
@@ -330,9 +337,9 @@ public class ToolFormatTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testPrompt() {
-        test(
-                (a) -> assertCommand(a, "/set mode tp -quiet", "|  Created new feedback mode: tp"),
+        test((a) -> assertCommand(a, "/set mode tp -quiet", "|  Created new feedback mode: tp"),
                 (a) -> assertCommand(a, "/set prompt tp 'aaa' 'bbb'", ""),
                 (a) -> assertCommand(a, "/set prompt tp",
                         "|  /set prompt tp \"aaa\" \"bbb\""),
@@ -346,21 +353,21 @@ public class ToolFormatTest extends ReplToolTesting {
                         (s) -> {
                             try {
                                 BufferedReader rdr = new BufferedReader(new StringReader(s));
-                                assertEquals(rdr.readLine(), "|  /set mode tp -quiet",
+                                assertEquals("|  /set mode tp -quiet", rdr.readLine(),
                                         "|  /set mode tp -quiet");
-                                assertEquals(rdr.readLine(), "|  /set prompt tp \"aaa\" \"bbb\"",
+                                assertEquals("|  /set prompt tp \"aaa\" \"bbb\"", rdr.readLine(),
                                         "|  /set prompt tp \"aaa\" \"bbb\"");
                                 String l = rdr.readLine();
                                 while (l.startsWith("|  /set format tp ")) {
                                     l = rdr.readLine();
                                 }
-                                assertEquals(l, "|  /set mode -retain tp",
+                                assertEquals("|  /set mode -retain tp", l,
                                         "|  /set mode -retain tp");
-                                assertEquals(rdr.readLine(), "|  ",
+                                assertEquals("|  ", rdr.readLine(),
                                         "|  ");
-                                assertEquals(rdr.readLine(), "|  /set mode tp -quiet",
+                                assertEquals("|  /set mode tp -quiet", rdr.readLine(),
                                         "|  /set mode tp -quiet");
-                                assertEquals(rdr.readLine(), "|  /set prompt tp \"ccc\" \"ddd\"",
+                                assertEquals("|  /set prompt tp \"ccc\" \"ddd\"", rdr.readLine(),
                                         "|  /set prompt tp \"ccc\" \"ddd\"");
                             } catch (IOException ex) {
                                 fail("threw " + ex);
@@ -369,12 +376,14 @@ public class ToolFormatTest extends ReplToolTesting {
         );
     }
 
+    @Test
     public void testShowFeedbackModes() {
         test(
                 (a) -> assertCommandOutputContains(a, "/set feedback", "normal")
         );
     }
 
+    @Test
     public void testSetNewModeQuiet() {
         try {
             test(
@@ -395,6 +404,7 @@ public class ToolFormatTest extends ReplToolTesting {
         }
     }
 
+    @Test
     public void testSetError() {
         try {
             test(
@@ -472,6 +482,7 @@ public class ToolFormatTest extends ReplToolTesting {
         }
     }
 
+    @Test
     public void testSetHelp() {
         try {
             test(

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -125,19 +125,19 @@ namespace AccessInternal {
   template <class GCBarrierType, DecoratorSet decorators>
   struct PostRuntimeDispatch<GCBarrierType, BARRIER_ARRAYCOPY, decorators>: public AllStatic {
     template <typename T>
-    static bool access_barrier(arrayOop src_obj, size_t src_offset_in_bytes, T* src_raw,
-                               arrayOop dst_obj, size_t dst_offset_in_bytes, T* dst_raw,
-                               size_t length) {
+    static OopCopyResult access_barrier(arrayOop src_obj, size_t src_offset_in_bytes, T* src_raw,
+                                        arrayOop dst_obj, size_t dst_offset_in_bytes, T* dst_raw,
+                                        size_t length) {
       GCBarrierType::arraycopy_in_heap(src_obj, src_offset_in_bytes, src_raw,
                                        dst_obj, dst_offset_in_bytes, dst_raw,
                                        length);
-      return true;
+      return OopCopyResult::ok;
     }
 
     template <typename T>
-    static bool oop_access_barrier(arrayOop src_obj, size_t src_offset_in_bytes, T* src_raw,
-                                   arrayOop dst_obj, size_t dst_offset_in_bytes, T* dst_raw,
-                                   size_t length) {
+    static OopCopyResult oop_access_barrier(arrayOop src_obj, size_t src_offset_in_bytes, T* src_raw,
+                                            arrayOop dst_obj, size_t dst_offset_in_bytes, T* dst_raw,
+                                            size_t length) {
       typedef typename HeapOopType<decorators>::type OopType;
       return GCBarrierType::oop_arraycopy_in_heap(src_obj, src_offset_in_bytes, reinterpret_cast<OopType*>(src_raw),
                                                   dst_obj, dst_offset_in_bytes, reinterpret_cast<OopType*>(dst_raw),
@@ -211,7 +211,7 @@ namespace AccessInternal {
       FunctionPointerT>::type
     resolve_barrier_gc() {
       BarrierSet* bs = BarrierSet::barrier_set();
-      assert(bs != NULL, "GC barriers invoked before BarrierSet is set");
+      assert(bs != nullptr, "GC barriers invoked before BarrierSet is set");
       switch (bs->kind()) {
 #define BARRIER_SET_RESOLVE_BARRIER_CLOSURE(bs_name)                    \
         case BarrierSet::bs_name: {                                     \
@@ -219,12 +219,12 @@ namespace AccessInternal {
             AccessBarrier<ds>, barrier_type, ds>::oop_access_barrier; \
         }                                                               \
         break;
-        FOR_EACH_CONCRETE_BARRIER_SET_DO(BARRIER_SET_RESOLVE_BARRIER_CLOSURE)
+        FOR_EACH_BARRIER_SET_DO(BARRIER_SET_RESOLVE_BARRIER_CLOSURE)
 #undef BARRIER_SET_RESOLVE_BARRIER_CLOSURE
 
       default:
         fatal("BarrierSet AccessBarrier resolving not implemented");
-        return NULL;
+        return nullptr;
       };
     }
 
@@ -234,7 +234,7 @@ namespace AccessInternal {
       FunctionPointerT>::type
     resolve_barrier_gc() {
       BarrierSet* bs = BarrierSet::barrier_set();
-      assert(bs != NULL, "GC barriers invoked before BarrierSet is set");
+      assert(bs != nullptr, "GC barriers invoked before BarrierSet is set");
       switch (bs->kind()) {
 #define BARRIER_SET_RESOLVE_BARRIER_CLOSURE(bs_name)                    \
         case BarrierSet::bs_name: {                                       \
@@ -242,12 +242,12 @@ namespace AccessInternal {
             AccessBarrier<ds>, barrier_type, ds>::access_barrier; \
         }                                                                 \
         break;
-        FOR_EACH_CONCRETE_BARRIER_SET_DO(BARRIER_SET_RESOLVE_BARRIER_CLOSURE)
+        FOR_EACH_BARRIER_SET_DO(BARRIER_SET_RESOLVE_BARRIER_CLOSURE)
 #undef BARRIER_SET_RESOLVE_BARRIER_CLOSURE
 
       default:
         fatal("BarrierSet AccessBarrier resolving not implemented");
-        return NULL;
+        return nullptr;
       };
     }
 
@@ -331,9 +331,9 @@ namespace AccessInternal {
   }
 
   template <DecoratorSet decorators, typename T>
-  bool RuntimeDispatch<decorators, T, BARRIER_ARRAYCOPY>::arraycopy_init(arrayOop src_obj, size_t src_offset_in_bytes, T* src_raw,
-                                                                         arrayOop dst_obj, size_t dst_offset_in_bytes, T* dst_raw,
-                                                                         size_t length) {
+  OopCopyResult RuntimeDispatch<decorators, T, BARRIER_ARRAYCOPY>::arraycopy_init(arrayOop src_obj, size_t src_offset_in_bytes, T* src_raw,
+                                                                                  arrayOop dst_obj, size_t dst_offset_in_bytes, T* dst_raw,
+                                                                                  size_t length) {
     func_t function = BarrierResolver<decorators, func_t, BARRIER_ARRAYCOPY>::resolve_barrier();
     _arraycopy_func = function;
     return function(src_obj, src_offset_in_bytes, src_raw,

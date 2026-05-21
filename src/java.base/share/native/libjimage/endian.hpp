@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2026, Oracle and/or its affiliates. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,7 +40,7 @@
 // To select an endian handler, one should call Endian::get_handler(big_endian);
 // Where big_endian is true if big endian is required and false otherwise.  The
 // native endian handler can be fetched with Endian::get_native_handler();
-// To retrieve a value using the approprate endian, use one of the overloaded
+// To retrieve a value using the appropriate endian, use one of the overloaded
 // calls to get. To set a value, then use one of the overloaded set calls.
 // Ex.
 //          s4 value; // Imported value;
@@ -73,9 +73,6 @@ public:
 
     // Select an appropriate endian handler.
     static Endian* get_handler(bool big_endian);
-
-    // Return the native endian handler.
-    static Endian* get_native_handler();
 
     // get platform u2 from Java Big endian
     static u2 get_java(u1* x);

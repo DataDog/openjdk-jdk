@@ -1,11 +1,13 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2021, JetBrains s.r.o.. All rights reserved.
+ * Copyright (c) 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2022, JetBrains s.r.o.. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -37,32 +39,24 @@ static jmethodID sjm_getAccessibleName = NULL;
 
 @implementation ComboBoxAccessibility
 
-// NSAccessibilityElement protocol methods
-
-- (id)accessibilityValue {
+- (CommonComponentAccessibility *)accessibleSelection
+{
     JNIEnv *env = [ThreadUtilities getJNIEnv];
-    jobject axContext = [self axContextWithEnv:env];
-    if (axContext == NULL) return nil;
-    jclass axContextClass = (*env)->GetObjectClass(env, axContext);
-    DECLARE_METHOD_RETURN(jm_getAccessibleSelection, axContextClass, "getAccessibleSelection", "(I)Ljavax/accessibility/Accessible;", nil);
-    jobject axSelectedChild = (*env)->CallObjectMethod(env, axContext, jm_getAccessibleSelection, 0);
+    GET_CACCESSIBILITY_CLASS_RETURN(nil);
+    DECLARE_STATIC_METHOD_RETURN(sjm_getAccessibleComboboxValue, sjc_CAccessibility, "getAccessibleComboboxValue", "(Ljavax/accessibility/Accessible;Ljava/awt/Component;)Ljavax/accessibility/Accessible;", nil);
+    jobject axSelectedChild = (*env)->CallStaticObjectMethod(env, sjc_CAccessibility, sjm_getAccessibleComboboxValue, fAccessible, fComponent);
     CHECK_EXCEPTION();
-    (*env)->DeleteLocalRef(env, axContext);
     if (axSelectedChild == NULL) {
         return nil;
     }
-    GET_CACCESSIBILITY_CLASS_RETURN(nil);
-    GET_ACCESSIBLENAME_METHOD_RETURN(nil);
-    jobject childName = (*env)->CallStaticObjectMethod(env, sjc_CAccessibility, sjm_getAccessibleName, axSelectedChild, fComponent);
-    CHECK_EXCEPTION();
-    if (childName == NULL) {
-        (*env)->DeleteLocalRef(env, axSelectedChild);
-        return nil;
-    }
-    NSString *selectedText = JavaStringToNSString(env, childName);
-    (*env)->DeleteLocalRef(env, axSelectedChild);
-    (*env)->DeleteLocalRef(env, childName);
-    return selectedText;
+    return [CommonComponentAccessibility createWithAccessible:axSelectedChild withEnv:env withView:fView];
+}
+
+// NSAccessibilityElement protocol methods
+
+- (id)accessibilityValue
+{
+    return [[self accessibleSelection] accessibilityLabel];
 }
 
 @end

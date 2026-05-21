@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,11 +26,11 @@ package selectionresolution;
 import java.util.ArrayList;
 import java.util.Iterator;
 
-import static jdk.internal.org.objectweb.asm.Opcodes.ACC_ABSTRACT;
-import static jdk.internal.org.objectweb.asm.Opcodes.ACC_PUBLIC;
-import static jdk.internal.org.objectweb.asm.Opcodes.ACC_PRIVATE;
-import static jdk.internal.org.objectweb.asm.Opcodes.ACC_PROTECTED;
-import static jdk.internal.org.objectweb.asm.Opcodes.ACC_STATIC;
+import static org.objectweb.asm.Opcodes.ACC_ABSTRACT;
+import static org.objectweb.asm.Opcodes.ACC_PUBLIC;
+import static org.objectweb.asm.Opcodes.ACC_PRIVATE;
+import static org.objectweb.asm.Opcodes.ACC_PROTECTED;
+import static org.objectweb.asm.Opcodes.ACC_STATIC;
 
 /**
  * Constructs classes and interfaces based on the information from a
@@ -112,7 +112,7 @@ public class ClassBuilder extends Builder {
         int packageId = classdata.get(classId).packageId.ordinal();
         Clazz C = helpers[packageId];
         if (C == null) {
-            C = new Clazz(getPackageName(packageId) + "Helper", -1, ACC_PUBLIC);
+            C = new Clazz(getPackageName(packageId) + "Helper", ACC_PUBLIC, -1);
             helpers[packageId] = C;
             classes.add(C);
         }

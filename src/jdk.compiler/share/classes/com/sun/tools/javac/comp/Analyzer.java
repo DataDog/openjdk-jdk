@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -118,6 +118,7 @@ public class Analyzer {
         return instance;
     }
 
+    @SuppressWarnings("this-escape")
     protected Analyzer(Context context) {
         context.put(analyzerKey, this);
         types = Types.instance(context);
@@ -140,13 +141,17 @@ public class Analyzer {
      * the {@code -XDfind} option.
      */
     enum AnalyzerMode {
-        DIAMOND("diamond", Feature.DIAMOND),
-        LAMBDA("lambda", Feature.LAMBDA),
-        METHOD("method", Feature.GRAPH_INFERENCE),
+        DIAMOND("diamond"),
+        LAMBDA("lambda"),
+        METHOD("method"),
         LOCAL("local", Feature.LOCAL_VARIABLE_TYPE_INFERENCE);
 
         final String opt;
         final Feature feature;
+
+        AnalyzerMode(String opt) {
+            this(opt, null);
+        }
 
         AnalyzerMode(String opt, Feature feature) {
             this.opt = opt;
@@ -169,7 +174,7 @@ public class Analyzer {
                 res = EnumSet.allOf(AnalyzerMode.class);
             }
             for (AnalyzerMode mode : values()) {
-                if (modes.contains("-" + mode.opt) || !mode.feature.allowedInSource(source)) {
+                if (modes.contains("-" + mode.opt) || (mode.feature != null && !mode.feature.allowedInSource(source))) {
                     res.remove(mode);
                 } else if (modes.contains(mode.opt)) {
                     res.add(mode);
@@ -235,7 +240,7 @@ public class Analyzer {
 
         @Override
         List<JCNewClass> rewrite(JCNewClass oldTree) {
-            if (oldTree.clazz.hasTag(TYPEAPPLY)) {
+            if (oldTree.clazz.hasTag(TYPEAPPLY) && !oldTree.type.isErroneous()) {
                 JCNewClass nc = copier.copy(oldTree);
                 ((JCTypeApply)nc.clazz).arguments = List.nil();
                 return List.of(nc);
@@ -360,16 +365,11 @@ public class Analyzer {
             super(AnalyzerMode.LOCAL, tag);
         }
 
-        boolean isImplicitlyTyped(JCVariableDecl decl) {
-            return decl.vartype.pos == Position.NOPOS;
-        }
-
         /**
          * Map a variable tree into a new declaration using implicit type.
          */
         JCVariableDecl rewriteVarType(JCVariableDecl oldTree) {
             JCVariableDecl newTree = copier.copy(oldTree);
-            newTree.vartype = null;
             return newTree;
         }
 
@@ -396,7 +396,7 @@ public class Analyzer {
 
         boolean match(JCVariableDecl tree){
             return tree.sym.owner.kind == Kind.MTH &&
-                    tree.init != null && !isImplicitlyTyped(tree) &&
+                    tree.init != null && !tree.declaredUsingVar() &&
                     attr.canInferLocalVarType(tree) == null;
         }
         @Override
@@ -420,7 +420,7 @@ public class Analyzer {
 
         @Override
         boolean match(JCEnhancedForLoop tree){
-            return !isImplicitlyTyped(tree.var);
+            return !tree.var.declaredUsingVar();
         }
         @Override
         List<JCEnhancedForLoop> rewrite(JCEnhancedForLoop oldTree) {
@@ -606,7 +606,6 @@ public class Analyzer {
         }
 
         @Override
-        @SuppressWarnings("unchecked")
         public void scan(JCTree tree) {
             if (tree != null) {
                 for (StatementAnalyzer<JCTree, JCTree> analyzer : analyzers) {
@@ -726,12 +725,12 @@ public class Analyzer {
          * Simple deferred diagnostic handler which filters out all messages and keep track of errors.
          */
         Log.DeferredDiagnosticHandler diagHandler() {
-            return new Log.DeferredDiagnosticHandler(log, d -> {
+            return log.new DeferredDiagnosticHandler(d -> {
                 if (d.getType() == DiagnosticType.ERROR) {
                     erroneous = true;
                 }
                 return true;
-            });
+            }, false);
         }
     }
 
@@ -751,7 +750,6 @@ public class Analyzer {
             if (oldLambda.paramKind == ParameterKind.IMPLICIT) {
                 //reset implicit lambda parameters (whose type might have been set during attr)
                 newLambda.paramKind = ParameterKind.IMPLICIT;
-                newLambda.params.forEach(p -> p.vartype = null);
             }
             return newLambda;
         }

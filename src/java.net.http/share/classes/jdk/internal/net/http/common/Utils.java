@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,10 +25,6 @@
 
 package jdk.internal.net.http.common;
 
-import sun.net.NetProperties;
-import sun.net.util.IPAddressUtil;
-import sun.net.www.HeaderParser;
-
 import javax.net.ssl.ExtendedSSLSession;
 import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLHandshakeException;
@@ -41,42 +37,67 @@ import java.io.PrintStream;
 import java.io.UncheckedIOException;
 import java.lang.System.Logger.Level;
 import java.net.ConnectException;
+import java.net.Inet6Address;
 import java.net.InetSocketAddress;
+import java.net.ProtocolException;
+import java.net.SocketAddress;
+import java.net.StandardSocketOptions;
+import java.net.Proxy;
 import java.net.URI;
-import java.net.URLPermission;
-import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
+import java.net.http.HttpRequest;
 import java.net.http.HttpTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
+import java.nio.channels.CancelledKeyException;
+import java.nio.channels.NetworkChannel;
+import java.nio.channels.SelectionKey;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.text.Normalizer;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HexFormat;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.BiConsumer;
 import java.util.function.BiPredicate;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import jdk.internal.net.http.common.DebugLogger.LoggerConfig;
+import jdk.internal.net.http.HttpRequestImpl;
+
+import sun.net.NetProperties;
+import sun.net.www.HeaderParser;
+
 import static java.lang.String.format;
 import static java.nio.charset.StandardCharsets.US_ASCII;
-import static java.util.stream.Collectors.joining;
-import jdk.internal.net.http.HttpRequestImpl;
+import static java.net.Authenticator.RequestorType.PROXY;
+import static java.net.Authenticator.RequestorType.SERVER;
 
 /**
  * Miscellaneous utilities
@@ -93,21 +114,54 @@ public final class Utils {
 
 //    public static final boolean TESTING;
 //    static {
-//        if (ASSERTIONSENABLED) {
-//            PrivilegedAction<String> action = () -> System.getProperty("test.src");
-//            TESTING = AccessController.doPrivileged(action) != null;
-//        } else TESTING = false;
+//        TESTING = ASSERTIONSENABLED ? System.getProperty("test.src") != null : false;
 //    }
-    public static final boolean DEBUG = // Revisit: temporary dev flag.
-            getBooleanProperty(DebugLogger.HTTP_NAME, false);
-    public static final boolean DEBUG_WS = // Revisit: temporary dev flag.
-            getBooleanProperty(DebugLogger.WS_NAME, false);
-    public static final boolean DEBUG_HPACK = // Revisit: temporary dev flag.
-            getBooleanProperty(DebugLogger.HPACK_NAME, false);
+    public static final LoggerConfig DEBUG_CONFIG =
+            getLoggerConfig(DebugLogger.HTTP_NAME, LoggerConfig.OFF);
+    public static final LoggerConfig DEBUG_WS_CONFIG =
+            getLoggerConfig(DebugLogger.WS_NAME, LoggerConfig.OFF);
+    public static final LoggerConfig DEBUG_HPACK_CONFIG =
+            getLoggerConfig(DebugLogger.HPACK_NAME, LoggerConfig.OFF);
+
+    public static final boolean DEBUG = DEBUG_CONFIG.on(); // Revisit: temporary dev flag.
+    public static final boolean DEBUG_WS = DEBUG_WS_CONFIG.on(); // Revisit: temporary dev flag.
     public static final boolean TESTING = DEBUG;
 
     public static final boolean isHostnameVerificationDisabled = // enabled by default
             hostnameVerificationDisabledValue();
+
+    private static LoggerConfig getLoggerConfig(String loggerName, LoggerConfig def) {
+        var prop = System.getProperty(loggerName);
+        if (prop == null) return def;
+        var config = LoggerConfig.OFF;
+        for (var s : prop.split(",")) {
+            s = s.trim();
+            if (s.isEmpty()) continue;
+            int len = s.length();
+            switch (len) {
+                case 3 -> {
+                    if (s.regionMatches(true, 0, "err", 0, 3)) {
+                        config = config.withErrLevel(Level.ALL);
+                        continue;
+                    }
+                    if (s.regionMatches(true, 0, "out", 0, 3)) {
+                        config = config.withOutLevel(Level.ALL);
+                        continue;
+                    }
+                    if (s.regionMatches(true, 0, "log", 0, 3)) {
+                        config = config.withLogLevel(Level.ALL);
+                    }
+                }
+                case 4 -> {
+                    if (s.regionMatches(true, 0, "true", 0, 4)) {
+                        config = config.withErrLevel(Level.ALL).withLogLevel(Level.ALL);
+                    }
+                }
+                default -> { continue; }
+            }
+        }
+        return config;
+    }
 
     private static boolean hostnameVerificationDisabledValue() {
         String prop = getProperty("jdk.internal.httpclient.disableHostnameVerification");
@@ -116,16 +170,25 @@ public final class Utils {
         return prop.isEmpty() ? true : Boolean.parseBoolean(prop);
     }
 
-    /**
-     * Allocated buffer size. Must never be higher than 16K. But can be lower
-     * if smaller allocation units preferred. HTTP/2 mandates that all
-     * implementations support frame payloads of at least 16K.
-     */
-    private static final int DEFAULT_BUFSIZE = 16 * 1024;
+    // A threshold to decide whether to slice or copy.
+    // see sliceOrCopy
+    public static final int SLICE_THRESHOLD = 32;
 
+    /**
+     * The capacity of ephemeral {@link ByteBuffer}s allocated to pass data to and from the client.
+     * It is ensured to have a value between 1 and 2^14 (16,384).
+     */
     public static final int BUFSIZE = getIntegerNetProperty(
-            "jdk.httpclient.bufsize", DEFAULT_BUFSIZE
-    );
+            "jdk.httpclient.bufsize", 1,
+            // We cap at 2^14 (16,384) for two main reasons:
+            // - The initial frame size is 2^14 (RFC 9113)
+            // - SSL record layer fragments data in chunks of 2^14 bytes or less (RFC 5246)
+            1 << 14,
+            // We choose 2^14 (16,384) as the default, because:
+            // 1. It maximizes throughput within the limits described above
+            // 2. It is small enough to not create a GC bottleneck when it is partially filled
+            1 << 14,
+            true);
 
     public static final BiPredicate<String,String> ACCEPT_ALL = (x,y) -> true;
 
@@ -133,7 +196,8 @@ public final class Utils {
 
     private static Set<String> getDisallowedHeaders() {
         Set<String> headers = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
-        headers.addAll(Set.of("connection", "content-length", "expect", "host", "upgrade"));
+        headers.addAll(Set.of("connection", "content-length", "expect", "host", "upgrade",
+                "alt-used"));
 
         String v = getNetProperty("jdk.httpclient.allowRestrictedHeaders");
         if (v != null) {
@@ -151,6 +215,18 @@ public final class Utils {
     public static final BiPredicate<String, String>
             ALLOWED_HEADERS = (header, unused) -> !DISALLOWED_HEADERS_SET.contains(header);
 
+    private static final Set<String> DISALLOWED_REDIRECT_HEADERS_SET = getDisallowedRedirectHeaders();
+
+    private static Set<String> getDisallowedRedirectHeaders() {
+        Set<String> headers = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        headers.addAll(Set.of("Authorization", "Cookie", "Origin", "Referer", "Host"));
+
+        return Collections.unmodifiableSet(headers);
+    }
+
+    public static final BiPredicate<String, String>
+            ALLOWED_REDIRECT_HEADERS = (header, _) -> !DISALLOWED_REDIRECT_HEADERS_SET.contains(header);
+
     public static final BiPredicate<String, String> VALIDATE_USER_HEADER =
             (name, value) -> {
                 assert name != null : "null header name";
@@ -167,24 +243,69 @@ public final class Utils {
                 return true;
             };
 
-    // Headers that are not generally restricted, and can therefore be set by users,
-    // but can in some contexts be overridden by the implementation.
-    // Currently, only contains "Authorization" which will
-    // be overridden, when an Authenticator is set on the HttpClient.
-    // Needs to be BiPred<String,String> to fit with general form of predicates
-    // used by caller.
+    public enum UseVTForSelector { ALWAYS, NEVER, DEFAULT }
 
-    public static final BiPredicate<String, String> CONTEXT_RESTRICTED(HttpClient client) {
-        return (k, v) -> !client.authenticator().isPresent() ||
-                (!k.equalsIgnoreCase("Authorization")
-                        && !k.equalsIgnoreCase("Proxy-Authorization"));
+    public static UseVTForSelector useVTForSelector(String property, String defval) {
+        String useVtForSelector = System.getProperty(property, defval);
+        return Stream.of(UseVTForSelector.values())
+                .filter((v) -> v.name().equalsIgnoreCase(useVtForSelector))
+                .findFirst().orElse(UseVTForSelector.DEFAULT);
+    }
+
+    public static <T extends Throwable> T addSuppressed(T x, Throwable suppressed) {
+        if (x != suppressed && suppressed != null) {
+            var sup = x.getSuppressed();
+            if (sup != null && sup.length > 0) {
+                if (Arrays.asList(sup).contains(suppressed)) {
+                    return x;
+                }
+            }
+            sup = suppressed.getSuppressed();
+            if (sup != null && sup.length > 0) {
+                if (Arrays.asList(sup).contains(x)) {
+                    return x;
+                }
+            }
+            x.addSuppressed(suppressed);
+        }
+        return x;
+    }
+
+    /**
+     * {@return a string comparing the given deadline with now, typically
+     *  something like "due since Nms" or "due in Nms"}
+     *
+     * @apiNote
+     * This method recognize deadlines set to Instant.MIN
+     * and Instant.MAX as special cases meaning "due" and
+     * "not scheduled".
+     *
+     * @param now       now
+     * @param deadline  the deadline
+     */
+    public static String debugDeadline(Deadline now, Deadline deadline) {
+        boolean isDue = deadline.compareTo(now) <= 0;
+        try {
+            if (isDue) {
+                if (deadline.equals(Deadline.MIN)) {
+                    return "due (Deadline.MIN)";
+                } else {
+                    return "due since " + deadline.until(now, ChronoUnit.MILLIS) + "ms";
+                }
+            } else if (deadline.equals(Deadline.MAX)) {
+                return "not scheduled (Deadline.MAX)";
+            } else {
+                return "due in " + now.until(deadline, ChronoUnit.MILLIS) + "ms";
+            }
+        } catch (ArithmeticException x) {
+            return isDue ? "due since too long" : "due in the far future";
+        }
     }
 
     public record ProxyHeaders(HttpHeaders userHeaders, HttpHeaders systemHeaders) {}
 
-    private static final BiPredicate<String, String> HOST_RESTRICTED = (k,v) -> !"host".equalsIgnoreCase(k);
-    public static final BiPredicate<String, String> PROXY_TUNNEL_RESTRICTED(HttpClient client)  {
-        return CONTEXT_RESTRICTED(client).and(HOST_RESTRICTED);
+    public static final BiPredicate<String, String> PROXY_TUNNEL_RESTRICTED()  {
+        return (k,v) -> !"host".equalsIgnoreCase(k);
     }
 
     private static final Predicate<String> IS_HOST = "host"::equalsIgnoreCase;
@@ -267,10 +388,34 @@ public final class Utils {
     public static final BiPredicate<String, String> NO_PROXY_HEADERS_FILTER =
             (n,v) -> Utils.NO_PROXY_HEADER.test(n);
 
+    /**
+     * Check the user headers to see if the Authorization or ProxyAuthorization
+     * were set. We need to set special flags in the request if so. Otherwise
+     * we can't distinguish user set from Authenticator set headers
+     */
+    public static void setUserAuthFlags(HttpRequestImpl request, HttpHeaders userHeaders) {
+        if (userHeaders.firstValue("Authorization").isPresent()) {
+            request.setUserSetAuthFlag(SERVER, true);
+        }
+        if (userHeaders.firstValue("Proxy-Authorization").isPresent()) {
+            request.setUserSetAuthFlag(PROXY, true);
+        }
+    }
 
     public static boolean proxyHasDisabledSchemes(boolean tunnel) {
         return tunnel ? ! PROXY_AUTH_TUNNEL_DISABLED_SCHEMES.isEmpty()
                       : ! PROXY_AUTH_DISABLED_SCHEMES.isEmpty();
+    }
+
+    /**
+     * Creates a new {@link Proxy} instance for the given proxy iff it is
+     * neither null, {@link Proxy#NO_PROXY Proxy.NO_PROXY}, nor already a
+     * {@code Proxy} instance.
+     */
+    public static Proxy copyProxy(Proxy proxy) {
+        return proxy == null || proxy.getClass() == Proxy.class
+                ? proxy
+                : new Proxy(proxy.type(), proxy.address());
     }
 
     // WebSocket connection Upgrade headers
@@ -282,11 +427,84 @@ public final class Utils {
         request.setSystemHeader(HEADER_CONNECTION, "Upgrade");
     }
 
+    private static final ConcurrentHashMap<Integer, String> opsMap = new ConcurrentHashMap<>();
+    static {
+        opsMap.put(0, "None");
+    }
+
+    public static String interestOps(SelectionKey key) {
+        if (key == null) return "null-key";
+        try {
+            return describeOps(key.interestOps());
+        } catch (CancelledKeyException x) {
+            return "cancelled-key";
+        }
+    }
+
+    public static String readyOps(SelectionKey key) {
+        if (key == null) return "null-key";
+        try {
+            return describeOps(key.readyOps());
+        } catch (CancelledKeyException x) {
+            return "cancelled-key";
+        }
+    }
+
+    public static String describeOps(int interestOps) {
+        String ops = opsMap.get(interestOps);
+        if (ops != null) return ops;
+        StringBuilder opsb = new StringBuilder();
+        int mask = SelectionKey.OP_READ
+                | SelectionKey.OP_WRITE
+                | SelectionKey.OP_CONNECT
+                | SelectionKey.OP_ACCEPT;
+        if ((interestOps & SelectionKey.OP_READ) == SelectionKey.OP_READ) {
+            opsb.append("R");
+        }
+        if ((interestOps & SelectionKey.OP_WRITE) == SelectionKey.OP_WRITE) {
+            opsb.append("W");
+        }
+        if ((interestOps & SelectionKey.OP_ACCEPT) == SelectionKey.OP_ACCEPT) {
+            opsb.append("A");
+        }
+        if ((interestOps & SelectionKey.OP_CONNECT) == SelectionKey.OP_CONNECT) {
+            opsb.append("C");
+        }
+        if ((interestOps | mask) != mask) {
+            opsb.append("("+interestOps+")");
+        }
+        ops = opsb.toString();
+        opsMap.put(interestOps, ops);
+        return ops;
+    }
+
     public static IllegalArgumentException newIAE(String message, Object... args) {
         return new IllegalArgumentException(format(message, args));
     }
+
+    /**
+     * {@return a new {@link ByteBuffer} instance of {@link #BUFSIZE} capacity}
+     */
     public static ByteBuffer getBuffer() {
         return ByteBuffer.allocate(BUFSIZE);
+    }
+
+    /**
+     * {@return a new {@link ByteBuffer} instance whose capacity is set to the
+     * smaller of the specified {@code maxCapacity} and the default
+     * ({@value BUFSIZE})}
+     *
+     * @param maxCapacity a buffer capacity, in bytes
+     * @throws IllegalArgumentException if {@code maxCapacity < 0}
+     */
+    public static ByteBuffer getBufferWithAtMost(long maxCapacity) {
+        if (maxCapacity < 0) {
+            throw new IllegalArgumentException(
+                    // Match the message produced by `ByteBuffer::createCapacityException`
+                    "capacity < 0: (%s < 0)".formatted(maxCapacity));
+        }
+        int effectiveCapacity = (int) Math.min(maxCapacity, BUFSIZE);
+        return ByteBuffer.allocate(effectiveCapacity);
     }
 
     public static Throwable getCompletionCause(Throwable x) {
@@ -307,6 +525,21 @@ public final class Utils {
             cause = cause.getCause();
         }
         return cause;
+    }
+
+    public static IOException toIOException(Throwable cause) {
+        if (cause == null) return null;
+        if (cause instanceof CompletionException ce) {
+            cause = ce.getCause();
+        } else if (cause instanceof ExecutionException ee) {
+            cause = ee.getCause();
+        }
+        if (cause instanceof IOException io) {
+            return io;
+        } else if (cause instanceof UncheckedIOException uio) {
+            return uio.getCause();
+        }
+        return new IOException(cause.getMessage(), cause);
     }
 
     public static IOException getIOException(Throwable t) {
@@ -356,52 +589,21 @@ public final class Utils {
 
     private Utils() { }
 
-    /**
-     * Returns the security permissions required to connect to the proxy, or
-     * {@code null} if none is required or applicable.
-     */
-    public static URLPermission permissionForProxy(InetSocketAddress proxyAddress) {
-        if (proxyAddress == null)
-            return null;
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("socket://")
-          .append(proxyAddress.getHostString()).append(":")
-          .append(proxyAddress.getPort());
-        String urlString = sb.toString();
-        return new URLPermission(urlString, "CONNECT");
-    }
-
-    /**
-     * Returns the security permission required for the given details.
-     */
-    public static URLPermission permissionForServer(URI uri,
-                                                    String method,
-                                                    Stream<String> headers) {
-        String urlString = new StringBuilder()
-                .append(uri.getScheme()).append("://")
-                .append(uri.getRawAuthority())
-                .append(uri.getRawPath()).toString();
-
-        StringBuilder actionStringBuilder = new StringBuilder(method);
-        String collected = headers.collect(joining(","));
-        if (!collected.isEmpty()) {
-            actionStringBuilder.append(":").append(collected);
-        }
-        return new URLPermission(urlString, actionStringBuilder.toString());
-    }
-
+    private static final boolean[] LOWER_CASE_CHARS = new boolean[128];
 
     // ABNF primitives defined in RFC 7230
     private static final boolean[] tchar      = new boolean[256];
     private static final boolean[] fieldvchar = new boolean[256];
 
     static {
-        char[] allowedTokenChars =
-                ("!#$%&'*+-.^_`|~0123456789" +
-                 "abcdefghijklmnopqrstuvwxyz" +
-                 "ABCDEFGHIJKLMNOPQRSTUVWXYZ").toCharArray();
-        for (char c : allowedTokenChars) {
+        char[] lcase = ("!#$%&'*+-.^_`|~0123456789" +
+                "abcdefghijklmnopqrstuvwxyz").toCharArray();
+        for (char c : lcase) {
+            tchar[c] = true;
+            LOWER_CASE_CHARS[c] = true;
+        }
+        char[] ucase = ("ABCDEFGHIJKLMNOPQRSTUVWXYZ").toCharArray();
+        for (char c : ucase) {
             tchar[c] = true;
         }
         for (char c = 0x21; c <= 0xFF; c++) {
@@ -410,8 +612,18 @@ public final class Utils {
         fieldvchar[0x7F] = false; // a little hole (DEL) in the range
     }
 
+    public static boolean isValidLowerCaseName(String token) {
+        for (int i = 0; i < token.length(); i++) {
+            char c = token.charAt(i);
+            if (c > 255 || !LOWER_CASE_CHARS[c]) {
+                return false;
+            }
+        }
+        return !token.isEmpty();
+    }
+
     /*
-     * Validates a RFC 7230 field-name.
+     * Validates an RFC 7230 field-name.
      */
     public static boolean isValidName(String token) {
         for (int i = 0; i < token.length(); i++) {
@@ -423,56 +635,8 @@ public final class Utils {
         return !token.isEmpty();
     }
 
-    public static class ServerName {
-        ServerName(String name, boolean isLiteral) {
-            this.name = name;
-            this.isLiteral = isLiteral;
-        }
-
-        final String name;
-        final boolean isLiteral;
-
-        public String getName() {
-            return name;
-        }
-
-        public boolean isLiteral() {
-            return isLiteral;
-        }
-    }
-
-    /**
-     * Analyse the given address and determine if it is literal or not,
-     * returning the address in String form.
-     */
-    public static ServerName getServerName(InetSocketAddress addr) {
-        String host = addr.getHostString();
-        byte[] literal = IPAddressUtil.textToNumericFormatV4(host);
-        if (literal == null) {
-            // not IPv4 literal. Check IPv6
-            literal = IPAddressUtil.textToNumericFormatV6(host);
-            return new ServerName(host, literal != null);
-        } else {
-            return new ServerName(host, true);
-        }
-    }
-
-    private static boolean isLoopbackLiteral(byte[] bytes) {
-        if (bytes.length == 4) {
-            return bytes[0] == 127;
-        } else if (bytes.length == 16) {
-            for (int i=0; i<14; i++)
-                if (bytes[i] != 0)
-                    return false;
-            if (bytes[15] != 1)
-                return false;
-            return true;
-        } else
-            throw new InternalError();
-    }
-
     /*
-     * Validates a RFC 7230 field-value.
+     * Validates an RFC 7230 field-value.
      *
      * "Obsolete line folding" rule
      *
@@ -495,35 +659,41 @@ public final class Utils {
         return true;
     }
 
-
-    @SuppressWarnings("removal")
     public static int getIntegerNetProperty(String name, int defaultValue) {
-        return AccessController.doPrivileged((PrivilegedAction<Integer>) () ->
-                NetProperties.getInteger(name, defaultValue));
+        return NetProperties.getInteger(name, defaultValue);
     }
 
-    @SuppressWarnings("removal")
     public static String getNetProperty(String name) {
-        return AccessController.doPrivileged((PrivilegedAction<String>) () ->
-                NetProperties.get(name));
+        return NetProperties.get(name);
     }
 
-    @SuppressWarnings("removal")
     public static boolean getBooleanProperty(String name, boolean def) {
-        return AccessController.doPrivileged((PrivilegedAction<Boolean>) () ->
-                Boolean.parseBoolean(System.getProperty(name, String.valueOf(def))));
+        return Boolean.parseBoolean(System.getProperty(name, String.valueOf(def)));
     }
 
-    @SuppressWarnings("removal")
     public static String getProperty(String name) {
-        return AccessController.doPrivileged((PrivilegedAction<String>) () ->
-                System.getProperty(name));
+        return System.getProperty(name);
     }
 
-    @SuppressWarnings("removal")
     public static int getIntegerProperty(String name, int defaultValue) {
-        return AccessController.doPrivileged((PrivilegedAction<Integer>) () ->
-                Integer.parseInt(System.getProperty(name, String.valueOf(defaultValue))));
+        return Integer.parseInt(System.getProperty(name, String.valueOf(defaultValue)));
+    }
+
+    public static long getLongProperty(String name, long defaultValue) {
+        return Long.parseLong(System.getProperty(name, String.valueOf(defaultValue)));
+    }
+
+    public static int getIntegerNetProperty(String property, int min, int max, int defaultValue, boolean log) {
+        int value =  Utils.getIntegerNetProperty(property, defaultValue);
+        // use default value if misconfigured
+        if (value < min || value > max) {
+            if (log && Log.errors()) {
+                Log.logError("Property value for {0}={1} not in [{2}..{3}]: " +
+                        "using default={4}", property, value, min, max, defaultValue);
+            }
+            value = defaultValue;
+        }
+        return value;
     }
 
     public static SSLParameters copySSLParameters(SSLParameters p) {
@@ -535,7 +705,12 @@ public final class Utils {
         p1.setMaximumPacketSize(p.getMaximumPacketSize());
         // JDK 8 EXCL END
         p1.setEndpointIdentificationAlgorithm(p.getEndpointIdentificationAlgorithm());
-        p1.setNeedClientAuth(p.getNeedClientAuth());
+        if (p.getNeedClientAuth()) {
+            p1.setNeedClientAuth(true);
+        }
+        if (p.getWantClientAuth()) {
+            p1.setWantClientAuth(true);
+        }
         String[] protocols = p.getProtocols();
         if (protocols != null) {
             p1.setProtocols(protocols.clone());
@@ -543,7 +718,8 @@ public final class Utils {
         p1.setSNIMatchers(p.getSNIMatchers());
         p1.setServerNames(p.getServerNames());
         p1.setUseCipherSuitesOrder(p.getUseCipherSuitesOrder());
-        p1.setWantClientAuth(p.getWantClientAuth());
+        p1.setSignatureSchemes(p.getSignatureSchemes());
+        p1.setNamedGroups(p.getNamedGroups());
         return p1;
     }
 
@@ -652,6 +828,7 @@ public final class Utils {
     }
 
     public static long remaining(ByteBuffer[] bufs) {
+        if (bufs == null) return 0;
         long remain = 0;
         for (ByteBuffer buf : bufs) {
             remain += buf.remaining();
@@ -660,6 +837,16 @@ public final class Utils {
     }
 
     public static boolean hasRemaining(List<ByteBuffer> bufs) {
+        if (bufs == null) return false;
+        for (ByteBuffer buf : bufs) {
+            if (buf.hasRemaining())
+                return true;
+        }
+        return false;
+    }
+
+    public static boolean hasRemaining(ByteBuffer[] bufs) {
+        if (bufs == null) return false;
         for (ByteBuffer buf : bufs) {
             if (buf.hasRemaining())
                 return true;
@@ -668,6 +855,7 @@ public final class Utils {
     }
 
     public static long remaining(List<ByteBuffer> bufs) {
+        if (bufs == null) return 0L;
         long remain = 0;
         for (ByteBuffer buf : bufs) {
             remain += buf.remaining();
@@ -675,32 +863,132 @@ public final class Utils {
         return remain;
     }
 
+    //
+
+    /**
+     * Reads as much bytes as possible from the buffer list, and
+     * write them in the provided {@code data} byte array.
+     * Returns the number of bytes read and written to the byte array.
+     * This method advances the position in the byte buffers it reads
+     * @param bufs A list of byte buffer
+     * @param data A byte array to write into
+     * @param offset Where to start writing in the byte array
+     * @return the amount of bytes read and written to the byte array
+     */
+    public static int read(List<ByteBuffer> bufs, byte[] data, int offset) {
+        int pos = offset;
+        for (ByteBuffer buf : bufs) {
+            if (pos >= data.length) break;
+            int read = Math.min(buf.remaining(), data.length - pos);
+            if (read <= 0) continue;
+            buf.get(data, pos, read);
+            pos += read;
+        }
+        return pos - offset;
+    }
+
+    /**
+     * Returns the next buffer that has remaining bytes, or null.
+     * @param iterator an iterator
+     * @return the next buffer that has remaining bytes, or null
+     */
+    public static ByteBuffer next(Iterator<ByteBuffer> iterator) {
+        ByteBuffer next = null;
+        while (iterator.hasNext() && !(next = iterator.next()).hasRemaining());
+        return next == null || !next.hasRemaining() ? null : next;
+    }
+
+    /**
+     * Compute the relative consolidated position in bytes at which the two
+     * input mismatch, or -1 if there is no mismatch.
+     * @apiNote This method behaves as {@link ByteBuffer#mismatch(ByteBuffer)}.
+     * @param these a first list of byte buffers
+     * @param those a second list of byte buffers
+     * @return  the relative consolidated position in bytes at which the two
+     *          input mismatch, or -1L if there is no mismatch.
+     */
+    public static long mismatch(List<ByteBuffer> these, List<ByteBuffer> those) {
+        if (these.isEmpty()) return those.isEmpty() ? -1 : 0;
+        if (those.isEmpty()) return 0;
+        Iterator<ByteBuffer> lefti = these.iterator(), righti = those.iterator();
+        ByteBuffer left = next(lefti), right = next(righti);
+        long parsed = 0;
+        while (left != null || right != null) {
+            int m = left == null || right == null ? 0 : left.mismatch(right);
+            if (m == -1) {
+                parsed = parsed + left.remaining();
+                assert right.remaining() == left.remaining();
+                if ((left = next(lefti)) != null) {
+                    if ((right = next(righti)) != null) {
+                        continue;
+                    }
+                    return parsed;
+                }
+                return (right = next(righti)) != null ? parsed : -1;
+            }
+            if (m == 0) return parsed;
+            parsed = parsed + m;
+            if (m < left.remaining()) {
+                if (m < right.remaining()) {
+                    return parsed;
+                }
+                if ((right = next(righti)) != null) {
+                    left = left.slice(m, left.remaining() - m);
+                    continue;
+                }
+                return parsed;
+            }
+            assert m < right.remaining();
+            if ((left = next(lefti)) != null) {
+                right = right.slice(m, right.remaining() - m);
+                continue;
+            }
+            return parsed;
+        }
+        return -1L;
+    }
+
     public static long synchronizedRemaining(List<ByteBuffer> bufs) {
+        if (bufs == null) return 0L;
         synchronized (bufs) {
             return remaining(bufs);
         }
     }
 
-    public static int remaining(List<ByteBuffer> bufs, int max) {
+    public static long remaining(List<ByteBuffer> bufs, long max) {
+        if (bufs == null) return 0;
         long remain = 0;
         for (ByteBuffer buf : bufs) {
-            remain += buf.remaining();
-            if (remain > max) {
+            int size = buf.remaining();
+            if (max - remain < size) {
                 throw new IllegalArgumentException("too many bytes");
             }
+            remain += size;
         }
-        return (int) remain;
+        return remain;
+    }
+
+    public static int remaining(List<ByteBuffer> bufs, int max) {
+        // safe cast since max is an int
+        return (int) remaining(bufs, (long) max);
+    }
+
+    public static long remaining(ByteBuffer[] refs, long max) {
+        if (refs == null) return 0;
+        long remain = 0;
+        for (ByteBuffer b : refs) {
+            int size = b.remaining();
+            if (max - remain < size) {
+                throw new IllegalArgumentException("too many bytes");
+            }
+            remain += size;
+        }
+        return remain;
     }
 
     public static int remaining(ByteBuffer[] refs, int max) {
-        long remain = 0;
-        for (ByteBuffer b : refs) {
-            remain += b.remaining();
-            if (remain > max) {
-                throw new IllegalArgumentException("too many bytes");
-            }
-        }
-        return (int) remain;
+        // safe cast since max is an int
+        return (int) remaining(refs, (long) max);
     }
 
     public static void close(Closeable... closeables) {
@@ -742,6 +1030,50 @@ public final class Utils {
     }
 
     /**
+     * Creates a slice of a buffer, possibly copying the data instead
+     * of slicing.
+     * If the buffer capacity is less than the {@linkplain #SLICE_THRESHOLD
+     * default slice threshold}, or if the capacity minus the length to slice
+     * is less than the {@linkplain #SLICE_THRESHOLD threshold}, returns a slice.
+     * Otherwise, copy so as not to retain a reference to a big buffer
+     * for a small slice.
+     * @param src the original buffer
+     * @param start where to start copying/slicing from src
+     * @param len   how many byte to slice/copy
+     * @return a new ByteBuffer for the given slice
+     */
+    public static ByteBuffer sliceOrCopy(ByteBuffer src, int start, int len) {
+        return sliceOrCopy(src, start, len, SLICE_THRESHOLD);
+    }
+
+    /**
+     * Creates a slice of a buffer, possibly copying the data instead
+     * of slicing.
+     * If the buffer capacity minus the length to slice is less than the threshold,
+     * returns a slice.
+     * Otherwise, copy so as not to retain a reference to a buffer
+     * that contains more bytes than needed.
+     * @param src the original buffer
+     * @param start where to start copying/slicing from src
+     * @param len   how many byte to slice/copy
+     * @param threshold a threshold to decide whether to slice or copy
+     * @return a new ByteBuffer for the given slice
+     */
+    public static ByteBuffer sliceOrCopy(ByteBuffer src, int start, int len, int threshold) {
+        assert src.hasArray();
+        int cap = src.array().length;
+        if (cap - len < threshold) {
+            return src.slice(start, len);
+        } else {
+            byte[] b = new byte[len];
+            if (len > 0) {
+                src.get(start, b, 0, len);
+            }
+            return ByteBuffer.wrap(b);
+        }
+    }
+
+    /**
      * Get the Charset from the Content-encoding header. Defaults to
      * UTF_8
      */
@@ -756,7 +1088,9 @@ public final class Utils {
             if (value == null) return StandardCharsets.UTF_8;
             return Charset.forName(value);
         } catch (Throwable x) {
-            Log.logTrace("Can't find charset in \"{0}\" ({1})", type, x);
+            if (Log.trace()) {
+                Log.logTrace("Can't find charset in \"{0}\" ({1})", type, x);
+            }
             return StandardCharsets.UTF_8;
         }
     }
@@ -767,13 +1101,24 @@ public final class Utils {
 
     /**
      * Get a logger for debug HTTP traces.
-     *
+     * <p>
      * The logger should only be used with levels whose severity is
-     * {@code <= DEBUG}. By default, this logger will forward all messages
-     * logged to an internal logger named "jdk.internal.httpclient.debug".
-     * In addition, if the property -Djdk.internal.httpclient.debug=true is set,
-     * it will print the messages on stderr.
-     * The logger will add some decoration to the printed message, in the form of
+     * {@code <= DEBUG}.
+     * <p>
+     * The output of this logger is controlled by the system property
+     * -Djdk.internal.httpclient.debug. The value of the property is
+     * a comma separated list of tokens. The following tokens are
+     * recognized:
+     * <ul>
+     *   <li> err: the messages will be logged on System.err</li>
+     *   <li> out: the messages will be logged on System.out</li>
+     *   <li> log: the messages will be forwarded to an internal
+     *        System.Logger named "jdk.internal.httpclient.debug"</li>
+     *   <li> true: this is equivalent to "err,log":  the messages will be logged
+     *        both on System.err, and forwarded to the internal logger.</li>
+     * </ul>
+     *
+     * This logger will add some decoration to the printed message, in the form of
      * {@code <Level>:[<thread-name>] [<elapsed-time>] <dbgTag>: <formatted message>}
      *
      * @param dbgTag A lambda that returns a string that identifies the caller
@@ -782,121 +1127,38 @@ public final class Utils {
      * @return A logger for HTTP internal debug traces
      */
     public static Logger getDebugLogger(Supplier<String> dbgTag) {
-        return getDebugLogger(dbgTag, DEBUG);
+        return DebugLogger.createHttpLogger(dbgTag, DEBUG_CONFIG);
     }
+
 
     /**
      * Get a logger for debug HTTP traces.The logger should only be used
      * with levels whose severity is {@code <= DEBUG}.
      *
-     * By default, this logger will forward all messages logged to an internal
-     * logger named "jdk.internal.httpclient.debug".
-     * In addition, if the message severity level is >= to
-     * the provided {@code errLevel} it will print the messages on stderr.
-     * The logger will add some decoration to the printed message, in the form of
-     * {@code <Level>:[<thread-name>] [<elapsed-time>] <dbgTag>: <formatted message>}
-     *
-     * @apiNote To obtain a logger that will always print things on stderr in
-     *          addition to forwarding to the internal logger, use
-     *          {@code getDebugLogger(this::dbgTag, Level.ALL);}.
-     *          This is also equivalent to calling
-     *          {@code getDebugLogger(this::dbgTag, true);}.
-     *          To obtain a logger that will only forward to the internal logger,
-     *          use {@code getDebugLogger(this::dbgTag, Level.OFF);}.
-     *          This is also equivalent to calling
-     *          {@code getDebugLogger(this::dbgTag, false);}.
+     * If {@code on} is false, returns a logger that doesn't log anything.
+     * Otherwise, returns a logger equivalent to {@link #getDebugLogger(Supplier)}.
      *
      * @param dbgTag A lambda that returns a string that identifies the caller
      *               (e.g: "SocketTube(3)", or "Http2Connection(SocketTube(3))")
-     * @param errLevel The level above which messages will be also printed on
-     *               stderr (in addition to be forwarded to the internal logger).
-     *
-     * @return A logger for HTTP internal debug traces
-     */
-    static Logger getDebugLogger(Supplier<String> dbgTag, Level errLevel) {
-        return DebugLogger.createHttpLogger(dbgTag, Level.OFF, errLevel);
-    }
-
-    /**
-     * Get a logger for debug HTTP traces.The logger should only be used
-     * with levels whose severity is {@code <= DEBUG}.
-     *
-     * By default, this logger will forward all messages logged to an internal
-     * logger named "jdk.internal.httpclient.debug".
-     * In addition, the provided boolean {@code on==true}, it will print the
-     * messages on stderr.
-     * The logger will add some decoration to the printed message, in the form of
-     * {@code <Level>:[<thread-name>] [<elapsed-time>] <dbgTag>: <formatted message>}
-     *
-     * @apiNote To obtain a logger that will always print things on stderr in
-     *          addition to forwarding to the internal logger, use
-     *          {@code getDebugLogger(this::dbgTag, true);}.
-     *          This is also equivalent to calling
-     *          {@code getDebugLogger(this::dbgTag, Level.ALL);}.
-     *          To obtain a logger that will only forward to the internal logger,
-     *          use {@code getDebugLogger(this::dbgTag, false);}.
-     *          This is also equivalent to calling
-     *          {@code getDebugLogger(this::dbgTag, Level.OFF);}.
-     *
-     * @param dbgTag A lambda that returns a string that identifies the caller
-     *               (e.g: "SocketTube(3)", or "Http2Connection(SocketTube(3))")
-     * @param on  Whether messages should also be printed on
-     *               stderr (in addition to be forwarded to the internal logger).
+     * @param on  Whether the logger is enabled.
      *
      * @return A logger for HTTP internal debug traces
      */
     public static Logger getDebugLogger(Supplier<String> dbgTag, boolean on) {
-        Level errLevel = on ? Level.ALL : Level.OFF;
-        return getDebugLogger(dbgTag, errLevel);
-    }
-
-    /**
-     * Return the host string from a HttpRequestImpl
-     *
-     * @param request
-     * @return
-     */
-    public static String hostString(HttpRequestImpl request) {
-        URI uri = request.uri();
-        int port = uri.getPort();
-        String host = uri.getHost();
-
-        boolean defaultPort;
-        if (port == -1) {
-            defaultPort = true;
-        } else if (uri.getScheme().equalsIgnoreCase("https")) {
-            defaultPort = port == 443;
-        } else {
-            defaultPort = port == 80;
-        }
-
-        if (defaultPort) {
-            return host;
-        } else {
-            return host + ":" + Integer.toString(port);
-        }
+        LoggerConfig config = on ? DEBUG_CONFIG : LoggerConfig.OFF;
+        return DebugLogger.createHttpLogger(dbgTag, config);
     }
 
     /**
      * Get a logger for debug HPACK traces.The logger should only be used
      * with levels whose severity is {@code <= DEBUG}.
      *
-     * By default, this logger will forward all messages logged to an internal
-     * logger named "jdk.internal.httpclient.hpack.debug".
-     * In addition, if the message severity level is >= to
-     * the provided {@code errLevel} it will print the messages on stderr.
-     * The logger will add some decoration to the printed message, in the form of
-     * {@code <Level>:[<thread-name>] [<elapsed-time>] <dbgTag>: <formatted message>}
-     *
-     * @apiNote To obtain a logger that will always print things on stderr in
-     *          addition to forwarding to the internal logger, use
-     *          {@code getHpackLogger(this::dbgTag, Level.ALL);}.
-     *          This is also equivalent to calling
-     *          {@code getHpackLogger(this::dbgTag, true);}.
-     *          To obtain a logger that will only forward to the internal logger,
-     *          use {@code getHpackLogger(this::dbgTag, Level.OFF);}.
-     *          This is also equivalent to calling
-     *          {@code getHpackLogger(this::dbgTag, false);}.
+     * By default, this logger has a configuration equivalent to that
+     * returned by {@link #getHpackLogger(Supplier)}. This original
+     * configuration is amended by the provided {@code errLevel} in
+     * the following way: if the message severity level is >= to
+     * the provided {@code errLevel} the message will additionally
+     * be printed on stderr.
      *
      * @param dbgTag A lambda that returns a string that identifies the caller
      *               (e.g: "Http2Connection(SocketTube(3))/hpack.Decoder(3)")
@@ -906,107 +1168,72 @@ public final class Utils {
      * @return A logger for HPACK internal debug traces
      */
     public static Logger getHpackLogger(Supplier<String> dbgTag, Level errLevel) {
-        Level outLevel = Level.OFF;
-        return DebugLogger.createHpackLogger(dbgTag, outLevel, errLevel);
+        return DebugLogger.createHpackLogger(dbgTag, DEBUG_HPACK_CONFIG.withErrLevel(errLevel));
     }
 
     /**
      * Get a logger for debug HPACK traces.The logger should only be used
      * with levels whose severity is {@code <= DEBUG}.
      *
-     * By default, this logger will forward all messages logged to an internal
-     * logger named "jdk.internal.httpclient.hpack.debug".
-     * In addition, the provided boolean {@code on==true}, it will print the
-     * messages on stderr.
-     * The logger will add some decoration to the printed message, in the form of
-     * {@code <Level>:[<thread-name>] [<elapsed-time>] <dbgTag>: <formatted message>}
+     * The logger should only be used with levels whose severity is
+     * {@code <= DEBUG}.
+     * <p>
+     * The output of this logger is controlled by the system property
+     * -Djdk.internal.httpclient.hpack.debug. The value of the property is
+     * a comma separated list of tokens. The following tokens are
+     * recognized:
+     * <ul>
+     *   <li> err: the messages will be logged on System.err</li>
+     *   <li> out: the messages will be logged on System.out</li>
+     *   <li> log: the messages will be forwarded to an internal
+     *        System.Logger named "jdk.internal.httpclient.hpack.debug"</li>
+     *   <li> true: this is equivalent to "err,log":  the messages will be logged
+     *        both on System.err, and forwarded to the internal logger.</li>
+     * </ul>
      *
-     * @apiNote To obtain a logger that will always print things on stderr in
-     *          addition to forwarding to the internal logger, use
-     *          {@code getHpackLogger(this::dbgTag, true);}.
-     *          This is also equivalent to calling
-     *          {@code getHpackLogger(this::dbgTag, Level.ALL);}.
-     *          To obtain a logger that will only forward to the internal logger,
-     *          use {@code getHpackLogger(this::dbgTag, false);}.
-     *          This is also equivalent to calling
-     *          {@code getHpackLogger(this::dbgTag, Level.OFF);}.
+     * This logger will add some decoration to the printed message, in the form of
+     * {@code <Level>:[<thread-name>] [<elapsed-time>] <dbgTag>: <formatted message>}
      *
      * @param dbgTag A lambda that returns a string that identifies the caller
      *               (e.g: "Http2Connection(SocketTube(3))/hpack.Decoder(3)")
-     * @param on  Whether messages should also be printed on
-     *            stderr (in addition to be forwarded to the internal logger).
      *
      * @return A logger for HPACK internal debug traces
      */
-    public static Logger getHpackLogger(Supplier<String> dbgTag, boolean on) {
-        Level errLevel = on ? Level.ALL : Level.OFF;
-        return getHpackLogger(dbgTag, errLevel);
+    public static Logger getHpackLogger(Supplier<String> dbgTag) {
+        return DebugLogger.createHpackLogger(dbgTag, DEBUG_HPACK_CONFIG);
     }
 
     /**
      * Get a logger for debug WebSocket traces.The logger should only be used
      * with levels whose severity is {@code <= DEBUG}.
+     * <p>
+     * The logger should only be used with levels whose severity is
+     * {@code <= DEBUG}.
+     * <p>
+     * The output of this logger is controlled by the system property
+     * -Djdk.internal.httpclient.websocket.debug. The value of the property is
+     * a comma separated list of tokens. The following tokens are
+     * recognized:
+     * <ul>
+     *   <li> err: the messages will be logged on System.err</li>
+     *   <li> out: the messages will be logged on System.out</li>
+     *   <li> log: the messages will be forwarded to an internal
+     *        System.Logger named "jdk.internal.httpclient.websocket.debug"</li>
+     *   <li> true: this is equivalent to "err,log":  the messages will be logged
+     *        both on System.err, and forwarded to the internal logger.</li>
+     * </ul>
      *
-     * By default, this logger will forward all messages logged to an internal
-     * logger named "jdk.internal.httpclient.websocket.debug".
-     * In addition, if the message severity level is >= to
-     * the provided {@code errLevel} it will print the messages on stderr.
-     * The logger will add some decoration to the printed message, in the form of
+     * This logger will add some decoration to the printed message, in the form of
      * {@code <Level>:[<thread-name>] [<elapsed-time>] <dbgTag>: <formatted message>}
      *
-     * @apiNote To obtain a logger that will always print things on stderr in
-     *          addition to forwarding to the internal logger, use
-     *          {@code getWebSocketLogger(this::dbgTag, Level.ALL);}.
-     *          This is also equivalent to calling
-     *          {@code getWSLogger(this::dbgTag, true);}.
-     *          To obtain a logger that will only forward to the internal logger,
-     *          use {@code getWebSocketLogger(this::dbgTag, Level.OFF);}.
-     *          This is also equivalent to calling
-     *          {@code getWSLogger(this::dbgTag, false);}.
      *
      * @param dbgTag A lambda that returns a string that identifies the caller
      *               (e.g: "WebSocket(3)")
-     * @param errLevel The level above which messages will be also printed on
-     *               stderr (in addition to be forwarded to the internal logger).
-     *
-     * @return A logger for HPACK internal debug traces
-     */
-    public static Logger getWebSocketLogger(Supplier<String> dbgTag, Level errLevel) {
-        Level outLevel = Level.OFF;
-        return DebugLogger.createWebSocketLogger(dbgTag, outLevel, errLevel);
-    }
-
-    /**
-     * Get a logger for debug WebSocket traces.The logger should only be used
-     * with levels whose severity is {@code <= DEBUG}.
-     *
-     * By default, this logger will forward all messages logged to an internal
-     * logger named "jdk.internal.httpclient.websocket.debug".
-     * In addition, the provided boolean {@code on==true}, it will print the
-     * messages on stderr.
-     * The logger will add some decoration to the printed message, in the form of
-     * {@code <Level>:[<thread-name>] [<elapsed-time>] <dbgTag>: <formatted message>}
-     *
-     * @apiNote To obtain a logger that will always print things on stderr in
-     *          addition to forwarding to the internal logger, use
-     *          {@code getWebSocketLogger(this::dbgTag, true);}.
-     *          This is also equivalent to calling
-     *          {@code getWebSocketLogger(this::dbgTag, Level.ALL);}.
-     *          To obtain a logger that will only forward to the internal logger,
-     *          use {@code getWebSocketLogger(this::dbgTag, false);}.
-     *          This is also equivalent to calling
-     *          {@code getHpackLogger(this::dbgTag, Level.OFF);}.
-     *
-     * @param dbgTag A lambda that returns a string that identifies the caller
-     *               (e.g: "WebSocket(3)")
-     * @param on  Whether messages should also be printed on
-     *            stderr (in addition to be forwarded to the internal logger).
      *
      * @return A logger for WebSocket internal debug traces
      */
-    public static Logger getWebSocketLogger(Supplier<String> dbgTag, boolean on) {
-        Level errLevel = on ? Level.ALL : Level.OFF;
-        return getWebSocketLogger(dbgTag, errLevel);
+    public static Logger getWebSocketLogger(Supplier<String> dbgTag) {
+        return DebugLogger.createWebSocketLogger(dbgTag, DEBUG_WS_CONFIG);
     }
 
     /**
@@ -1092,7 +1319,82 @@ public final class Utils {
         }
     }
 
+    /**
+     * Creates HTTP/2 HTTP/3 pseudo headers for the given request.
+     * @param request the request
+     * @return pseudo headers for that request
+     */
+    public static HttpHeaders createPseudoHeaders(HttpRequest request) {
+        HttpHeadersBuilder hdrs = new HttpHeadersBuilder();
+        String method = request.method();
+        hdrs.setHeader(":method", method);
+        URI uri = request.uri();
+        hdrs.setHeader(":scheme", uri.getScheme());
+        String host = uri.getHost();
+        int port = uri.getPort();
+        assert host != null;
+        if (port != -1) {
+            hdrs.setHeader(":authority", host + ":" + port);
+        } else {
+            hdrs.setHeader(":authority", host);
+        }
+        String query = uri.getRawQuery();
+        String path = uri.getRawPath();
+        if (path == null || path.isEmpty()) {
+            if (method.equalsIgnoreCase("OPTIONS")) {
+                path = "*";
+            } else {
+                path = "/";
+            }
+        }
+        if (query != null) {
+            path += "?" + query;
+        }
+        hdrs.setHeader(":path", Utils.encode(path));
+        return hdrs.build();
+    }
     // -- toAsciiString-like support to encode path and query URI segments
+
+    public static int readStatusCode(HttpHeaders headers, String errorPrefix) throws ProtocolException {
+        var s = headers.firstValue(":status").orElse(null);
+        if (s == null) {
+            throw new ProtocolException(errorPrefix + "missing status code");
+        }
+        Throwable t = null;
+        int i = 0;
+        try {
+            i = Integer.parseInt(s);
+        } catch (NumberFormatException nfe) {
+            t = nfe;
+        }
+        if (t != null || i < 100 || i > 999) {
+            var pe = new ProtocolException(errorPrefix + "invalid status code: " + s);
+            pe.initCause(t);
+            throw pe;
+        }
+        return i;
+    }
+
+    public static long readContentLength(HttpHeaders headers, String errorPrefix, long defaultIfMissing) throws ProtocolException {
+        var k = "Content-Length";
+        var s = headers.firstValue(k).orElse(null);
+        if (s == null) {
+            return defaultIfMissing;
+        }
+        Throwable t = null;
+        long i = 0;
+        try {
+            i = Long.parseLong(s);
+        } catch (NumberFormatException nfe) {
+            t = nfe;
+        }
+        if (t != null || i < 0) {
+            var pe = new ProtocolException("%sinvalid \"%s\": %s".formatted(errorPrefix, k, s));
+            pe.initCause(t);
+            throw pe;
+        }
+        return i;
+    }
 
     // Encodes all characters >= \u0080 into escaped, normalized UTF-8 octets,
     // assuming that s is otherwise legal
@@ -1133,5 +1435,328 @@ public final class Utils {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * {@return the content of the buffer as an hexadecimal string}
+     * This method doesn't move the buffer position or limit.
+     * @param buffer a byte buffer
+     */
+    public static String asHexString(ByteBuffer buffer) {
+        if (!buffer.hasRemaining()) return "";
+        byte[] bytes = new byte[buffer.remaining()];
+        buffer.get(buffer.position(), bytes);
+        return HexFormat.of().formatHex(bytes);
+    }
+
+    /**
+     * Converts a ByteBuffer containing bytes encoded using
+     * the given {@linkplain Charset charset} into a
+     * string. This method does not throw but will replace
+     * unrecognized sequences with the replacement character.
+     * The bytes in the buffer are consumed.
+     *
+     * @apiNote
+     * This method is intended for debugging purposes only,
+     * since buffers are not guaranteed to be split at character
+     * boundaries.
+     *
+     * @param buffer a buffer containing bytes encoded using
+     *               a charset
+     * @param charset the charset to use to decode the bytes
+     *                into a string
+     *
+     * @return a string built from the bytes contained
+     * in the buffer decoded using the given charset
+     */
+    public static String asString(ByteBuffer buffer, Charset charset) {
+        var decoded = charset.decode(buffer);
+        char[] chars = new char[decoded.length()];
+        decoded.get(chars);
+        return new String(chars);
+    }
+
+    /**
+     * Converts a ByteBuffer containing UTF-8 bytes into a
+     * string. This method does not throw but will replace
+     * unrecognized sequences with the replacement character.
+     * The bytes in the buffer are consumed.
+     *
+     * @apiNote
+     * This method is intended for debugging purposes only,
+     * since buffers are not guaranteed to be split at character
+     * boundaries.
+     *
+     * @param buffer a buffer containing UTF-8 bytes
+     *
+     * @return a string built from the decoded UTF-8 bytes contained
+     * in the buffer
+     */
+    public static String asString(ByteBuffer buffer) {
+       return asString(buffer, StandardCharsets.UTF_8);
+    }
+
+    public static String millis(Instant now, Instant deadline) {
+        if (Instant.MAX.equals(deadline)) return "not scheduled";
+        try {
+            long delay = now.until(deadline, ChronoUnit.MILLIS);
+            return delay + " ms";
+        } catch (ArithmeticException a) {
+            return "too far away";
+        }
+    }
+
+    public static String millis(Deadline now, Deadline deadline) {
+        return millis(now.asInstant(), deadline.asInstant());
+    }
+
+    public static ExecutorService safeExecutor(ExecutorService delegate,
+                                 BiConsumer<Runnable, Throwable> errorHandler) {
+        Executor overflow =  new CompletableFuture<Void>().defaultExecutor();
+        return new SafeExecutorService(delegate, overflow, errorHandler);
+    }
+
+    public static sealed class SafeExecutor<E extends Executor> implements Executor
+            permits SafeExecutorService {
+        final E delegate;
+        final BiConsumer<Runnable, Throwable> errorHandler;
+        final Executor overflow;
+
+        public SafeExecutor(E delegate, Executor overflow, BiConsumer<Runnable, Throwable> errorHandler) {
+            this.delegate = delegate;
+            this.overflow = overflow;
+            this.errorHandler = errorHandler;
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            ensureExecutedAsync(command);
+        }
+
+        private void ensureExecutedAsync(Runnable command) {
+            try {
+                delegate.execute(command);
+            } catch (RejectedExecutionException t) {
+                errorHandler.accept(command, t);
+                overflow.execute(command);
+            }
+        }
+
+    }
+
+    public static final class SafeExecutorService extends SafeExecutor<ExecutorService>
+            implements ExecutorService {
+
+        public SafeExecutorService(ExecutorService delegate,
+                            Executor overflow,
+                            BiConsumer<Runnable, Throwable> errorHandler) {
+            super(delegate, overflow, errorHandler);
+        }
+
+        @Override
+        public void shutdown() {
+            delegate.shutdown();
+        }
+
+        @Override
+        public List<Runnable> shutdownNow() {
+            return delegate.shutdownNow();
+        }
+
+        @Override
+        public boolean isShutdown() {
+            return delegate.isShutdown();
+        }
+
+        @Override
+        public boolean isTerminated() {
+            return delegate.isTerminated();
+        }
+
+        @Override
+        public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+            return delegate.awaitTermination(timeout, unit);
+        }
+
+        @Override
+        public <T> Future<T> submit(Callable<T> task) {
+            return delegate.submit(task);
+        }
+
+        @Override
+        public <T> Future<T> submit(Runnable task, T result) {
+            return delegate.submit(task, result);
+        }
+
+        @Override
+        public Future<?> submit(Runnable task) {
+            return delegate.submit(task);
+        }
+
+        @Override
+        public <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> tasks)
+                throws InterruptedException {
+            return delegate.invokeAll(tasks);
+        }
+
+        @Override
+        public <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> tasks,
+                                             long timeout, TimeUnit unit)
+                throws InterruptedException {
+            return delegate.invokeAll(tasks, timeout, unit);
+        }
+
+        @Override
+        public <T> T invokeAny(Collection<? extends Callable<T>> tasks)
+                throws InterruptedException, ExecutionException {
+            return delegate.invokeAny(tasks);
+        }
+
+        @Override
+        public <T> T invokeAny(Collection<? extends Callable<T>> tasks,
+                               long timeout, TimeUnit unit)
+                throws InterruptedException, ExecutionException, TimeoutException {
+            return delegate.invokeAny(tasks);
+        }
+    }
+
+    public static <T extends NetworkChannel> T configureChannelBuffers(Consumer<String> logSink, T chan,
+                                                                int receiveBufSize, int sendBufSize) {
+
+        if (logSink != null) {
+            int bufsize = getSoReceiveBufferSize(logSink, chan);
+            logSink.accept("Initial receive buffer size is: %d".formatted(bufsize));
+            bufsize = getSoSendBufferSize(logSink, chan);
+            logSink.accept("Initial send buffer size is: %d".formatted(bufsize));
+        }
+        if (trySetReceiveBufferSize(logSink, chan, receiveBufSize)) {
+            if (logSink != null) {
+                int bufsize = getSoReceiveBufferSize(logSink, chan);
+                logSink.accept("Receive buffer size configured: %d".formatted(bufsize));
+            }
+        }
+        if (trySetSendBufferSize(logSink, chan, sendBufSize)) {
+            if (logSink != null) {
+                int bufsize = getSoSendBufferSize(logSink, chan);
+                logSink.accept("Send buffer size configured: %d".formatted(bufsize));
+            }
+        }
+        return chan;
+    }
+
+    public static boolean trySetReceiveBufferSize(Consumer<String> logSink, NetworkChannel chan, int bufsize) {
+        try {
+            if (bufsize > 0) {
+                chan.setOption(StandardSocketOptions.SO_RCVBUF, bufsize);
+                return true;
+            }
+        } catch (IOException x) {
+            if (logSink != null)
+                logSink.accept("Failed to set receive buffer size to %d on %s"
+                        .formatted(bufsize, chan));
+        }
+        return false;
+    }
+
+    public static boolean trySetSendBufferSize(Consumer<String> logSink, NetworkChannel chan, int bufsize) {
+        try {
+            if (bufsize > 0) {
+                chan.setOption(StandardSocketOptions.SO_SNDBUF, bufsize);
+                return true;
+            }
+        } catch (IOException x) {
+            if (logSink != null)
+                logSink.accept("Failed to set send buffer size to %d on %s"
+                        .formatted(bufsize, chan));
+        }
+        return false;
+    }
+
+    public static int getSoReceiveBufferSize(Consumer<String> logSink, NetworkChannel chan) {
+        try {
+            return chan.getOption(StandardSocketOptions.SO_RCVBUF);
+        } catch (IOException x) {
+            if (logSink != null)
+                logSink.accept("Failed to get initial receive buffer size on %s".formatted(chan));
+        }
+        return 0;
+    }
+
+    public static int getSoSendBufferSize(Consumer<String> logSink, NetworkChannel chan) {
+        try {
+            return chan.getOption(StandardSocketOptions.SO_SNDBUF);
+        } catch (IOException x) {
+            if (logSink!= null)
+                logSink.accept("Failed to get initial receive buffer size on %s".formatted(chan));
+        }
+        return 0;
+    }
+
+
+    /**
+     * Try to figure out whether local and remote addresses are compatible.
+     * Used to diagnose potential communication issues early.
+     * This is a best effort, and there is no guarantee that all potential
+     * conflicts will be detected.
+     * @param local local address
+     * @param peer  peer address
+     * @return a message describing the conflict, if any, or {@code null} if no
+     *         conflict was detected.
+     */
+    public static String addressConflict(SocketAddress local, SocketAddress peer) {
+        if (local == null || peer == null) return null;
+        if (local.equals(peer)) {
+            return "local endpoint and remote endpoint are bound to the same IP address and port";
+        }
+        if (!(local instanceof InetSocketAddress li) || !(peer instanceof InetSocketAddress pi)) {
+            return null;
+        }
+        var laddr = li.getAddress();
+        var paddr = pi.getAddress();
+        if (!laddr.isAnyLocalAddress() && !paddr.isAnyLocalAddress()) {
+            if (laddr.getClass() != paddr.getClass()) { // IPv4 vs IPv6
+                if ((laddr instanceof Inet6Address laddr6 && !laddr6.isIPv4CompatibleAddress())
+                    || (paddr instanceof Inet6Address paddr6 && !paddr6.isIPv4CompatibleAddress())) {
+                    return "local endpoint IP (%s) and remote endpoint IP (%s) don't match"
+                            .formatted(laddr.getClass().getSimpleName(),
+                                    paddr.getClass().getSimpleName());
+                }
+            }
+        }
+        if (li.getPort() != pi.getPort()) return null;
+        if (li.getAddress().isAnyLocalAddress() && pi.getAddress().isLoopbackAddress()) {
+            return "local endpoint (wildcard) and remote endpoint (loopback) ports conflict";
+        }
+        if (pi.getAddress().isAnyLocalAddress() && li.getAddress().isLoopbackAddress()) {
+            return "local endpoint (loopback) and remote endpoint (wildcard) ports conflict";
+        }
+        return null;
+    }
+
+    /**
+     * {@return the exception the given {@code cf} was completed with,
+     * or a {@link CancellationException} if the given {@code cf} was
+     * cancelled}
+     *
+     * @param cf a {@code CompletableFuture} exceptionally completed
+     * @throws IllegalArgumentException if the given cf was not
+     *    {@linkplain CompletableFuture#isCompletedExceptionally()
+     *    completed exceptionally}
+     */
+    public static Throwable exceptionNow(CompletableFuture<?> cf) {
+        if (cf.isCompletedExceptionally()) {
+            if (cf.isCancelled()) {
+                try {
+                    cf.join();
+                } catch (CancellationException x) {
+                    return x;
+                } catch (CompletionException x) {
+                    return x.getCause();
+                }
+            } else {
+                return cf.exceptionNow();
+            }
+        }
+        throw new IllegalArgumentException("cf is not completed exceptionally");
     }
 }

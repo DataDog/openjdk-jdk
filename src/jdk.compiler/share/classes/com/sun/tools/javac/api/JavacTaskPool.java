@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -55,6 +55,7 @@ import com.sun.source.util.TaskEvent.Kind;
 import com.sun.source.util.TaskListener;
 import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Kinds;
+import com.sun.tools.javac.code.LintMapper;
 import com.sun.tools.javac.code.Preview;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symtab;
@@ -88,7 +89,7 @@ import com.sun.tools.javac.util.Options;
  * For each combination of options, a separate task/context is created and kept, as most option
  * values are cached inside components themselves.
  * <p>
- * When the compilation redefines sensitive classes (e.g. classes in the the java.* packages), the
+ * When the compilation redefines sensitive classes (e.g. classes in the java.* packages), the
  * task/context is not reused.
  * <p>
  * When the task is reused, then packages that were already listed won't be listed again.
@@ -267,13 +268,12 @@ public class JavacTaskPool {
 
             if (ht.get(Log.logKey) instanceof ReusableLog) {
                 //log already inited - not first round
-                ((ReusableLog)Log.instance(this)).clear();
+                Log.instance(this).clear();
+                LintMapper.instance(this).clear();
                 Enter.instance(this).newRound();
                 ((ReusableJavaCompiler)ReusableJavaCompiler.instance(this)).clear();
                 Types.instance(this).newRound();
                 Check.instance(this).newRound();
-                Check.instance(this).clear(); //clear mandatory warning handlers
-                Preview.instance(this).clear(); //clear mandatory warning handlers
                 Modules.instance(this).newRound();
                 Annotate.instance(this).newRound();
                 CompileStates.instance(this).clear();
@@ -395,11 +395,9 @@ public class JavacTaskPool {
                 this.context = context;
             }
 
-            void clear() {
-                recorded.clear();
-                sourceMap.clear();
-                nerrors = 0;
-                nwarnings = 0;
+            @Override
+            public void clear() {
+                super.clear();
                 //Set a fake listener that will lazily lookup the context for the 'real' listener. Since
                 //this field is never updated when a new task is created, we cannot simply reset the field
                 //or keep old value. This is a hack to workaround the limitations in the current infrastructure.

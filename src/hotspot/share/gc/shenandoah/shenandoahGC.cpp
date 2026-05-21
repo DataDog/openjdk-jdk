@@ -22,10 +22,9 @@
  *
  */
 
-#include "precompiled.hpp"
 
 #include "compiler/oopMap.hpp"
-#include "gc/shared/workgroup.hpp"
+#include "gc/shared/workerThread.hpp"
 #include "gc/shenandoah/shenandoahClosures.inline.hpp"
 #include "gc/shenandoah/shenandoahGC.hpp"
 #include "gc/shenandoah/shenandoahHeap.hpp"
@@ -39,11 +38,13 @@ const char* ShenandoahGC::degen_point_to_string(ShenandoahDegenPoint point) {
       return "<UNSET>";
     case _degenerated_outside_cycle:
       return "Outside of Cycle";
+    case _degenerated_roots:
+      return "Roots";
     case _degenerated_mark:
       return "Mark";
     case _degenerated_evac:
       return "Evacuation";
-    case _degenerated_updaterefs:
+    case _degenerated_update_refs:
       return "Update References";
     default:
       ShouldNotReachHere();
@@ -51,13 +52,13 @@ const char* ShenandoahGC::degen_point_to_string(ShenandoahDegenPoint point) {
    }
 }
 
-class ShenandoahUpdateRootsTask : public AbstractGangTask {
+class ShenandoahUpdateRootsTask : public WorkerTask {
 private:
   ShenandoahRootUpdater*  _root_updater;
   bool                    _check_alive;
 public:
   ShenandoahUpdateRootsTask(ShenandoahRootUpdater* root_updater, bool check_alive) :
-    AbstractGangTask("Shenandoah Update Roots"),
+    WorkerTask("Shenandoah Update Roots"),
     _root_updater(root_updater),
     _check_alive(check_alive){
   }
@@ -66,14 +67,13 @@ public:
     assert(ShenandoahSafepoint::is_at_shenandoah_safepoint(), "Must be at a safepoint");
     ShenandoahParallelWorkerSession worker_session(worker_id);
 
-    ShenandoahHeap* heap = ShenandoahHeap::heap();
-    ShenandoahUpdateRefsClosure cl;
+    ShenandoahNonConcUpdateRefsClosure cl;
     if (_check_alive) {
       ShenandoahForwardedIsAliveClosure is_alive;
-      _root_updater->roots_do<ShenandoahForwardedIsAliveClosure, ShenandoahUpdateRefsClosure>(worker_id, &is_alive, &cl);
+      _root_updater->roots_do<ShenandoahForwardedIsAliveClosure, ShenandoahNonConcUpdateRefsClosure>(worker_id, &is_alive, &cl);
     } else {
-      AlwaysTrueClosure always_true;;
-      _root_updater->roots_do<AlwaysTrueClosure, ShenandoahUpdateRefsClosure>(worker_id, &always_true, &cl);
+      AlwaysTrueClosure always_true;
+      _root_updater->roots_do<AlwaysTrueClosure, ShenandoahNonConcUpdateRefsClosure>(worker_id, &always_true, &cl);
     }
   }
 };
@@ -95,7 +95,7 @@ void ShenandoahGC::update_roots(bool full_gc) {
 #endif
 
   ShenandoahHeap* const heap = ShenandoahHeap::heap();
-  WorkGang* workers = heap->workers();
+  WorkerThreads* workers = heap->workers();
   uint nworkers = workers->active_workers();
 
   ShenandoahRootUpdater root_updater(nworkers, p);

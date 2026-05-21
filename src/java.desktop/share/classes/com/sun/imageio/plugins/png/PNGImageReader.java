@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -142,6 +142,7 @@ public class PNGImageReader extends ImageReader {
     static final int tRNS_TYPE = 0x74524e53;
     static final int zTXt_TYPE = 0x7a545874;
 
+    static final int MAX_INFLATED_TEXT_LENGTH = 262144;
     static final int PNG_COLOR_GRAY = 0;
     static final int PNG_COLOR_RGB = 2;
     static final int PNG_COLOR_PALETTE = 3;
@@ -228,7 +229,7 @@ public class PNGImageReader extends ImageReader {
         if (b != 0) {
             throw new IIOException("Found non null terminated string");
         }
-        return new String(baos.toByteArray(), charset);
+        return baos.toString(charset);
     }
 
     private void readHeader() throws IIOException {
@@ -332,13 +333,13 @@ public class PNGImageReader extends ImageReader {
         if (metadata.PLTE_present) {
             processWarningOccurred(
 "A PNG image may not contain more than one PLTE chunk.\n" +
-"The chunk wil be ignored.");
+"The chunk will be ignored.");
             return;
         } else if (metadata.IHDR_colorType == PNG_COLOR_GRAY ||
                    metadata.IHDR_colorType == PNG_COLOR_GRAY_ALPHA) {
             processWarningOccurred(
 "A PNG gray or gray alpha image cannot have a PLTE chunk.\n" +
-"The chunk wil be ignored.");
+"The chunk will be ignored.");
             return;
         }
 
@@ -669,18 +670,9 @@ public class PNGImageReader extends ImageReader {
 
     private static byte[] inflate(byte[] b) throws IOException {
         InputStream bais = new ByteArrayInputStream(b);
-        InputStream iis = new InflaterInputStream(bais);
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-
-        int c;
-        try {
-            while ((c = iis.read()) != -1) {
-                baos.write(c);
-            }
-        } finally {
-            iis.close();
+        try (InputStream iis = new InflaterInputStream(bais)) {
+            return iis.readNBytes(MAX_INFLATED_TEXT_LENGTH);
         }
-        return baos.toByteArray();
     }
 
     private void parse_zTXt_chunk(int chunkLength) throws IOException {
@@ -772,7 +764,7 @@ public class PNGImageReader extends ImageReader {
                 // verify the chunk length
                 if (chunkLength < 0) {
                     throw new IIOException("Invalid chunk length " + chunkLength);
-                };
+                }
 
                 try {
                     /*
@@ -1424,6 +1416,13 @@ public class PNGImageReader extends ImageReader {
         int width = metadata.IHDR_width;
         int height = metadata.IHDR_height;
 
+        if ((long)width * height > Integer.MAX_VALUE - 2) {
+            // We are not able to properly decode image that has number
+            // of pixels greater than Integer.MAX_VALUE - 2
+            throw new IIOException("Can not read image of the size "
+                    + width + " by " + height);
+        }
+
         // Init default values
         sourceXSubsampling = 1;
         sourceYSubsampling = 1;
@@ -1686,7 +1685,7 @@ public class PNGImageReader extends ImageReader {
              * 2^bitDepth is legal in the view of PNG spec.
              *
              * However the spec of createIndexed() method demands the exact
-             * equality of the palette lengh and number of possible palette
+             * equality of the palette length and number of possible palette
              * entries (2^bitDepth).
              *
              * {@link javax.imageio.ImageTypeSpecifier.html#createIndexed}
@@ -1753,7 +1752,7 @@ public class PNGImageReader extends ImageReader {
         case PNG_COLOR_RGB_ALPHA:
             if (bitDepth == 8) {
                 // some standard types of buffered images
-                // wich can be used as destination
+                // which can be used as destination
                 l.add(ImageTypeSpecifier.createFromBufferedImageType(
                           BufferedImage.TYPE_4BYTE_ABGR));
 

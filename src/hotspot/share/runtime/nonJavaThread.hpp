@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,14 +26,18 @@
 #define SHARE_RUNTIME_NONJAVATHREAD_HPP
 
 #include "runtime/thread.hpp"
+#include "utilities/deferredStatic.hpp"
 
 class NonJavaThread: public Thread {
-  friend class VMStructs;
-
-  NonJavaThread* volatile _next;
+  friend class Threads;
 
   class List;
-  static List _the_list;
+  static DeferredStatic<List> _the_list;
+
+  // Deferred static initialization
+  static void init();
+
+  NonJavaThread* volatile _next;
 
   void add_to_the_list();
   void remove_from_the_list();
@@ -65,7 +69,7 @@ public:
   Iterator();
   ~Iterator();
 
-  bool end() const { return _current == NULL; }
+  bool end() const { return _current == nullptr; }
   NonJavaThread* current() const { return _current; }
   void step();
 };
@@ -91,7 +95,7 @@ class NamedThread: public NonJavaThread {
   // May only be called once per thread.
   void set_name(const char* format, ...)  ATTRIBUTE_PRINTF(2, 3);
   virtual bool is_Named_thread() const { return true; }
-  virtual const char* name() const { return _name == NULL ? "Unknown Thread" : _name; }
+  virtual const char* name() const { return _name == nullptr ? "Unknown Thread" : _name; }
   virtual const char* type_name() const { return "NamedThread"; }
   Thread *processed_thread() { return _processed_thread; }
   void set_processed_thread(Thread *thread) { _processed_thread = thread; }
@@ -101,49 +105,18 @@ class NamedThread: public NonJavaThread {
   uint gc_id() { return _gc_id; }
 };
 
-// Worker threads are named and have an id of an assigned work.
-class WorkerThread: public NamedThread {
- private:
-  uint _id;
- public:
-  static WorkerThread* current() {
-    return WorkerThread::cast(Thread::current());
-  }
-
-  static WorkerThread* cast(Thread* t) {
-    assert(t->is_Worker_thread(), "incorrect cast to WorkerThread");
-    return static_cast<WorkerThread*>(t);
-  }
-
-  WorkerThread() : _id(0)               { }
-  virtual bool is_Worker_thread() const { return true; }
-
-  void set_id(uint work_id)             { _id = work_id; }
-  uint id() const                       { return _id; }
-
-  // Printing
-  virtual const char* type_name() const { return "WorkerThread"; }
-
-};
-
 // A single WatcherThread is used for simulating timer interrupts.
 class WatcherThread: public NonJavaThread {
-  friend class VMStructs;
  protected:
   virtual void run();
 
  private:
   static WatcherThread* _watcher_thread;
 
-  static bool _startable;
+  static bool _run_all_tasks;
   // volatile due to at least one lock-free read
   volatile static bool _should_terminate;
  public:
-
-  enum SomeConstants {
-    delay_interval = 10                          // interrupt delay in milliseconds
-  };
-
   // Constructor
   WatcherThread();
 
@@ -167,9 +140,9 @@ class WatcherThread: public NonJavaThread {
   // Create and start the single instance of WatcherThread, or stop it on shutdown
   static void start();
   static void stop();
-  // Only allow start once the VM is sufficiently initialized
-  // Otherwise the first task to enroll will trigger the start
-  static void make_startable();
+  // Allow executing registered tasks once the VM is sufficiently
+  // initialized. Meanwhile only error reporting will be checked.
+  static void run_all_tasks();
  private:
   int sleep() const;
 };

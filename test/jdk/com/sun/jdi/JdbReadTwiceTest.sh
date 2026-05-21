@@ -1,7 +1,7 @@
 #!/bin/sh
 
 #
-# Copyright (c) 2007, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2007, 2022, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 # 
 # This code is free software; you can redistribute it and/or modify it
@@ -68,6 +68,12 @@ jdbFiles="$HOME/jdb.ini $HOME/.jdbrc $here/jdb.ini $here/.jdbrc $tmpResult $fred
 cd $here
 failed=
 
+target_os=$($TESTJAVA/bin/java -XshowSettings:all 2>&1 | grep 'os.name' | grep -i 'windows')
+if [ -n "$target_os" ]; then
+    IS_WINDOWS=true
+else
+    IS_WINDOWS=false
+fi
 
 mkFiles()
 {
@@ -76,7 +82,7 @@ mkFiles()
 
 doit()
 {
-    echo quit | $TESTJAVA/bin/jdb -J-Duser.home=$HOME > $tmpResult 2>&1
+    echo quit | $TESTJAVA/bin/jdb -J-Duser.language=en -J-Duser.country=US -J-Duser.home=$HOME > $tmpResult 2>&1
 }
 
 failIfNot()
@@ -84,7 +90,7 @@ failIfNot()
     # $1 is the expected number of occurances of $2 in the jdb output.
     count=$1
     shift
-    if [ -r c:/ ] ; then
+    if [ "${IS_WINDOWS}" = "true" ] ; then
        sed -e 's@\\@/@g' $tmpResult > $tmpResult.1
        mv $tmpResult.1 $tmpResult
     fi
@@ -177,7 +183,7 @@ mkFiles $HOME/.jdbrc $here/jdb.ini
     clean
 
 
-if [ ! -r c:/ ] ; then
+if [ "${IS_WINDOWS}" != "true" ] ; then
     # No symlinks on windows.
     echo
     echo "+++++++++++++++++++++++++++++++++++"
@@ -191,7 +197,7 @@ if [ ! -r c:/ ] ; then
 fi
 
 
-if [ ! -r c:/ ] ; then
+if [ "${IS_WINDOWS}" != "true" ] ; then
     # No symlinks on windows.
     echo
     echo "+++++++++++++++++++++++++++++++++++"

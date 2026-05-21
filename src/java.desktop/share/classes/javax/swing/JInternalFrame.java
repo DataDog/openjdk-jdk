@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -54,7 +54,6 @@ import javax.swing.event.InternalFrameListener;
 import javax.swing.plaf.DesktopIconUI;
 import javax.swing.plaf.InternalFrameUI;
 
-import sun.awt.AppContext;
 import sun.swing.SwingUtilities2;
 
 /**
@@ -237,17 +236,13 @@ public class JInternalFrame extends JComponent implements
     /** Constrained property name indicating that the internal frame is iconified. */
     public static final String IS_ICON_PROPERTY = "icon";
 
-    private static final Object PROPERTY_CHANGE_LISTENER_KEY =
-        new StringBuilder("InternalFramePropertyChangeListener");
+    private static PropertyChangeListener focusListener;
 
     private static void addPropertyChangeListenerIfNecessary() {
-        if (AppContext.getAppContext().get(PROPERTY_CHANGE_LISTENER_KEY) ==
-            null) {
-            PropertyChangeListener focusListener =
-                new FocusPropertyChangeListener();
-
-            AppContext.getAppContext().put(PROPERTY_CHANGE_LISTENER_KEY,
-                focusListener);
+        synchronized (JInternalFrame.class) {
+            if (focusListener == null) {
+                focusListener = new FocusPropertyChangeListener();
+            }
 
             KeyboardFocusManager.getCurrentKeyboardFocusManager().
                 addPropertyChangeListener(focusListener);
@@ -497,10 +492,10 @@ public class JInternalFrame extends JComponent implements
      * @param comp the component to be enhanced
      * @param constraints the constraints to be respected
      * @param index the index
-     * @exception IllegalArgumentException if <code>index</code> is invalid
-     * @exception IllegalArgumentException if adding the container's parent
+     * @throws IllegalArgumentException if <code>index</code> is invalid
+     * @throws IllegalArgumentException if adding the container's parent
      *                  to itself
-     * @exception IllegalArgumentException if adding a window to a container
+     * @throws IllegalArgumentException if adding a window to a container
      *
      * @see #setRootPaneCheckingEnabled
      * @see javax.swing.RootPaneContainer
@@ -628,7 +623,7 @@ public class JInternalFrame extends JComponent implements
      *
      * @param c  the content pane for this internal frame
      *
-     * @exception java.awt.IllegalComponentStateException (a runtime
+     * @throws java.awt.IllegalComponentStateException (a runtime
      *           exception) if the content pane parameter is <code>null</code>
      * @see RootPaneContainer#getContentPane
      */
@@ -657,7 +652,7 @@ public class JInternalFrame extends JComponent implements
      *
      * @param layered the <code>JLayeredPane</code> for this internal frame
      *
-     * @exception java.awt.IllegalComponentStateException (a runtime
+     * @throws java.awt.IllegalComponentStateException (a runtime
      *           exception) if the layered pane parameter is <code>null</code>
      * @see RootPaneContainer#setLayeredPane
      */
@@ -794,7 +789,7 @@ public class JInternalFrame extends JComponent implements
      *
      * @param b must be <code>true</code>
      *
-     * @exception PropertyVetoException when the attempt to set the
+     * @throws PropertyVetoException when the attempt to set the
      *            property is vetoed by the <code>JInternalFrame</code>
      *
      * @see #isClosed()
@@ -906,7 +901,7 @@ public class JInternalFrame extends JComponent implements
      *
      * @param b a boolean, where <code>true</code> means to iconify this internal frame and
      *          <code>false</code> means to de-iconify it
-     * @exception PropertyVetoException when the attempt to set the
+     * @throws PropertyVetoException when the attempt to set the
      *            property is vetoed by the <code>JInternalFrame</code>
      *
      * @see InternalFrameEvent#INTERNAL_FRAME_ICONIFIED
@@ -985,13 +980,16 @@ public class JInternalFrame extends JComponent implements
      *
      * @param b  a boolean, where <code>true</code> maximizes this internal frame and <code>false</code>
      *           restores it
-     * @exception PropertyVetoException when the attempt to set the
+     * @throws PropertyVetoException when the attempt to set the
      *            property is vetoed by the <code>JInternalFrame</code>
      */
     @BeanProperty(description
             = "Indicates whether this internal frame is maximized.")
     public void setMaximum(boolean b) throws PropertyVetoException {
         if (isMaximum == b) {
+            if (!b) {
+                normalBounds = null;
+            }
             return;
         }
 
@@ -1003,6 +1001,9 @@ public class JInternalFrame extends JComponent implements
            get it wrong... See, for example, getNormalBounds() */
         isMaximum = b;
         firePropertyChange(IS_MAXIMUM_PROPERTY, oldValue, newValue);
+        if (!b) {
+            normalBounds = null;
+        }
     }
 
     /**
@@ -1047,7 +1048,7 @@ public class JInternalFrame extends JComponent implements
      * @param selected  a boolean, where <code>true</code> means this internal frame
      *                  should become selected (currently active)
      *                  and <code>false</code> means it should become deselected
-     * @exception PropertyVetoException when the attempt to set the
+     * @throws PropertyVetoException when the attempt to set the
      *            property is vetoed by the <code>JInternalFrame</code>
      *
      * @see #isShowing
@@ -1080,7 +1081,7 @@ public class JInternalFrame extends JComponent implements
            doesn't get set in some other way (as if a user clicked on
            a component that doesn't request focus).  If this call is
            happening because the user clicked on a component that will
-           want focus, then it will get transfered there later.
+           want focus, then it will get transferred there later.
 
            We test for parent.isShowing() above, because AWT throws a
            NPE if you try to request focus on a lightweight before its
@@ -1096,12 +1097,8 @@ public class JInternalFrame extends JComponent implements
           fireInternalFrameEvent(InternalFrameEvent.INTERNAL_FRAME_ACTIVATED);
         else {
           fireInternalFrameEvent(InternalFrameEvent.INTERNAL_FRAME_DEACTIVATED);
-          try {
-              java.awt.Toolkit.getDefaultToolkit().getSystemEventQueue().postEvent(
+          java.awt.Toolkit.getDefaultToolkit().getSystemEventQueue().postEvent(
                                                new sun.awt.UngrabEvent(this));
-          } catch (SecurityException e) {
-              this.dispatchEvent(new sun.awt.UngrabEvent(this));
-          }
         }
         repaint();
     }
@@ -1233,10 +1230,9 @@ public class JInternalFrame extends JComponent implements
     @BeanProperty(bound = false, expert = true, description
             = "Specifies what desktop layer is used.")
     public void setLayer(Integer layer) {
-        if(getParent() != null && getParent() instanceof JLayeredPane) {
+        if (getParent() instanceof JLayeredPane p) {
             // Normally we want to do this, as it causes the LayeredPane
             // to draw properly.
-            JLayeredPane p = (JLayeredPane)getParent();
             p.setLayer(this, layer.intValue(), p.getPosition(this));
         } else {
              // Try to do the right thing
@@ -1786,12 +1782,8 @@ public class JInternalFrame extends JComponent implements
           isClosed = true;
         }
         fireInternalFrameEvent(InternalFrameEvent.INTERNAL_FRAME_CLOSED);
-        try {
-            java.awt.Toolkit.getDefaultToolkit().getSystemEventQueue().postEvent(
-                    new sun.awt.UngrabEvent(this));
-        } catch (SecurityException e) {
-            this.dispatchEvent(new sun.awt.UngrabEvent(this));
-        }
+        java.awt.Toolkit.getDefaultToolkit().getSystemEventQueue().postEvent(
+                new sun.awt.UngrabEvent(this));
     }
 
     /**
@@ -1863,12 +1855,14 @@ public class JInternalFrame extends JComponent implements
 
     /**
      * Gets the warning string that is displayed with this internal frame.
-     * Since an internal frame is always secure (since it's fully
-     * contained within a window that might need a warning string)
-     * this method always returns <code>null</code>.
+     * This method always returns <code>null</code>.
+     * Warning strings are no longer applicable, even to top-level
+     * windows, so this method may be removed in a future release
      * @return    <code>null</code>
      * @see       java.awt.Window#getWarningString
+     * @deprecated since JDK 24
      */
+    @Deprecated(since="24", forRemoval=true)
     @BeanProperty(bound = false)
     public final String getWarningString() {
         return null;

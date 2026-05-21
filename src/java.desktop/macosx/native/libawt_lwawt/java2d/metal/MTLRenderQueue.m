@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -48,6 +48,19 @@ jint mtlPreviousOp = MTL_OP_INIT;
 
 extern void MTLGC_DestroyMTLGraphicsConfig(jlong pConfigInfo);
 
+/**
+ * Triggers the display link for the current destination surface.
+ */
+static void MTLSD_Flush() {
+    if (dstOps != NULL) {
+        MTLSDOps *dstMTLOps = (MTLSDOps *)dstOps->privOps;
+        MTLLayer *layer = (MTLLayer*)dstMTLOps->layer;
+        if (layer != NULL) {
+            [layer startDisplayLink];
+        }
+    }
+}
+
 void MTLRenderQueue_CheckPreviousOp(jint op) {
 
     if (mtlPreviousOp == op) {
@@ -65,8 +78,8 @@ void MTLRenderQueue_CheckPreviousOp(jint op) {
         return;
     }
 
-    J2dTraceLn1(J2D_TRACE_VERBOSE,
-                "MTLRenderQueue_CheckPreviousOp: new op=%d", op);
+    J2dTraceLn(J2D_TRACE_VERBOSE,
+               "MTLRenderQueue_CheckPreviousOp: new op=%d", op);
 
     switch (mtlPreviousOp) {
         case MTL_OP_INIT :
@@ -80,7 +93,9 @@ void MTLRenderQueue_CheckPreviousOp(jint op) {
     if (mtlc != NULL) {
         [mtlc.encoderManager endEncoder];
 
-        if (op == MTL_OP_RESET_PAINT || op == MTL_OP_SYNC || op == MTL_OP_SHAPE_CLIP_SPANS) {
+        if (op == MTL_OP_RESET_PAINT || op == MTL_OP_SYNC || op == MTL_OP_SHAPE_CLIP_SPANS ||
+            mtlPreviousOp == MTL_OP_MASK_OP)
+        {
             MTLCommandBufferWrapper *cbwrapper = [mtlc pullCommandBufferWrapper];
             id <MTLCommandBuffer> commandbuf = [cbwrapper getCommandBuffer];
             [commandbuf addCompletedHandler:^(id <MTLCommandBuffer> commandbuf) {
@@ -102,8 +117,8 @@ Java_sun_java2d_metal_MTLRenderQueue_flushBuffer
 {
     unsigned char *b, *end;
 
-    J2dTraceLn1(J2D_TRACE_INFO,
-                "MTLRenderQueue_flushBuffer: limit=%d", limit);
+    J2dTraceLn(J2D_TRACE_INFO,
+               "MTLRenderQueue_flushBuffer: limit=%d", limit);
 
     b = (unsigned char *)jlong_to_ptr(buf);
     if (b == NULL) {
@@ -117,9 +132,9 @@ Java_sun_java2d_metal_MTLRenderQueue_flushBuffer
         while (b < end) {
             jint opcode = NEXT_INT(b);
 
-            J2dTraceLn2(J2D_TRACE_VERBOSE,
-                    "MTLRenderQueue_flushBuffer: opcode=%d, rem=%d",
-                    opcode, (end-b));
+            J2dTraceLn(J2D_TRACE_VERBOSE,
+                       "MTLRenderQueue_flushBuffer: opcode=%d, rem=%d",
+                       opcode, (end-b));
 
             switch (opcode) {
 
@@ -587,6 +602,7 @@ Java_sun_java2d_metal_MTLRenderQueue_flushBuffer
                             [cbwrapper release];
                         }];
                         [commandbuf commit];
+                        MTLSD_Flush();
                     }
                     mtlc = [MTLContext setSurfacesEnv:env src:pSrc dst:pDst];
                     dstOps = (BMTLSDOps *)jlong_to_ptr(pDst);
@@ -614,6 +630,7 @@ Java_sun_java2d_metal_MTLRenderQueue_flushBuffer
                                     [cbwrapper release];
                                 }];
                                 [commandbuf commit];
+                                MTLSD_Flush();
                             }
                             mtlc = newMtlc;
                             dstOps = NULL;
@@ -866,8 +883,9 @@ Java_sun_java2d_metal_MTLRenderQueue_flushBuffer
                 }
 
                 default:
-                    J2dRlsTraceLn1(J2D_TRACE_ERROR,
-                        "MTLRenderQueue_flushBuffer: invalid opcode=%d", opcode);
+                    J2dRlsTraceLn(J2D_TRACE_ERROR,
+                                  "MTLRenderQueue_flushBuffer: invalid opcode=%d",
+                                  opcode);
                     return;
             }
         }
@@ -883,14 +901,7 @@ Java_sun_java2d_metal_MTLRenderQueue_flushBuffer
                 [cbwrapper release];
             }];
             [commandbuf commit];
-            BMTLSDOps *dstOps = MTLRenderQueue_GetCurrentDestination();
-            if (dstOps != NULL) {
-                MTLSDOps *dstMTLOps = (MTLSDOps *)dstOps->privOps;
-                MTLLayer *layer = (MTLLayer*)dstMTLOps->layer;
-                if (layer != NULL) {
-                    [layer startDisplayLink];
-                }
-            }
+            MTLSD_Flush();
         }
         RESET_PREVIOUS_OP();
     }
@@ -917,7 +928,7 @@ MTLRenderQueue_GetCurrentDestination()
 }
 
 /**
- * commit earlier encoded commmands
+ * commit earlier encoded commands
  * these would be rendered to the back-buffer - which is read in shader while rendering in XOR mode
  */
 void commitEncodedCommands() {

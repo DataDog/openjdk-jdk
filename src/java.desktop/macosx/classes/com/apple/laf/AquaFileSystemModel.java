@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -41,14 +41,14 @@ import javax.swing.table.AbstractTableModel;
  * Some of it came from BasicDirectoryModel
  */
 @SuppressWarnings("serial") // Superclass is not serializable across versions
-class AquaFileSystemModel extends AbstractTableModel implements PropertyChangeListener {
+final class AquaFileSystemModel extends AbstractTableModel implements PropertyChangeListener {
     private final JTable fFileList;
     private FilesLoader filesLoader = null;
     private Vector<File> files = null;
 
     JFileChooser filechooser = null;
-    Vector<SortableFile> fileCache = null;
-    Object fileCacheLock;
+    ArrayList<SortableFile> fileCache = null;
+    final Object fileCacheLock;
 
     Vector<File> directories = null;
     int fetchID = 0;
@@ -75,6 +75,7 @@ class AquaFileSystemModel extends AbstractTableModel implements PropertyChangeLi
         fFileList.setSelectionMode(b ? ListSelectionModel.MULTIPLE_INTERVAL_SELECTION : ListSelectionModel.SINGLE_SELECTION);
     }
 
+    @Override
     public void propertyChange(final PropertyChangeEvent e) {
         final String prop = e.getPropertyName();
         if (prop == JFileChooser.DIRECTORY_CHANGED_PROPERTY || prop == JFileChooser.FILE_VIEW_CHANGED_PROPERTY || prop == JFileChooser.FILE_FILTER_CHANGED_PROPERTY || prop == JFileChooser.FILE_HIDING_CHANGED_PROPERTY) {
@@ -136,7 +137,7 @@ class AquaFileSystemModel extends AbstractTableModel implements PropertyChangeLi
 
         synchronized(fileCacheLock) {
             for (int i = 0; i < fileCache.size(); i++) {
-                final SortableFile sf = fileCache.elementAt(i);
+                final SortableFile sf = fileCache.get(i);
                 final File f = sf.fFile;
                 if (filechooser.isTraversable(f)) {
                     directories.addElement(f);
@@ -180,25 +181,29 @@ class AquaFileSystemModel extends AbstractTableModel implements PropertyChangeLi
         // PENDING(jeff) pick the size more sensibly
         invalidateFileCache();
         synchronized(fileCacheLock) {
-            fileCache = new Vector<SortableFile>(50);
+            fileCache = new ArrayList<>(50);
         }
 
         filesLoader = new FilesLoader(currentDirectory, fetchID);
     }
 
+    @Override
     public int getColumnCount() {
         return 2;
     }
 
+    @Override
     public String getColumnName(final int col) {
         return fColumnNames[col];
     }
 
+    @Override
     public Class<? extends Object> getColumnClass(final int col) {
         if (col == 0) return File.class;
         return Date.class;
     }
 
+    @Override
     public int getRowCount() {
         synchronized(fileCacheLock) {
             if (fileCache != null) {
@@ -238,13 +243,14 @@ class AquaFileSystemModel extends AbstractTableModel implements PropertyChangeLi
 
     // AbstractTableModel interface
 
+    @Override
     public Object getValueAt(int row, final int col) {
         if (row < 0 || col < 0) return null;
         final boolean isAscending = fSortNames ? fSortAscending[0] : fSortAscending[1];
         synchronized(fileCacheLock) {
             if (fileCache != null) {
                 if (!isAscending) row = fileCache.size() - row - 1;
-                return fileCache.elementAt(row).getValueAt(col);
+                return fileCache.get(row).getValueAt(col);
             }
             return null;
         }
@@ -278,7 +284,7 @@ class AquaFileSystemModel extends AbstractTableModel implements PropertyChangeLi
     // @param a an integer array
     // @param lo0 left boundary of array partition
     // @param hi0 right boundary of array partition
-    abstract class QuickSort {
+    abstract static class QuickSort {
         final void quickSort(final Vector<Object> v, final int lo0, final int hi0) {
             int lo = lo0;
             int hi = hi0;
@@ -338,7 +344,8 @@ class AquaFileSystemModel extends AbstractTableModel implements PropertyChangeLi
         protected abstract boolean lt(SortableFile a, SortableFile b);
     }
 
-    class QuickSortNames extends QuickSort {
+    static final class QuickSortNames extends QuickSort {
+        @Override
         protected boolean lt(final SortableFile a, final SortableFile b) {
             final String aLower = a.fName.toLowerCase();
             final String bLower = b.fName.toLowerCase();
@@ -346,14 +353,15 @@ class AquaFileSystemModel extends AbstractTableModel implements PropertyChangeLi
         }
     }
 
-    class QuickSortDates extends QuickSort {
+    static final class QuickSortDates extends QuickSort {
+        @Override
         protected boolean lt(final SortableFile a, final SortableFile b) {
             return a.fDateValue < b.fDateValue;
         }
     }
 
     // for speed in sorting, displaying
-    class SortableFile /* extends FileView */{
+    static final class SortableFile /* extends FileView */{
         File fFile;
         String fName;
         long fDateValue;
@@ -371,6 +379,7 @@ class AquaFileSystemModel extends AbstractTableModel implements PropertyChangeLi
             return fDate;
         }
 
+        @Override
         public boolean equals(final Object other) {
             final SortableFile otherFile = (SortableFile)other;
             return otherFile.fFile.equals(fFile);
@@ -382,8 +391,8 @@ class AquaFileSystemModel extends AbstractTableModel implements PropertyChangeLi
         }
     }
 
-    class FilesLoader implements Runnable {
-        Vector<Runnable> queuedTasks = new Vector<>();
+    final class FilesLoader implements Runnable {
+        ArrayList<Runnable> queuedTasks = new ArrayList<>();
         File currentDirectory = null;
         int fid;
         Thread loadThread;
@@ -449,7 +458,7 @@ class AquaFileSystemModel extends AbstractTableModel implements PropertyChangeLi
         }
     }
 
-    class DoChangeContents implements Runnable {
+    final class DoChangeContents implements Runnable {
         private Vector<SortableFile> contentFiles;
         private boolean doFire = true;
         private final Object lock = new Object();
@@ -466,6 +475,7 @@ class AquaFileSystemModel extends AbstractTableModel implements PropertyChangeLi
             }
         }
 
+        @Override
         public void run() {
             if (fetchID == fid) {
                 synchronized(lock) {
@@ -473,7 +483,7 @@ class AquaFileSystemModel extends AbstractTableModel implements PropertyChangeLi
                         synchronized(fileCacheLock) {
                             if (fileCache != null) {
                                 for (int i = 0; i < contentFiles.size(); i++) {
-                                    fileCache.addElement(contentFiles.elementAt(i));
+                                    fileCache.add(contentFiles.elementAt(i));
                                     fireTableRowsInserted(i, i);
                                 }
                             }

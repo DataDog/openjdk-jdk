@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@
  * @bug 8137317 8139238 8210408
  * @summary Visibility tests for ResourceBundle.getBundle with and without
  *          an unnamed module argument.
+ * @requires vm.flagless
  * @library /test/lib
  *          ..
  * @build jdk.test.lib.JDKToolLauncher
@@ -33,23 +34,25 @@
  *        jdk.test.lib.compiler.CompilerUtils
  *        jdk.test.lib.process.ProcessTools
  *        ModuleTestUtil
- * @run testng VisibilityTest
+ * @run junit VisibilityTest
  */
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.stream.Stream;
 
 import jdk.test.lib.JDKToolLauncher;
 import jdk.test.lib.Utils;
 import jdk.test.lib.process.ProcessTools;
-import org.testng.annotations.BeforeTest;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 
-import static org.testng.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
-@Test
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class VisibilityTest {
     private static final Path SRC_DIR = Paths.get(Utils.TEST_SRC, "src");
     private static final Path MODS_DIR = Paths.get(Utils.TEST_CLASSES, "mods");
@@ -60,7 +63,7 @@ public class VisibilityTest {
     private static final List<String> MODULE_LIST = List.of("embargo",
             "exported.named.bundles", "named.bundles", "test");
 
-    @BeforeTest
+    @BeforeAll
     public void prepareTestEnv() throws Throwable {
         MODULE_LIST.forEach(mn -> ModuleTestUtil.prepareModule(SRC_DIR,
                 MODS_DIR, mn, ".properties"));
@@ -90,7 +93,6 @@ public class VisibilityTest {
      * "exported.named.bundle" are exported to unnamed modules.
      */
 
-    @DataProvider(name = "RunWithTestResData")
     Object[][] RunWithTestResData() {
         return new Object[][] {
                 // Tests using jdk.test.TestWithNoModuleArg and jdk.embargo.TestWithNoModuleArg.
@@ -185,7 +187,6 @@ public class VisibilityTest {
         };
     }
 
-    @DataProvider(name = "RunWithExportedResData")
     Object[][] RunWithExportedResData() {
         return new Object[][] {
                 // Tests using jdk.test.TestWithNoModuleArg and jdk.embargo.TestWithNoModuleArg
@@ -282,7 +283,6 @@ public class VisibilityTest {
         };
     }
 
-    @DataProvider(name = "RunWithPkgResData")
     Object[][] RunWithPkgResData() {
         return new Object[][] {
                 // jdk.pkg.resources.* are in an unnamed module.
@@ -297,10 +297,11 @@ public class VisibilityTest {
     /**
      * Test cases with jdk.test.resources.*
      */
-    @Test(dataProvider = "RunWithTestResData")
+    @ParameterizedTest
+    @MethodSource("RunWithTestResData")
     public void RunWithTestRes(List<String> argsList) throws Throwable {
         int exitCode = runCmd(argsList);
-        assertEquals(exitCode, 0, "Execution of the tests with "
+        assertEquals(0, exitCode, "Execution of the tests with "
                 + "jdk.test.resources.* failed. "
                 + "Unexpected exit code: " + exitCode);
     }
@@ -308,10 +309,11 @@ public class VisibilityTest {
     /**
      * Test cases with jdk.test.resources.exported.*
      */
-    @Test(dataProvider = "RunWithExportedResData")
+    @ParameterizedTest
+    @MethodSource("RunWithExportedResData")
     public void RunWithExportedRes(List<String> argsList) throws Throwable {
         int exitCode = runCmd(argsList);
-        assertEquals(exitCode, 0, "Execution of the tests with "
+        assertEquals(0, exitCode, "Execution of the tests with "
                 + "jdk.test.resources.exported.* failed. "
                 + "Unexpected exit code: " + exitCode);
     }
@@ -319,20 +321,20 @@ public class VisibilityTest {
     /**
      * Test cases with jdk.pkg.resources.*
      */
-    @Test(dataProvider = "RunWithPkgResData")
+    @ParameterizedTest
+    @MethodSource("RunWithPkgResData")
     public void RunWithPkgRes(List<String> argsList) throws Throwable {
         int exitCode = runCmd(argsList);
-        assertEquals(exitCode, 0, "Execution of the tests with "
+        assertEquals(0, exitCode, "Execution of the tests with "
                 + "jdk.pkg.resources.* failed. "
                 + "Unexpected exit code: " + exitCode);
     }
 
     private int runCmd(List<String> argsList) throws Throwable {
-        JDKToolLauncher launcher = JDKToolLauncher.createUsingTestJDK("java");
-        launcher.addToolArg("-ea")
-                .addToolArg("-esa");
-        argsList.forEach(launcher::addToolArg);
-
-        return ProcessTools.executeCommand(launcher.getCommand()).getExitValue();
+        // Build process (without VM flags)
+        ProcessBuilder pb = ProcessTools.createLimitedTestJavaProcessBuilder(
+                Stream.concat(Stream.of("-ea", "-esa"), argsList.stream()).toList());
+        // Evaluate process status
+        return ProcessTools.executeCommand(pb).getExitValue();
     }
 }

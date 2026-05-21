@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,20 +24,23 @@
  */
 package sun.security.ssl;
 
-import javax.crypto.spec.DHParameterSpec;
-import javax.net.ssl.SSLException;
 import java.io.IOException;
 import java.security.*;
-import java.security.spec.*;
+import java.security.spec.AlgorithmParameterSpec;
+import java.security.spec.ECParameterSpec;
+import java.security.spec.InvalidParameterSpecException;
+import java.security.spec.NamedParameterSpec;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Objects;
 import java.util.Set;
 import javax.crypto.KeyAgreement;
-import sun.security.ssl.DHKeyExchange.DHEPossession;
+import javax.crypto.spec.DHParameterSpec;
 import sun.security.ssl.ECDHKeyExchange.ECDHEPossession;
 import sun.security.util.CurveDB;
-
 
 /**
  * An enum containing all known named groups for use in TLS.
@@ -213,6 +216,39 @@ enum NamedGroup {
             ProtocolVersion.PROTOCOLS_TO_13,
             PredefinedDHParameterSpecs.ffdheParams.get(8192)),
 
+    ML_KEM_512(0x0200, "MLKEM512",
+            NamedGroupSpec.NAMED_GROUP_KEM,
+            ProtocolVersion.PROTOCOLS_OF_13,
+            null),
+
+    ML_KEM_768(0x0201, "MLKEM768",
+            NamedGroupSpec.NAMED_GROUP_KEM,
+            ProtocolVersion.PROTOCOLS_OF_13,
+            null),
+
+    ML_KEM_1024(0x0202, "MLKEM1024",
+            NamedGroupSpec.NAMED_GROUP_KEM,
+            ProtocolVersion.PROTOCOLS_OF_13,
+            null),
+
+    X25519MLKEM768(0x11ec, "X25519MLKEM768",
+            NamedGroupSpec.NAMED_GROUP_KEM,
+            ProtocolVersion.PROTOCOLS_OF_13,
+            Hybrid.X25519_MLKEM768,
+            HybridProvider.PROVIDER),
+
+    SECP256R1MLKEM768(0x11eb, "SecP256r1MLKEM768",
+            NamedGroupSpec.NAMED_GROUP_KEM,
+            ProtocolVersion.PROTOCOLS_OF_13,
+            Hybrid.SECP256R1_MLKEM768,
+            HybridProvider.PROVIDER),
+
+    SECP384R1MLKEM1024(0x11ed, "SecP384r1MLKEM1024",
+            NamedGroupSpec.NAMED_GROUP_KEM,
+            ProtocolVersion.PROTOCOLS_OF_13,
+            Hybrid.SECP384R1_MLKEM1024,
+            HybridProvider.PROVIDER),
+
     // Elliptic Curves (RFC 4492)
     //
     // arbitrary prime and characteristic-2 curves
@@ -233,22 +269,33 @@ enum NamedGroup {
     final AlgorithmParameterSpec keAlgParamSpec;
     final AlgorithmParameters keAlgParams;
     final boolean isAvailable;
+    final Provider defaultProvider;
 
     // performance optimization
     private static final Set<CryptoPrimitive> KEY_AGREEMENT_PRIMITIVE_SET =
         Collections.unmodifiableSet(EnumSet.of(CryptoPrimitive.KEY_AGREEMENT));
 
-    // Constructor used for all NamedGroup types
-    private NamedGroup(int id, String name,
+    NamedGroup(int id, String name,
             NamedGroupSpec namedGroupSpec,
             ProtocolVersion[] supportedProtocols,
             AlgorithmParameterSpec keAlgParamSpec) {
+        this(id, name, namedGroupSpec, supportedProtocols, keAlgParamSpec,
+                null);
+    }
+
+    // Constructor used for all NamedGroup types
+    NamedGroup(int id, String name,
+            NamedGroupSpec namedGroupSpec,
+            ProtocolVersion[] supportedProtocols,
+            AlgorithmParameterSpec keAlgParamSpec,
+            Provider defaultProvider) {
         this.id = id;
         this.name = name;
         this.spec = namedGroupSpec;
         this.algorithm = namedGroupSpec.algorithm;
         this.supportedProtocols = supportedProtocols;
         this.keAlgParamSpec = keAlgParamSpec;
+        this.defaultProvider = defaultProvider;
 
         // Check if it is a supported named group.
         AlgorithmParameters algParams = null;
@@ -265,16 +312,29 @@ enum NamedGroup {
         // Check the specific algorithm parameters.
         if (mediator) {
             try {
-                algParams =
-                    AlgorithmParameters.getInstance(namedGroupSpec.algorithm);
-                algParams.init(keAlgParamSpec);
+                // Skip AlgorithmParameters for KEMs (not supported)
+                // Check KEM's availability via KeyFactory
+                if (namedGroupSpec == NamedGroupSpec.NAMED_GROUP_KEM) {
+                    if (defaultProvider == null) {
+                        KeyFactory.getInstance(name);
+                    } else {
+                        KeyFactory.getInstance(name, defaultProvider);
+                    }
+                } else {
+                    // ECDHE or others: use AlgorithmParameters as before
+                    algParams = AlgorithmParameters.getInstance(
+                            namedGroupSpec.algorithm);
+                    algParams.init(keAlgParamSpec);
+                }
             } catch (InvalidParameterSpecException
                     | NoSuchAlgorithmException exp) {
                 if (namedGroupSpec != NamedGroupSpec.NAMED_GROUP_XDH) {
                     mediator = false;
-                    if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                    if (SSLLogger.isOn() &&
+                            SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                         SSLLogger.warning(
-                            "No AlgorithmParameters for " + name, exp);
+                            "No AlgorithmParameters or KeyFactory for " + name,
+                                exp);
                     }
                 } else {
                     // Please remove the following code if the XDH/X25519/X448
@@ -293,7 +353,8 @@ enum NamedGroup {
                         // AlgorithmParameters.getInstance(name);
                     } catch (NoSuchAlgorithmException nsae) {
                         mediator = false;
-                        if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                        if (SSLLogger.isOn() &&
+                                SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                             SSLLogger.warning(
                                 "No AlgorithmParameters for " + name, nsae);
                         }
@@ -304,6 +365,10 @@ enum NamedGroup {
 
         this.isAvailable = mediator;
         this.keAlgParams = mediator ? algParams : null;
+    }
+
+    Provider getProvider() {
+        return defaultProvider;
     }
 
     //
@@ -368,6 +433,123 @@ enum NamedGroup {
         return "UNDEFINED-NAMED-GROUP(" + id + ")";
     }
 
+    public static List<NamedGroup> namesOf(String[] namedGroups) {
+        if (namedGroups == null) {
+            return null;
+        }
+
+        if (namedGroups.length == 0) {
+            return List.of();
+        }
+
+        List<NamedGroup> ngs = new ArrayList<>(namedGroups.length);
+        for (String ss : namedGroups) {
+            NamedGroup ng = NamedGroup.nameOf(ss);
+            if (ng == null || !ng.isAvailable) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE_VERBOSE)) {
+                    SSLLogger.finest(
+                            "Ignore the named group (" + ss
+                                    + "), unsupported or unavailable");
+                }
+
+                continue;
+            }
+
+            ngs.add(ng);
+        }
+
+        return Collections.unmodifiableList(ngs);
+    }
+
+    // Is there any supported group permitted by the constraints?
+    static boolean isActivatable(SSLConfiguration sslConfig,
+            AlgorithmConstraints constraints, NamedGroupSpec type) {
+
+        boolean hasFFDHEGroups = false;
+        for (NamedGroup namedGroup :
+                SupportedGroups.getGroupsFromConfig(sslConfig)) {
+            if (namedGroup.isAvailable && namedGroup.spec == type) {
+                if (namedGroup.isPermitted(constraints)) {
+                    return true;
+                }
+
+                if (!hasFFDHEGroups &&
+                        (type == NamedGroupSpec.NAMED_GROUP_FFDHE)) {
+                    hasFFDHEGroups = true;
+                }
+            }
+        }
+
+        // For compatibility, if no FFDHE groups are defined, the non-FFDHE
+        // compatible mode (using DHE cipher suite without FFDHE extension)
+        // is allowed.
+        //
+        // Note that the constraints checking on DHE parameters will be
+        // performed during key exchanging in a handshake.
+        return !hasFFDHEGroups && type == NamedGroupSpec.NAMED_GROUP_FFDHE;
+    }
+
+    // Is the named group permitted by the constraints?
+    static boolean isActivatable(
+            SSLConfiguration sslConfig,
+            AlgorithmConstraints constraints, NamedGroup namedGroup) {
+        if (!namedGroup.isAvailable || !isEnabled(sslConfig, namedGroup)) {
+            return false;
+        }
+
+        return namedGroup.isPermitted(constraints);
+    }
+
+    // Is the named group supported?
+    static boolean isEnabled(SSLConfiguration sslConfig,
+                             NamedGroup namedGroup) {
+        for (NamedGroup ng : SupportedGroups.getGroupsFromConfig(sslConfig)) {
+            if (namedGroup.equals(ng)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Get preferred named group from the configured named groups for the
+    // negotiated protocol and named group types.
+    static NamedGroup getPreferredGroup(
+            SSLConfiguration sslConfig,
+            ProtocolVersion negotiatedProtocol,
+            AlgorithmConstraints constraints, NamedGroupSpec[] types) {
+        for (NamedGroup ng : SupportedGroups.getGroupsFromConfig(sslConfig)) {
+            if (ng.isAvailable && NamedGroupSpec.arrayContains(types, ng.spec)
+                    && ng.isAvailable(negotiatedProtocol)
+                    && ng.isPermitted(constraints)) {
+                return ng;
+            }
+        }
+
+        return null;
+    }
+
+    // Get preferred named group from the requested and configured named
+    // groups for the negotiated protocol and named group types.
+    static NamedGroup getPreferredGroup(
+            SSLConfiguration sslConfig,
+            ProtocolVersion negotiatedProtocol,
+            AlgorithmConstraints constraints, NamedGroupSpec[] types,
+            List<NamedGroup> requestedNamedGroups) {
+        for (NamedGroup namedGroup : requestedNamedGroups) {
+            if ((namedGroup.isAvailable &&
+                    NamedGroupSpec.arrayContains(types, namedGroup.spec)) &&
+                    namedGroup.isAvailable(negotiatedProtocol) &&
+                    isEnabled(sslConfig, namedGroup) &&
+                    namedGroup.isPermitted(constraints)) {
+                return namedGroup;
+            }
+        }
+
+        return null;
+    }
+
     // Is the NamedGroup available for the protocols desired?
     boolean isAvailable(List<ProtocolVersion> protocolVersions) {
         if (this.isAvailable) {
@@ -419,12 +601,13 @@ enum NamedGroup {
         return spec.encodePossessionPublicKey(namedGroupPossession);
     }
 
-    SSLCredentials decodeCredentials(byte[] encoded,
-            AlgorithmConstraints constraints,
-            ExceptionSupplier onConstraintFail)
-            throws IOException, GeneralSecurityException {
-        return spec.decodeCredentials(
-                this, encoded, constraints, onConstraintFail);
+    SSLCredentials decodeCredentials(
+            byte[] encoded) throws IOException, GeneralSecurityException {
+        return spec.decodeCredentials(this, encoded);
+    }
+
+    SSLPossession createPossession(boolean isClient, SecureRandom random) {
+        return spec.createPossession(this, isClient, random);
     }
 
     SSLPossession createPossession(SecureRandom random) {
@@ -436,35 +619,23 @@ enum NamedGroup {
         return spec.createKeyDerivation(hc);
     }
 
-    interface ExceptionSupplier {
-        void apply(String s) throws SSLException;
-    }
-
     // A list of operations related to named groups.
     private interface NamedGroupScheme {
-        default void checkConstraints(PublicKey publicKey,
-                AlgorithmConstraints constraints,
-                ExceptionSupplier onConstraintFail) throws SSLException {
-            if (!constraints.permits(
-                    EnumSet.of(CryptoPrimitive.KEY_AGREEMENT), publicKey)) {
-                onConstraintFail.apply("key share entry does not "
-                        + "comply with algorithm constraints");
-            }
-        }
-
         byte[] encodePossessionPublicKey(
                 NamedGroupPossession namedGroupPossession);
 
-        SSLCredentials decodeCredentials(
-                NamedGroup ng, byte[] encoded,
-                AlgorithmConstraints constraints,
-                ExceptionSupplier onConstraintFail
-            ) throws IOException, GeneralSecurityException;
+        SSLCredentials decodeCredentials(NamedGroup ng,
+                byte[] encoded) throws IOException, GeneralSecurityException;
 
         SSLPossession createPossession(NamedGroup ng, SecureRandom random);
 
         SSLKeyDerivation createKeyDerivation(
                 HandshakeContext hc) throws IOException;
+
+        default SSLPossession createPossession(NamedGroup ng, boolean isClient,
+                SecureRandom random) {
+            return createPossession(ng, random);
+        }
     }
 
     enum NamedGroupSpec implements NamedGroupScheme {
@@ -477,6 +648,10 @@ enum NamedGroup {
         // Finite Field Groups (XDH)
         NAMED_GROUP_XDH("XDH", XDHScheme.instance),
 
+        // Post-Quantum Cryptography (PQC) KEM groups
+        // Currently used for hybrid named groups
+        NAMED_GROUP_KEM("KEM", KEMScheme.instance),
+
         // arbitrary prime and curves (ECDHE)
         NAMED_GROUP_ARBITRARY("EC", null),
 
@@ -486,7 +661,7 @@ enum NamedGroup {
         private final String algorithm;     // key exchange name
         private final NamedGroupScheme scheme;  // named group operations
 
-        private NamedGroupSpec(String algorithm, NamedGroupScheme scheme) {
+        NamedGroupSpec(String algorithm, NamedGroupScheme scheme) {
             this.algorithm = algorithm;
             this.scheme = scheme;
         }
@@ -524,13 +699,19 @@ enum NamedGroup {
         }
 
         @Override
-        public SSLCredentials decodeCredentials(NamedGroup ng, byte[] encoded,
-                    AlgorithmConstraints constraints,
-                    ExceptionSupplier onConstraintFail
-                ) throws IOException, GeneralSecurityException {
+        public SSLCredentials decodeCredentials(NamedGroup ng,
+                byte[] encoded) throws IOException, GeneralSecurityException {
             if (scheme != null) {
-                return scheme.decodeCredentials(
-                        ng, encoded, constraints, onConstraintFail);
+                return scheme.decodeCredentials(ng, encoded);
+            }
+
+            return null;
+        }
+
+        public SSLPossession createPossession(
+                NamedGroup ng, boolean isClient, SecureRandom random) {
+            if (scheme != null) {
+                return scheme.createPossession(ng, isClient, random);
             }
 
             return null;
@@ -563,22 +744,13 @@ enum NamedGroup {
         @Override
         public byte[] encodePossessionPublicKey(
                 NamedGroupPossession namedGroupPossession) {
-            return ((DHEPossession)namedGroupPossession).encode();
+            return namedGroupPossession.encode();
         }
 
         @Override
-        public SSLCredentials decodeCredentials(NamedGroup ng, byte[] encoded,
-                AlgorithmConstraints constraints,
-                ExceptionSupplier onConstraintFail
-            ) throws IOException, GeneralSecurityException {
-
-            DHKeyExchange.DHECredentials result
-                    = DHKeyExchange.DHECredentials.valueOf(ng, encoded);
-
-            checkConstraints(result.getPublicKey(), constraints,
-                    onConstraintFail);
-
-            return result;
+        public SSLCredentials decodeCredentials(NamedGroup ng,
+                byte[] encoded) throws IOException, GeneralSecurityException {
+            return DHKeyExchange.DHECredentials.valueOf(ng, encoded);
         }
 
         @Override
@@ -605,18 +777,9 @@ enum NamedGroup {
         }
 
         @Override
-        public SSLCredentials decodeCredentials(NamedGroup ng, byte[] encoded,
-                AlgorithmConstraints constraints,
-                ExceptionSupplier onConstraintFail
-            ) throws IOException, GeneralSecurityException {
-
-            ECDHKeyExchange.ECDHECredentials result
-                    = ECDHKeyExchange.ECDHECredentials.valueOf(ng, encoded);
-
-            checkConstraints(result.getPublicKey(), constraints,
-                    onConstraintFail);
-
-            return result;
+        public SSLCredentials decodeCredentials(NamedGroup ng,
+                byte[] encoded) throws IOException, GeneralSecurityException {
+            return ECDHKeyExchange.ECDHECredentials.valueOf(ng, encoded);
         }
 
         @Override
@@ -641,18 +804,9 @@ enum NamedGroup {
         }
 
         @Override
-        public SSLCredentials decodeCredentials(NamedGroup ng, byte[] encoded,
-                AlgorithmConstraints constraints,
-                ExceptionSupplier onConstraintFail
-            ) throws IOException, GeneralSecurityException {
-
-            XDHKeyExchange.XDHECredentials result
-                    = XDHKeyExchange.XDHECredentials.valueOf(ng, encoded);
-
-            checkConstraints(result.getPublicKey(), constraints,
-                    onConstraintFail);
-
-            return result;
+        public SSLCredentials decodeCredentials(NamedGroup ng,
+                byte[] encoded) throws IOException, GeneralSecurityException {
+            return XDHKeyExchange.XDHECredentials.valueOf(ng, encoded);
         }
 
         @Override
@@ -665,6 +819,159 @@ enum NamedGroup {
         public SSLKeyDerivation createKeyDerivation(
                 HandshakeContext hc) throws IOException {
             return XDHKeyExchange.xdheKAGenerator.createKeyDerivation(hc);
+        }
+    }
+
+    private static class KEMScheme implements NamedGroupScheme {
+        private static final KEMScheme instance = new KEMScheme();
+
+        @Override
+        public byte[] encodePossessionPublicKey(NamedGroupPossession poss) {
+            return poss.encode();
+        }
+
+        @Override
+        public SSLCredentials decodeCredentials(NamedGroup ng,
+                byte[] encoded) throws IOException, GeneralSecurityException {
+            return KEMKeyExchange.KEMCredentials.valueOf(ng, encoded);
+        }
+
+        @Override
+        public SSLPossession createPossession(NamedGroup ng,
+                SecureRandom random) {
+            // Must call createPossession with isClient
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public SSLPossession createPossession(
+                NamedGroup ng, boolean isClient, SecureRandom random) {
+            return isClient
+                    ? new KEMKeyExchange.KEMReceiverPossession(ng, random)
+                    : new KEMKeyExchange.KEMSenderPossession(ng, random);
+        }
+
+        @Override
+        public SSLKeyDerivation createKeyDerivation(
+                HandshakeContext hc) throws IOException {
+            return KEMKeyExchange.kemKAGenerator.createKeyDerivation(hc);
+        }
+    }
+
+    // Inner class encapsulating supported named groups.
+    static final class SupportedGroups {
+
+        // Default named groups.
+        private static final NamedGroup[] defaultGroups = new NamedGroup[]{
+                // Hybrid key agreement
+                X25519MLKEM768,
+
+                // Primary XDH (RFC 7748) curves
+                X25519,
+
+                // Primary NIST Suite B curves
+                SECP256_R1,
+                SECP384_R1,
+                SECP521_R1,
+
+                // Secondary XDH curves
+                X448,
+
+                // FFDHE (RFC 7919)
+                FFDHE_2048,
+                FFDHE_3072,
+                FFDHE_4096,
+                FFDHE_6144,
+                FFDHE_8192
+        };
+
+        // Filter default groups names against default constraints.
+        // Those are the values being displayed to the user with
+        // "java -XshowSettings:security:tls" command.
+        private static final String[] defaultNames = Arrays.stream(
+                        defaultGroups)
+                .filter(ng -> ng.isAvailable)
+                .filter(ng -> ng.isPermitted(SSLAlgorithmConstraints.DEFAULT))
+                .map(ng -> ng.name)
+                .toArray(String[]::new);
+
+        private static final NamedGroup[] customizedGroups =
+                getCustomizedNamedGroups();
+
+        // Note: user-passed groups are not being filtered against default
+        // algorithm constraints here. They will be displayed as-is.
+        private static final String[] customizedNames =
+                customizedGroups == null ?
+                        null : Arrays.stream(customizedGroups)
+                        .map(ng -> ng.name)
+                        .toArray(String[]::new);
+
+        // Named group names for SSLConfiguration.
+        static final String[] namedGroups;
+
+        static {
+            if (customizedNames != null) {
+                namedGroups = customizedNames;
+            } else {
+                if (defaultNames.length == 0) {
+                    SSLLogger.logWarning(SSLLogger.Opt.SSL,
+                            "No default named groups");
+                }
+                namedGroups = defaultNames;
+            }
+        }
+
+        // Avoid the group lookup for default and customized groups.
+        static NamedGroup[] getGroupsFromConfig(SSLConfiguration sslConfig) {
+            if (sslConfig.namedGroups == defaultNames) {
+                return defaultGroups;
+            } else if (sslConfig.namedGroups == customizedNames) {
+                return customizedGroups;
+            } else {
+                return Arrays.stream(sslConfig.namedGroups)
+                        .map(NamedGroup::nameOf)
+                        .filter(Objects::nonNull)
+                        .toArray(NamedGroup[]::new);
+            }
+        }
+
+        // The value of the System Property defines a list of enabled named
+        // groups in preference order, separated with comma.  For example:
+        //
+        //      jdk.tls.namedGroups="secp521r1, secp256r1, ffdhe2048"
+        //
+        // If the System Property is not defined or the value is empty, the
+        // default groups and preferences will be used.
+        private static NamedGroup[] getCustomizedNamedGroups() {
+            String property = System.getProperty("jdk.tls.namedGroups");
+
+            if (property != null && !property.isEmpty()) {
+                // remove double quote marks from beginning/end of the property
+                if (property.length() > 1 && property.charAt(0) == '"' &&
+                        property.charAt(property.length() - 1) == '"') {
+                    property = property.substring(1, property.length() - 1);
+                }
+            }
+
+            if (property != null && !property.isEmpty()) {
+                NamedGroup[] ret = Arrays.stream(property.split(","))
+                        .map(String::trim)
+                        .map(NamedGroup::nameOf)
+                        .filter(Objects::nonNull)
+                        .filter(ng -> ng.isAvailable)
+                        .toArray(NamedGroup[]::new);
+
+                if (ret.length == 0) {
+                    throw new IllegalArgumentException(
+                            "System property jdk.tls.namedGroups(" +
+                                    property
+                                    + ") contains no supported named groups");
+                }
+
+                return ret;
+            }
+
+            return null;
         }
     }
 }

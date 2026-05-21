@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -55,7 +55,9 @@ public class T6439826 extends AbstractProcessor {
                                                   "-processorpath", testClasses);
             StringWriter out = new StringWriter();
             JavacTask task = tool.getTask(out, fm, dl, opts, null, files);
-            task.call();
+            if (task.call()) {
+                throw new AssertionError("test compilation was expected to fail");
+            }
             String s = out.toString();
             System.err.print(s);
             // Expect the following 2 diagnostics, and no output to log
@@ -84,10 +86,8 @@ public class T6439826 extends AbstractProcessor {
     private void writeBadFile() {
         Filer filer = processingEnv.getFiler();
         Messager messager = processingEnv.getMessager();
-        try {
-            Writer out = filer.createSourceFile("Foo").openWriter();
+        try (Writer out = filer.createSourceFile("Foo").openWriter()) {
             out.write("class Foo #"); // write a file that generates a scanner error
-            out.close();
         } catch (IOException e) {
             messager.printError(e.toString());
         }

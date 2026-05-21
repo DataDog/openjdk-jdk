@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -42,6 +42,7 @@ import javax.net.ssl.StandardConstants;
 import static sun.security.ssl.SSLExtension.CH_SERVER_NAME;
 import static sun.security.ssl.SSLExtension.EE_SERVER_NAME;
 import sun.security.ssl.SSLExtension.ExtensionConsumer;
+import static sun.security.ssl.SSLExtension.SH_PRE_SHARED_KEY;
 import static sun.security.ssl.SSLExtension.SH_SERVER_NAME;
 import sun.security.ssl.SSLExtension.SSLExtensionSpec;
 import sun.security.ssl.SSLHandshake.HandshakeMessage;
@@ -135,9 +136,8 @@ final class ServerNameExtension {
                             nameType + "), name=" +
                             (new String(encoded, StandardCharsets.UTF_8)) +
                             ", value={" +
-                            Utilities.toHexString(encoded) + "}");
-                        throw hc.conContext.fatal(Alert.ILLEGAL_PARAMETER,
-                                (SSLProtocolException)spe.initCause(iae));
+                            Utilities.toHexString(encoded) + "}", iae);
+                        throw hc.conContext.fatal(Alert.ILLEGAL_PARAMETER, spe);
                     }
                 } else {
                     try {
@@ -146,9 +146,8 @@ final class ServerNameExtension {
                         SSLProtocolException spe = new SSLProtocolException(
                             "Illegal server name, type=(" + nameType +
                             "), value={" +
-                            Utilities.toHexString(encoded) + "}");
-                        throw hc.conContext.fatal(Alert.ILLEGAL_PARAMETER,
-                                (SSLProtocolException)spe.initCause(iae));
+                            Utilities.toHexString(encoded) + "}", iae);
+                        throw hc.conContext.fatal(Alert.ILLEGAL_PARAMETER, spe);
                     }
                 }
 
@@ -217,7 +216,8 @@ final class ServerNameExtension {
 
             // Is it a supported and enabled extension?
             if (!chc.sslConfig.isAvailable(CH_SERVER_NAME)) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.warning(
                         "Ignore unavailable server_name extension");
                 }
@@ -262,7 +262,7 @@ final class ServerNameExtension {
                 return extData;
             }
 
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.warning("Unable to indicate server name");
             }
             return null;
@@ -288,7 +288,8 @@ final class ServerNameExtension {
 
             // Is it a supported and enabled extension?
             if (!shc.sslConfig.isAvailable(CH_SERVER_NAME)) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                         "Ignore unavailable extension: " + CH_SERVER_NAME.name);
                 }
@@ -306,7 +307,8 @@ final class ServerNameExtension {
             if (!shc.sslConfig.sniMatchers.isEmpty()) {
                 sni = chooseSni(shc.sslConfig.sniMatchers, spec.serverNames);
                 if (sni != null) {
-                    if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                    if (SSLLogger.isOn() &&
+                            SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                         SSLLogger.fine(
                                 "server name indication (" +
                                 sni + ") is accepted");
@@ -323,7 +325,8 @@ final class ServerNameExtension {
                 // connection with a "missing_extension" alert.
                 //
                 // We do not reject client without SNI extension currently.
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                             "no server name matchers, " +
                             "ignore server name indication");
@@ -344,7 +347,12 @@ final class ServerNameExtension {
                         sni, shc.resumingSession.serverNameIndication)) {
                     shc.isResumption = false;
                     shc.resumingSession = null;
-                    if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                    // this server is disallowing this session resumption,
+                    // so don't include the pre-shared key in the
+                    // ServerHello handshake message
+                    shc.handshakeExtensions.remove(SH_PRE_SHARED_KEY);
+                    if (SSLLogger.isOn() &&
+                            SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                         SSLLogger.fine(
                                 "abort session resumption, " +
                                 "different server name indication used");
@@ -438,7 +446,8 @@ final class ServerNameExtension {
             CHServerNamesSpec spec = (CHServerNamesSpec)
                     shc.handshakeExtensions.get(CH_SERVER_NAME);
             if (spec == null) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.finest(
                         "Ignore unavailable extension: " + SH_SERVER_NAME.name);
                 }
@@ -448,7 +457,8 @@ final class ServerNameExtension {
             // When resuming a session, the server MUST NOT include a
             // server_name extension in the server hello.
             if (shc.isResumption || shc.negotiatedServerName == null) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.finest(
                         "No expected server name indication response");
                 }
@@ -525,7 +535,8 @@ final class ServerNameExtension {
             CHServerNamesSpec spec = (CHServerNamesSpec)
                     shc.handshakeExtensions.get(CH_SERVER_NAME);
             if (spec == null) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.finest(
                         "Ignore unavailable extension: " + EE_SERVER_NAME.name);
                 }
@@ -535,7 +546,8 @@ final class ServerNameExtension {
             // When resuming a session, the server MUST NOT include a
             // server_name extension in the server hello.
             if (shc.isResumption || shc.negotiatedServerName == null) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.finest(
                         "No expected server name indication response");
                 }

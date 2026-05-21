@@ -109,6 +109,7 @@ import sun.util.logging.PlatformLogger;
  *
  * <p>The implementation conforms to <a href="http://www.ietf.org/rfc/rfc2965.txt">RFC 2965</a>, section 3.3.
  *
+ * @spec https://www.rfc-editor.org/info/rfc2965 RFC 2965: HTTP State Management Mechanism
  * @see CookiePolicy
  * @author Edward Wang
  * @since 1.6
@@ -169,7 +170,7 @@ public class CookieManager extends CookieHandler
     /**
      * To set the cookie policy of this cookie manager.
      *
-     * <p> A instance of {@code CookieManager} will have
+     * <p> An instance of {@code CookieManager} will have
      * cookie policy ACCEPT_ORIGINAL_SERVER by default. Users always
      * can call this method to set another cookie policy.
      *
@@ -447,13 +448,7 @@ public class CookieManager extends CookieHandler
             // Check creation time. Sort older first
             long creation1 = c1.getCreationTime();
             long creation2 = c2.getCreationTime();
-            if (creation1 < creation2) {
-                return -1;
-            }
-            if (creation1 > creation2) {
-                return 1;
-            }
-            return 0;
+            return Long.compare(creation1, creation2);
         }
     }
 }

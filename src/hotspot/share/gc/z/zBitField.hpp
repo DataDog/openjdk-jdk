@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,8 +24,9 @@
 #ifndef SHARE_GC_Z_ZBITFIELD_HPP
 #define SHARE_GC_Z_ZBITFIELD_HPP
 
-#include "memory/allocation.hpp"
+#include "memory/allStatic.hpp"
 #include "utilities/debug.hpp"
+#include "utilities/globalDefinitions.hpp"
 
 //
 //  Example
@@ -73,7 +74,7 @@ public:
 
   static ContainerType encode(ValueType value) {
     assert(((ContainerType)value & (FieldMask << ValueShift)) == (ContainerType)value, "Invalid value");
-    return ((ContainerType)value >> ValueShift) << FieldShift;
+    return checked_cast<ContainerType>(((ContainerType)value >> ValueShift) << FieldShift);
   }
 };
 

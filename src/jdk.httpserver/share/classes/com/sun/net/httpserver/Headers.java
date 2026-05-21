@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 
 package com.sun.net.httpserver;
 
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -33,6 +34,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiFunction;
+import java.util.stream.Collectors;
+import sun.net.httpserver.UnmodifiableHeaders;
+import sun.net.httpserver.Utils;
 
 /**
  * HTTP request and response headers are represented by this class which
@@ -59,19 +63,27 @@ import java.util.function.BiFunction;
  * <ul>
  *     <li>{@link #getFirst(String)} returns a single valued header or the first
  *     value of a multi-valued header.
- *     <li>{@link #add(String,String)} adds the given header value to the list
+ *     <li>{@link #add(String, String)} adds the given header value to the list
  *     for the given key.
- *     <li>{@link #set(String,String)} sets the given header field to the single
+ *     <li>{@link #set(String, String)} sets the given header field to the single
  *     value given overwriting any existing values in the value list.
  * </ul>
+ *
+ * <p> An instance of {@code Headers} is either <i>mutable</i> or <i>immutable</i>.
+ * A <i>mutable headers</i> allows to add, remove, or modify header names and
+ * values, e.g. the instance returned by {@link HttpExchange#getResponseHeaders()}.
+ * An <i>immutable headers</i> disallows any modification to header names or
+ * values, e.g. the instance returned by {@link HttpExchange#getRequestHeaders()}.
+ * The mutator methods for an immutable headers instance unconditionally throw
+ * {@code UnsupportedOperationException}.
  *
  * <p> All methods in this class reject {@code null} values for keys and values.
  * {@code null} keys will never be present in HTTP request or response headers.
  * @since 1.6
  */
-public class Headers implements Map<String,List<String>> {
+public class Headers implements Map<String, List<String>> {
 
-    HashMap<String,List<String>> map;
+    HashMap<String, List<String>> map;
 
     /**
      * Creates an empty instance of {@code Headers}.
@@ -79,29 +91,88 @@ public class Headers implements Map<String,List<String>> {
     public Headers() {map = new HashMap<>(32);}
 
     /**
-     * Normalize the key by converting to following form.
-     * First {@code char} upper case, rest lower case.
-     * key is presumed to be {@code ASCII}.
+     * Creates a mutable {@code Headers} from the given {@code headers} with
+     * the same header names and values.
+     *
+     * @param headers a map of header names and values
+     * @throws NullPointerException if {@code headers} or any of its names or
+     *                              values are null, or if any value contains
+     *                              null.
+     * @since 18
      */
-    private String normalize(String key) {
+    public Headers(Map<String, List<String>> headers) {
+        Objects.requireNonNull(headers);
+        var h = headers.entrySet().stream()
+                .collect(Collectors.toUnmodifiableMap(
+                        Entry::getKey, e -> new LinkedList<>(e.getValue())));
+        map = new HashMap<>(32);
+        this.putAll(h);
+    }
+
+    /**
+     * {@return the normalized header name of the following form: the first
+     * character in upper-case, the rest in lower-case}
+     * The input header name is assumed to be encoded in ASCII.
+     *
+     * @implSpec
+     * This method is performance-sensitive; update with care.
+     *
+     * @param key an ASCII-encoded header name
+     * @throws NullPointerException on null {@code key}
+     * @throws IllegalArgumentException if {@code key} contains {@code \r} or {@code \n}
+     */
+    private static String normalize(String key) {
+
+        // Fast path for the empty key
         Objects.requireNonNull(key);
-        int len = key.length();
-        if (len == 0) {
+        int l = key.length();
+        if (l == 0) {
             return key;
         }
-        char[] b = key.toCharArray();
-        if (b[0] >= 'a' && b[0] <= 'z') {
-            b[0] = (char)(b[0] - ('a' - 'A'));
-        } else if (b[0] == '\r' || b[0] == '\n')
-            throw new IllegalArgumentException("illegal character in key");
 
-        for (int i=1; i<len; i++) {
-            if (b[i] >= 'A' && b[i] <= 'Z') {
-                b[i] = (char) (b[i] + ('a' - 'A'));
-            } else if (b[i] == '\r' || b[i] == '\n')
-                throw new IllegalArgumentException("illegal character in key");
+        // Find the first non-normalized `char`
+        int i = 0;
+        char c = key.charAt(i);
+        if (!(c == '\r' || c == '\n' || (c >= 'a' && c <= 'z'))) {
+            i++;
+            for (; i < l; i++) {
+                c = key.charAt(i);
+                if (c == '\r' || c == '\n' || (c >= 'A' && c <= 'Z')) {
+                    break;
+                }
+            }
         }
-        return new String(b);
+
+        // Fast path for the already normalized key
+        if (i == l) {
+            return key;
+        }
+
+        // Upper-case the first `char`
+        char[] cs = key.toCharArray();
+        int o = 'a' - 'A';
+        if (i == 0) {
+            if (c == '\r' || c == '\n') {
+                throw new IllegalArgumentException("illegal character in key at index " + i);
+            }
+            if (c >= 'a' && c <= 'z') {
+                cs[0] = (char) (c - o);
+            }
+            i++;
+        }
+
+        // Lower-case the secondary `char`s
+        for (; i < l; i++) {
+            c = cs[i];
+            if (c >= 'A' && c <= 'Z') {
+                cs[i] = (char) (c + o);
+            } else if (c == '\r' || c == '\n') {
+                throw new IllegalArgumentException("illegal character in key at index " + i);
+            }
+        }
+
+        return new String(cs);
+
     }
 
     @Override
@@ -146,8 +217,13 @@ public class Headers implements Map<String,List<String>> {
 
     @Override
     public List<String> put(String key, List<String> value) {
+        // checkHeader is called in this class to fail fast
+        // It also must be called in sendResponseHeaders because
+        // Headers instances internal state can be modified
+        // external to these methods.
+        Utils.checkHeader(key, false);
         for (String v : value)
-            checkValue(v);
+            Utils.checkHeader(v, true);
         return map.put(normalize(key), value);
     }
 
@@ -159,38 +235,15 @@ public class Headers implements Map<String,List<String>> {
      * @param value the value to add to the header
      */
     public void add(String key, String value) {
-        checkValue(value);
+        Utils.checkHeader(key, false);
+        Utils.checkHeader(value, true);
         String k = normalize(key);
         List<String> l = map.get(k);
         if (l == null) {
             l = new LinkedList<>();
-            map.put(k,l);
+            map.put(k, l);
         }
         l.add(value);
-    }
-
-    private static void checkValue(String value) {
-        int len = value.length();
-        for (int i=0; i<len; i++) {
-            char c = value.charAt(i);
-            if (c == '\r') {
-                // is allowed if it is followed by \n and a whitespace char
-                if (i >= len - 2) {
-                    throw new IllegalArgumentException("Illegal CR found in header");
-                }
-                char c1 = value.charAt(i+1);
-                char c2 = value.charAt(i+2);
-                if (c1 != '\n') {
-                    throw new IllegalArgumentException("Illegal char found after CR in header");
-                }
-                if (c2 != ' ' && c2 != '\t') {
-                    throw new IllegalArgumentException("No whitespace found after CRLF in header");
-                }
-                i+=2;
-            } else if (c == '\n') {
-                throw new IllegalArgumentException("Illegal LF found in header");
-            }
-        }
     }
 
     /**
@@ -234,7 +287,7 @@ public class Headers implements Map<String,List<String>> {
     public void replaceAll(BiFunction<? super String, ? super List<String>, ? extends List<String>> function) {
         var f = function.andThen(values -> {
             Objects.requireNonNull(values);
-            values.forEach(Headers::checkValue);
+            values.forEach(value -> Utils.checkHeader(value, true));
             return values;
         });
         Map.super.replaceAll(f);
@@ -253,5 +306,56 @@ public class Headers implements Map<String,List<String>> {
         sb.append(map.toString());
         sb.append(" }");
         return sb.toString();
+    }
+
+    /**
+     * Returns an immutable {@code Headers} with the given name value pairs as
+     * its set of headers.
+     *
+     * <p> The supplied {@code String} instances must alternate as header names
+     * and header values. To add several values to the same name, the same name
+     * must be supplied with each new value. If the supplied {@code headers} is
+     * empty, then an empty {@code Headers} is returned.
+     *
+     * @param headers the list of name value pairs
+     * @return an immutable headers with the given name value pairs
+     * @throws NullPointerException     if {@code headers} or any of its
+     *                                  elements are null.
+     * @throws IllegalArgumentException if the number of supplied strings is odd.
+     * @since 18
+     */
+    public static Headers of(String... headers) {
+        Objects.requireNonNull(headers);
+        if (headers.length == 0) {
+            return new UnmodifiableHeaders(new Headers());
+        }
+        if (headers.length % 2 != 0) {
+            throw new IllegalArgumentException("wrong number, %d, of elements"
+                    .formatted(headers.length));
+        }
+        Arrays.stream(headers).forEach(Objects::requireNonNull);
+
+        var h = new Headers();
+        for (int i = 0; i < headers.length; i += 2) {
+            String name  = headers[i];
+            String value = headers[i + 1];
+            h.add(name, value);
+        }
+        return new UnmodifiableHeaders(h);
+    }
+
+    /**
+     * Returns an immutable {@code Headers} from the given {@code headers} with
+     * the same header names and values.
+     *
+     * @param headers a map of header names and values
+     * @return an immutable headers
+     * @throws NullPointerException if {@code headers} or any of its names or
+     *                              values are null, or if any value contains
+     *                              null.
+     * @since 18
+     */
+    public static Headers of(Map<String, List<String>> headers) {
+        return new UnmodifiableHeaders(new Headers(headers));
     }
 }

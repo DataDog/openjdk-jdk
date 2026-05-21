@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2014, 2108, Red Hat Inc. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Red Hat Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,21 +29,25 @@
 #include "asm/assembler.hpp"
 #include "runtime/icache.hpp"
 #include "runtime/os.hpp"
+#include "runtime/os.hpp"
+#if INCLUDE_JVMCI
+#include "jvmci/jvmciExceptions.hpp"
+#endif
+
 
 // We have interfaces for the following instructions:
 // - NativeInstruction
 // - - NativeCall
 // - - NativeMovConstReg
-// - - NativeMovConstRegPatching
 // - - NativeMovRegMem
-// - - NativeMovRegMemPatching
 // - - NativeJump
-// - - NativeIllegalOpCode
-// - - NativeGeneralJump
-// - - NativeReturn
-// - - NativeReturnX (return with argument)
-// - - NativePushConst
-// - - NativeTstRegMem
+// - - - NativeGeneralJump
+// - - NativeIllegalInstruction
+// - - NativeCallTrampolineStub
+// - - NativeMembar
+// - - NativeLdSt
+// - - NativePostCallNop
+// - - NativeDeoptInstruction
 
 // The base class for different kinds of native instruction abstractions.
 // Provides the primitive operations to manipulate code relative to this.
@@ -71,15 +75,13 @@ public:
     return (encoding() & 0xff000000) == 0x10000000;
   }
 
-  inline bool is_nop();
+  inline bool is_nop() const;
   bool is_jump();
   bool is_general_jump();
-  inline bool is_jump_or_nop();
   inline bool is_cond_jump();
   bool is_safepoint_poll();
   bool is_movz();
   bool is_movk();
-  bool is_sigill_zombie_not_entrant();
   bool is_stop();
 
 protected:
@@ -87,16 +89,18 @@ protected:
 
   s_char sbyte_at(int offset) const { return *(s_char*)addr_at(offset); }
   u_char ubyte_at(int offset) const { return *(u_char*)addr_at(offset); }
-  jint int_at(int offset) const { return *(jint*)addr_at(offset); }
-  juint uint_at(int offset) const { return *(juint*)addr_at(offset); }
-  address ptr_at(int offset) const { return *(address*)addr_at(offset); }
-  oop oop_at(int offset) const { return *(oop*)addr_at(offset); }
+  jint int_at(int offset) const     { return *(jint*)addr_at(offset); }
+  juint uint_at(int offset) const   { return *(juint*)addr_at(offset); }
+  address ptr_at(int offset) const  { return *(address*)addr_at(offset); }
+  oop oop_at(int offset) const      { return *(oop*)addr_at(offset); }
 
-  void set_char_at(int offset, char c) { *addr_at(offset) = (u_char)c; }
-  void set_int_at(int offset, jint i) { *(jint*)addr_at(offset) = i; }
-  void set_uint_at(int offset, jint i) { *(juint*)addr_at(offset) = i; }
-  void set_ptr_at(int offset, address ptr) { *(address*)addr_at(offset) = ptr; }
-  void set_oop_at(int offset, oop o) { *(oop*)addr_at(offset) = o; }
+#define MACOS_WX_WRITE MACOS_AARCH64_ONLY(os::thread_wx_enable_write())
+  void set_char_at(int offset, char c)     { MACOS_WX_WRITE;  *addr_at(offset) = (u_char)c; }
+  void set_int_at(int offset, jint i)      { MACOS_WX_WRITE;  *(jint*)addr_at(offset) = i; }
+  void set_uint_at(int offset, juint i)    { MACOS_WX_WRITE;  *(juint*)addr_at(offset) = i; }
+  void set_ptr_at(int offset, address ptr) { MACOS_WX_WRITE;  *(address*)addr_at(offset) = ptr; }
+  void set_oop_at(int offset, oop o)       { MACOS_WX_WRITE;  *(oop*)addr_at(offset) = o; }
+#undef MACOS_WX_WRITE
 
   void wrote(int offset);
 
@@ -150,44 +154,6 @@ inline NativeInstruction* nativeInstruction_at(uint32_t* address) {
   return (NativeInstruction*)address;
 }
 
-class NativePltCall: public NativeInstruction {
-public:
-  enum Arm_specific_constants {
-    instruction_size           =    4,
-    instruction_offset         =    0,
-    displacement_offset        =    1,
-    return_address_offset      =    4
-  };
-  address instruction_address() const { return addr_at(instruction_offset); }
-  address next_instruction_address() const { return addr_at(return_address_offset); }
-  address displacement_address() const { return addr_at(displacement_offset); }
-  int displacement() const { return (jint) int_at(displacement_offset); }
-  address return_address() const { return addr_at(return_address_offset); }
-  address destination() const;
-  address plt_entry() const;
-  address plt_jump() const;
-  address plt_load_got() const;
-  address plt_resolve_call() const;
-  address plt_c2i_stub() const;
-  void set_stub_to_clean();
-
-  void reset_to_plt_resolve_call();
-  void set_destination_mt_safe(address dest);
-
-  void verify() const;
-};
-
-inline NativePltCall* nativePltCall_at(address address) {
-  NativePltCall* call = (NativePltCall*)address;
-  DEBUG_ONLY(call->verify());
-  return call;
-}
-
-inline NativePltCall* nativePltCall_before(address addr) {
-  address at = addr - NativePltCall::instruction_size;
-  return nativePltCall_at(at);
-}
-
 inline NativeCall* nativeCall_at(address address);
 // The NativeCall is an abstraction for accessing/manipulating native
 // call instructions (used to manipulate inline caches, primitive &
@@ -202,21 +168,21 @@ public:
     return_address_offset       =    4
   };
 
+  static int byte_size() { return instruction_size; }
   address instruction_address() const { return addr_at(instruction_offset); }
   address next_instruction_address() const { return addr_at(return_address_offset); }
   int displacement() const { return (int_at(displacement_offset) << 6) >> 4; }
   address displacement_address() const { return addr_at(displacement_offset); }
   address return_address() const { return addr_at(return_address_offset); }
+  address raw_destination() const { return instruction_address() + displacement(); }
   address destination() const;
 
   void set_destination(address dest) {
-    int offset = dest - instruction_address();
-    unsigned int insn = 0b100101 << 26;
+    int64_t offset = dest - instruction_address();
+    juint insn = 0b100101u << 26u;
     assert((offset & 3) == 0, "should be");
-    offset >>= 2;
-    offset &= (1 << 26) - 1; // mask off insn part
-    insn |= offset;
-    set_int_at(displacement_offset, insn);
+    Instruction_aarch64::spatch(reinterpret_cast<address>(&insn), 25, 0, offset >> 2);
+    set_uint_at(displacement_offset, insn);
   }
 
   void verify_alignment() { ; }
@@ -246,12 +212,12 @@ public:
   //
   // Used in the runtime linkage of calls; see class CompiledIC.
   // (Cf. 4506997 and 4479829, where threads witnessed garbage displacements.)
-
-  // The parameter assert_lock disables the assertion during code generation.
-  void set_destination_mt_safe(address dest, bool assert_lock = true);
+  void set_destination_mt_safe(address dest);
 
   address get_trampoline();
-  address trampoline_jump(CodeBuffer &cbuf, address dest);
+#if INCLUDE_JVMCI
+  void trampoline_jump(CodeBuffer &cbuf, address dest, JVMCI_TRAPS);
+#endif
 };
 
 inline NativeCall* nativeCall_at(address address) {
@@ -287,7 +253,7 @@ public:
     else if (is_ldr_literal_at(instruction_address()))
       return(addr_at(4));
     assert(false, "Unknown instruction in NativeMovConstReg");
-    return NULL;
+    return nullptr;
   }
 
   intptr_t data() const;
@@ -318,15 +284,6 @@ inline NativeMovConstReg* nativeMovConstReg_before(address address) {
   DEBUG_ONLY(test->verify());
   return test;
 }
-
-class NativeMovConstRegPatching: public NativeMovConstReg {
-private:
-  friend NativeMovConstRegPatching* nativeMovConstRegPatching_at(address address) {
-    NativeMovConstRegPatching* test = (NativeMovConstRegPatching*)(address - instruction_offset);
-    DEBUG_ONLY(test->verify());
-    return test;
-  }
-};
 
 // An interface for accessing/manipulating native moves of the form:
 //      mov[b/w/l/q] [reg + offset], reg   (instruction_code_reg2mem)
@@ -380,60 +337,6 @@ inline NativeMovRegMem* nativeMovRegMem_at(address address) {
   return test;
 }
 
-class NativeMovRegMemPatching: public NativeMovRegMem {
-private:
-  friend NativeMovRegMemPatching* nativeMovRegMemPatching_at(address address) {
-    Unimplemented();
-    return 0;
-  }
-};
-
-// An interface for accessing/manipulating native leal instruction of form:
-//        leal reg, [reg + offset]
-
-class NativeLoadAddress: public NativeInstruction {
-  enum AArch64_specific_constants {
-    instruction_size            =    4,
-    instruction_offset          =    0,
-    data_offset                 =    0,
-    next_instruction_offset     =    4
-  };
-
-public:
-  void verify();
-};
-
-//   adrp    x16, #page
-//   add     x16, x16, #offset
-//   ldr     x16, [x16]
-class NativeLoadGot: public NativeInstruction {
-public:
-  enum AArch64_specific_constants {
-    instruction_length = 4 * NativeInstruction::instruction_size,
-    offset_offset = 0,
-  };
-
-  address instruction_address() const { return addr_at(0); }
-  address return_address() const { return addr_at(instruction_length); }
-  address got_address() const;
-  address next_instruction_address() const { return return_address(); }
-  intptr_t data() const;
-  void set_data(intptr_t data) {
-    intptr_t* addr = (intptr_t*)got_address();
-    *addr = data;
-  }
-
-  void verify() const;
-private:
-  void report_and_fail() const;
-};
-
-inline NativeLoadGot* nativeLoadGot_at(address addr) {
-  NativeLoadGot* load = (NativeLoadGot*)addr;
-  DEBUG_ONLY(load->verify());
-  return load;
-}
-
 class NativeJump: public NativeInstruction {
 public:
   enum AArch64_specific_constants {
@@ -455,9 +358,6 @@ public:
 
   // Insertion of native jump instruction
   static void insert(address code_pos, address entry);
-  // MT-safe insertion of native jump at verified method entry
-  static void check_verified_entry_alignment(address entry, address verified_entry);
-  static void patch_verified_entry(address entry, address verified_entry, address dest);
 };
 
 inline NativeJump* nativeJump_at(address address) {
@@ -478,9 +378,7 @@ public:
   address jump_destination() const;
   void set_jump_destination(address dest);
 
-  static void insert_unconditional(address code_pos, address entry);
   static void replace_mt_safe(address instr_addr, address code_buffer);
-  static void verify();
 };
 
 inline NativeGeneralJump* nativeGeneralJump_at(address address) {
@@ -489,61 +387,13 @@ inline NativeGeneralJump* nativeGeneralJump_at(address address) {
   return jump;
 }
 
-class NativeGotJump: public NativeInstruction {
-public:
-  enum AArch64_specific_constants {
-    instruction_size = 4 * NativeInstruction::instruction_size,
-  };
-
-  void verify() const;
-  address instruction_address() const { return addr_at(0); }
-  address destination() const;
-  address return_address() const { return addr_at(instruction_size); }
-  address got_address() const;
-  address next_instruction_address() const { return addr_at(instruction_size); }
-  bool is_GotJump() const;
-
-  void set_jump_destination(address dest) {
-    address* got = (address*)got_address();
-    *got = dest;
-  }
-};
-
-inline NativeGotJump* nativeGotJump_at(address addr) {
-  NativeGotJump* jump = (NativeGotJump*)(addr);
-  DEBUG_ONLY(jump->verify());
-  return jump;
-}
-
-class NativePopReg : public NativeInstruction {
-public:
-  // Insert a pop instruction
-  static void insert(address code_pos, Register reg);
-};
-
-
 class NativeIllegalInstruction: public NativeInstruction {
 public:
   // Insert illegal opcode as specific address
   static void insert(address code_pos);
 };
 
-// return instruction that does not pop values of the stack
-class NativeReturn: public NativeInstruction {
-public:
-};
-
-// return instruction that does pop values of the stack
-class NativeReturnX: public NativeInstruction {
-public:
-};
-
-// Simple test vs memory
-class NativeTstRegMem: public NativeInstruction {
-public:
-};
-
-inline bool NativeInstruction::is_nop() {
+inline bool NativeInstruction::is_nop() const{
   uint32_t insn = *(uint32_t*)addr_at(0);
   return insn == 0xd503201f;
 }
@@ -567,10 +417,6 @@ inline bool NativeInstruction::is_jump() {
     return false;
 }
 
-inline bool NativeInstruction::is_jump_or_nop() {
-  return is_nop() || is_jump();
-}
-
 // Call trampoline stubs.
 class NativeCallTrampolineStub : public NativeInstruction {
 public:
@@ -582,7 +428,7 @@ public:
     next_instruction_offset     =    4 * 4
   };
 
-  address destination(nmethod* nm = NULL) const;
+  address destination(nmethod* nm = nullptr) const;
   void set_destination(address new_destination);
   ptrdiff_t destination_offset() const;
 };
@@ -665,5 +511,93 @@ inline NativeLdSt* NativeLdSt_at(address addr) {
   assert(nativeInstruction_at(addr)->is_Imm_LdSt(), "no immediate load/store found");
   return (NativeLdSt*)addr;
 }
+
+// A NativePostCallNop takes the form of three instructions:
+//     nop; movk zr, lo; movk zr, hi
+//
+// The nop is patchable for a deoptimization trap. The two movk
+// instructions execute as nops but have a 16-bit payload in which we
+// can store an offset from the initial nop to the nmethod.
+
+class NativePostCallNop: public NativeInstruction {
+private:
+  static bool is_movk_to_zr(uint32_t insn) {
+    return ((insn & 0xffe0001f) == 0xf280001f);
+  }
+
+public:
+  enum AArch64_specific_constants {
+    // The two parts should be checked separately to prevent out of bounds access in case
+    // the return address points to the deopt handler stub code entry point which could be
+    // at the end of page.
+    first_check_size = instruction_size
+  };
+
+  bool check() const {
+    // Check the first instruction is NOP.
+    if (is_nop()) {
+      uint32_t insn = *(uint32_t*)addr_at(first_check_size);
+      // Check next instruction is MOVK zr, xx.
+      // These instructions only ever appear together in a post-call
+      // NOP, so it's unnecessary to check that the third instruction is
+      // a MOVK as well.
+      return is_movk_to_zr(insn);
+    }
+
+    return false;
+  }
+
+  bool decode(int32_t& oopmap_slot, int32_t& cb_offset) const {
+    uint64_t movk_insns = *(uint64_t*)addr_at(4);
+    uint32_t lo = (movk_insns >> 5) & 0xffff;
+    uint32_t hi = (movk_insns >> (5 + 32)) & 0xffff;
+    uint32_t data = (hi << 16) | lo;
+    if (data == 0) {
+      return false; // no information encoded
+    }
+    cb_offset = (data & 0xffffff);
+    oopmap_slot = (data >> 24) & 0xff;
+    return true; // decoding succeeded
+  }
+
+  bool patch(int32_t oopmap_slot, int32_t cb_offset);
+  void make_deopt();
+};
+
+inline NativePostCallNop* nativePostCallNop_at(address address) {
+  NativePostCallNop* nop = (NativePostCallNop*) address;
+  if (nop->check()) {
+    return nop;
+  }
+  return nullptr;
+}
+
+inline NativePostCallNop* nativePostCallNop_unsafe_at(address address) {
+  NativePostCallNop* nop = (NativePostCallNop*) address;
+  assert(nop->check(), "");
+  return nop;
+}
+
+class NativeDeoptInstruction: public NativeInstruction {
+ public:
+  enum {
+    instruction_size            =    4,
+    instruction_offset          =    0,
+  };
+
+  address instruction_address() const       { return addr_at(instruction_offset); }
+  address next_instruction_address() const  { return addr_at(instruction_size); }
+
+  void  verify();
+
+  static bool is_deopt_at(address instr) {
+    assert(instr != nullptr, "");
+    uint32_t value = *(uint32_t *) instr;
+    return value == 0xd4ade001;
+  }
+
+  // MT-safe patching
+  static void insert(address code_pos);
+};
 
 #endif // CPU_AARCH64_NATIVEINST_AARCH64_HPP

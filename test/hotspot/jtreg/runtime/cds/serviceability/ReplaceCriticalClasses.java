@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,8 +27,8 @@
  * @summary Tests how CDS works when critical library classes are replaced with JVMTI ClassFileLoadHook
  * @library /test/lib
  * @requires vm.cds
- * @build sun.hotspot.WhiteBox
- * @run driver jdk.test.lib.helpers.ClassFileInstaller -jar whitebox.jar sun.hotspot.WhiteBox
+ * @build jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller -jar whitebox.jar jdk.test.whitebox.WhiteBox
  * @run main/othervm/native ReplaceCriticalClasses
  */
 
@@ -38,7 +38,7 @@ import jdk.test.lib.cds.CDSTestUtils;
 import jdk.test.lib.cds.CDSOptions;
 import jdk.test.lib.process.OutputAnalyzer;
 import jdk.test.lib.helpers.ClassFileInstaller;
-import sun.hotspot.WhiteBox;
+import jdk.test.whitebox.WhiteBox;
 
 public class ReplaceCriticalClasses {
     public static void main(String args[]) throws Throwable {
@@ -98,9 +98,7 @@ public class ReplaceCriticalClasses {
             // Replace classes that are loaded after JVMTI_PHASE_PRIMORDIAL. It's OK to replace
             // such
             // classes even when CDS is enabled. Nothing bad should happen.
-            "-notshared java/util/Locale",
-            "-notshared sun/util/locale/BaseLocale",
-            "-notshared java/lang/Readable",
+            "-notshared java/util/Calendar",
         };
         return tests;
     }
@@ -150,8 +148,8 @@ public class ReplaceCriticalClasses {
         Class.forName(klassName.replace("/", ".")); // make sure it's a valid class
         final String subgraphInit = "initialize_from_archived_subgraph " + subgraphKlass;
 
-        // We will pass an option like "-agentlib:SimpleClassFileLoadHook=java/util/Locale,XXX,XXX".
-        // The SimpleClassFileLoadHook agent would attempt to hook the java/util/Locale class
+        // We will pass an option like "-agentlib:SimpleClassFileLoadHook=java/util/Calendar,XXX,XXX".
+        // The SimpleClassFileLoadHook agent would attempt to hook the java/util/Calendar class
         // but leave the class file bytes unchanged (it replaces all bytes "XXX" with "XXX", i.e.,
         // a no-op). JVMTI doesn't check the class file bytes returned by the agent, so as long
         // as the agent returns a buffer, it will not load the class from CDS, and will instead
@@ -159,7 +157,7 @@ public class ReplaceCriticalClasses {
         //
         // Note that for safety we don't change the contents of the class file bytes. If in the
         // future JVMTI starts checking the contents of the class file bytes, this test would need
-        // to be updated. (You'd see the test case with java/util/Locale staring to fail).
+        // to be updated. (You'd see the test case with java/util/Calendar staring to fail).
         String agent = "-agentlib:SimpleClassFileLoadHook=" + early + klassName + ",XXX,XXX";
 
         CDSOptions opts = (new CDSOptions())
@@ -167,6 +165,7 @@ public class ReplaceCriticalClasses {
             .setArchiveName(ReplaceCriticalClasses.class.getName() + ".jsa")
             .setUseVersion(false)
             .addSuffix("-showversion",
+                       "-Xlog:aot",
                        "-Xlog:cds",
                        "-XX:+UnlockDiagnosticVMOptions",
                        agent);
@@ -174,7 +173,7 @@ public class ReplaceCriticalClasses {
             opts.addSuffix("-XX:+WhiteBoxAPI",
                            "-Xbootclasspath/a:" + ClassFileInstaller.getJarPath("whitebox.jar"));
         }
-        opts.addSuffix("-Xlog:cds,cds+heap");
+        opts.addSuffix("-Xlog:aot,aot+heap,cds");
         opts.addSuffix("ReplaceCriticalClasses",
                        "child",
                        shared,
@@ -185,13 +184,12 @@ public class ReplaceCriticalClasses {
         final boolean expectShared = shared.equals("-shared");
         CDSTestUtils.run(opts).assertNormalExit(out -> {
                 if (expectDisable) {
-                    out.shouldContain("UseSharedSpaces: CDS is disabled because early JVMTI ClassFileLoadHook is in use.");
+                    out.shouldContain("CDS is disabled because early JVMTI ClassFileLoadHook is in use.");
                     System.out.println("CDS disabled as expected");
                 }
                 if (checkSubgraph) {
                     if (expectShared) {
-                        if (!out.getOutput().contains("UseSharedSpaces: Unable to map at required address in java heap")) {
-                            out.shouldContain(subgraphInit);
+                        if (!out.getOutput().contains("Unable to map at required address in java heap")) {
                             // If the subgraph is successfully initialized, the specified shared class must not be rewritten.
                             out.shouldNotContain("Rewriting done.");
                         }

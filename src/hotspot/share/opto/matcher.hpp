@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,10 +27,12 @@
 
 #include "libadt/vectset.hpp"
 #include "memory/resourceArea.hpp"
+#include "oops/compressedKlass.hpp"
 #include "oops/compressedOops.hpp"
 #include "opto/node.hpp"
 #include "opto/phaseX.hpp"
 #include "opto/regmask.hpp"
+#include "opto/subnode.hpp"
 #include "runtime/vm_version.hpp"
 
 class Compile;
@@ -41,8 +43,6 @@ class MachOper;
 
 //---------------------------Matcher-------------------------------------------
 class Matcher : public PhaseTransform {
-  friend class VMStructs;
-
 public:
 
   // Machine-dependent definitions
@@ -63,13 +63,8 @@ public:
       Node_Stack::push(n, (uint)ns);
     }
     void push(Node *n, Node_State ns, Node *parent, int indx) {
-      ++_inode_top;
-      if ((_inode_top + 1) >= _inode_max) grow();
-      _inode_top->node = parent;
-      _inode_top->indx = (uint)indx;
-      ++_inode_top;
-      _inode_top->node = n;
-      _inode_top->indx = (uint)ns;
+      Node_Stack::push(parent, (uint)indx);
+      Node_Stack::push(n, (uint)ns);
     }
     Node *parent() {
       pop();
@@ -86,6 +81,9 @@ public:
 private:
   // Private arena of State objects
   ResourceArea _states_arena;
+
+  // Map old nodes to new nodes
+  Node_List   _new_nodes;
 
   VectorSet   _visited;         // Visit bits
 
@@ -146,20 +144,19 @@ private:
   VectorSet _reused;          // Ideal IGV identifiers reused by machine nodes
 #endif // !PRODUCT
 
-  // Accessors for the inherited field PhaseTransform::_nodes:
   void   grow_new_node_array(uint idx_limit) {
-    _nodes.map(idx_limit-1, NULL);
+    _new_nodes.map(idx_limit-1, nullptr);
   }
   bool    has_new_node(const Node* n) const {
-    return _nodes.at(n->_idx) != NULL;
+    return _new_nodes.at(n->_idx) != nullptr;
   }
   Node*       new_node(const Node* n) const {
     assert(has_new_node(n), "set before get");
-    return _nodes.at(n->_idx);
+    return _new_nodes.at(n->_idx);
   }
   void    set_new_node(const Node* n, Node *nn) {
     assert(!has_new_node(n), "set only once");
-    _nodes.map(n->_idx, nn);
+    _new_nodes.map(n->_idx, nn);
   }
 
 #ifdef ASSERT
@@ -169,7 +166,7 @@ private:
   Node* _mem_node;   // Ideal memory node consumed by mach node
 #endif
 
-  // Mach node for ConP #NULL
+  // Mach node for ConP #null
   MachNode* _mach_null;
 
   void handle_precedence_edges(Node* n, MachNode *mach);
@@ -180,7 +177,6 @@ public:
   static const RegMask *idealreg2regmask[];
   RegMask *idealreg2spillmask  [_last_machine_leaf];
   RegMask *idealreg2debugmask  [_last_machine_leaf];
-  RegMask *idealreg2mhdebugmask[_last_machine_leaf];
   void init_spill_mask( Node *ret );
   // Convert machine register number to register mask
   static uint mreg2regmask_max;
@@ -188,8 +184,6 @@ public:
   static RegMask STACK_ONLY_mask;
   static RegMask caller_save_regmask;
   static RegMask caller_save_regmask_exclude_soe;
-  static RegMask mh_caller_save_regmask;
-  static RegMask mh_caller_save_regmask_exclude_soe;
 
   MachNode* mach_null() const { return _mach_null; }
 
@@ -227,12 +221,12 @@ public:
   // Convert a machine register to a machine register type, so-as to
   // properly match spill code.
   const int *_register_save_type;
+  #ifdef ASSERT
   // Maps from machine register to boolean; true if machine register can
   // be holding a call argument in some signature.
   static bool can_be_java_arg( int reg );
-  // Maps from machine register to boolean; true if machine register holds
-  // a spillable argument.
-  static bool is_spillable_arg( int reg );
+  #endif
+
   // Number of integer live ranges that constitute high register pressure
   static uint int_pressure_limit();
   // Number of float live ranges that constitute high register pressure
@@ -316,38 +310,63 @@ public:
   RegMask *_calling_convention_mask; // Array of RegMasks per argument
 
   // Does matcher have a match rule for this ideal node?
-  static const bool has_match_rule(int opcode);
+  static bool has_match_rule(int opcode);
   static const bool _hasMatchRule[_last_opcode];
 
   // Does matcher have a match rule for this ideal node and is the
   // predicate (if there is one) true?
   // NOTE: If this function is used more commonly in the future, ADLC
   // should generate this one.
-  static const bool match_rule_supported(int opcode);
+  static bool match_rule_supported(int opcode);
+
+  // Identify extra cases that we might want to vectorize automatically
+  // And exclude cases which are not profitable to auto-vectorize.
+  static bool match_rule_supported_auto_vectorization(int opcode, int vlen, BasicType bt);
 
   // identify extra cases that we might want to provide match rules for
   // e.g. Op_ vector nodes and other intrinsics while guarding with vlen
-  static const bool match_rule_supported_vector(int opcode, int vlen, BasicType bt);
+  static bool match_rule_supported_vector(int opcode, int vlen, BasicType bt);
+
+  // Returns true if the platform efficiently implements the given masked vector
+  // operation using predicate features, false otherwise.
+  static bool match_rule_supported_vector_masked(int opcode, int vlen, BasicType bt);
+
+  // Determines if a vector operation needs to be partially implemented with a mask
+  // controlling only the lanes in range [0, vector_length) are processed. This applies
+  // to operations whose vector length is less than the hardware-supported maximum
+  // vector length. Returns true if the operation requires masking, false otherwise.
+  static bool vector_needs_partial_operations(Node* node, const TypeVect* vt);
+
+  static bool vector_rearrange_requires_load_shuffle(BasicType elem_bt, int vlen);
+
+  // Identify if a vector mask operation prefers the input/output mask to be
+  // saved with a predicate type or not.
+  // - Return true if it prefers a predicate type (i.e. TypePVectMask).
+  // - Return false if it prefers a general vector type (i.e. TypeVectA to TypeVectZ).
+  static bool mask_op_prefers_predicate(int opcode, const TypeVect* vt);
 
   static const RegMask* predicate_reg_mask(void);
-  static const TypeVect* predicate_reg_type(const Type* elemTy, int length);
 
   // Vector width in bytes
-  static const int vector_width_in_bytes(BasicType bt);
+  static int vector_width_in_bytes(BasicType bt);
 
   // Limits on vector size (number of elements).
-  static const int max_vector_size(const BasicType bt);
-  static const int min_vector_size(const BasicType bt);
-  static const bool vector_size_supported(const BasicType bt, int size) {
+  static int max_vector_size(const BasicType bt);
+  static int min_vector_size(const BasicType bt);
+  static bool vector_size_supported(const BasicType bt, int size) {
     return (Matcher::max_vector_size(bt) >= size &&
             Matcher::min_vector_size(bt) <= size);
   }
+  // Limits on max vector size (number of elements) for auto-vectorization.
+  static int max_vector_size_auto_vectorization(const BasicType bt);
 
   // Actual max scalable vector register length.
-  static const int scalable_vector_reg_size(const BasicType bt);
+  static int scalable_vector_reg_size(const BasicType bt);
+  // Actual max scalable predicate register length.
+  static int scalable_predicate_reg_slots();
 
   // Vector ideal reg
-  static const uint vector_ideal_reg(int len);
+  static uint vector_ideal_reg(int len);
 
   // Vector length
   static uint vector_length(const Node* n);
@@ -360,6 +379,16 @@ public:
   // Vector element basic type
   static BasicType vector_element_basic_type(const Node* n);
   static BasicType vector_element_basic_type(const MachNode* use, const MachOper* opnd);
+
+  // Vector element basic type is non double word integral type.
+  static bool is_non_long_integral_vector(const Node* n);
+
+  // Check if given booltest condition is unsigned or not
+  static inline bool is_unsigned_booltest_pred(int bt) {
+    return ((bt & BoolTest::unsigned_compare) == BoolTest::unsigned_compare);
+  }
+
+  static bool is_encode_and_store_pattern(const Node* n, const Node* m);
 
   // These calls are all generated by the ADLC
 
@@ -391,20 +420,14 @@ public:
   static int            inline_cache_reg_encode();
 
   // Register for DIVI projection of divmodI
-  static RegMask divI_proj_mask();
+  static const RegMask& divI_proj_mask();
   // Register for MODI projection of divmodI
-  static RegMask modI_proj_mask();
+  static const RegMask& modI_proj_mask();
 
   // Register for DIVL projection of divmodL
-  static RegMask divL_proj_mask();
+  static const RegMask& divL_proj_mask();
   // Register for MODL projection of divmodL
-  static RegMask modL_proj_mask();
-
-  // Use hardware DIV instruction when it is faster than
-  // a code which use multiply for division by constant.
-  static bool use_asm_for_ldiv_by_con( jlong divisor );
-
-  static const RegMask method_handle_invoke_SP_save_mask();
+  static const RegMask& modL_proj_mask();
 
   // Java-Interpreter calling convention
   // (what you use when calling between compiled-Java and Interpreted-Java
@@ -416,9 +439,6 @@ public:
   // The Method-klass-holder may be passed in the inline_cache_reg
   // and then expanded into the inline_cache_reg and a method_ptr register
 
-  // Interpreter's Frame Pointer Register
-  static OptoReg::Name  interpreter_frame_pointer_reg();
-
   // Java-Native calling convention
   // (what you use when intercalling between Java and C++ code)
 
@@ -429,7 +449,7 @@ public:
   static RegMask c_frame_ptr_mask;
 
   // Java-Native vector calling convention
-  static const bool supports_vector_calling_convention();
+  static bool supports_vector_calling_convention();
   static OptoRegPair vector_return_value(uint ideal_reg);
 
   // Is this branch offset small enough to be addressed by a short branch?
@@ -491,6 +511,8 @@ public:
   DEBUG_ONLY( bool verify_after_postselect_cleanup(); )
 
  public:
+  static bool is_register_biasing_candidate(const MachNode* mdef, int oper_index);
+
   // This routine is run whenever a graph fails to match.
   // If it returns, the compiler should bailout to interpreter without error.
   // In non-product mode, SoftMatchFailure is false to detect non-canonical
@@ -514,7 +536,7 @@ public:
 
   void dump_old2new_map();      // machine-independent to machine-dependent
 
-  Node* find_old_node(Node* new_node) {
+  Node* find_old_node(const Node* new_node) {
     return _new2old_map[new_node->_idx];
   }
 #endif // !PRODUCT

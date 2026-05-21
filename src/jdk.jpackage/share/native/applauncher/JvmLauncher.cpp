@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,6 +23,7 @@
  * questions.
  */
 
+#include <cstddef>
 #include <cstring>
 #include "tstrings.h"
 #include "JvmLauncher.h"
@@ -32,12 +33,6 @@
 #include "FileUtils.h"
 #include "Toolbox.h"
 #include "ErrorHandling.h"
-
-#if defined(_WIN32) && !defined(_WIN64)
-#define LAUNCH_FUNC "_JLI_Launch@56"
-#else
-#define LAUNCH_FUNC "JLI_Launch"
-#endif
 
 Jvm::Jvm() {
     LOG_TRACE(tstrings::any() << "Jvm(" << this << ")::Jvm()");
@@ -201,11 +196,11 @@ void Jvm::launch() {
     JvmlLauncherAPI* api = jvmLauncherGetAPI();
 
     AutoJvmlLauncherData jld(jvmLauncherCreateJvmlLauncherData(api,
-                                                            jlh.release()));
+                                                        jlh.release(), 0));
 
     LOG_TRACE(tstrings::any() << "JVM library: \"" << jvmPath << "\"");
 
-    DllFunction<void*> func(Dll(jvmPath), LAUNCH_FUNC);
+    DllFunction<void*> func(Dll(jvmPath), "JLI_Launch");
 
     int exitStatus = jvmLauncherStartJvm(jld.get(), func.operator void*());
 
@@ -215,11 +210,20 @@ void Jvm::launch() {
 }
 
 
+void Jvm::setEnvVariables() {
+    for (size_t i = 0; i != envVarNames.size(); i++) {
+        SysInfo::setEnvVariable(envVarNames.at(i), envVarValues.at(i));
+    }
+}
+
+
 namespace {
 
 struct JliLaunchData {
     std::string jliLibPath;
     std::vector<std::string> args;
+    tstring_array envVarNames;
+    tstring_array envVarValues;
 
     int initJvmlLauncherData(JvmlLauncherData* ptr, int bufferSize) const {
         int minimalBufferSize = initJvmlLauncherData(0);
@@ -230,9 +234,33 @@ struct JliLaunchData {
     }
 
 private:
+    template <class T>
+    static char* copyStrings(const std::vector<T>& src,
+                JvmlLauncherData* ptr, const size_t offset, char* curPtr) {
+        char** strArray = 0;
+        if (ptr) {
+            strArray = *reinterpret_cast<char***>(
+                                    reinterpret_cast<char*>(ptr) + offset);
+        }
+
+        for (size_t i = 0; i != src.size(); i++) {
+            const size_t count = (src[i].size() + 1 /* trailing zero */)
+                                            * sizeof(typename T::value_type);
+            if (ptr) {
+                std::memcpy(curPtr, src[i].c_str(), count);
+                strArray[i] = curPtr;
+            }
+
+            curPtr += count;
+        };
+
+        return curPtr;
+    }
+
     int initJvmlLauncherData(JvmlLauncherData* ptr) const {
         // Store path to JLI library just behind JvmlLauncherData header.
-        char* curPtr = reinterpret_cast<char*>(ptr + 1);
+        JvmlLauncherData dummy;
+        char* curPtr = reinterpret_cast<char*>((ptr ? ptr : &dummy) + 1);
         {
             const size_t count = sizeof(char)
                     * (jliLibPath.size() + 1 /* trailing zero */);
@@ -243,28 +271,41 @@ private:
             curPtr += count;
         }
 
-        // Next write array of char* pointing to JLI lib arg strings.
+        // Write array of char* pointing to JLI lib arg strings.
         if (ptr) {
             ptr->jliLaunchArgv = reinterpret_cast<char**>(curPtr);
             ptr->jliLaunchArgc = (int)args.size();
             // Add terminal '0' arg.
             ptr->jliLaunchArgv[ptr->jliLaunchArgc] = 0;
         }
-
-        // Skip memory occupied by char* array.
+        // Skip memory occupied by JvmlLauncherData::jliLaunchArgv array.
         curPtr += sizeof(char*) * (args.size() + 1 /* terminal '0' arg */);
+        // Store JLI lib arg strings.
+        curPtr = copyStrings(args, ptr,
+                            offsetof(JvmlLauncherData, jliLaunchArgv), curPtr);
 
-        // Store array of strings.
-        for (size_t i = 0; i != args.size(); i++) {
-            const size_t count = (args[i].size() + 1 /* trailing zero */);
-            if (ptr) {
-                std::memcpy(curPtr, args[i].c_str(), count);
-                ptr->jliLaunchArgv[i] = curPtr;
-            }
-            curPtr += count;
-        };
+        // Write array of char* pointing to env variable name strings.
+        if (ptr) {
+            ptr->envVarNames = reinterpret_cast<TCHAR**>(curPtr);
+            ptr->envVarCount = (int)envVarNames.size();
+        }
+        // Skip memory occupied by JvmlLauncherData::envVarNames array.
+        curPtr += sizeof(TCHAR*) * envVarNames.size();
+        // Store env variable names.
+        curPtr = copyStrings(envVarNames, ptr,
+                            offsetof(JvmlLauncherData, envVarNames), curPtr);
 
-        const size_t bufferSize = curPtr - reinterpret_cast<char*>(ptr);
+        // Write array of char* pointing to env variable value strings.
+        if (ptr) {
+            ptr->envVarValues = reinterpret_cast<TCHAR**>(curPtr);
+        }
+        // Skip memory occupied by JvmlLauncherData::envVarValues array.
+        curPtr += sizeof(TCHAR*) * envVarValues.size();
+        // Store env variable values.
+        curPtr = copyStrings(envVarValues, ptr,
+                            offsetof(JvmlLauncherData, envVarValues), curPtr);
+
+        const size_t bufferSize = curPtr - reinterpret_cast<char*>(ptr ? ptr : &dummy);
         if (ptr) {
             LOG_TRACE(tstrings::any() << "Initialized " << bufferSize
                                         << " bytes at " << ptr << " address");
@@ -276,6 +317,20 @@ private:
     }
 };
 
+void copyStringArray(const tstring_array& src, std::vector<std::string>& dst) {
+#ifdef TSTRINGS_WITH_WCHAR
+    {
+        tstring_array::const_iterator it = src.begin();
+        const tstring_array::const_iterator end = src.end();
+        for (; it != end; ++it) {
+            dst.push_back(tstrings::toACP(*it));
+        }
+    }
+#else
+    dst = src;
+#endif
+}
+
 } // namespace
 
 JvmlLauncherHandle Jvm::exportLauncher() const {
@@ -283,17 +338,9 @@ JvmlLauncherHandle Jvm::exportLauncher() const {
 
     result->jliLibPath = tstrings::toUtf8(jvmPath);
 
-#ifdef TSTRINGS_WITH_WCHAR
-    {
-        tstring_array::const_iterator it = args.begin();
-        const tstring_array::const_iterator end = args.end();
-        for (; it != end; ++it) {
-            result->args.push_back(tstrings::toACP(*it));
-        }
-    }
-#else
-    result->args = args;
-#endif
+    copyStringArray(args, result->args);
+    result->envVarNames = envVarNames;
+    result->envVarValues = envVarValues;
 
     return result.release();
 }

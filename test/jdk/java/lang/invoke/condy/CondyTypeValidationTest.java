@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,13 +25,11 @@
  * @test
  * @bug 8186046
  * @summary Test invalid name in name and type
- * @library /lib/testlibrary/bytecode /java/lang/invoke/common
- * @build jdk.experimental.bytecode.BasicClassBuilder test.java.lang.invoke.lib.InstructionHelper
- * @run testng/othervm -XX:+UnlockDiagnosticVMOptions -XX:UseBootstrapCallInfo=3 CondyTypeValidationTest
+ * @library /java/lang/invoke/common
+ * @build test.java.lang.invoke.lib.InstructionHelper
+ * @run junit/othervm -XX:+UnlockDiagnosticVMOptions -XX:UseBootstrapCallInfo=3 CondyTypeValidationTest
  */
 
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 import test.java.lang.invoke.lib.InstructionHelper;
 
 import java.lang.invoke.MethodHandle;
@@ -42,36 +40,46 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static java.lang.invoke.MethodType.methodType;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class CondyTypeValidationTest {
     static final MethodHandles.Lookup L = MethodHandles.lookup();
     static final String BSM_TYPE = methodType(Object.class, MethodHandles.Lookup.class, String.class, Object.class)
             .toMethodDescriptorString();
 
-    @DataProvider
-    public Object[][] invalidTypesProvider() throws Exception {
+    public static Object[][] invalidTypesProvider() {
         return Stream.of(
 //                         ByteCode API checks for the following invalid types
 //                         "",
 //                         "[",
 //                         "A",
 //                         "a",
-                "L/java/lang/Object",
-                Stream.generate(() -> "[").limit(256).collect(Collectors.joining("", "", "I")))
-                .map(e -> new Object[]{e}).toArray(Object[][]::new);
+                new Object[]{"L/java/lang/Object", "not a valid reference type descriptor"},
+                new Object[]{
+                        Stream.generate(() -> "[").limit(256)
+                                .collect(Collectors.joining("", "", "I")),
+                        "Cannot create an array type descriptor with more than 255 dimensions"
+                }
+        ).toArray(Object[][]::new);
     }
 
-    @Test(dataProvider = "invalidTypesProvider", expectedExceptions = ClassFormatError.class)
-    public void testInvalidTypes(String type) throws Exception {
-        MethodHandle mh = InstructionHelper.ldcDynamicConstant(
-                L, "name", type,
-                "bsm", BSM_TYPE,
-                S -> {
-                });
+    @ParameterizedTest
+    @MethodSource("invalidTypesProvider")
+    public void testInvalidTypes(String type, String errMessContent) throws Exception {
+        var e = assertThrows(IllegalArgumentException.class, () -> {
+            MethodHandle mh = InstructionHelper.ldcDynamicConstant(
+                    L, "name", type,
+                    "bsm", BSM_TYPE
+            );
+        });
+        assertTrue(e.getMessage().contains(errMessContent));
     }
 
-    @DataProvider
-    public Object[][] validTypesProvider() throws Exception {
+    public static Object[][] validTypesProvider() {
         List<String> t = new ArrayList<>(List.of("B", "C", "D", "F", "I", "J", "Ljava/lang/Object;", "S", "Z"));
         int l = t.size();
         for (int i = 0; i < l; i++) {
@@ -82,12 +90,12 @@ public class CondyTypeValidationTest {
                 .map(e -> new Object[]{e}).toArray(Object[][]::new);
     }
 
-    @Test(dataProvider = "validTypesProvider")
+    @ParameterizedTest
+    @MethodSource("validTypesProvider")
     public void testValidTypes(String type) throws Exception {
         MethodHandle mh = InstructionHelper.ldcDynamicConstant(
                 L, "name", type,
-                "bsm", BSM_TYPE,
-                S -> {
-                });
+                "bsm", BSM_TYPE
+        );
     }
 }

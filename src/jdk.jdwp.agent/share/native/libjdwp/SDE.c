@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -584,7 +584,7 @@ private jboolean isValid(void);
 
     /**
      * Until the next stratum section, everything after this
-     * is in stratumId - so, store the current indicies.
+     * is in stratumId - so, store the current indices.
      */
     private void storeStratum(String stratumId) {
         /* remove redundant strata */
@@ -716,19 +716,6 @@ private jboolean isValid(void);
         return lineTable[lti].njplsStart +
                 (((jplsLine - lineTable[lti].jplsStart) /
                                    lineTable[lti].jplsLineInc));
-    }
-
-    private int fileTableIndex(int sti, int fileId) {
-        int i;
-        int fileIndexStart = stratumTable[sti].fileIndex;
-        /* one past end */
-        int fileIndexEnd = stratumTable[sti+1].fileIndex;
-        for (i = fileIndexStart; i < fileIndexEnd; ++i) {
-            if (fileTable[i].fileId == fileId) {
-                return i;
-            }
-        }
-        return -1;
     }
 
     private jboolean isValid(void) {

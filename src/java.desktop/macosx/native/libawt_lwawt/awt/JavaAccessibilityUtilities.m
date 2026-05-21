@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -51,17 +51,21 @@ static jclass sjc_CAccessibility = NULL;
 
 NSSize getAxComponentSize(JNIEnv *env, jobject axComponent, jobject component)
 {
+    GET_CACCESSIBILITY_CLASS_RETURN(NSZeroSize);
     DECLARE_CLASS_RETURN(jc_Dimension, "java/awt/Dimension", NSZeroSize);
     DECLARE_FIELD_RETURN(jf_width, jc_Dimension, "width", "I", NSZeroSize);
     DECLARE_FIELD_RETURN(jf_height, jc_Dimension, "height", "I", NSZeroSize);
     DECLARE_STATIC_METHOD_RETURN(jm_getSize, sjc_CAccessibility, "getSize",
            "(Ljavax/accessibility/AccessibleComponent;Ljava/awt/Component;)Ljava/awt/Dimension;", NSZeroSize);
 
-    jobject dimension = (*env)->CallStaticObjectMethod(env, jc_Dimension, jm_getSize, axComponent, component);
+    jobject dimension = (*env)->CallStaticObjectMethod(env, sjc_CAccessibility, jm_getSize, axComponent, component);
     CHECK_EXCEPTION();
 
     if (dimension == NULL) return NSZeroSize;
-    return NSMakeSize((*env)->GetIntField(env, dimension, jf_width), (*env)->GetIntField(env, dimension, jf_height));
+
+    NSSize size = NSMakeSize((*env)->GetIntField(env, dimension, jf_width), (*env)->GetIntField(env, dimension, jf_height));
+    (*env)->DeleteLocalRef(env, dimension);
+    return size;
 }
 
 NSString *getJavaRole(JNIEnv *env, jobject axComponent, jobject component)
@@ -95,9 +99,10 @@ jobject getAxContextSelection(JNIEnv *env, jobject axContext, jint index, jobjec
     GET_CACCESSIBILITY_CLASS_RETURN(nil);
     DECLARE_STATIC_METHOD_RETURN(jm_ax_getAccessibleSelection, sjc_CAccessibility, "ax_getAccessibleSelection",
                   "(Ljavax/accessibility/AccessibleContext;ILjava/awt/Component;)Ljavax/accessibility/Accessible;", nil);
-    return (*env)->CallStaticObjectMethod(env, sjc_CAccessibility, jm_ax_getAccessibleSelection,
+    jobject o = (*env)->CallStaticObjectMethod(env, sjc_CAccessibility, jm_ax_getAccessibleSelection,
                     axContext, index, component);
     CHECK_EXCEPTION();
+    return o;
 }
 
 void setAxContextSelection(JNIEnv *env, jobject axContext, jint index, jobject component)
@@ -226,7 +231,9 @@ NSPoint getAxComponentLocationOnScreen(JNIEnv *env, jobject axComponent, jobject
                       axComponent, component);
     CHECK_EXCEPTION();
     if (jpoint == NULL) return NSZeroPoint;
-    return NSMakePoint((*env)->GetIntField(env, jpoint, sjf_X), (*env)->GetIntField(env, jpoint, sjf_Y));
+    NSPoint p = NSMakePoint((*env)->GetIntField(env, jpoint, sjf_X), (*env)->GetIntField(env, jpoint, sjf_Y));
+    (*env)->DeleteLocalRef(env, jpoint);
+    return p;
 }
 
 jint getAxTextCharCount(JNIEnv *env, jobject axText, jobject component)
@@ -318,20 +325,6 @@ static BOOL JavaAccessibilityIsSupportedAttribute(id element, NSString *attribut
 {
     return [[element accessibilityAttributeNames] indexOfObject:attribute] != NSNotFound;
 }
-
-/*
- * Class:     sun_lwawt_macosx_CAccessibility
- * Method:    roleKey
- * Signature: (Ljavax/accessibility/AccessibleRole;)Ljava/lang/String;
- */
-JNIEXPORT jstring JNICALL Java_sun_lwawt_macosx_CAccessibility_roleKey
-(JNIEnv *env, jclass clz, jobject axRole)
-{
-    DECLARE_CLASS_RETURN(sjc_AccessibleRole, "javax/accessibility/AccessibleRole", NULL);
-    DECLARE_FIELD_RETURN(sjf_key, sjc_AccessibleRole, "key", "Ljava/lang/String;", NULL);
-    return (*env)->GetObjectField(env, axRole, sjf_key);
-}
-
 
 // errors from NSAccessibilityErrors
 void JavaAccessibilityRaiseSetAttributeToIllegalTypeException(const char *functionName, id element, NSString *attribute, id value)
@@ -426,7 +419,7 @@ NSValue *javaIntArrayToNSRangeValue(JNIEnv* env, jintArray array) {
         // Note: Java will not be on the stack here so a java exception can't happen and no need to call ExceptionCheck.
         NSLog(@"%s failed calling GetIntArrayElements", __FUNCTION__);
         return nil;
-    };
+    }
     NSValue *value = [NSValue valueWithRange:NSMakeRange(values[0], values[1] - values[0])];
     (*env)->ReleaseIntArrayElements(env, array, values, 0);
     return value;

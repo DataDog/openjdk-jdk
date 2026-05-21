@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,8 @@ package com.sun.jndi.ldap;
 
 import java.util.Vector;
 import java.util.EventObject;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 
 import javax.naming.event.NamingEvent;
 import javax.naming.event.NamingExceptionEvent;
@@ -34,18 +36,22 @@ import javax.naming.event.NamingListener;
 import javax.naming.ldap.UnsolicitedNotificationEvent;
 import javax.naming.ldap.UnsolicitedNotificationListener;
 
+import jdk.internal.misc.InnocuousThread;
+
 /**
  * Package private class used by EventSupport to dispatch events.
  * This class implements an event queue, and a dispatcher thread that
  * dequeues and dispatches events from the queue.
- *
- * Pieces stolen from sun.misc.Queue.
  *
  * @author      Bill Shannon (from javax.mail.event)
  * @author      Rosanna Lee (modified for JNDI-related events)
  */
 final class EventQueue implements Runnable {
     private static final boolean debug = false;
+
+    // EventQueue instance lock
+    private final ReentrantLock lock = new ReentrantLock();
+    private final Condition condition = lock.newCondition();
 
     private static class QueueElement {
         QueueElement next = null;
@@ -65,7 +71,7 @@ final class EventQueue implements Runnable {
 
     // package private
     EventQueue() {
-        qThread = Obj.helper.createThread(this);
+        qThread = InnocuousThread.newSystemThread("LDAP Event Dispatcher", this);
         qThread.setDaemon(true);  // not a user thread
         qThread.start();
     }
@@ -86,18 +92,23 @@ final class EventQueue implements Runnable {
      * are notified.
      * @param vector List of NamingListeners that will be notified of event.
      */
-    synchronized void enqueue(EventObject event, Vector<NamingListener> vector) {
-        QueueElement newElt = new QueueElement(event, vector);
+    void enqueue(EventObject event, Vector<NamingListener> vector) {
+        lock.lock();
+        try {
+            QueueElement newElt = new QueueElement(event, vector);
 
-        if (head == null) {
-            head = newElt;
-            tail = newElt;
-        } else {
-            newElt.next = head;
-            head.prev = newElt;
-            head = newElt;
+            if (head == null) {
+                head = newElt;
+                tail = newElt;
+            } else {
+                newElt.next = head;
+                head.prev = newElt;
+                head = newElt;
+            }
+            condition.signal();
+        } finally {
+            lock.unlock();
         }
-        notify();
     }
 
     /**
@@ -108,24 +119,29 @@ final class EventQueue implements Runnable {
      * @exception java.lang.InterruptedException if any thread has
      *              interrupted this thread.
      */
-    private synchronized QueueElement dequeue()
-                                throws InterruptedException {
-        while (tail == null)
-            wait();
-        QueueElement elt = tail;
-        tail = elt.prev;
-        if (tail == null) {
-            head = null;
-        } else {
-            tail.next = null;
+    private QueueElement dequeue() throws InterruptedException {
+        lock.lock();
+        try {
+            while (tail == null)
+                condition.await();
+            QueueElement elt = tail;
+            tail = elt.prev;
+            if (tail == null) {
+                head = null;
+            } else {
+                tail.next = null;
+            }
+            elt.prev = elt.next = null;
+            return elt;
+        } finally {
+            lock.unlock();
         }
-        elt.prev = elt.next = null;
-        return elt;
     }
 
     /**
      * Pull events off the queue and dispatch them.
      */
+    @Override
     public void run() {
         QueueElement qe;
 

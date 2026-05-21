@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,9 +21,6 @@
  * questions.
  */
 
-import org.testng.annotations.AfterMethod;
-import org.testng.annotations.DataProvider;
-
 import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
@@ -35,16 +32,19 @@ import java.util.function.BooleanSupplier;
 import static java.net.http.HttpClient.Builder.NO_PROXY;
 import static java.net.http.HttpClient.newBuilder;
 
+import org.junit.jupiter.api.AfterEach;
+
 /* Common infrastructure for tests that check pending operations */
 public class PendingOperations {
 
     static final Class<IllegalStateException> ISE = IllegalStateException.class;
     static final Class<IOException> IOE = IOException.class;
     // Time after which we deem that the local send buffer and remote
-    // receive buffer must be full. This has been heuristically determined.
+    // receive buffer must be full.
     // At the time of writing, using anything <= 5s on Mac will make the
     // tests fail intermittently.
     static final long MAX_WAIT_SEC = 10; // seconds.
+    long waitSec;
 
     DummyWebSocketServer server;
     WebSocket webSocket;
@@ -53,7 +53,7 @@ public class PendingOperations {
         return newBuilder().proxy(NO_PROXY).build();
     }
 
-    @AfterMethod
+    @AfterEach
     public void cleanup() {
         // make sure we have a trace both on System.out and System.err
         // to help with diagnosis.
@@ -61,6 +61,12 @@ public class PendingOperations {
         System.err.println("cleanup: Closing server");
         server.close();
         webSocket.abort();
+    }
+
+    /* shortcut */
+    static void assertAllHang(CompletableFuture<?> cf1,
+                              CompletableFuture<?> cf2) {
+        assertHangs(CompletableFuture.anyOf(cf1, cf2));
     }
 
     /* shortcut */
@@ -78,8 +84,7 @@ public class PendingOperations {
         Support.assertNotDone(future);
     }
 
-    @DataProvider(name = "booleans")
-    public Object[][] booleans() {
+    public static Object[][] booleans() {
         return new Object[][]{{Boolean.TRUE}, {Boolean.FALSE}};
     }
 
@@ -99,6 +104,11 @@ public class PendingOperations {
         int iterations = 0;
         do {
             iterations++;
+            if (iterations == 1) {
+                waitSec = initialWaitSec();
+            } else {
+                waitSec = MAX_WAIT_SEC;
+            }
             System.out.println("--- iteration " + iterations + " ---");
             try {
                 callable.call();
@@ -124,5 +134,9 @@ public class PendingOperations {
                 Thread.sleep(100);
             }
         } while (iterations <= ITERATIONS);
+    }
+
+    long initialWaitSec() {
+        return 1;
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,7 +37,7 @@ import com.apple.laf.ClientPropertyApplicator;
 import com.apple.laf.ClientPropertyApplicator.Property;
 import com.apple.laf.AquaUtils.RecyclableSingleton;
 
-public class AquaTableHeaderUI extends BasicTableHeaderUI {
+public final class AquaTableHeaderUI extends BasicTableHeaderUI {
     private int originalHeaderAlignment;
     protected int sortColumn;
     protected int sortOrder;
@@ -46,6 +46,7 @@ public class AquaTableHeaderUI extends BasicTableHeaderUI {
         return new AquaTableHeaderUI();
     }
 
+    @Override
     public void installDefaults() {
         super.installDefaults();
 
@@ -57,6 +58,7 @@ public class AquaTableHeaderUI extends BasicTableHeaderUI {
         }
     }
 
+    @Override
     public void uninstallDefaults() {
         final TableCellRenderer renderer = header.getDefaultRenderer();
         if (renderer instanceof UIResource && renderer instanceof DefaultTableCellRenderer) {
@@ -103,9 +105,8 @@ public class AquaTableHeaderUI extends BasicTableHeaderUI {
         }
 
         final TableHeaderUI headerUI = target.getUI();
-        if (headerUI == null || !(headerUI instanceof AquaTableHeaderUI)) return;
+        if (!(headerUI instanceof AquaTableHeaderUI aquaHeaderUI)) return;
 
-        final AquaTableHeaderUI aquaHeaderUI = (AquaTableHeaderUI)headerUI;
         aquaHeaderUI.sortColumn = tableColumn.getModelIndex();
         aquaHeaderUI.sortOrder = sortDirection;
         final AquaTableCellRenderer renderer = aquaHeaderUI.new AquaTableCellRenderer();
@@ -113,7 +114,8 @@ public class AquaTableHeaderUI extends BasicTableHeaderUI {
     }
 
     @SuppressWarnings("serial") // Superclass is not serializable across versions
-    class AquaTableCellRenderer extends DefaultTableCellRenderer implements UIResource {
+    final class AquaTableCellRenderer extends DefaultTableCellRenderer implements UIResource {
+        @Override
         public Component getTableCellRendererComponent(final JTable localTable, final Object value, final boolean isSelected, final boolean hasFocus, final int row, final int column) {
             if (localTable != null) {
                 if (header != null) {
@@ -145,8 +147,7 @@ public class AquaTableHeaderUI extends BasicTableHeaderUI {
     }
 
     protected static TableColumn getTableColumn(final JTableHeader target, final Object value) {
-        if (value == null || !(value instanceof Integer)) return null;
-        final int columnIndex = ((Integer)value).intValue();
+        if (!(value instanceof Integer columnIndex)) return null;
 
         final TableColumnModel columnModel = target.getColumnModel();
         if (columnIndex < 0 || columnIndex >= columnModel.getColumnCount()) return null;
@@ -167,11 +168,13 @@ public class AquaTableHeaderUI extends BasicTableHeaderUI {
         return (AquaTableHeaderBorder)border;
     }
 
+    @Override
     protected void installListeners() {
         super.installListeners();
         getTableHeaderApplicators().attachAndApplyClientProperties(header);
     }
 
+    @Override
     protected void uninstallListeners() {
         getTableHeaderApplicators().removeFrom(header);
         super.uninstallListeners();
@@ -234,6 +237,7 @@ public class AquaTableHeaderUI extends BasicTableHeaderUI {
      * Return the minimum size of the header. The minimum width is the sum of the minimum widths of each column (plus
      * inter-cell spacing).
      */
+    @Override
     public Dimension getMinimumSize(final JComponent c) {
         long width = 0;
         final Enumeration<TableColumn> enumeration = header.getColumnModel().getColumns();
@@ -249,6 +253,7 @@ public class AquaTableHeaderUI extends BasicTableHeaderUI {
      * the components provided by the header renderers. The preferred width is the sum of the preferred widths of each
      * column (plus inter-cell spacing).
      */
+    @Override
     public Dimension getPreferredSize(final JComponent c) {
         long width = 0;
         final Enumeration<TableColumn> enumeration = header.getColumnModel().getColumns();

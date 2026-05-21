@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,25 +26,50 @@
 #define SHARE_RUNTIME_VMOPERATIONS_HPP
 
 #include "oops/oop.hpp"
-#include "runtime/vmOperation.hpp"
-#include "runtime/thread.hpp"
+#include "runtime/javaThread.hpp"
 #include "runtime/threadSMR.hpp"
+#include "runtime/vmOperation.hpp"
+
+class ObjectMonitorsView;
 
 // A hodge podge of commonly used VM Operations
 
-class VM_None: public VM_Operation {
-  const char* _reason;
- public:
-  VM_None(const char* reason) : _reason(reason) {}
-  const char* name() const { return _reason; }
-  VMOp_Type type() const { return VMOp_None; }
-  void doit() {};
+class VM_EmptyOperation : public VM_Operation {
+public:
+  virtual void doit() final {}
+  virtual bool skip_thread_oop_barriers() const final {
+    // Neither the doit function nor the safepoint
+    // cleanup tasks read oops in the Java threads.
+    return true;
+  }
 };
 
-class VM_Cleanup: public VM_Operation {
+class VM_Halt: public VM_EmptyOperation {
  public:
-  VMOp_Type type() const { return VMOp_Cleanup; }
-  void doit() {};
+  VMOp_Type type() const { return VMOp_Halt; }
+};
+
+class VM_SafepointALot: public VM_EmptyOperation {
+ public:
+  VMOp_Type type() const { return VMOp_SafepointALot; }
+};
+
+// empty vm op, evaluated just to force a safepoint
+class VM_ForceSafepoint: public VM_EmptyOperation {
+ public:
+  VMOp_Type type() const { return VMOp_ForceSafepoint; }
+};
+
+// used by whitebox API to emulate VM issues
+// when VM can't operate and doesn't respond to jcmd
+class VM_HangInSafepoint: public VM_Operation {
+public:
+  VMOp_Type type() const { return VMOp_ForceSafepoint; }
+  void doit() {
+    while(true) {
+      os::naked_short_sleep(10);
+    }
+  }
 };
 
 class VM_ClearICs: public VM_Operation {
@@ -54,32 +79,6 @@ class VM_ClearICs: public VM_Operation {
   VM_ClearICs(bool preserve_static_stubs) { _preserve_static_stubs = preserve_static_stubs; }
   void doit();
   VMOp_Type type() const { return VMOp_ClearICs; }
-};
-
-// empty vm op, evaluated just to force a safepoint
-class VM_ForceSafepoint: public VM_Operation {
- public:
-  void doit()         {}
-  VMOp_Type type() const { return VMOp_ForceSafepoint; }
-};
-
-// empty vm op, when forcing a safepoint to suspend a thread
-class VM_ThreadSuspend: public VM_ForceSafepoint {
- public:
-  VMOp_Type type() const { return VMOp_ThreadSuspend; }
-};
-
-// empty vm op, when forcing a safepoint to suspend threads from jvmti
-class VM_ThreadsSuspendJVMTI: public VM_ForceSafepoint {
- public:
-  VMOp_Type type() const { return VMOp_ThreadsSuspendJVMTI; }
-};
-
-// empty vm op, when forcing a safepoint due to inline cache buffers being full
-class VM_ICBufferFull: public VM_ForceSafepoint {
- public:
-  VMOp_Type type() const { return VMOp_ICBufferFull; }
-  virtual bool skip_thread_oop_barriers() const { return true; }
 };
 
 // Base class for invoking parts of a gtest in a safepoint.
@@ -97,6 +96,20 @@ class VM_CleanClassLoaderDataMetaspaces : public VM_Operation {
  public:
   VM_CleanClassLoaderDataMetaspaces() {}
   VMOp_Type type() const                         { return VMOp_CleanClassLoaderDataMetaspaces; }
+  void doit();
+};
+
+class VM_RehashStringTable : public VM_Operation {
+ public:
+  VM_RehashStringTable() {}
+  VMOp_Type type() const                         { return VMOp_RehashStringTable; }
+  void doit();
+};
+
+class VM_RehashSymbolTable : public VM_Operation {
+ public:
+  VM_RehashSymbolTable() {}
+  VMOp_Type type() const                         { return VMOp_RehashSymbolTable; }
   void doit();
 };
 
@@ -119,8 +132,6 @@ class VM_DeoptimizeFrame: public VM_Operation {
 
 #ifndef PRODUCT
 class VM_DeoptimizeAll: public VM_Operation {
- private:
-  Klass* _dependee;
  public:
   VM_DeoptimizeAll() {}
   VMOp_Type type() const                         { return VMOp_DeoptimizeAll; }
@@ -185,8 +196,8 @@ class VM_FindDeadlocks: public VM_Operation {
                               // which protects the JavaThreads in _deadlocks.
 
  public:
-  VM_FindDeadlocks(bool concurrent_locks) :  _concurrent_locks(concurrent_locks), _deadlocks(NULL), _out(NULL), _setter() {};
-  VM_FindDeadlocks(outputStream* st) : _concurrent_locks(true), _deadlocks(NULL), _out(st) {};
+  VM_FindDeadlocks(bool concurrent_locks) :  _concurrent_locks(concurrent_locks), _deadlocks(nullptr), _out(nullptr), _setter() {};
+  VM_FindDeadlocks(outputStream* st) : _concurrent_locks(true), _deadlocks(nullptr), _out(st) {};
   ~VM_FindDeadlocks();
 
   DeadlockCycle* result()      { return _deadlocks; };
@@ -207,7 +218,8 @@ class VM_ThreadDump : public VM_Operation {
   bool                           _with_locked_monitors;
   bool                           _with_locked_synchronizers;
 
-  void snapshot_thread(JavaThread* java_thread, ThreadConcurrentLocks* tcl);
+  void snapshot_thread(JavaThread* java_thread, ThreadConcurrentLocks* tcl,
+                       ObjectMonitorsView* monitors);
 
  public:
   VM_ThreadDump(ThreadDumpResult* result,

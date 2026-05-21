@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,7 @@
 #include "jvm.h"
 #include "jlong.h"
 
+#include "java_lang_Long.h"
 #include "nio.h"
 #include "nio_util.h"
 #include "net_util.h"
@@ -77,6 +78,11 @@ Java_sun_nio_ch_IOUtil_iovMax(JNIEnv *env, jclass this)
     return 16;
 }
 
+JNIEXPORT jlong JNICALL
+Java_sun_nio_ch_IOUtil_writevMax(JNIEnv *env, jclass this)
+{
+    return java_lang_Long_MAX_VALUE;
+}
 
 jint
 convertReturnVal(JNIEnv *env, jint n, jboolean reading)
@@ -128,11 +134,10 @@ Java_sun_nio_ch_IOUtil_setfdVal(JNIEnv *env, jclass clazz, jobject fdo, jint val
 
 JNIEXPORT void JNICALL
 Java_sun_nio_ch_IOUtil_configureBlocking(JNIEnv *env, jclass clazz,
-                                        jobject fdo, jboolean blocking)
+                                         jint fd, jboolean blocking)
 {
     u_long argp;
     int result = 0;
-    jint fd = fdval(env, fdo);
 
     if (blocking == JNI_FALSE) {
         argp = SET_NONBLOCKING;
@@ -143,8 +148,7 @@ Java_sun_nio_ch_IOUtil_configureBlocking(JNIEnv *env, jclass clazz,
     }
     result = ioctlsocket(fd, FIONBIO, &argp);
     if (result == SOCKET_ERROR) {
-        int error = WSAGetLastError();
-        handleSocketError(env, (jint)error);
+        NET_ThrowNew(env, WSAGetLastError(), "ioctlsocket");
     }
 }
 

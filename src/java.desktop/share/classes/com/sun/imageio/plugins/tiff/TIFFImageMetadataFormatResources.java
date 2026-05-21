@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,7 +35,7 @@ public class TIFFImageMetadataFormatResources extends ListResourceBundle {
         { "TIFFIFD/parentTagName",
           "A mnemonic name for the field pointing to this IFD, if known" },
         { "TIFFField", "A field containing data" },
-        { "TIFFField/number", "The tag number asociated with the field" },
+        { "TIFFField/number", "The tag number associated with the field" },
         { "TIFFField/name",
           "A mnemonic name associated with the field, if known" },
 
@@ -96,6 +96,7 @@ public class TIFFImageMetadataFormatResources extends ListResourceBundle {
     public TIFFImageMetadataFormatResources() {
     }
 
+    @Override
     public Object[][] getContents() {
         return contents.clone();
     }

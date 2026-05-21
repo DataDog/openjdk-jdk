@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,32 +26,89 @@
 #define SHARE_CDS_HEAPSHARED_INLINE_HPP
 
 #include "cds/heapShared.hpp"
-#include "oops/compressedOops.inline.hpp"
-#include "utilities/align.hpp"
+
+#include "cds/aotReferenceObjSupport.hpp"
+#include "cds/regeneratedClasses.hpp"
+#include "classfile/javaClasses.hpp"
+#include "utilities/macros.hpp"
 
 #if INCLUDE_CDS_JAVA_HEAP
 
-inline oop HeapShared::decode_from_archive(narrowOop v) {
-  assert(!CompressedOops::is_null(v), "narrow oop value can never be zero");
-  uintptr_t p = ((uintptr_t)_narrow_oop_base) + ((uintptr_t)v << _narrow_oop_shift);
-  if (p >= _dumptime_base_0) {
-    assert(p < _dumptime_top, "must be");
-    if (p >= _dumptime_base_3) {
-      p += _runtime_offset_3;
-    } else if (p >= _dumptime_base_2) {
-      p += _runtime_offset_2;
-    } else if (p >= _dumptime_base_1) {
-      p += _runtime_offset_1;
-    } else {
-      p += _runtime_offset_0;
-    }
-  }
-
-  oop result = cast_to_oop((uintptr_t)p);
-  assert(is_object_aligned(result), "address not aligned: " INTPTR_FORMAT, p2i((void*) result));
-  return result;
+inline bool HeapShared::is_loading() {
+  return _heap_load_mode != HeapArchiveMode::_uninitialized;
 }
 
-#endif
+inline bool HeapShared::is_loading_streaming_mode() {
+  assert(_heap_load_mode != HeapArchiveMode::_uninitialized, "not initialized yet");
+  return _heap_load_mode == HeapArchiveMode::_streaming;
+}
+
+inline bool HeapShared::is_loading_mapping_mode() {
+  assert(_heap_load_mode != HeapArchiveMode::_uninitialized, "not initialized yet");
+  return _heap_load_mode == HeapArchiveMode::_mapping;
+}
+
+inline bool HeapShared::is_writing() {
+  return _heap_write_mode != HeapArchiveMode::_uninitialized;
+}
+
+inline bool HeapShared::is_writing_streaming_mode() {
+  assert(_heap_write_mode != HeapArchiveMode::_uninitialized, "not initialized yet");
+  return _heap_write_mode == HeapArchiveMode::_streaming;
+}
+
+inline bool HeapShared::is_writing_mapping_mode() {
+  assert(_heap_write_mode != HeapArchiveMode::_uninitialized, "not initialized yet");
+  return _heap_write_mode == HeapArchiveMode::_mapping;
+}
+
+// Keep the knowledge about which objects have what metadata in one single place
+template <typename T>
+void HeapShared::do_metadata_offsets(oop src_obj, T callback) {
+  if (java_lang_Class::is_instance(src_obj)) {
+    assert(java_lang_Class::klass_offset() < java_lang_Class::array_klass_offset(),
+           "metadata offsets must be sorted");
+    callback(java_lang_Class::klass_offset());
+    callback(java_lang_Class::array_klass_offset());
+  } else if (java_lang_invoke_ResolvedMethodName::is_instance(src_obj)) {
+    callback(java_lang_invoke_ResolvedMethodName::vmtarget_offset());
+  }
+}
+
+inline void HeapShared::remap_loaded_metadata(oop src_obj) {
+  do_metadata_offsets(src_obj, [&](int offset) {
+    Metadata* metadata = src_obj->metadata_field(offset);
+    if (metadata != nullptr) {
+      metadata = (Metadata*)(address(metadata) + AOTMetaspace::relocation_delta());
+      src_obj->metadata_field_put(offset, metadata);
+    }
+  });
+}
+
+inline oop HeapShared::maybe_remap_referent(bool is_java_lang_ref, size_t field_offset, oop referent) {
+  if (referent == nullptr) {
+    return nullptr;
+  }
+
+  if (is_java_lang_ref && AOTReferenceObjSupport::skip_field((int)field_offset)) {
+    return nullptr;
+  }
+
+  if (java_lang_Class::is_instance(referent)) {
+    Klass* k = java_lang_Class::as_Klass(referent);
+    if (RegeneratedClasses::has_been_regenerated(k)) {
+      referent = RegeneratedClasses::get_regenerated_object(k)->java_mirror();
+    }
+    // When the source object points to a "real" mirror, the buffered object should point
+    // to the "scratch" mirror, which has all unarchivable fields scrubbed (to be reinstated
+    // at run time).
+    referent = HeapShared::scratch_java_mirror(referent);
+    assert(referent != nullptr, "must be");
+  }
+
+  return referent;
+}
+
+#endif // INCLUDE_CDS_JAVA_HEAP
 
 #endif // SHARE_CDS_HEAPSHARED_INLINE_HPP

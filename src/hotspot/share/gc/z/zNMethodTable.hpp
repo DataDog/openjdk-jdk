@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,7 @@
 
 #include "gc/z/zNMethodTableIteration.hpp"
 #include "gc/z/zSafeDelete.hpp"
-#include "memory/allocation.hpp"
+#include "memory/allStatic.hpp"
 
 class nmethod;
 class NMethodClosure;
@@ -35,15 +35,13 @@ class ZWorkers;
 
 class ZNMethodTable : public AllStatic {
 private:
-  static ZNMethodTableEntry*                     _table;
-  static size_t                                  _size;
-  static size_t                                  _nregistered;
-  static size_t                                  _nunregistered;
-  static ZNMethodTableIteration                  _iteration;
-  static ZSafeDeleteNoLock<ZNMethodTableEntry[]> _safe_delete;
-
-  static ZNMethodTableEntry* create(size_t size);
-  static void destroy(ZNMethodTableEntry* table);
+  static ZNMethodTableEntry*               _table;
+  static size_t                            _size;
+  static size_t                            _nregistered;
+  static size_t                            _nunregistered;
+  static ZNMethodTableIteration            _iteration;
+  static ZNMethodTableIteration            _iteration_secondary;
+  static ZSafeDelete<ZNMethodTableEntry[]> _safe_delete;
 
   static size_t first_index(const nmethod* nm, size_t size);
   static size_t next_index(size_t prev_index, size_t size);
@@ -54,6 +52,8 @@ private:
   static void rebuild(size_t new_size);
   static void rebuild_if_needed();
 
+  static ZNMethodTableIteration* iteration(bool secondary);
+
 public:
   static size_t registered_nmethods();
   static size_t unregistered_nmethods();
@@ -61,14 +61,9 @@ public:
   static void register_nmethod(nmethod* nm);
   static void unregister_nmethod(nmethod* nm);
 
-  static void wait_until_iteration_done();
-
-  static void nmethods_do_begin();
-  static void nmethods_do_end();
-  static void nmethods_do(NMethodClosure* cl);
-
-  static void unlink(ZWorkers* workers, bool unloading_occurred);
-  static void purge(ZWorkers* workers);
+  static void nmethods_do_begin(bool secondary);
+  static void nmethods_do_end(bool secondary);
+  static void nmethods_do(bool secondary, NMethodClosure* cl);
 };
 
 #endif // SHARE_GC_Z_ZNMETHODTABLE_HPP

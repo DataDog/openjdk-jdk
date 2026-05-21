@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,9 +26,9 @@
 #define SHARE_GC_SHARED_C1_BARRIERSETC1_HPP
 
 #include "c1/c1_Decorators.hpp"
-#include "c1/c1_LIRGenerator.hpp"
 #include "c1/c1_Instruction.hpp"
 #include "c1/c1_LIR.hpp"
+#include "c1/c1_LIRGenerator.hpp"
 #include "memory/allocation.hpp"
 
 class LIRGenerator;
@@ -41,17 +41,17 @@ class LIRAddressOpr: public StackObj {
   LIRItem* _item;
   LIR_Opr  _opr;
 public:
-  LIRAddressOpr(LIRItem& item) : _item(&item), _opr(NULL) {}
-  LIRAddressOpr(LIR_Opr opr) : _item(NULL), _opr(opr) {}
+  LIRAddressOpr(LIRItem& item) : _item(&item), _opr() {}
+  LIRAddressOpr(LIR_Opr opr) : _item(nullptr), _opr(opr) {}
   LIRAddressOpr(const LIRAddressOpr& other) : _item(other._item), _opr(other._opr) {}
 
   LIRItem& item() const {
-    assert(_item != NULL, "sanity");
+    assert(_item != nullptr, "sanity");
     return *_item;
   }
 
   LIR_Opr opr() const {
-    if (_item == NULL) {
+    if (_item == nullptr) {
       return _opr;
     } else {
       return _item->result();
@@ -74,13 +74,13 @@ class LIRAccess: public StackObj {
 public:
   LIRAccess(LIRGenerator* gen, DecoratorSet decorators,
             LIRAddressOpr base, LIRAddressOpr offset, BasicType type,
-            CodeEmitInfo* patch_emit_info = NULL, CodeEmitInfo* access_emit_info = NULL) :
+            CodeEmitInfo* patch_emit_info = nullptr, CodeEmitInfo* access_emit_info = nullptr) :
     _gen(gen),
-    _decorators(AccessInternal::decorator_fixup(decorators)),
+    _decorators(AccessInternal::decorator_fixup(decorators, type)),
     _base(base),
     _offset(offset),
     _type(type),
-    _resolved_addr(NULL),
+    _resolved_addr(),
     _patch_emit_info(patch_emit_info),
     _access_emit_info(access_emit_info) {}
 
@@ -107,7 +107,7 @@ public:
 };
 
 // The BarrierSetC1 class is the main entry point for the GC backend of the Access API in C1.
-// It is called by the LIRGenerator::access_* functions, which is the main entry poing for
+// It is called by the LIRGenerator::access_* functions, which is the main entry point for
 // access calls in C1.
 
 class BarrierSetC1: public CHeapObj<mtGC> {
@@ -135,7 +135,7 @@ public:
   virtual LIR_Opr atomic_xchg_at(LIRAccess& access, LIRItem& value);
   virtual LIR_Opr atomic_add_at(LIRAccess& access, LIRItem& value);
 
-  virtual void generate_c1_runtime_stubs(BufferBlob* buffer_blob) {}
+  virtual bool generate_c1_runtime_stubs(BufferBlob* buffer_blob) { return true; }
 };
 
 #endif // SHARE_GC_SHARED_C1_BARRIERSETC1_HPP

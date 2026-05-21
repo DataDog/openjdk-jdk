@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,22 +24,23 @@
 /*
  * @test
  * @build DummyWebSocketServer
- * @run testng/othervm
+ * @run junit/othervm
  *      -Djdk.httpclient.sendBufferSize=8192
- *       PendingPingTextClose
+ *       ${test.main.class}
  */
 
 // This test produce huge logs (14Mb+) so disable logging by default
 // *      -Djdk.internal.httpclient.debug=true
 // *      -Djdk.internal.httpclient.websocket.debug=true
 
-import org.testng.annotations.Test;
-
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 public class PendingPingTextClose extends PendingOperations {
 
@@ -48,7 +49,8 @@ public class PendingPingTextClose extends PendingOperations {
     CompletableFuture<WebSocket> cfPing;
     CompletableFuture<WebSocket> cfClose;
 
-    @Test(dataProvider = "booleans")
+    @ParameterizedTest
+    @MethodSource("booleans")
     public void pendingPingTextClose(boolean last) throws Exception {
         try {
             repeatable(() -> {
@@ -65,7 +67,7 @@ public class PendingPingTextClose extends PendingOperations {
                     if (debug) System.out.printf("begin cycle #%s at %s%n", i, start);
                     cfPing = webSocket.sendPing(data);
                     try {
-                        cfPing.get(MAX_WAIT_SEC, TimeUnit.SECONDS);
+                        cfPing.get(waitSec, TimeUnit.SECONDS);
                         data.clear();
                     } catch (TimeoutException e) {
                         done = true;
@@ -73,31 +75,35 @@ public class PendingPingTextClose extends PendingOperations {
                         break;
                     } finally {
                         long stop = System.currentTimeMillis();
-                        if (debug || done || (stop - start) > (MAX_WAIT_SEC * 1000L)/2L)
+                        if (debug || done || (stop - start) > (waitSec * 1000L)/2L)
                             System.out.printf("end cycle #%s at %s (%s ms)%n", i, stop, stop - start);
                     }
                 }
                 assertFails(ISE, webSocket.sendPing(ByteBuffer.allocate(125)));
                 assertFails(ISE, webSocket.sendPong(ByteBuffer.allocate(125)));
-                System.out.println("asserting that sendText hangs");
                 cfText = webSocket.sendText("hello", last);
-                assertHangs(cfText);
-                System.out.println("asserting that sendClose hangs");
                 cfClose = webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "ok");
-                assertHangs(cfClose);
+                System.out.println("asserting that sendText and sendClose hang");
+                assertAllHang(cfText, cfClose);
                 System.out.println("asserting that cfPing is not completed");
                 assertNotDone(cfPing);
                 System.out.println("finishing");
+                webSocket.abort();
+                assertFails(IOE, cfPing);
+                assertFails(IOE, cfText);
+                assertFails(IOE, cfClose);
                 return null;
             }, () -> cfPing.isDone()); // can't use method ref: cfPing not initialized
-            webSocket.abort();
-            assertFails(IOE, cfPing);
-            assertFails(IOE, cfText);
-            assertFails(IOE, cfClose);
         } catch (Throwable t) {
             System.err.printf("pendingPingTextClose(%s) failed: %s%n", last, t);
             t.printStackTrace();
             throw t;
         }
+    }
+
+    @Override
+    long initialWaitSec() {
+        // Some Windows machines increase buffer size after 1-2 seconds
+        return isWindows() ? 3 : 1;
     }
 }

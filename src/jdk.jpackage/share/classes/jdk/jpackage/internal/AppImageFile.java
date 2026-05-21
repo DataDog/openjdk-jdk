@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,311 +24,340 @@
  */
 package jdk.jpackage.internal;
 
+import static java.util.stream.Collectors.joining;
+import static java.util.stream.Collectors.toUnmodifiableMap;
+import static java.util.stream.Collectors.toUnmodifiableSet;
+import static jdk.jpackage.internal.cli.StandardAppImageFileOption.APP_VERSION;
+import static jdk.jpackage.internal.cli.StandardAppImageFileOption.DESCRIPTION;
+import static jdk.jpackage.internal.cli.StandardAppImageFileOption.LAUNCHER_AS_SERVICE;
+import static jdk.jpackage.internal.cli.StandardAppImageFileOption.LAUNCHER_NAME;
+import static jdk.jpackage.internal.util.function.ThrowingFunction.toFunction;
+
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.NoSuchFileException;
-import java.text.MessageFormat;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
+import java.util.NoSuchElementException;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Stream;
+import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamWriter;
 import javax.xml.xpath.XPath;
-import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
+import jdk.internal.util.OperatingSystem;
+import jdk.jpackage.internal.cli.OptionValue;
+import jdk.jpackage.internal.cli.Options;
+import jdk.jpackage.internal.cli.StandardAppImageFileOption.AppImageFileOptionScope;
+import jdk.jpackage.internal.cli.StandardAppImageFileOption.InvalidOptionValueException;
+import jdk.jpackage.internal.cli.StandardAppImageFileOption.MissingMandatoryOptionException;
+import jdk.jpackage.internal.model.Application;
+import jdk.jpackage.internal.model.ApplicationLayout;
+import jdk.jpackage.internal.model.ExternalApplication;
+import jdk.jpackage.internal.model.JPackageException;
+import jdk.jpackage.internal.model.Launcher;
+import jdk.jpackage.internal.util.XmlUtils;
+import jdk.jpackage.internal.util.function.ExceptionBox;
 import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-import org.w3c.dom.NamedNodeMap;
 import org.xml.sax.SAXException;
 
-import static jdk.jpackage.internal.StandardBundlerParam.VERSION;
-import static jdk.jpackage.internal.StandardBundlerParam.ADD_LAUNCHERS;
-import static jdk.jpackage.internal.StandardBundlerParam.APP_NAME;
-import static jdk.jpackage.internal.StandardBundlerParam.SHORTCUT_HINT;
-import static jdk.jpackage.internal.StandardBundlerParam.MENU_HINT;
-import static jdk.jpackage.internal.StandardBundlerParam.SIGN_BUNDLE;
 
-public class AppImageFile {
+final class AppImageFile {
 
-    // These values will be loaded from AppImage xml file.
-    private final String creatorVersion;
-    private final String creatorPlatform;
-    private final String launcherName;
-    private final List<LauncherInfo> addLauncherInfos;
-    private final boolean signed;
-
-    private static final String FILENAME = ".jpackage.xml";
-
-    private static final Map<Platform, String> PLATFORM_LABELS = Map.of(
-            Platform.LINUX, "linux", Platform.WINDOWS, "windows", Platform.MAC,
-            "macOS");
-
-
-    private AppImageFile() {
-        this(null, null, null, null, null);
-    }
-
-    private AppImageFile(String launcherName, List<LauncherInfo> launcherInfos,
-            String creatorVersion, String creatorPlatform, String signedStr) {
-        this.launcherName = launcherName;
-        this.addLauncherInfos = launcherInfos;
-        this.creatorVersion = creatorVersion;
-        this.creatorPlatform = creatorPlatform;
-        this.signed = "true".equals(signedStr);
+    AppImageFile(Application app) {
+        appVersion = Objects.requireNonNull(app.version());
+        extra = Objects.requireNonNull(app.extraAppImageFileData());
+        launcherInfos = app.launchers().stream().map(LauncherInfo::new).toList();
     }
 
     /**
-     * Returns list of additional launchers configured for the application.
-     * Each item in the list is not null or empty string.
-     * Returns empty list for application without additional launchers.
+     * Writes the values captured in this instance into the application image info
+     * file in the given application layout.
+     * <p>
+     * It is an equivalent to calling
+     * {@link #save(ApplicationLayout, OperatingSystem)} method with
+     * {@code OperatingSystem.current()} for the second parameter.
+     *
+     * @param appLayout the application layout
+     * @throws IOException if an I/O error occurs when writing
      */
-    List<LauncherInfo> getAddLaunchers() {
-        return addLauncherInfos;
+    void save(ApplicationLayout appLayout) throws IOException {
+        save(appLayout, OperatingSystem.current());
     }
 
     /**
-     * Returns main application launcher name. Never returns null or empty value.
+     * Writes the values captured in this instance into the application image info
+     * file in the given application layout.
+     *
+     * @param appLayout the application layout
+     * @param os the target OS
+     * @throws IOException if an I/O error occurs when writing
      */
-    String getLauncherName() {
-        return launcherName;
-    }
-
-    boolean isSigned() {
-        return signed;
-    }
-
-    void verifyCompatible() throws ConfigException {
-        // Just do nothing for now.
-    }
-
-    /**
-     * Returns path to application image info file.
-     * @param appImageDir - path to application image
-     */
-    public static Path getPathInAppImage(Path appImageDir) {
-        return ApplicationLayout.platformAppImage()
-                .resolveAt(appImageDir)
-                .appDirectory()
-                .resolve(FILENAME);
-    }
-
-    /**
-     * Saves file with application image info in application image.
-     * @param appImageDir - path to application image
-     * @throws IOException
-     */
-    static void save(Path appImageDir, Map<String, Object> params)
-            throws IOException {
-        IOUtils.createXml(getPathInAppImage(appImageDir), xml -> {
+    void save(ApplicationLayout appLayout, OperatingSystem os) throws IOException {
+        XmlUtils.createXml(getPathInAppImage(appLayout), xml -> {
             xml.writeStartElement("jpackage-state");
             xml.writeAttribute("version", getVersion());
-            xml.writeAttribute("platform", getPlatform());
+            xml.writeAttribute("platform", getPlatform(os));
 
             xml.writeStartElement("app-version");
-            xml.writeCharacters(VERSION.fetchFrom(params));
+            xml.writeCharacters(appVersion);
             xml.writeEndElement();
 
-            xml.writeStartElement("main-launcher");
-            xml.writeCharacters(APP_NAME.fetchFrom(params));
-            xml.writeEndElement();
-
-            xml.writeStartElement("signed");
-            xml.writeCharacters(SIGN_BUNDLE.fetchFrom(params).toString());
-            xml.writeEndElement();
-
-            List<Map<String, ? super Object>> addLaunchers =
-                ADD_LAUNCHERS.fetchFrom(params);
-
-            for (int i = 0; i < addLaunchers.size(); i++) {
-                Map<String, ? super Object> sl = addLaunchers.get(i);
-                xml.writeStartElement("add-launcher");
-                xml.writeAttribute("name", APP_NAME.fetchFrom(sl));
-                xml.writeAttribute("shortcut",
-                        SHORTCUT_HINT.fetchFrom(sl).toString());
-                xml.writeAttribute("menu", MENU_HINT.fetchFrom(sl).toString());
+            for (var extraKey : extra.keySet().stream().sorted().toList()) {
+                xml.writeStartElement(extraKey);
+                xml.writeCharacters(extra.get(extraKey));
                 xml.writeEndElement();
+            }
+
+            launcherInfos.getFirst().save(xml, "main-launcher");
+
+            for (var li : launcherInfos.subList(1, launcherInfos.size())) {
+                li.save(xml, "add-launcher");
             }
         });
     }
 
     /**
-     * Loads application image info from application image.
-     * @param appImageDir - path to application image
-     * @return valid info about application image or null
-     * @throws IOException
+     * Returns the path to the application image info file in the given application layout.
+     *
+     * @param appLayout the application layout
      */
-    static AppImageFile load(Path appImageDir) throws IOException {
-        try {
-            Document doc = readXml(appImageDir);
-
-            XPath xPath = XPathFactory.newInstance().newXPath();
-
-            String mainLauncher = xpathQueryNullable(xPath,
-                    "/jpackage-state/main-launcher/text()", doc);
-            if (mainLauncher == null) {
-                // No main launcher, this is fatal.
-                return new AppImageFile();
-            }
-
-            List<LauncherInfo> launcherInfos = new ArrayList<>();
-
-            String platform = xpathQueryNullable(xPath,
-                    "/jpackage-state/@platform", doc);
-
-            String version = xpathQueryNullable(xPath,
-                    "/jpackage-state/@version", doc);
-
-            String signedStr = xpathQueryNullable(xPath,
-                    "/jpackage-state/@signed", doc);
-
-            NodeList launcherNodes = (NodeList) xPath.evaluate(
-                    "/jpackage-state/add-launcher", doc,
-                    XPathConstants.NODESET);
-
-            for (int i = 0; i != launcherNodes.getLength(); i++) {
-                 Node item = launcherNodes.item(i);
-                 String name = getAttribute(item, "name");
-                 String shortcut = getAttribute(item, "shortcut");
-                 String menu = getAttribute(item, "menu");
-
-                 launcherInfos.add(new LauncherInfo(name,
-                         !("false".equals(shortcut)),
-                         !("false".equals(menu))));
-            }
-
-            AppImageFile file = new AppImageFile(
-                    mainLauncher, launcherInfos, version, platform, signedStr);
-            if (!file.isValid()) {
-                file = new AppImageFile();
-            }
-            return file;
-        } catch (XPathExpressionException ex) {
-            // This should never happen as XPath expressions should be correct
-            throw new RuntimeException(ex);
-        }
-    }
-
-    private static String getAttribute(Node item, String attr) {
-        NamedNodeMap attrs = item.getAttributes();
-        Node attrNode = attrs.getNamedItem(attr);
-        return ((attrNode == null) ? null : attrNode.getNodeValue());
-    }
-
-    public static Document readXml(Path appImageDir) throws IOException {
-        try {
-            Path path = getPathInAppImage(appImageDir);
-
-            DocumentBuilderFactory dbf =
-                    DocumentBuilderFactory.newDefaultInstance();
-            dbf.setFeature(
-                   "http://apache.org/xml/features/nonvalidating/load-external-dtd",
-                    false);
-            DocumentBuilder b = dbf.newDocumentBuilder();
-            return b.parse(Files.newInputStream(path));
-        } catch (ParserConfigurationException | SAXException ex) {
-            // Let caller sort this out
-            throw new IOException(ex);
-        }
+    static Path getPathInAppImage(ApplicationLayout appLayout) {
+        return appLayout.appDirectory().resolve(FILENAME);
     }
 
     /**
-     * Returns list of LauncherInfo objects configured for the application.
-     * The first item in the returned list is main launcher.
-     * Following items in the list are names of additional launchers.
+     * Loads application image info from the specified application layout and OS.
+     *
+     * @param appLayout the application layout
+     * @param os        the OS defining extra properties of the application and
+     *                  additional launchers
      */
-    static List<LauncherInfo> getLaunchers(Path appImageDir,
-            Map<String, ? super Object> params) {
-        List<LauncherInfo> launchers = new ArrayList<>();
+    static ExternalApplication load(ApplicationLayout appLayout, OperatingSystem os) {
+        Objects.requireNonNull(appLayout);
+        Objects.requireNonNull(os);
+
+        final var appImageDir = appLayout.rootDirectory();
+        final var appImageFilePath = getPathInAppImage(appLayout);
+        final var relativeAppImageFilePath = appImageDir.relativize(appImageFilePath);
+
         try {
-            AppImageFile appImageInfo = AppImageFile.load(appImageDir);
-            if (appImageInfo != null) {
-                launchers.add(new LauncherInfo(
-                        appImageInfo.getLauncherName(), true, true));
-                launchers.addAll(appImageInfo.getAddLaunchers());
-                return launchers;
+            //
+            // Use javax.xml.parsers.DocumentBuilder#parse(java.io.InputStream).
+            // Don't use javax.xml.parsers.DocumentBuilder#parse(java.io.File) as this will introduce
+            // dependency on how the XML parser reports filesystem I/O errors.
+            // E.g.: the default JDK XML parser throws java.io.FileNotFoundException if the supplied
+            // directory is not found and throws org.xml.sax.SAXParseException if the supplied file is a directory.
+            // Another DOM XML parser (a different version of Xerces?) may behave differently.
+            //
+            // The use of javax.xml.parsers.DocumentBuilder#parse(java.io.InputStream) eliminates
+            // differences in how XML parsers handle file system I/O errors.
+            // Filesystem I/O is delegated to java.nio.file.Files#readAllBytes(java.nio.file.Path),
+            // XML parser deals with the byte stream in memory and the error handling code
+            // doesn't depend on how XML parser reports filesystem I/O errors because
+            // it reads data from memory, not from the filesystem.
+            //
+            final Document doc = XmlUtils.initDocumentBuilder().parse(
+                    new ByteArrayInputStream(Files.readAllBytes(appImageFilePath)));
+
+            final XPath xPath = XPathFactory.newInstance().newXPath();
+
+            final var isPlatformValid = XmlUtils.queryNodes(doc, xPath, "/jpackage-state/@platform").findFirst().map(
+                    Node::getNodeValue).map(getPlatform(os)::equals).orElse(false);
+            if (!isPlatformValid) {
+                throw new InvalidAppImageFileException();
             }
-        } catch (NoSuchFileException nsfe) {
-            // non jpackage generated app-image (no app/.jpackage.xml)
-            Log.info(MessageFormat.format(I18N.getString(
-                    "warning.foreign-app-image"), appImageDir));
-        } catch (IOException ioe) {
-            Log.verbose(ioe);
-            Log.info(MessageFormat.format(I18N.getString(
-                    "warning.invalid-app-image"), appImageDir));
 
+            final var isVersionValid = XmlUtils.queryNodes(doc, xPath, "/jpackage-state/@version").findFirst().map(
+                    Node::getNodeValue).map(getVersion()::equals).orElse(false);
+            if (!isVersionValid) {
+                throw new InvalidAppImageFileException();
+            }
+
+            final var appOptions = AppImageFileOptionScope.APP.parse(appImageFilePath, AppImageProperties.main(doc, xPath), os);
+
+            final var mainLauncherOptions = LauncherElement.MAIN.readAll(doc, xPath).stream().reduce((_, second) -> {
+                return second;
+            }).map(launcherProps -> {
+                return AppImageFileOptionScope.LAUNCHER.parse(appImageFilePath, launcherProps, os);
+            }).orElseThrow(InvalidAppImageFileException::new);
+
+            final var addLauncherOptions = LauncherElement.ADDITIONAL.readAll(doc, xPath).stream().map(launcherProps -> {
+                return AppImageFileOptionScope.LAUNCHER.parse(appImageFilePath, launcherProps, os);
+            }).toList();
+
+            try {
+                return ExternalApplication.create(Options.concat(appOptions, mainLauncherOptions), addLauncherOptions, os);
+            } catch (NoSuchElementException ex) {
+                throw new InvalidAppImageFileException(ex);
+            }
+
+        } catch (XPathExpressionException ex) {
+            // This should never happen as XPath expressions should be correct
+            throw ExceptionBox.toUnchecked(ex);
+        } catch (SAXException ex) {
+            // Malformed input XML
+            throw new JPackageException(I18N.format("error.malformed-app-image-file", relativeAppImageFilePath, appImageDir), ex);
+        } catch (NoSuchFileException ex) {
+            // Don't save the original exception as its error message is redundant.
+            throw new JPackageException(I18N.format("error.missing-app-image-file", relativeAppImageFilePath, appImageDir));
+        } catch (InvalidAppImageFileException|InvalidOptionValueException|MissingMandatoryOptionException ex) {
+            // Invalid input XML
+            throw new JPackageException(I18N.format("error.invalid-app-image-file", relativeAppImageFilePath, appImageDir), ex);
+        } catch (IOException ex) {
+            throw new JPackageException(I18N.format("error.reading-app-image-file", relativeAppImageFilePath, appImageDir), ex);
         }
-        // this should never be the case, but maintaining behavior of
-        // creating default launchers without AppImageFile present
-
-        ADD_LAUNCHERS.fetchFrom(params).stream().map(APP_NAME::fetchFrom).map(
-                name -> new LauncherInfo(name, true, true)).forEach(launchers::add);
-        return launchers;
     }
 
-    public static String extractAppName(Path appImageDir) {
-        try {
-            return AppImageFile.load(appImageDir).getLauncherName();
-        } catch (IOException ioe) {
-            Log.verbose(MessageFormat.format(I18N.getString(
-                    "warning.foreign-app-image"), appImageDir));
-            return null;
-        }
-    }
-
-    private static String xpathQueryNullable(XPath xPath, String xpathExpr,
-            Document xml) throws XPathExpressionException {
-        NodeList nodes = (NodeList) xPath.evaluate(xpathExpr, xml,
-                XPathConstants.NODESET);
-        if (nodes != null && nodes.getLength() > 0) {
-            return nodes.item(0).getNodeValue();
-        }
-        return null;
-    }
-
-    private static String getVersion() {
+    static String getVersion() {
         return System.getProperty("java.version");
     }
 
-    private static String getPlatform() {
-        return PLATFORM_LABELS.get(Platform.getPlatform());
+    static String getPlatform(OperatingSystem os) {
+        return Objects.requireNonNull(PLATFORM_LABELS.get(Objects.requireNonNull(os)));
     }
 
-    private boolean isValid() {
-        if (launcherName == null || launcherName.length() == 0) {
-            return false;
+
+    private static final class AppImageProperties {
+
+        static Map<String, String> main(Document xml, XPath xPath) throws XPathExpressionException {
+            return queryProperties(xml.getDocumentElement(), xPath, MAIN_PROPERTIES_XPATH_QUERY);
         }
-        for (var launcher : addLauncherInfos) {
-            if ("".equals(launcher.getName())) {
-                return false;
+
+        static Map<String, String> launcher(Element launcherNode, XPath xPath) throws XPathExpressionException {
+            final var attrData = XmlUtils.toStream(launcherNode.getAttributes())
+                    .collect(toUnmodifiableMap(Node::getNodeName, Node::getNodeValue));
+
+            final var extraData = queryProperties(launcherNode, xPath, LAUNCHER_PROPERTIES_XPATH_QUERY);
+
+            final Map<String, String> data = new HashMap<>(attrData);
+            data.putAll(extraData);
+
+            return data;
+        }
+
+        private static  Map<String, String> queryProperties(Element e, XPath xPath, String xpathExpr)
+                throws XPathExpressionException {
+            return XmlUtils.queryNodes(e, xPath, xpathExpr)
+                    .map(Element.class::cast)
+                    .collect(toUnmodifiableMap(Node::getNodeName, selectedElement -> {
+                        return selectedElement.getTextContent();
+                    }, (a, b) -> b));
+        }
+
+        private static String xpathQueryForExtraProperties(Set<String> excludeNames) {
+            final String otherElementNames = excludeNames.stream().map(name -> {
+                return String.format("name() != '%s'", name);
+            }).collect(joining(" and "));
+
+            return String.format("*[(%s) and not(*)]", otherElementNames);
+        }
+
+        private static final Set<String> LAUNCHER_ATTR_NAMES = Stream.of(
+                LAUNCHER_NAME
+        ).map(OptionValue::getName).collect(toUnmodifiableSet());
+        private static final String LAUNCHER_PROPERTIES_XPATH_QUERY = xpathQueryForExtraProperties(LAUNCHER_ATTR_NAMES);
+
+        private static final Set<String> MAIN_ELEMENT_NAMES = Stream.of(
+                APP_VERSION
+        ).map(OptionValue::getName).collect(toUnmodifiableSet());
+        private static final String MAIN_PROPERTIES_XPATH_QUERY;
+
+        static {
+            final String nonEmptyMainElements = MAIN_ELEMENT_NAMES.stream().map(name -> {
+                return String.format("/jpackage-state/%s[text()]", name);
+            }).collect(joining("|"));
+
+            MAIN_PROPERTIES_XPATH_QUERY = String.format("%s|/jpackage-state/%s", nonEmptyMainElements,
+                    xpathQueryForExtraProperties(Stream.concat(MAIN_ELEMENT_NAMES.stream(),
+                            Stream.of("main-launcher", "add-launcher")).collect(toUnmodifiableSet())));
+        }
+    }
+
+
+    private enum LauncherElement {
+        MAIN("main-launcher"),
+        ADDITIONAL("add-launcher");
+
+        LauncherElement(String elementName) {
+            this.elementName = Objects.requireNonNull(elementName);
+        }
+
+        List<Map<String, String>> readAll(Document xml, XPath xPath) throws XPathExpressionException {
+            return XmlUtils.queryNodes(xml, xPath, "/jpackage-state/" + elementName + "[@name]")
+                    .map(Element.class::cast).map(toFunction(e -> {
+                        return AppImageProperties.launcher(e, xPath);
+                    })).toList();
+        }
+
+        private final String elementName;
+    }
+
+    private record LauncherInfo(String name, Map<String, String> properties) {
+        LauncherInfo {
+            Objects.requireNonNull(name);
+            Objects.requireNonNull(properties);
+        }
+
+        LauncherInfo(Launcher launcher) {
+            this(launcher.name(), properties(launcher));
+        }
+
+        void save(XMLStreamWriter xml, String elementName) throws IOException, XMLStreamException {
+            xml.writeStartElement(elementName);
+            xml.writeAttribute("name", name());
+            for (var key : properties().keySet().stream().sorted().toList()) {
+                xml.writeStartElement(key);
+                xml.writeCharacters(properties().get(key));
+                xml.writeEndElement();
             }
+            xml.writeEndElement();
         }
 
-        return true;
-    }
+        private static Map<String, String> properties(Launcher launcher) {
+            List<Map.Entry<String, String>> standardProps = new ArrayList<>();
+            if (launcher.isService()) {
+                standardProps.add(Map.entry(LAUNCHER_AS_SERVICE.getName(), Boolean.TRUE.toString()));
+            }
+            standardProps.add(Map.entry(DESCRIPTION.getName(), launcher.description()));
 
-    static class LauncherInfo {
-        private String name;
-        private boolean shortcut;
-        private boolean menu;
-
-        public LauncherInfo(String name, boolean shortcut, boolean menu) {
-            this.name = name;
-            this.shortcut = shortcut;
-            this.menu = menu;
-        }
-        public String getName() {
-            return name;
-        }
-        public boolean isShortcut() {
-            return shortcut;
-        }
-        public boolean isMenu() {
-            return menu;
+            return Stream.concat(
+                    standardProps.stream(),
+                    launcher.extraAppImageFileData().entrySet().stream()
+            ).collect(toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
         }
     }
 
+
+    private static class InvalidAppImageFileException extends RuntimeException {
+
+        InvalidAppImageFileException() {
+        }
+
+        InvalidAppImageFileException(Throwable t) {
+            super(t);
+        }
+
+        private static final long serialVersionUID = 1L;
+    }
+
+
+    private final String appVersion;
+    private final Map<String, String> extra;
+    private final List<LauncherInfo> launcherInfos;
+
+    private static final String FILENAME = ".jpackage.xml";
+
+    private static final Map<OperatingSystem, String> PLATFORM_LABELS = Map.of(
+            OperatingSystem.LINUX, "linux",
+            OperatingSystem.WINDOWS, "windows",
+            OperatingSystem.MACOS, "macOS");
 }

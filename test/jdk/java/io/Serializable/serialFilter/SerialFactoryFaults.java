@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,23 +21,31 @@
  * questions.
  */
 
-import org.testng.Assert;
-import org.testng.annotations.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.ObjectInputFilter;
 import java.io.ObjectInputFilter.Config;
+import java.io.ObjectInputStream;
 import java.util.function.BinaryOperator;
 
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+
 /* @test
- * @run testng/othervm  -Djdk.serialFilterFactory=ForcedError_NoSuchClass SerialFactoryFaults
- * @run testng/othervm  -Djdk.serialFilterFactory=SerialFactoryFaults$NoPublicConstructor SerialFactoryFaults
- * @run testng/othervm  -Djdk.serialFilterFactory=SerialFactoryFaults$ConstructorThrows SerialFactoryFaults
- * @run testng/othervm  -Djdk.serialFilterFactory=SerialFactoryFaults$FactorySetsFactory SerialFactoryFaults
+ * @run junit/othervm  -Djdk.serialFilterFactory=ForcedError_NoSuchClass SerialFactoryFaults
+ * @run junit/othervm  -Djdk.serialFilterFactory=SerialFactoryFaults$NoPublicConstructor SerialFactoryFaults
+ * @run junit/othervm  -Djdk.serialFilterFactory=SerialFactoryFaults$ConstructorThrows SerialFactoryFaults
+ * @run junit/othervm  -Djdk.serialFilterFactory=SerialFactoryFaults$FactorySetsFactory SerialFactoryFaults
  * @summary Check cases where the Filter Factory initialization from properties fails
  */
 
-@Test
 public class SerialFactoryFaults {
+
+    // Sample the serial factory class name
+    private static final String factoryName = System.getProperty("jdk.serialFilterFactory");
 
     static {
         // Enable logging
@@ -45,29 +53,37 @@ public class SerialFactoryFaults {
                 System.getProperty("test.src", ".") + "/logging.properties");
     }
 
-    public void initFaultTest() {
-        String factoryName = System.getProperty("jdk.serialFilterFactory");
-        ExceptionInInitializerError ex = Assert.expectThrows(ExceptionInInitializerError.class,
-                () -> Config.getSerialFilterFactory());
-        Throwable cause = ex.getCause();
+    // Test cases of faults
+    private static Object[][] cases() {
+        return new Object[][] {
+                {"getSerialFilterFactory", (Executable) () -> Config.getSerialFilterFactory()},
+                {"setSerialFilterFactory", (Executable) () -> Config.setSerialFilterFactory(new NoopFactory())},
+                {"new ObjectInputStream(is)", (Executable) () -> new ObjectInputStream(new ByteArrayInputStream(new byte[0]))},
+                {"new OISSubclass()", (Executable) () -> new OISSubclass()},
+        };
+    }
+
+    /**
+     * Test each method that should throw IllegalStateException based on
+     * the invalid arguments it was launched with.
+     */
+    @ParameterizedTest
+    @MethodSource("cases")
+    public void initFaultTest(String name, Executable runnable) {
+        IllegalStateException ex = Assertions.assertThrows(IllegalStateException.class,
+                runnable);
+        final String msg = ex.getMessage();
 
         if (factoryName.equals("ForcedError_NoSuchClass")) {
-            Assert.assertEquals(cause.getClass(),
-                    ClassNotFoundException.class, "wrong exception");
+            Assertions.assertEquals("invalid jdk.serialFilterFactory: ForcedError_NoSuchClass: java.lang.ClassNotFoundException: ForcedError_NoSuchClass", msg, "wrong exception");
         } else if (factoryName.equals("SerialFactoryFaults$NoPublicConstructor")) {
-            Assert.assertEquals(cause.getClass(),
-                    NoSuchMethodException.class, "wrong exception");
+            Assertions.assertEquals("invalid jdk.serialFilterFactory: SerialFactoryFaults$NoPublicConstructor: java.lang.NoSuchMethodException: SerialFactoryFaults$NoPublicConstructor.<init>()", msg, "wrong exception");
         } else if (factoryName.equals("SerialFactoryFaults$ConstructorThrows")) {
-            Assert.assertEquals(cause.getClass(),
-                    IllegalStateException.class, "wrong exception");
+            Assertions.assertEquals("invalid jdk.serialFilterFactory: SerialFactoryFaults$ConstructorThrows: java.lang.RuntimeException: constructor throwing a runtime exception", msg, "wrong exception");
         } else if (factoryName.equals("SerialFactoryFaults$FactorySetsFactory")) {
-            Assert.assertEquals(cause.getClass(),
-                    IllegalStateException.class, "wrong exception");
-            Assert.assertEquals(cause.getMessage(),
-                    "Cannot replace filter factory: initialization incomplete",
-                    "wrong message");
+            Assertions.assertEquals("invalid jdk.serialFilterFactory: SerialFactoryFaults$FactorySetsFactory: java.lang.IllegalStateException: Serial filter factory initialization incomplete", msg, "wrong exception");
         } else {
-            Assert.fail("No test for filter factory: " + factoryName);
+            Assertions.fail("No test for filter factory: " + factoryName);
         }
     }
 
@@ -90,7 +106,7 @@ public class SerialFactoryFaults {
     public static final class ConstructorThrows
             implements BinaryOperator<ObjectInputFilter> {
         public ConstructorThrows() {
-            throw new IllegalStateException("SerialFactoryFaults$ConstructorThrows");
+            throw new RuntimeException("constructor throwing a runtime exception");
         }
 
         public ObjectInputFilter apply(ObjectInputFilter curr, ObjectInputFilter next) {
@@ -109,6 +125,23 @@ public class SerialFactoryFaults {
 
         public ObjectInputFilter apply(ObjectInputFilter curr, ObjectInputFilter next) {
             throw new RuntimeException("NYI");
+        }
+    }
+
+    public static final class NoopFactory implements BinaryOperator<ObjectInputFilter> {
+        public NoopFactory() {}
+
+        public ObjectInputFilter apply(ObjectInputFilter curr, ObjectInputFilter next) {
+            throw new RuntimeException("NYI");
+        }
+    }
+
+    /**
+     * Subclass of ObjectInputStream to test subclassing constructor.
+     */
+    private static class OISSubclass extends ObjectInputStream {
+
+        protected OISSubclass() throws IOException {
         }
     }
 

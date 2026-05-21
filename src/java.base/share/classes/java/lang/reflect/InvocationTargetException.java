@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -48,7 +48,7 @@ public class InvocationTargetException extends ReflectiveOperationException {
      * @serial
      *
      */
-    private Throwable target;
+    private final Throwable target;
 
     /**
      * Constructs an {@code InvocationTargetException} with
@@ -56,12 +56,13 @@ public class InvocationTargetException extends ReflectiveOperationException {
      */
     protected InvocationTargetException() {
         super((Throwable)null);  // Disallow initCause
+        this.target = null;
     }
 
     /**
      * Constructs a InvocationTargetException with a target exception.
      *
-     * @param target the target exception
+     * @param target the target exception, may be {@code null}
      */
     public InvocationTargetException(Throwable target) {
         super((Throwable)null);  // Disallow initCause
@@ -72,8 +73,8 @@ public class InvocationTargetException extends ReflectiveOperationException {
      * Constructs a InvocationTargetException with a target exception
      * and a detail message.
      *
-     * @param target the target exception
-     * @param s      the detail message
+     * @param target the target exception, may be {@code null}
+     * @param s      the detail message, may be {@code null}
      */
     public InvocationTargetException(Throwable target, String s) {
         super(s, null);  // Disallow initCause

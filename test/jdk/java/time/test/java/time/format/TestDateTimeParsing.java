@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -62,15 +62,20 @@ package test.java.time.format;
 import static java.time.temporal.ChronoField.AMPM_OF_DAY;
 import static java.time.temporal.ChronoField.EPOCH_DAY;
 import static java.time.temporal.ChronoField.HOUR_OF_AMPM;
+import static java.time.temporal.ChronoField.HOUR_OF_DAY;
 import static java.time.temporal.ChronoField.INSTANT_SECONDS;
 import static java.time.temporal.ChronoField.MICRO_OF_SECOND;
 import static java.time.temporal.ChronoField.MILLI_OF_SECOND;
+import static java.time.temporal.ChronoField.MINUTE_OF_HOUR;
 import static java.time.temporal.ChronoField.NANO_OF_SECOND;
 import static java.time.temporal.ChronoField.OFFSET_SECONDS;
 import static java.time.temporal.ChronoField.SECOND_OF_DAY;
 import static java.util.Locale.US;
-import static org.testng.Assert.assertEquals;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+import java.text.ParsePosition;
 import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -80,16 +85,22 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.DateTimeParseException;
+import java.time.format.SignStyle;
 import java.time.temporal.TemporalAccessor;
+import java.util.Locale;
 
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * @test
  * @summary Test parsing of edge cases.
- * @bug 8223773 8272473
+ * @bug 8223773 8272473 8319640
  */
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class TestDateTimeParsing {
 
     private static final ZoneId PARIS = ZoneId.of("Europe/Paris");
@@ -126,7 +137,6 @@ public class TestDateTimeParsing {
     private static final String DTPE_MESSAGE =
         "Invalid value for HourOfAmPm (valid values 0 - 11): 12";
 
-    @DataProvider(name = "instantZones")
     Object[][] data_instantZones() {
         return new Object[][] {
             {LOCALFIELDS_ZONEID, "2014-06-30 01:02:03 Europe/Paris", ZonedDateTime.of(2014, 6, 30, 1, 2, 3, 0, PARIS)},
@@ -148,37 +158,40 @@ public class TestDateTimeParsing {
         };
     }
 
-    @Test(dataProvider = "instantZones")
+    @ParameterizedTest
+    @MethodSource("data_instantZones")
     public void test_parse_instantZones_ZDT(DateTimeFormatter formatter, String text, ZonedDateTime expected) {
         TemporalAccessor actual = formatter.parse(text);
-        assertEquals(ZonedDateTime.from(actual), expected);
+        assertEquals(expected, ZonedDateTime.from(actual));
     }
 
-    @Test(dataProvider = "instantZones")
+    @ParameterizedTest
+    @MethodSource("data_instantZones")
     public void test_parse_instantZones_LDT(DateTimeFormatter formatter, String text, ZonedDateTime expected) {
         TemporalAccessor actual = formatter.parse(text);
-        assertEquals(LocalDateTime.from(actual), expected.toLocalDateTime());
+        assertEquals(expected.toLocalDateTime(), LocalDateTime.from(actual));
     }
 
-    @Test(dataProvider = "instantZones")
+    @ParameterizedTest
+    @MethodSource("data_instantZones")
     public void test_parse_instantZones_Instant(DateTimeFormatter formatter, String text, ZonedDateTime expected) {
         TemporalAccessor actual = formatter.parse(text);
-        assertEquals(Instant.from(actual), expected.toInstant());
+        assertEquals(expected.toInstant(), Instant.from(actual));
     }
 
-    @Test(dataProvider = "instantZones")
+    @ParameterizedTest
+    @MethodSource("data_instantZones")
     public void test_parse_instantZones_supported(DateTimeFormatter formatter, String text, ZonedDateTime expected) {
         TemporalAccessor actual = formatter.parse(text);
-        assertEquals(actual.isSupported(INSTANT_SECONDS), true);
-        assertEquals(actual.isSupported(EPOCH_DAY), true);
-        assertEquals(actual.isSupported(SECOND_OF_DAY), true);
-        assertEquals(actual.isSupported(NANO_OF_SECOND), true);
-        assertEquals(actual.isSupported(MICRO_OF_SECOND), true);
-        assertEquals(actual.isSupported(MILLI_OF_SECOND), true);
+        assertEquals(true, actual.isSupported(INSTANT_SECONDS));
+        assertEquals(true, actual.isSupported(EPOCH_DAY));
+        assertEquals(true, actual.isSupported(SECOND_OF_DAY));
+        assertEquals(true, actual.isSupported(NANO_OF_SECOND));
+        assertEquals(true, actual.isSupported(MICRO_OF_SECOND));
+        assertEquals(true, actual.isSupported(MILLI_OF_SECOND));
     }
 
     //-----------------------------------------------------------------------
-    @DataProvider(name = "instantNoZone")
     Object[][] data_instantNoZone() {
         return new Object[][] {
             {INSTANT, "2014-06-30T01:02:03Z", ZonedDateTime.of(2014, 6, 30, 1, 2, 3, 0, ZoneOffset.UTC).toInstant()},
@@ -187,54 +200,90 @@ public class TestDateTimeParsing {
         };
     }
 
-    @Test(dataProvider = "instantNoZone", expectedExceptions = DateTimeException.class)
+    @ParameterizedTest
+    @MethodSource("data_instantNoZone")
     public void test_parse_instantNoZone_ZDT(DateTimeFormatter formatter, String text, Instant expected) {
-        TemporalAccessor actual = formatter.parse(text);
-        ZonedDateTime.from(actual);
+        Assertions.assertThrows(DateTimeException.class, () -> {
+            TemporalAccessor actual = formatter.parse(text);
+            ZonedDateTime.from(actual);
+        });
     }
 
-    @Test(dataProvider = "instantNoZone", expectedExceptions = DateTimeException.class)
+    @ParameterizedTest
+    @MethodSource("data_instantNoZone")
     public void test_parse_instantNoZone_LDT(DateTimeFormatter formatter, String text, Instant expected) {
-        TemporalAccessor actual = formatter.parse(text);
-        LocalDateTime.from(actual);
+        Assertions.assertThrows(DateTimeException.class, () -> {
+            TemporalAccessor actual = formatter.parse(text);
+            LocalDateTime.from(actual);
+        });
     }
 
-    @Test(dataProvider = "instantNoZone")
+    @ParameterizedTest
+    @MethodSource("data_instantNoZone")
     public void test_parse_instantNoZone_Instant(DateTimeFormatter formatter, String text, Instant expected) {
         TemporalAccessor actual = formatter.parse(text);
-        assertEquals(Instant.from(actual), expected);
+        assertEquals(expected, Instant.from(actual));
     }
 
-    @Test(dataProvider = "instantNoZone")
+    @ParameterizedTest
+    @MethodSource("data_instantNoZone")
     public void test_parse_instantNoZone_supported(DateTimeFormatter formatter, String text, Instant expected) {
         TemporalAccessor actual = formatter.parse(text);
-        assertEquals(actual.isSupported(INSTANT_SECONDS), true);
-        assertEquals(actual.isSupported(EPOCH_DAY), false);
-        assertEquals(actual.isSupported(SECOND_OF_DAY), false);
-        assertEquals(actual.isSupported(NANO_OF_SECOND), true);
-        assertEquals(actual.isSupported(MICRO_OF_SECOND), true);
-        assertEquals(actual.isSupported(MILLI_OF_SECOND), true);
+        assertEquals(true, actual.isSupported(INSTANT_SECONDS));
+        assertEquals(false, actual.isSupported(EPOCH_DAY));
+        assertEquals(false, actual.isSupported(SECOND_OF_DAY));
+        assertEquals(true, actual.isSupported(NANO_OF_SECOND));
+        assertEquals(true, actual.isSupported(MICRO_OF_SECOND));
+        assertEquals(true, actual.isSupported(MILLI_OF_SECOND));
     }
 
     // Bug 8223773: validation check for the range of HourOfAmPm in SMART mode.
     // Should throw a DateTimeParseException, as 12 is out of range for HourOfAmPm.
-    @Test(expectedExceptions = DateTimeParseException.class)
+    @Test
     public void test_validateHourOfAmPm() {
-        try {
-            new DateTimeFormatterBuilder()
-                .appendValue(HOUR_OF_AMPM,2)
-                .appendText(AMPM_OF_DAY)
-                .toFormatter(US)
-                .parse("12PM");
-        } catch (DateTimeParseException e) {
-            Throwable cause = e.getCause();
-            if (cause == null ||
-                !DTPE_MESSAGE.equals(cause.getMessage())) {
-                throw new RuntimeException(
-                    "DateTimeParseException was thrown with different reason: " + e);
-            } else {
-                throw e;
+        Assertions.assertThrows(DateTimeParseException.class, () -> {
+            try {
+                new DateTimeFormatterBuilder()
+                        .appendValue(HOUR_OF_AMPM,2)
+                        .appendText(AMPM_OF_DAY)
+                        .toFormatter(US)
+                        .parse("12PM");
+            } catch (DateTimeParseException e) {
+                Throwable cause = e.getCause();
+                if (cause == null ||
+                        !DTPE_MESSAGE.equals(cause.getMessage())) {
+                    throw new RuntimeException(
+                            "DateTimeParseException was thrown with different reason: " + e);
+                } else {
+                    throw e;
+                }
             }
-        }
+        });
+    }
+
+    // Checks ::toFormat().parseObject(text, pos) do not throw DateTimeException
+    @Test
+    public void test_toFormat_2arg_null_return_on_DateTimeException() {
+        var f = new DateTimeFormatterBuilder()
+            .appendValue(HOUR_OF_DAY, 2, 2, SignStyle.NOT_NEGATIVE)
+            .optionalStart()
+            .appendLiteral(':')
+            .appendValue(MINUTE_OF_HOUR, 2, 2, SignStyle.NOT_NEGATIVE)
+            .optionalEnd()
+            .optionalStart()
+            .appendOffset("+HHmm", "Z")
+            .optionalEnd()
+            .toFormatter(Locale.ROOT)
+            .toFormat();
+        assertNull(f.parseObject("17-30", new ParsePosition(0)));
+    }
+
+    // Checks ::toFormat().parseObject(text, pos) do not throw IOOBE
+    @Test
+    public void test_toFormat_2arg_null_return_on_IOOBE() {
+        var date = "2023-11-13";
+        assertNull(DateTimeFormatter.ISO_LOCAL_DATE
+                .toFormat()
+                .parseObject(date, new ParsePosition(date.length() + 1)));
     }
 }

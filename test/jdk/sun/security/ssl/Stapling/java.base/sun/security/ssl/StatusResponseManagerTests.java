@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,7 @@
 package sun.security.ssl;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.math.BigInteger;
 import java.security.cert.*;
 import java.util.*;
@@ -33,8 +34,8 @@ import java.security.KeyStore;
 import java.security.PublicKey;
 import java.util.concurrent.TimeUnit;
 
-import sun.security.testlibrary.SimpleOCSPServer;
-import sun.security.testlibrary.CertificateBuilder;
+import jdk.test.lib.security.SimpleOCSPServer;
+import jdk.test.lib.security.CertificateBuilder;
 
 import static sun.security.ssl.CertStatusExtension.*;
 
@@ -46,8 +47,20 @@ import static sun.security.ssl.CertStatusExtension.*;
  */
 public class StatusResponseManagerTests {
 
-    private static final boolean debug = true;
+    /*
+     * Enables the JSSE system debugging system property:
+     *
+     *     -Djavax.net.debug=ssl:respmgr
+     *
+     * This gives a lot of low-level information about operations underway,
+     * including specific handshake messages, and might be best examined
+     * after gaining some familiarity with this application.
+     */
+    private static final boolean debug = false;
+
     private static final boolean ocspDebug = false;
+
+    private static Field responseCacheField;
 
     // PKI components we will need for this test
     static String passwd = "passphrase";
@@ -69,12 +82,22 @@ public class StatusResponseManagerTests {
     static X509Certificate[] chain;
 
     public static void main(String[] args) throws Exception {
+
+        if (debug) {
+            System.setProperty("javax.net.debug", "ssl:respmgr");
+        }
+
+        responseCacheField =
+                StatusResponseManager.class.getDeclaredField("responseCache");
+        responseCacheField.setAccessible(true);
+
         Map<String, TestCase> testList =
                 new LinkedHashMap<String, TestCase>() {{
             put("Basic OCSP fetch test", testOcspFetch);
             put("Clear StatusResponseManager cache", testClearSRM);
             put("Basic OCSP_MULTI fetch test", testOcspMultiFetch);
             put("Test Cache Expiration", testCacheExpiry);
+            put("Test Interrupt while fetching", forceInterruptMainThread);
         }};
 
         // Create the CAs and OCSP responders
@@ -118,9 +141,9 @@ public class StatusResponseManagerTests {
                 } else if (!responseMap.containsKey(sslCert)) {
                     message = "Response map key is incorrect, expected " +
                             sslCert.getSubjectX500Principal().toString();
-                } else if (srm.size() != 1) {
+                } else if (responseCacheSize(srm) != 1) {
                     message = "Incorrect number of cache entries: " +
-                            "expected 1, got " + srm.size();
+                            "expected 1, got " + responseCacheSize(srm);
                 } else {
                     pass = Boolean.TRUE;
                 }
@@ -149,15 +172,15 @@ public class StatusResponseManagerTests {
 
                 // There should be two entries in the returned map and
                 // two entries in the cache when the operation is complete.
-                if (srm.size() != 2) {
+                if (responseCacheSize(srm) != 2) {
                     message = "Incorrect number of responses: expected 2, got "
-                            + srm.size();
+                            + responseCacheSize(srm);
                 } else {
                     // Next, clear the SRM, then check the size again
-                    srm.clear();
-                    if (srm.size() != 0) {
+                    clearResponseCache(srm);
+                    if (responseCacheSize(srm) != 0) {
                         message = "Incorrect number of responses: expected 0," +
-                                " got " + srm.size();
+                                " got " + responseCacheSize(srm);
                     } else {
                         pass = Boolean.TRUE;
                     }
@@ -197,9 +220,9 @@ public class StatusResponseManagerTests {
                             sslCert.getSubjectX500Principal().toString() +
                             " and " +
                             intCert.getSubjectX500Principal().toString();
-                } else if (srm.size() != 2) {
+                } else if (responseCacheSize(srm) != 2) {
                     message = "Incorrect number of cache entries: " +
-                            "expected 2, got " + srm.size();
+                            "expected 2, got " + responseCacheSize(srm);
                 } else {
                     pass = Boolean.TRUE;
                 }
@@ -230,16 +253,16 @@ public class StatusResponseManagerTests {
 
                 // There should be two entries in the returned map and
                 // two entries in the cache when the operation is complete.
-                if (srm.size() != 2) {
+                if (responseCacheSize(srm) != 2) {
                     message = "Incorrect number of responses: expected 2, got "
-                            + srm.size();
+                            + responseCacheSize(srm);
                 } else {
                     // Next, wait for more than 5 seconds so the responses
                     // in the SRM will expire.
                     Thread.sleep(7000);
-                    if (srm.size() != 0) {
+                    if (responseCacheSize(srm) != 0) {
                         message = "Incorrect number of responses: expected 0," +
-                                " got " + srm.size();
+                                " got " + responseCacheSize(srm);
                     } else {
                         pass = Boolean.TRUE;
                     }
@@ -251,6 +274,38 @@ public class StatusResponseManagerTests {
 
             // Set the cache lifetime back to the default
             System.setProperty("jdk.tls.stapling.cacheLifetime", "");
+            return new AbstractMap.SimpleEntry<>(pass, message);
+        }
+    };
+
+    public static final TestCase forceInterruptMainThread = new TestCase() {
+        @Override
+        public Map.Entry<Boolean, String> runTest() {
+            StatusResponseManager srm = new StatusResponseManager();
+            Boolean pass = Boolean.FALSE;
+            String message = null;
+            CertStatusRequest oReq = OCSPStatusRequest.EMPTY_OCSP;
+
+            try {
+                // Force the interrupted flag to be set on the thread that
+                // performs the invokeAll in the SRM.
+                Thread.currentThread().interrupt();
+
+                // Get OCSP responses for non-root certs in the chain
+                Map<X509Certificate, byte[]> responseMap = srm.get(
+                        CertStatusRequestType.OCSP, oReq, chain, 5000,
+                        TimeUnit.MILLISECONDS);
+                if (Thread.currentThread().isInterrupted()) {
+                    pass = Boolean.TRUE;
+                    message = "Thread is in expected interrupted state.";
+                } else {
+                    message = "Missing expectedInterruptedException.";
+                }
+                message += " Number of SRM entries: " + responseMap.size();
+            } catch (Exception exc) {
+                message = "Unexpected exception: " + exc;
+            }
+
             return new AbstractMap.SimpleEntry<>(pass, message);
         }
     };
@@ -304,11 +359,9 @@ public class StatusResponseManagerTests {
         rootOcsp.start();
 
         // Wait 5 seconds for server ready
-        for (int i = 0; (i < 100 && !rootOcsp.isServerReady()); i++) {
-            Thread.sleep(50);
-        }
-        if (!rootOcsp.isServerReady()) {
-            throw new RuntimeException("Server not ready yet");
+        boolean readyStatus = rootOcsp.awaitServerReady(5, TimeUnit.SECONDS);
+        if (!readyStatus) {
+            throw new RuntimeException("Server not ready");
         }
 
         rootOcspPort = rootOcsp.getPort();
@@ -357,11 +410,9 @@ public class StatusResponseManagerTests {
         intOcsp.start();
 
         // Wait 5 seconds for server ready
-        for (int i = 0; (i < 100 && !intOcsp.isServerReady()); i++) {
-            Thread.sleep(50);
-        }
-        if (!intOcsp.isServerReady()) {
-            throw new RuntimeException("Server not ready yet");
+        readyStatus = intOcsp.awaitServerReady(5, TimeUnit.SECONDS);
+        if (!readyStatus) {
+            throw new RuntimeException("Server not ready");
         }
 
         intOcspPort = intOcsp.getPort();
@@ -428,6 +479,16 @@ public class StatusResponseManagerTests {
         boolean[] kuBitSettings = {true, false, false, false, false, true,
             true, false, false};
         cbld.addKeyUsageExt(kuBitSettings);
+    }
+
+    private static int responseCacheSize(
+            StatusResponseManager srm) throws IllegalAccessException {
+        return ((sun.security.util.Cache)responseCacheField.get(srm)).size();
+    }
+
+    private static void clearResponseCache(
+            StatusResponseManager srm) throws IllegalAccessException {
+        ((sun.security.util.Cache)responseCacheField.get(srm)).clear();
     }
 
     /**

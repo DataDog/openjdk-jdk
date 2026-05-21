@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,7 +33,7 @@ import java.nio.*;
 import sun.awt.image.*;
 import sun.java2d.loops.*;
 
-public class OSXOffScreenSurfaceData extends OSXSurfaceData // implements RasterListener
+public final class OSXOffScreenSurfaceData extends OSXSurfaceData // implements RasterListener
 {
     private static native void initIDs();
 
@@ -57,7 +57,7 @@ public class OSXOffScreenSurfaceData extends OSXSurfaceData // implements Raster
     // these are extra image types we can handle
     private static final int TYPE_3BYTE_RGB = BufferedImage.TYPE_BYTE_INDEXED + 1;
 
-    // these are for callbacks when pixes have been touched
+    // these are for callbacks when pixels have been touched
     protected ByteBuffer fImageInfo;
     IntBuffer fImageInfoInt;
     private static final int kNeedToSyncFromJavaPixelsIndex = 0;
@@ -474,6 +474,7 @@ public class OSXOffScreenSurfaceData extends OSXSurfaceData // implements Raster
     /**
      * Performs a copyArea within this surface.
      */
+    @Override
     public boolean copyArea(SunGraphics2D sg2d, int x, int y, int w, int h, int dx, int dy) {
         // <rdar://problem/4488745> For the Sun2D renderer we should rely on the implementation of the super class.
         // BufImageSurfaceData.java doesn't have an implementation of copyArea() and relies on the super class.
@@ -505,7 +506,7 @@ public class OSXOffScreenSurfaceData extends OSXSurfaceData // implements Raster
         // src coordinates are in the coordinate space of the image)
         // sg2d.drawImage expects the destination rect to be in the coord space
         // of the graphics2d. <rdar://3746194> (vm)
-        // we need to substract the transX and transY to move it
+        // we need to subtract the transX and transY to move it
         // to the coordinate space of the graphics2d.
         int dstX = x + dx - sg2d.transX;
         int dstY = y + dy - sg2d.transY;
@@ -524,7 +525,8 @@ public class OSXOffScreenSurfaceData extends OSXSurfaceData // implements Raster
      *
      * Only used by compositor code (private API)
      */
-    public BufferedImage copyArea(SunGraphics2D sg2d, int x, int y, int w, int h, BufferedImage dstImage) {
+    @Override
+    public synchronized BufferedImage copyArea(SunGraphics2D sg2d, int x, int y, int w, int h, BufferedImage dstImage) {
         // create the destination image if needed
         if (dstImage == null) {
             dstImage = getDeviceConfiguration().createCompatibleImage(w, h);
@@ -538,7 +540,8 @@ public class OSXOffScreenSurfaceData extends OSXSurfaceData // implements Raster
         return dstImage;
     }
 
-    public boolean xorSurfacePixels(SunGraphics2D sg2d, BufferedImage srcPixels, int x, int y, int w, int h, int colorXOR) {
+    @Override
+    public synchronized boolean xorSurfacePixels(SunGraphics2D sg2d, BufferedImage srcPixels, int x, int y, int w, int h, int colorXOR) {
 
         int type = this.bim.getType();
 
@@ -549,7 +552,8 @@ public class OSXOffScreenSurfaceData extends OSXSurfaceData // implements Raster
 
     native boolean xorSurfacePixels(SurfaceData src, int colorXOR, int x, int y, int w, int h);
 
-    public void clearRect(BufferedImage bim, int w, int h) {
+    @Override
+    public synchronized void clearRect(BufferedImage bim, int w, int h) {
         OSXOffScreenSurfaceData offsd = (OSXOffScreenSurfaceData) (OSXOffScreenSurfaceData.createData(bim));
         // offsd.clear();
         if (offsd.clearSurfacePixels(w, h) == false) {

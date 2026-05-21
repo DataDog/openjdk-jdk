@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -65,6 +65,10 @@ static id<MTLRenderCommandEncoder> encoder = NULL;
         MTLVC_ADD_VERTEX(TX1, TY1, DX1, DY1, 0); \
     } while (0)
 
+// Next define should exactly match to the amount
+// of MTLVC_ADD_VERTEX in MTLVC_ADD_TRIANGLES
+#define VERTS_FOR_A_QUAD 6
+
 jboolean
 MTLVertexCache_InitVertexCache()
 {
@@ -91,8 +95,9 @@ MTLVertexCache_FlushVertexCache(MTLContext *mtlc)
                                                 atIndex:MeshVertexBuffer];
 
         [encoder setFragmentTexture:maskCacheTex.texture atIndex: 0];
-        J2dTraceLn1(J2D_TRACE_INFO,
-            "MTLVertexCache_FlushVertexCache : encode %d characters", (vertexCacheIndex / 6));
+        J2dTraceLn(J2D_TRACE_INFO,
+                   "MTLVertexCache_FlushVertexCache : encode %d characters",
+                   (vertexCacheIndex / 6));
         [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:vertexCacheIndex];
     }
     vertexCacheIndex = 0;
@@ -115,8 +120,9 @@ MTLVertexCache_FlushGlyphVertexCache()
                                                 atIndex:MeshVertexBuffer];
         id<MTLTexture> glyphCacheTex = MTLTR_GetGlyphCacheTexture();
         [encoder setFragmentTexture:glyphCacheTex atIndex: 0];
-        J2dTraceLn1(J2D_TRACE_INFO,
-            "MTLVertexCache_FlushGlyphVertexCache : encode %d characters", (vertexCacheIndex / 6));
+        J2dTraceLn(J2D_TRACE_INFO,
+                   "MTLVertexCache_FlushGlyphVertexCache : encode %d characters",
+                   (vertexCacheIndex / 6));
         [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:vertexCacheIndex];
     }
     vertexCacheIndex = 0;
@@ -216,12 +222,17 @@ MTLVertexCache_AddMaskQuad(MTLContext *mtlc,
     jfloat tx1, ty1, tx2, ty2;
     jfloat dx1, dy1, dx2, dy2;
 
-    J2dTraceLn1(J2D_TRACE_INFO, "MTLVertexCache_AddMaskQuad: %d",
-                maskCacheIndex);
+    J2dTraceLn(J2D_TRACE_INFO, "MTLVertexCache_AddMaskQuad: %d",
+               maskCacheIndex);
 
-    if (maskCacheIndex >= MTLVC_MASK_CACHE_MAX_INDEX)
+    // MTLVC_ADD_TRIANGLES at the end of this function
+    // will place VERTS_FOR_A_QUAD vertexes to the vertex cache
+    // check free space and flush if needed.
+    if ((maskCacheIndex >= MTLVC_MASK_CACHE_MAX_INDEX) ||
+         ((vertexCacheIndex + VERTS_FOR_A_QUAD) >= MTLVC_MAX_INDEX))
     {
-        J2dTraceLn2(J2D_TRACE_INFO, "maskCacheIndex = %d, vertexCacheIndex = %d", maskCacheIndex, vertexCacheIndex);
+        J2dTraceLn(J2D_TRACE_INFO, "maskCacheIndex = %d, vertexCacheIndex = %d",
+                   maskCacheIndex, vertexCacheIndex);
         MTLVertexCache_FlushVertexCache(mtlc);
         MTLVertexCache_EnableMaskCache(mtlc, dstOps);
         maskCacheIndex = 0;
@@ -232,8 +243,9 @@ MTLVertexCache_AddMaskQuad(MTLContext *mtlc,
                     (maskCacheIndex % MTLVC_MASK_CACHE_WIDTH_IN_TILES);
         jint texy = MTLVC_MASK_CACHE_TILE_HEIGHT *
                     (maskCacheIndex / MTLVC_MASK_CACHE_WIDTH_IN_TILES);
-        J2dTraceLn5(J2D_TRACE_INFO, "texx = %d texy = %d width = %d height = %d maskscan = %d", texx, texy, width,
-                    height, maskscan);
+        J2dTraceLn(J2D_TRACE_INFO,
+                   "texx = %d texy = %d width = %d height = %d maskscan = %d",
+                   texx, texy, width, height, maskscan);
         NSUInteger bytesPerRow = 1 * width;
         NSUInteger slice = bytesPerRow * srcy + srcx;
         MTLRegion region = {
@@ -245,9 +257,9 @@ MTLVertexCache_AddMaskQuad(MTLContext *mtlc,
         // we need to pick appropriate source subtexture. In repalceRegion
         // we can give destination subtexturing properly but we can't
         // subtexture from system memory glyph we have. So in such
-        // cases we are creating seperate tile and scan the source
+        // cases we are creating a separate tile and scan the source
         // stride into destination using memcpy. In case of OpenGL we
-        // can update source pointers, in case of D3D we ar doing memcpy.
+        // can update source pointers, in case of D3D we are doing memcpy.
         // We can use MTLBuffer and then copy source subtexture but that
         // adds extra blitting logic.
         // TODO : Research more and try removing memcpy logic.
@@ -263,9 +275,9 @@ MTLVertexCache_AddMaskQuad(MTLContext *mtlc,
             char tile[size];
             dst_offset = 0;
             for (int i = srcy; i < srcy + height; i++) {
-                J2dTraceLn2(J2D_TRACE_INFO, "srcx = %d srcy = %d", srcx, srcy);
+                J2dTraceLn(J2D_TRACE_INFO, "srcx = %d srcy = %d", srcx, srcy);
                 src_offset = maskscan * i + srcx;
-                J2dTraceLn2(J2D_TRACE_INFO, "src_offset = %d dst_offset = %d", src_offset, dst_offset);
+                J2dTraceLn(J2D_TRACE_INFO, "src_offset = %d dst_offset = %d", src_offset, dst_offset);
                 memcpy(tile + dst_offset, mask + src_offset, width);
                 dst_offset = dst_offset + width;
             }
@@ -293,7 +305,9 @@ MTLVertexCache_AddMaskQuad(MTLContext *mtlc,
     dx2 = dx1 + width;
     dy2 = dy1 + height;
 
-    J2dTraceLn8(J2D_TRACE_INFO, "tx1 = %f ty1 = %f tx2 = %f ty2 = %f dx1 = %f dy1 = %f dx2 = %f dy2 = %f", tx1, ty1, tx2, ty2, dx1, dy1, dx2, dy2);
+    J2dTraceLn(J2D_TRACE_INFO,
+               "tx1 = %f ty1 = %f tx2 = %f ty2 = %f dx1 = %f dy1 = %f dx2 = %f dy2 = %f",
+               tx1, ty1, tx2, ty2, dx1, dy1, dx2, dy2);
     MTLVC_ADD_TRIANGLES(tx1, ty1, tx2, ty2,
                         dx1, dy1, dx2, dy2);
 }
@@ -305,9 +319,12 @@ MTLVertexCache_AddGlyphQuad(MTLContext *mtlc,
 {
     J2dTraceLn(J2D_TRACE_INFO, "MTLVertexCache_AddGlyphQuad");
 
-    if (vertexCacheIndex >= MTLVC_MAX_INDEX)
+    // MTLVC_ADD_TRIANGLES adds VERTS_FOR_A_QUAD vertexes into Cache
+    // so need to check space for VERTS_FOR_A_QUAD elements
+    if ((vertexCacheIndex + VERTS_FOR_A_QUAD) >= MTLVC_MAX_INDEX)
     {
-        J2dTraceLn2(J2D_TRACE_INFO, "maskCacheIndex = %d, vertexCacheIndex = %d", maskCacheIndex, vertexCacheIndex);
+        J2dTraceLn(J2D_TRACE_INFO, "maskCacheIndex = %d, vertexCacheIndex = %d",
+                   maskCacheIndex, vertexCacheIndex);
         MTLVertexCache_FlushGlyphVertexCache();
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -63,8 +63,14 @@ public final class QuickHuffman {
         return codes[c] & 0xffffffff00000000L;
     }
 
-    private static long codeLengthOf(char c) {
-        return codes[c] & 0x00000000ffffffffL;
+    private static int codeLengthOf(char c) {
+        // codes are up to 30 bits long - and their length
+        // is coded on 5 bits which means casting to int here is safe: the
+        // returned value is expected to be in the range (5..30) and will
+        // never be negative.
+        int len = (int) (codes[c] & 0x00000000ffffffffL);
+        assert len >= 0;
+        return len;
     }
 
     private static final int EOS_LENGTH = 30;
@@ -613,7 +619,7 @@ public final class QuickHuffman {
         }
     }
 
-    static final class Reader implements Huffman.Reader {
+    public static final class Reader implements Huffman.Reader {
 
         private final BufferUpdateConsumer UPDATER =
                 (buf, bufLen) -> {
@@ -697,7 +703,7 @@ public final class QuickHuffman {
         }
     }
 
-    static final class Writer implements Huffman.Writer {
+    public static final class Writer implements Huffman.Writer {
 
         private final BufferUpdateConsumer UPDATER =
                 (buf, bufLen) -> {
@@ -732,7 +738,7 @@ public final class QuickHuffman {
                     if (c > 255) {
                         throw new IllegalArgumentException("char=" + ((int) c));
                     }
-                    long len = codeLengthOf(c);
+                    int len = codeLengthOf(c);
                     if (bufferLen + len <= 64) {
                         buffer |= (codeValueOf(c) >>> bufferLen); // append
                         bufferLen += len;
@@ -776,12 +782,26 @@ public final class QuickHuffman {
 
         @Override
         public int lengthOf(CharSequence value, int start, int end) {
-            int len = 0;
-            for (int i = start; i < end; i++) {
-                char c = value.charAt(i);
-                len += codeLengthOf(c);
-            }
-            return bytesForBits(len);
+            return QuickHuffman.lengthOf(value, start, end);
         }
+    }
+
+    public static int lengthOf(CharSequence value, int start, int end) {
+        int len = 0;
+        for (int i = start; i < end; i++) {
+            char c = value.charAt(i);
+            len += codeLengthOf(c);
+        }
+        return bytesForBits(len);
+    }
+
+    public static int lengthOf(CharSequence value) {
+        return lengthOf(value, 0, value.length());
+    }
+
+    /* Used to calculate the number of bytes required for Huffman encoding */
+
+    public static boolean isHuffmanBetterFor(CharSequence input) {
+        return lengthOf(input) < input.length();
     }
 }

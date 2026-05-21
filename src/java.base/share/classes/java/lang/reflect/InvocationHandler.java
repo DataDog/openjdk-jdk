@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,7 +28,6 @@ package java.lang.reflect;
 import jdk.internal.reflect.CallerSensitive;
 import jdk.internal.reflect.Reflection;
 
-import java.lang.invoke.MethodHandle;
 import java.util.Objects;
 
 /**
@@ -55,41 +54,40 @@ public interface InvocationHandler {
      * @param   proxy the proxy instance that the method was invoked on
      *
      * @param   method the {@code Method} instance corresponding to
-     * the interface method invoked on the proxy instance.  The declaring
-     * class of the {@code Method} object will be the interface that
-     * the method was declared in, which may be a superinterface of the
-     * proxy interface that the proxy class inherits the method through.
+     * the method invoked on the proxy instance; the declaring
+     * class of the {@code Method} object may be a proxy interface,
+     * one of their superinterfaces, or the {@code Object} class
      *
      * @param   args an array of objects containing the values of the
      * arguments passed in the method invocation on the proxy instance,
-     * or {@code null} if interface method takes no arguments.
+     * or {@code null} if the invoked method takes no arguments.
      * Arguments of primitive types are wrapped in instances of the
      * appropriate primitive wrapper class, such as
      * {@code java.lang.Integer} or {@code java.lang.Boolean}.
      *
      * @return  the value to return from the method invocation on the
-     * proxy instance.  If the declared return type of the interface
+     * proxy instance.  If the declared return type of the invoked
      * method is a primitive type, then the value returned by
      * this method must be an instance of the corresponding primitive
      * wrapper class; otherwise, it must be a type assignable to the
      * declared return type.  If the value returned by this method is
-     * {@code null} and the interface method's return type is
+     * {@code null} and the invoked method's return type is
      * primitive, then a {@code NullPointerException} will be
      * thrown by the method invocation on the proxy instance.  If the
      * value returned by this method is otherwise not compatible with
-     * the interface method's declared return type as described above,
+     * the invoked method's declared return type as described above,
      * a {@code ClassCastException} will be thrown by the method
      * invocation on the proxy instance.
      *
      * @throws  Throwable the exception to throw from the method
      * invocation on the proxy instance.  The exception's type must be
      * assignable either to any of the exception types declared in the
-     * {@code throws} clause of the interface method or to the
+     * {@code throws} clause of the invoked method or to the
      * unchecked exception types {@code java.lang.RuntimeException}
      * or {@code java.lang.Error}.  If a checked exception is
      * thrown by this method that is not assignable to any of the
      * exception types declared in the {@code throws} clause of
-     * the interface method, then an
+     * the invoked method, then an
      * {@link UndeclaredThrowableException} containing the
      * exception that was thrown by this method will be thrown by the
      * method invocation on the proxy instance.
@@ -255,40 +253,13 @@ public interface InvocationHandler {
      * @throws Throwable anything thrown by the default method
 
      * @since 16
-     * @jvms 5.4.3. Method Resolution
+     * @jvms 5.4.3 Resolution
      */
     @CallerSensitive
     public static Object invokeDefault(Object proxy, Method method, Object... args)
             throws Throwable {
         Objects.requireNonNull(proxy);
         Objects.requireNonNull(method);
-
-        // verify that the object is actually a proxy instance
-        if (!Proxy.isProxyClass(proxy.getClass())) {
-            throw new IllegalArgumentException("'proxy' is not a proxy instance");
-        }
-        if (!method.isDefault()) {
-            throw new IllegalArgumentException("\"" + method + "\" is not a default method");
-        }
-        @SuppressWarnings("unchecked")
-        Class<? extends Proxy> proxyClass = (Class<? extends Proxy>)proxy.getClass();
-
-        Class<?> intf = method.getDeclaringClass();
-        // access check on the default method
-        method.checkAccess(Reflection.getCallerClass(), intf, proxyClass, method.getModifiers());
-
-        MethodHandle mh = Proxy.defaultMethodHandle(proxyClass, method);
-        // invoke the super method
-        try {
-            // the args array can be null if the number of formal parameters required by
-            // the method is zero (consistent with Method::invoke)
-            Object[] params = args != null ? args : Proxy.EMPTY_ARGS;
-            return mh.invokeExact(proxy, params);
-        } catch (ClassCastException | NullPointerException e) {
-            throw new IllegalArgumentException(e.getMessage(), e);
-        } catch (Proxy.InvocationException e) {
-            // unwrap and throw the exception thrown by the default method
-            throw e.getCause();
-        }
+        return Proxy.invokeDefault(proxy, method, args, Reflection.getCallerClass());
     }
 }

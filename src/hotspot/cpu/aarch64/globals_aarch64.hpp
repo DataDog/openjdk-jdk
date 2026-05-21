@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2015, 2019, Red Hat Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -33,11 +33,13 @@
 // (see globals.hpp)
 
 define_pd_global(bool, ImplicitNullChecks,       true);  // Generate code for implicit null checks
-define_pd_global(bool, TrapBasedNullChecks,  false);
-define_pd_global(bool, UncommonNullCast,         true);  // Uncommon-trap NULLs past to check cast
+define_pd_global(bool, TrapBasedNullChecks,     false);
+define_pd_global(bool, UncommonNullCast,         true);  // Uncommon-trap nulls past to check cast
 
-define_pd_global(uintx, CodeCacheSegmentSize,    64 COMPILER1_AND_COMPILER2_PRESENT(+64)); // Tiered compilation has large code-entry alignment.
-define_pd_global(intx, CodeEntryAlignment,       64);
+define_pd_global(bool, DelayCompilerStubsGeneration, COMPILER2_OR_JVMCI);
+
+define_pd_global(size_t, CodeCacheSegmentSize,   64);
+define_pd_global(uint, CodeEntryAlignment,       64);
 define_pd_global(intx, OptoLoopAlignment,        16);
 
 #define DEFAULT_STACK_YELLOW_PAGES (2)
@@ -52,6 +54,8 @@ define_pd_global(intx, OptoLoopAlignment,        16);
 #define MIN_STACK_RED_PAGES    DEFAULT_STACK_RED_PAGES
 #define MIN_STACK_SHADOW_PAGES DEFAULT_STACK_SHADOW_PAGES
 #define MIN_STACK_RESERVED_PAGES (0)
+
+define_pd_global(bool, VMContinuations, true);
 
 define_pd_global(intx, StackYellowPages, DEFAULT_STACK_YELLOW_PAGES);
 define_pd_global(intx, StackRedPages, DEFAULT_STACK_RED_PAGES);
@@ -76,24 +80,23 @@ define_pd_global(intx, InlineSmallCode,          1000);
 
 #define ARCH_FLAGS(develop,                                             \
                    product,                                             \
-                   notproduct,                                          \
                    range,                                               \
                    constraint)                                          \
                                                                         \
-  product(bool, NearCpool, true,                                        \
-         "constant pool is close to instructions")                      \
-  product(bool, UseNeon, false,                                         \
-          "Use Neon for CRC32 computation")                             \
   product(bool, UseCRC32, false,                                        \
           "Use CRC32 instructions for CRC32 computation")               \
+  product(bool, UseCryptoPmullForCRC32, false,                          \
+          "Use Crypto PMULL instructions for CRC32 computation")        \
   product(bool, UseSIMDForMemoryOps, false,                             \
           "Use SIMD instructions in generated memory move code")        \
   product(bool, UseSIMDForArrayEquals, true,                            \
           "Use SIMD instructions in generated array equals code")       \
   product(bool, UseSimpleArrayEquals, false,                            \
-          "Use simpliest and shortest implementation for array equals") \
+          "Use simplest and shortest implementation for array equals")  \
   product(bool, UseSIMDForBigIntegerShiftIntrinsics, true,              \
           "Use SIMD instructions for left/right shift of BigInteger")   \
+  product(bool, UseSIMDForSHA3Intrinsic, false,                         \
+          "Use SIMD SHA3 instructions for SHA3 intrinsic")              \
   product(bool, AvoidUnalignedAccesses, false,                          \
           "Avoid generating unaligned memory accesses")                 \
   product(bool, UseLSE, false,                                          \
@@ -105,12 +108,33 @@ define_pd_global(intx, InlineSmallCode,          1000);
           "Use DC ZVA for block zeroing")                               \
   product(intx, BlockZeroingLowLimit, 256,                              \
           "Minimum size in bytes when block zeroing will be used")      \
-          range(1, max_jint)                                            \
+          range(wordSize, max_jint)                                     \
   product(bool, TraceTraps, false, "Trace all traps the signal handler")\
   product(int, SoftwarePrefetchHintDistance, -1,                        \
           "Use prfm hint with specified distance in compiled code."     \
           "Value -1 means off.")                                        \
-          range(-1, 4096)
+          range(-1, 4096)                                               \
+  product(ccstr, OnSpinWaitInst, "yield", DIAGNOSTIC,                   \
+          "The instruction to use for java.lang.Thread.onSpinWait(). "  \
+          "Valid values are: none, nop, isb, yield, sb, wfet.")         \
+          constraint(OnSpinWaitInstNameConstraintFunc, AtParse)         \
+  product(uint, OnSpinWaitInstCount, 1, DIAGNOSTIC,                     \
+          "The number of OnSpinWaitInst instructions to generate. "     \
+          "It cannot be used with OnSpinWaitInst=none. "                \
+          "For OnSpinWaitInst=wfet it must be 1.")                      \
+          range(1, 99)                                                  \
+  product(uint, OnSpinWaitDelay, 40, DIAGNOSTIC,                        \
+          "The minimum delay (in nanoseconds) of the OnSpinWait loop. " \
+          "It can only be used with -XX:OnSpinWaitInst=wfet.")          \
+          range(1, 1000)                                                \
+  product(ccstr, UseBranchProtection, "none",                           \
+          "Branch Protection to use: none, standard, pac-ret")          \
+  product(bool, AlwaysMergeDMB, true, DIAGNOSTIC,                       \
+          "Always merge DMB instructions in code emission")             \
+  product(bool, NeoverseN1ICacheErratumMitigation, false, DIAGNOSTIC,   \
+          "Enable workaround for Neoverse N1 erratum 1542419")          \
+  product(bool, UseSingleICacheInvalidation, false, DIAGNOSTIC,         \
+          "Defer multiple ICache invalidation to single invalidation")  \
 
 // end of ARCH_FLAGS
 

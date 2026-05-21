@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,7 @@
  */
 
 /* @test
- *
+ * @bug 8280642
  * @summary functional test for RMIClassLoader.loadProxyClass; test
  * ensures that the default RMI class loader provider implements
  * RMIClassLoader.loadProxyClass correctly.
@@ -36,7 +36,7 @@
  *          java.rmi/sun.rmi.transport.tcp
  * @build TestLibrary FnnClass FnnUnmarshal NonpublicInterface
  *     NonpublicInterface1 PublicInterface PublicInterface1
- * @run main/othervm/policy=security.policy
+ * @run main/othervm
  *     -Djava.rmi.server.useCodebaseOnly=false LoadProxyClasses
  */
 
@@ -48,6 +48,7 @@ import java.rmi.MarshalledObject;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.io.Serializable;
+import java.io.InvalidClassException;
 import java.io.IOException;
 
 import java.util.Arrays;
@@ -55,7 +56,7 @@ import java.util.zip.Checksum;
 
 /**
  *  Invokes RMIClassLoader.loadProxyClass() to load a proxy class with
- *  multiple interfaces using using RMI class unmarshalling.  Test is
+ *  multiple interfaces using RMI class unmarshalling.  Test is
  *  composed of cases which each unmarshal a proxy class in a
  *  different environment.  All of the cases create needed class
  *  loaders, load appropriate interfaces, create a proxy class that
@@ -72,16 +73,18 @@ import java.util.zip.Checksum;
  *  interface (java.util.zip.CheckSum) loaded from bootclasspath,
  *  proxy class defined in null/boot class loader.  Should succeed.
  *
- *  3. Public interface classes loaded in FNNL are also available in
+ *  3. Disabled. Public interface classes loaded in FNNL are also available in
  *  RMI loader parent.  FNNL is grandparent of RMI loader. Proxy class
  *  must be defined in RMI class loader. Should succeed. public
- *  interface must be defined in FNNL.
+ *  interface must be defined in FNNL. Disabled because the default
+ *  RMIClassLoader provider no longer creates class loaders.
  *
  *  4. Non-public interfaces have multiple class loaders. Should fail
  *  with a LinkageError.
  *
- *  5. Interface classes loaded from RMI class loader. Proxy class
- *  defined in RMI class loader.
+ *  5. Disabled. Interface classes loaded from RMI class loader. Proxy class
+ *  defined in RMI class loader. Disabled because the default RMIClassLoader
+ *  provider no longer creates class loaders.
  *
  *  6. Not all interfaces classes can be loaded from a single class
  *  loader; should fail with ClassNotFoundException.  All interface
@@ -125,9 +128,6 @@ public class LoadProxyClasses {
                                                "bothNonpublic");
             URL fnnUrl =
                 TestLibrary.installClassInCodebase("FnnClass", "fnn");
-
-            TestLibrary.suggestSecurityManager(null);
-
 
             /* Case 1 */
             ClassLoader grandParentPublic =
@@ -179,8 +179,8 @@ public class LoadProxyClasses {
                 new Class[] {publicInterface3},
                 new TestInvocationHandler());
 
-            unmarshalProxyClass(proxy3, fnnLoader3, fnnLoader3,
-                3, new Case3Checker());
+//            unmarshalProxyClass(proxy3, fnnLoader3, fnnLoader3,
+//                3, new Case3Checker());
 
             currentThread.setContextClassLoader(currentCtxLoader);
 
@@ -205,20 +205,20 @@ public class LoadProxyClasses {
                 currentThread.getContextClassLoader();
             currentThread.setContextClassLoader(nonpublicLoaderB);
 
-            IllegalAccessError illegal = null;
+            InvalidClassException invalid = null;
             try {
                 unmarshalProxyClass(proxy4, fnnLoader2, nonpublicLoaderB,
                                     4, null);
-            } catch (IllegalAccessError e) {
-                illegal = e;
+            } catch (InvalidClassException e) {
+                invalid = e;
             }
 
-            if (illegal == null) {
-                TestLibrary.bomb("case4: IllegalAccessError not thrown " +
+            if (invalid == null) {
+                TestLibrary.bomb("case4: InvalidClassException not thrown " +
                                  "when multiple nonpublic interfaces have \n" +
                                  "different class loaders");
             } else {
-                System.err.println("\ncase4: IllegalAccessError correctly " +
+                System.err.println("\ncase4: InvalidClassException correctly " +
                                    "thrown \n when trying to load proxy " +
                                    "with multiple nonpublic interfaces in \n" +
                                    "  different class loaders");
@@ -239,8 +239,8 @@ public class LoadProxyClasses {
             currentCtxLoader =
                 currentThread.getContextClassLoader();
             currentThread.setContextClassLoader(publicLoader);
-            unmarshalProxyClass(proxy5, fnnLoader2, publicLoader, 5,
-                                new Case5Checker());
+//            unmarshalProxyClass(proxy5, fnnLoader2, publicLoader, 5,
+//                                new Case5Checker());
             currentThread.setContextClassLoader(currentCtxLoader);
 
 

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2002, 2021, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2019, 2021, NTT DATA.
+ * Copyright (c) 2002, 2026, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2026, NTT DATA.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -40,14 +40,6 @@
 #define amd64 1
 #endif
 
-#if defined(i386) && !defined(i586)
-#define i586 1
-#endif
-
-#ifdef i586
-#include "sun_jvm_hotspot_debugger_x86_X86ThreadContext.h"
-#endif
-
 #ifdef amd64
 #include "sun_jvm_hotspot_debugger_amd64_AMD64ThreadContext.h"
 #endif
@@ -60,13 +52,17 @@
 #include "sun_jvm_hotspot_debugger_aarch64_AARCH64ThreadContext.h"
 #endif
 
+#ifdef riscv64
+#include "sun_jvm_hotspot_debugger_riscv64_RISCV64ThreadContext.h"
+#endif
+
 class AutoJavaString {
   JNIEnv* m_env;
   jstring m_str;
   const char* m_buf;
 
 public:
-  // check env->ExceptionOccurred() after ctor
+  // check env->ExceptionCheck() after ctor
   AutoJavaString(JNIEnv* env, jstring str)
     : m_env(env), m_str(str), m_buf(str == NULL ? NULL : env->GetStringUTFChars(str, NULL)) {
   }
@@ -97,8 +93,8 @@ static jmethodID listAdd_ID = 0;
  */
 static char *saaltroot = NULL;
 
-#define CHECK_EXCEPTION_(value) if (env->ExceptionOccurred()) { return value; }
-#define CHECK_EXCEPTION if (env->ExceptionOccurred()) { return;}
+#define CHECK_EXCEPTION_(value) if (env->ExceptionCheck()) { return value; }
+#define CHECK_EXCEPTION if (env->ExceptionCheck()) { return;}
 #define THROW_NEW_DEBUGGER_EXCEPTION_(str, value) { throw_new_debugger_exception(env, str); return value; }
 #define THROW_NEW_DEBUGGER_EXCEPTION(str) { throw_new_debugger_exception(env, str); return;}
 
@@ -293,6 +289,13 @@ JNIEXPORT void JNICALL Java_sun_jvm_hotspot_debugger_linux_LinuxDebuggerLocal_at
     snprintf(msg, sizeof(msg), "Can't attach to the process: %s", err_buf);
     THROW_NEW_DEBUGGER_EXCEPTION(msg);
   }
+
+#ifdef __aarch64__
+  if (pac_enabled(ph)) {
+    printf("WARNING: PAC is enabled. Stack traces might be incomplete.\n");
+  }
+#endif
+
   env->SetLongField(this_obj, p_ps_prochandle_ID, (jlong)(intptr_t)ph);
   fillThreadsAndLoadObjects(env, this_obj, ph);
 }
@@ -315,8 +318,15 @@ JNIEXPORT void JNICALL Java_sun_jvm_hotspot_debugger_linux_LinuxDebuggerLocal_at
   CHECK_EXCEPTION;
 
   if ( (ph = Pgrab_core(execName_cstr, coreName_cstr)) == NULL) {
-    THROW_NEW_DEBUGGER_EXCEPTION("Can't attach to the core file");
+    THROW_NEW_DEBUGGER_EXCEPTION("Can't attach to the core file. For more information, export LIBSAPROC_DEBUG=1 and try again.");
   }
+
+#ifdef __aarch64__
+  if (pac_enabled(ph)) {
+    printf("WARNING: PAC is enabled. Stack traces might be incomplete.\n");
+  }
+#endif
+
   env->SetLongField(this_obj, p_ps_prochandle_ID, (jlong)(intptr_t)ph);
   fillThreadsAndLoadObjects(env, this_obj, ph);
 }
@@ -348,7 +358,6 @@ extern "C"
 JNIEXPORT jlong JNICALL Java_sun_jvm_hotspot_debugger_linux_LinuxDebuggerLocal_lookupByName0
   (JNIEnv *env, jobject this_obj, jstring objectName, jstring symbolName) {
   jlong addr;
-  jboolean isCopy;
   struct ps_prochandle* ph = get_proc_handle(env, this_obj);
   // Note, objectName is ignored, and may in fact be NULL.
   // lookup_symbol will always search all objects/libs
@@ -408,7 +417,7 @@ JNIEXPORT jbyteArray JNICALL Java_sun_jvm_hotspot_debugger_linux_LinuxDebuggerLo
   return (err == PS_OK)? array : 0;
 }
 
-#if defined(i586) || defined(amd64) || defined(ppc64) || defined(ppc64le) || defined(aarch64)
+#if defined(amd64) || defined(ppc64) || defined(ppc64le) || defined(aarch64) || defined(riscv64)
 extern "C"
 JNIEXPORT jlongArray JNICALL Java_sun_jvm_hotspot_debugger_linux_LinuxDebuggerLocal_getThreadIntegerRegisterSet0
   (JNIEnv *env, jobject this_obj, jint lwp_id) {
@@ -417,11 +426,10 @@ JNIEXPORT jlongArray JNICALL Java_sun_jvm_hotspot_debugger_linux_LinuxDebuggerLo
   jboolean isCopy;
   jlongArray array;
   jlong *regs;
-  int i;
 
   struct ps_prochandle* ph = get_proc_handle(env, this_obj);
   if (get_lwp_regs(ph, lwp_id, &gregs) != true) {
-    // This is not considered fatal and does happen on occassion, usually with an
+    // This is not considered fatal and does happen on occasion, usually with an
     // ESRCH error. The root cause is not fully understood, but by ignoring this error
     // and returning NULL, stacking walking code will get null registers and fallback
     // to using the "last java frame" if setup.
@@ -431,14 +439,14 @@ JNIEXPORT jlongArray JNICALL Java_sun_jvm_hotspot_debugger_linux_LinuxDebuggerLo
   }
 
 #undef NPRGREG
-#ifdef i586
-#define NPRGREG sun_jvm_hotspot_debugger_x86_X86ThreadContext_NPRGREG
-#endif
 #ifdef amd64
 #define NPRGREG sun_jvm_hotspot_debugger_amd64_AMD64ThreadContext_NPRGREG
 #endif
 #ifdef aarch64
 #define NPRGREG sun_jvm_hotspot_debugger_aarch64_AARCH64ThreadContext_NPRGREG
+#endif
+#ifdef riscv64
+#define NPRGREG sun_jvm_hotspot_debugger_riscv64_RISCV64ThreadContext_NPRGREG
 #endif
 #if defined(ppc64) || defined(ppc64le)
 #define NPRGREG sun_jvm_hotspot_debugger_ppc64_PPC64ThreadContext_NPRGREG
@@ -450,27 +458,6 @@ JNIEXPORT jlongArray JNICALL Java_sun_jvm_hotspot_debugger_linux_LinuxDebuggerLo
   regs = env->GetLongArrayElements(array, &isCopy);
 
 #undef REG_INDEX
-
-#ifdef i586
-#define REG_INDEX(reg) sun_jvm_hotspot_debugger_x86_X86ThreadContext_##reg
-
-  regs[REG_INDEX(GS)]  = (uintptr_t) gregs.xgs;
-  regs[REG_INDEX(FS)]  = (uintptr_t) gregs.xfs;
-  regs[REG_INDEX(ES)]  = (uintptr_t) gregs.xes;
-  regs[REG_INDEX(DS)]  = (uintptr_t) gregs.xds;
-  regs[REG_INDEX(EDI)] = (uintptr_t) gregs.edi;
-  regs[REG_INDEX(ESI)] = (uintptr_t) gregs.esi;
-  regs[REG_INDEX(FP)] = (uintptr_t) gregs.ebp;
-  regs[REG_INDEX(SP)] = (uintptr_t) gregs.esp;
-  regs[REG_INDEX(EBX)] = (uintptr_t) gregs.ebx;
-  regs[REG_INDEX(EDX)] = (uintptr_t) gregs.edx;
-  regs[REG_INDEX(ECX)] = (uintptr_t) gregs.ecx;
-  regs[REG_INDEX(EAX)] = (uintptr_t) gregs.eax;
-  regs[REG_INDEX(PC)] = (uintptr_t) gregs.eip;
-  regs[REG_INDEX(CS)]  = (uintptr_t) gregs.xcs;
-  regs[REG_INDEX(SS)]  = (uintptr_t) gregs.xss;
-
-#endif /* i586 */
 
 #ifdef amd64
 #define REG_INDEX(reg) sun_jvm_hotspot_debugger_amd64_AMD64ThreadContext_##reg
@@ -516,6 +503,44 @@ JNIEXPORT jlongArray JNICALL Java_sun_jvm_hotspot_debugger_linux_LinuxDebuggerLo
   }
 #endif /* aarch64 */
 
+#if defined(riscv64)
+#define REG_INDEX(reg)  sun_jvm_hotspot_debugger_riscv64_RISCV64ThreadContext_##reg
+
+  regs[REG_INDEX(PC)]  = gregs.pc;
+  regs[REG_INDEX(LR)]  = gregs.ra;
+  regs[REG_INDEX(SP)]  = gregs.sp;
+  regs[REG_INDEX(R3)]  = gregs.gp;
+  regs[REG_INDEX(R4)]  = gregs.tp;
+  regs[REG_INDEX(R5)]  = gregs.t0;
+  regs[REG_INDEX(R6)]  = gregs.t1;
+  regs[REG_INDEX(R7)]  = gregs.t2;
+  regs[REG_INDEX(R8)]  = gregs.s0;
+  regs[REG_INDEX(R9)]  = gregs.s1;
+  regs[REG_INDEX(R10)]  = gregs.a0;
+  regs[REG_INDEX(R11)]  = gregs.a1;
+  regs[REG_INDEX(R12)]  = gregs.a2;
+  regs[REG_INDEX(R13)]  = gregs.a3;
+  regs[REG_INDEX(R14)]  = gregs.a4;
+  regs[REG_INDEX(R15)]  = gregs.a5;
+  regs[REG_INDEX(R16)]  = gregs.a6;
+  regs[REG_INDEX(R17)]  = gregs.a7;
+  regs[REG_INDEX(R18)]  = gregs.s2;
+  regs[REG_INDEX(R19)]  = gregs.s3;
+  regs[REG_INDEX(R20)]  = gregs.s4;
+  regs[REG_INDEX(R21)]  = gregs.s5;
+  regs[REG_INDEX(R22)]  = gregs.s6;
+  regs[REG_INDEX(R23)]  = gregs.s7;
+  regs[REG_INDEX(R24)]  = gregs.s8;
+  regs[REG_INDEX(R25)]  = gregs.s9;
+  regs[REG_INDEX(R26)]  = gregs.s10;
+  regs[REG_INDEX(R27)]  = gregs.s11;
+  regs[REG_INDEX(R28)]  = gregs.t3;
+  regs[REG_INDEX(R29)]  = gregs.t4;
+  regs[REG_INDEX(R30)]  = gregs.t5;
+  regs[REG_INDEX(R31)]  = gregs.t6;
+
+#endif /* riscv64 */
+
 #if defined(ppc64) || defined(ppc64le)
 #define REG_INDEX(reg) sun_jvm_hotspot_debugger_ppc64_PPC64ThreadContext_##reg
 
@@ -556,7 +581,7 @@ JNIEXPORT jlongArray JNICALL Java_sun_jvm_hotspot_debugger_linux_LinuxDebuggerLo
 
 #endif
 
-  env->ReleaseLongArrayElements(array, regs, JNI_COMMIT);
+  env->ReleaseLongArrayElements(array, regs, 0);
   return array;
 }
 #endif

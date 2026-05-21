@@ -1,6 +1,7 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2015, 2020, Red Hat Inc. All rights reserved.
+ * Copyright 2025, 2026 Arm Limited and/or its affiliates.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,16 +24,17 @@
  *
  */
 
-#include "precompiled.hpp"
+#include "logging/log.hpp"
+#include "pauth_aarch64.hpp"
+#include "register_aarch64.hpp"
 #include "runtime/arguments.hpp"
 #include "runtime/globals_extension.hpp"
 #include "runtime/java.hpp"
-#include "runtime/os.hpp"
+#include "runtime/os.inline.hpp"
 #include "runtime/vm_version.hpp"
 #include "utilities/formatBuffer.hpp"
 #include "utilities/macros.hpp"
-
-#include OS_HEADER_INLINE(os)
+#include "utilities/ostream.hpp"
 
 int VM_Version::_cpu;
 int VM_Version::_model;
@@ -45,20 +47,81 @@ int VM_Version::_zva_length;
 int VM_Version::_dcache_line_size;
 int VM_Version::_icache_line_size;
 int VM_Version::_initial_sve_vector_length;
+int VM_Version::_max_supported_sve_vector_length;
+bool VM_Version::_rop_protection;
+uintptr_t VM_Version::_pac_mask;
+
+SpinWait VM_Version::_spin_wait;
+
+bool VM_Version::_cache_dic_enabled;
+bool VM_Version::_cache_idc_enabled;
+bool VM_Version::_ic_ivau_trapped;
+
+#define DECLARE_CPU_FEATURE_NAME(id, name) XSTR(name),
+const char* VM_Version::_features_names[] = { CPU_FEATURE_FLAGS(DECLARE_CPU_FEATURE_NAME)};
+#undef DECLARE_CPU_FEATURE_NAME
+
+static SpinWait get_spin_wait_desc() {
+  SpinWait spin_wait(OnSpinWaitInst, OnSpinWaitInstCount, OnSpinWaitDelay);
+  if (spin_wait.inst() == SpinWait::SB && !VM_Version::supports_sb()) {
+    vm_exit_during_initialization("OnSpinWaitInst is SB but current CPU does not support SB instruction");
+  }
+
+  if (spin_wait.inst() == SpinWait::WFET) {
+    if (!VM_Version::supports_wfxt()) {
+      vm_exit_during_initialization("OnSpinWaitInst is WFET but the CPU does not support the WFET instruction");
+    }
+
+    if (!VM_Version::supports_ecv()) {
+      vm_exit_during_initialization("The CPU does not support the FEAT_ECV required by the -XX:OnSpinWaitInst=wfet implementation");
+    }
+
+    if (!VM_Version::supports_sb()) {
+      vm_exit_during_initialization("The CPU does not support the SB instruction required by the -XX:OnSpinWaitInst=wfet implementation");
+    }
+
+    if (OnSpinWaitInstCount != 1) {
+      vm_exit_during_initialization("OnSpinWaitInstCount for OnSpinWaitInst 'wfet' must be 1");
+    }
+  } else {
+    if (!FLAG_IS_DEFAULT(OnSpinWaitDelay)) {
+      vm_exit_during_initialization("OnSpinWaitDelay can only be used with -XX:OnSpinWaitInst=wfet");
+    }
+  }
+
+  return spin_wait;
+}
+
+static bool has_neoverse_n1_errata_1542419() {
+  const int major_rev_num = VM_Version::cpu_variant();
+  const int minor_rev_num = VM_Version::cpu_revision();
+  // Neoverse N1: 0xd0c
+  // Erratum 1542419 affects r3p0, r3p1 and r4p0.
+  // It is fixed in r4p1 and later revisions, which are not affected.
+  return (VM_Version::cpu_family() == VM_Version::CPU_ARM &&
+          VM_Version::model_is(0xd0c) &&
+          ((major_rev_num == 3 && minor_rev_num == 0) ||
+           (major_rev_num == 3 && minor_rev_num == 1) ||
+           (major_rev_num == 4 && minor_rev_num == 0)));
+}
 
 void VM_Version::initialize() {
-  _supports_cx8 = true;
   _supports_atomic_getset4 = true;
   _supports_atomic_getadd4 = true;
   _supports_atomic_getset8 = true;
   _supports_atomic_getadd8 = true;
 
-  get_os_cpu_info();
+  _cache_dic_enabled = false;
+  _cache_idc_enabled = false;
+  _ic_ivau_trapped = false;
 
-  int dcache_line = VM_Version::dcache_line_size();
+  get_os_cpu_info();
+  _cpu_features = _features;
+
+  int dcache_line = dcache_line_size();
 
   // Limit AllocatePrefetchDistance so that it does not exceed the
-  // constraint in AllocatePrefetchDistanceConstraintFunc.
+  // static constraint of 512 defined in runtime/globals.hpp.
   if (FLAG_IS_DEFAULT(AllocatePrefetchDistance))
     FLAG_SET_DEFAULT(AllocatePrefetchDistance, MIN2(512, 3*dcache_line));
 
@@ -79,7 +142,7 @@ void VM_Version::initialize() {
       PrefetchCopyIntervalInBytes = 32760;
   }
 
-  if (AllocatePrefetchDistance !=-1 && (AllocatePrefetchDistance & 7)) {
+  if (AllocatePrefetchDistance != -1 && (AllocatePrefetchDistance & 7)) {
     warning("AllocatePrefetchDistance must be multiple of 8");
     AllocatePrefetchDistance &= ~7;
   }
@@ -103,7 +166,7 @@ void VM_Version::initialize() {
     // if dcpop is available publish data cache line flush size via
     // generic field, otherwise let if default to zero thereby
     // disabling writeback
-    if (_features & CPU_DCPOP) {
+    if (supports_dcpop()) {
       _data_cache_line_flush_size = dcache_line;
     }
   }
@@ -111,7 +174,7 @@ void VM_Version::initialize() {
   // Enable vendor specific features
 
   // Ampere eMAG
-  if (_cpu == CPU_AMCC && (_model == 0) && (_variant == 0x3)) {
+  if (_cpu == CPU_AMCC && (_model == CPU_MODEL_EMAG) && (_variant == 0x3)) {
     if (FLAG_IS_DEFAULT(AvoidUnalignedAccesses)) {
       FLAG_SET_DEFAULT(AvoidUnalignedAccesses, true);
     }
@@ -120,6 +183,28 @@ void VM_Version::initialize() {
     }
     if (FLAG_IS_DEFAULT(UseSIMDForArrayEquals)) {
       FLAG_SET_DEFAULT(UseSIMDForArrayEquals, !(_revision == 1 || _revision == 2));
+    }
+  }
+
+  // Ampere CPUs
+  if (_cpu == CPU_AMPERE && ((_model == CPU_MODEL_AMPERE_1)  ||
+                             (_model == CPU_MODEL_AMPERE_1A) ||
+                             (_model == CPU_MODEL_AMPERE_1B))) {
+    if (FLAG_IS_DEFAULT(UseSIMDForMemoryOps)) {
+      FLAG_SET_DEFAULT(UseSIMDForMemoryOps, true);
+    }
+    if (FLAG_IS_DEFAULT(OnSpinWaitInst)) {
+      FLAG_SET_DEFAULT(OnSpinWaitInst, "isb");
+    }
+    if (FLAG_IS_DEFAULT(OnSpinWaitInstCount)) {
+      FLAG_SET_DEFAULT(OnSpinWaitInstCount, 2);
+    }
+    if (FLAG_IS_DEFAULT(CodeEntryAlignment) &&
+        (_model == CPU_MODEL_AMPERE_1A || _model == CPU_MODEL_AMPERE_1B)) {
+      FLAG_SET_DEFAULT(CodeEntryAlignment, 32);
+    }
+    if (FLAG_IS_DEFAULT(AlwaysMergeDMB)) {
+      FLAG_SET_DEFAULT(AlwaysMergeDMB, false);
     }
   }
 
@@ -158,16 +243,14 @@ void VM_Version::initialize() {
     }
   }
 
-  // Cortex A53
-  if (_cpu == CPU_ARM && (_model == 0xd03 || _model2 == 0xd03)) {
-    _features |= CPU_A53MAC;
+  if (_cpu == CPU_ARM && model_is(CPU_MODEL_ARM_CORTEX_A53)) {
+    set_feature(CPU_A53MAC);
     if (FLAG_IS_DEFAULT(UseSIMDForArrayEquals)) {
       FLAG_SET_DEFAULT(UseSIMDForArrayEquals, false);
     }
   }
 
-  // Cortex A73
-  if (_cpu == CPU_ARM && (_model == 0xd09 || _model2 == 0xd09)) {
+  if (_cpu == CPU_ARM && model_is(CPU_MODEL_ARM_CORTEX_A73)) {
     if (FLAG_IS_DEFAULT(SoftwarePrefetchHintDistance)) {
       FLAG_SET_DEFAULT(SoftwarePrefetchHintDistance, -1);
     }
@@ -177,37 +260,66 @@ void VM_Version::initialize() {
     }
   }
 
-  // Neoverse N1
-  if (_cpu == CPU_ARM && (_model == 0xd0c || _model2 == 0xd0c)) {
+  if (_cpu == CPU_ARM &&
+      model_is_in({ CPU_MODEL_ARM_NEOVERSE_N1, CPU_MODEL_ARM_NEOVERSE_V1,
+                    CPU_MODEL_ARM_NEOVERSE_N2, CPU_MODEL_ARM_NEOVERSE_V2,
+                    CPU_MODEL_ARM_NEOVERSE_N3, CPU_MODEL_ARM_NEOVERSE_V3,
+                    CPU_MODEL_ARM_NEOVERSE_V3AE })) {
     if (FLAG_IS_DEFAULT(UseSIMDForMemoryOps)) {
       FLAG_SET_DEFAULT(UseSIMDForMemoryOps, true);
     }
+
+    if (FLAG_IS_DEFAULT(OnSpinWaitInst)) {
+      FLAG_SET_DEFAULT(OnSpinWaitInst, "isb");
+    }
+
+    if (FLAG_IS_DEFAULT(OnSpinWaitInstCount)) {
+      FLAG_SET_DEFAULT(OnSpinWaitInstCount, 1);
+    }
+    if (FLAG_IS_DEFAULT(AlwaysMergeDMB)) {
+      FLAG_SET_DEFAULT(AlwaysMergeDMB, false);
+    }
   }
 
-  if (_cpu == CPU_ARM) {
+  if (supports_feature(CPU_FP) || supports_feature(CPU_ASIMD)) {
     if (FLAG_IS_DEFAULT(UseSignumIntrinsic)) {
       FLAG_SET_DEFAULT(UseSignumIntrinsic, true);
     }
   }
 
-  if (_cpu == CPU_ARM && (_model == 0xd07 || _model2 == 0xd07)) _features |= CPU_STXR_PREFETCH;
-
-  char buf[512];
-  sprintf(buf, "0x%02x:0x%x:0x%03x:%d", _cpu, _variant, _model, _revision);
-  if (_model2) sprintf(buf+strlen(buf), "(0x%03x)", _model2);
-#define ADD_FEATURE_IF_SUPPORTED(id, name, bit) if (_features & CPU_##id) strcat(buf, ", " name);
-  CPU_FEATURE_FLAGS(ADD_FEATURE_IF_SUPPORTED)
-#undef ADD_FEATURE_IF_SUPPORTED
-
-  _features_string = os::strdup(buf);
-
-  if (FLAG_IS_DEFAULT(UseCRC32)) {
-    UseCRC32 = (_features & CPU_CRC32) != 0;
+  if (supports_sha1() || supports_sha256() ||
+      supports_sha3() || supports_sha512()) {
+    if (FLAG_IS_DEFAULT(UseSHA)) {
+      FLAG_SET_DEFAULT(UseSHA, true);
+    } else if (!UseSHA) {
+      clear_feature(CPU_SHA1);
+      clear_feature(CPU_SHA2);
+      clear_feature(CPU_SHA3);
+      clear_feature(CPU_SHA512);
+    }
+  } else if (UseSHA) {
+    warning("SHA instructions are not available on this CPU");
+    FLAG_SET_DEFAULT(UseSHA, false);
   }
 
-  if (UseCRC32 && (_features & CPU_CRC32) == 0) {
-    warning("UseCRC32 specified, but not supported on this CPU");
-    FLAG_SET_DEFAULT(UseCRC32, false);
+  CHECK_CPU_FEATURE(UseCRC32, CRC32, supports_crc32(), "CRC32" MULTI_INST_WARNING_MSG);
+  CHECK_CPU_FEATURE(UseLSE, LSE, supports_lse(), "LSE" MULTI_INST_WARNING_MSG);
+  CHECK_CPU_FEATURE(UseAES, AES, supports_aes(), "AES" MULTI_INST_WARNING_MSG);
+
+  if (_cpu == CPU_ARM &&
+      model_is_in({ CPU_MODEL_ARM_NEOVERSE_V1, CPU_MODEL_ARM_NEOVERSE_V2,
+                    CPU_MODEL_ARM_NEOVERSE_V3, CPU_MODEL_ARM_NEOVERSE_V3AE })) {
+    if (FLAG_IS_DEFAULT(UseCryptoPmullForCRC32)) {
+      FLAG_SET_DEFAULT(UseCryptoPmullForCRC32, true);
+    }
+    if (FLAG_IS_DEFAULT(CodeEntryAlignment)) {
+      FLAG_SET_DEFAULT(CodeEntryAlignment, 32);
+    }
+  }
+
+  if (UseCryptoPmullForCRC32 && (!supports_pmull() || !supports_sha3() || !supports_crc32())) {
+    warning("UseCryptoPmullForCRC32 specified, but not supported on this CPU");
+    FLAG_SET_DEFAULT(UseCryptoPmullForCRC32, false);
   }
 
   if (FLAG_IS_DEFAULT(UseAdler32Intrinsics)) {
@@ -219,45 +331,40 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UseVectorizedMismatchIntrinsic, false);
   }
 
-  if (_features & CPU_LSE) {
-    if (FLAG_IS_DEFAULT(UseLSE))
-      FLAG_SET_DEFAULT(UseLSE, true);
-  } else {
-    if (UseLSE) {
-      warning("UseLSE specified, but not supported on this CPU");
-      FLAG_SET_DEFAULT(UseLSE, false);
+  if (supports_aes()) {
+    if (FLAG_IS_DEFAULT(UseAESIntrinsics)) {
+      FLAG_SET_DEFAULT(UseAESIntrinsics, true);
     }
-  }
-
-  if (_features & CPU_AES) {
-    UseAES = UseAES || FLAG_IS_DEFAULT(UseAES);
-    UseAESIntrinsics =
-        UseAESIntrinsics || (UseAES && FLAG_IS_DEFAULT(UseAESIntrinsics));
-    if (UseAESIntrinsics && !UseAES) {
-      warning("UseAESIntrinsics enabled, but UseAES not, enabling");
-      UseAES = true;
+    if (FLAG_IS_DEFAULT(UseAESCTRIntrinsics)) {
+      FLAG_SET_DEFAULT(UseAESCTRIntrinsics, true);
     }
   } else {
-    if (UseAES) {
-      warning("AES instructions are not available on this CPU");
-      FLAG_SET_DEFAULT(UseAES, false);
+    if (!UseAES) {
+      if (UseAESIntrinsics) {
+        warning("AES intrinsics require UseAES flag to be enabled. Intrinsics will be disabled.");
+        FLAG_SET_DEFAULT(UseAESIntrinsics, false);
+      }
+      if (UseAESCTRIntrinsics) {
+        warning("AES/CTR intrinsics require UseAES flag to be enabled. Intrinsics will be disabled.");
+        FLAG_SET_DEFAULT(UseAESCTRIntrinsics, false);
+      }
+    } else if (!cpu_supports_aes()) {
+      if (UseAESIntrinsics) {
+        warning("AES intrinsics are not available on this CPU");
+        FLAG_SET_DEFAULT(UseAESIntrinsics, false);
+      }
+      if (UseAESCTRIntrinsics) {
+        warning("AES/CTR intrinsics are not available on this CPU");
+        FLAG_SET_DEFAULT(UseAESCTRIntrinsics, false);
+      }
     }
-    if (UseAESIntrinsics) {
-      warning("AES intrinsics are not available on this CPU");
-      FLAG_SET_DEFAULT(UseAESIntrinsics, false);
-    }
-  }
-
-  if (UseAESCTRIntrinsics) {
-    warning("AES/CTR intrinsics are not available on this CPU");
-    FLAG_SET_DEFAULT(UseAESCTRIntrinsics, false);
   }
 
   if (FLAG_IS_DEFAULT(UseCRC32Intrinsics)) {
     UseCRC32Intrinsics = true;
   }
 
-  if (_features & CPU_CRC32) {
+  if (supports_crc32()) {
     if (FLAG_IS_DEFAULT(UseCRC32CIntrinsics)) {
       FLAG_SET_DEFAULT(UseCRC32CIntrinsics, true);
     }
@@ -270,21 +377,11 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UseFMA, true);
   }
 
-  if (UseMD5Intrinsics) {
-    warning("MD5 intrinsics are not available on this CPU");
-    FLAG_SET_DEFAULT(UseMD5Intrinsics, false);
+  if (FLAG_IS_DEFAULT(UseMD5Intrinsics)) {
+    UseMD5Intrinsics = true;
   }
 
-  if (_features & (CPU_SHA1 | CPU_SHA2 | CPU_SHA3 | CPU_SHA512)) {
-    if (FLAG_IS_DEFAULT(UseSHA)) {
-      FLAG_SET_DEFAULT(UseSHA, true);
-    }
-  } else if (UseSHA) {
-    warning("SHA instructions are not available on this CPU");
-    FLAG_SET_DEFAULT(UseSHA, false);
-  }
-
-  if (UseSHA && (_features & CPU_SHA1)) {
+  if (UseSHA && supports_sha1()) {
     if (FLAG_IS_DEFAULT(UseSHA1Intrinsics)) {
       FLAG_SET_DEFAULT(UseSHA1Intrinsics, true);
     }
@@ -293,7 +390,7 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UseSHA1Intrinsics, false);
   }
 
-  if (UseSHA && (_features & CPU_SHA2)) {
+  if (UseSHA && supports_sha256()) {
     if (FLAG_IS_DEFAULT(UseSHA256Intrinsics)) {
       FLAG_SET_DEFAULT(UseSHA256Intrinsics, true);
     }
@@ -302,37 +399,81 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UseSHA256Intrinsics, false);
   }
 
-  if (UseSHA && (_features & CPU_SHA3)) {
-    // Do not auto-enable UseSHA3Intrinsics until it has been fully tested on hardware
-    // if (FLAG_IS_DEFAULT(UseSHA3Intrinsics)) {
-      // FLAG_SET_DEFAULT(UseSHA3Intrinsics, true);
-    // }
+  if (UseSHA) {
+    // No need to check supports_sha3(), since a fallback GPR intrinsic implementation is provided.
+    if (FLAG_IS_DEFAULT(UseSHA3Intrinsics)) {
+      FLAG_SET_DEFAULT(UseSHA3Intrinsics, true);
+    }
   } else if (UseSHA3Intrinsics) {
+    // Matches the documented and tested behavior: the -UseSHA option disables all SHA intrinsics.
+    warning("UseSHA3Intrinsics requires that UseSHA is enabled.");
+    FLAG_SET_DEFAULT(UseSHA3Intrinsics, false);
+  }
+
+  if (UseSHA3Intrinsics && supports_sha3()) {
+    // Auto-enable UseSIMDForSHA3Intrinsic on hardware with performance benefit.
+    // Note that the evaluation of SHA3 extension Intrinsics shows better performance
+    // on Apple and Qualcomm silicon but worse performance on Neoverse V1 and N2.
+    if (_cpu == CPU_APPLE || _cpu == CPU_QUALCOMM) {  // Apple or Qualcomm silicon
+      if (FLAG_IS_DEFAULT(UseSIMDForSHA3Intrinsic)) {
+        FLAG_SET_DEFAULT(UseSIMDForSHA3Intrinsic, true);
+      }
+    }
+  }
+  if (UseSHA3Intrinsics && UseSIMDForSHA3Intrinsic && !supports_sha3()) {
     warning("Intrinsics for SHA3-224, SHA3-256, SHA3-384 and SHA3-512 crypto hash functions not available on this CPU.");
     FLAG_SET_DEFAULT(UseSHA3Intrinsics, false);
   }
 
-  if (UseSHA && (_features & CPU_SHA512)) {
-    // Do not auto-enable UseSHA512Intrinsics until it has been fully tested on hardware
-    // if (FLAG_IS_DEFAULT(UseSHA512Intrinsics)) {
-      // FLAG_SET_DEFAULT(UseSHA512Intrinsics, true);
-    // }
+  if (UseSHA && supports_sha512()) {
+    if (FLAG_IS_DEFAULT(UseSHA512Intrinsics)) {
+      FLAG_SET_DEFAULT(UseSHA512Intrinsics, true);
+    }
   } else if (UseSHA512Intrinsics) {
     warning("Intrinsics for SHA-384 and SHA-512 crypto hash functions not available on this CPU.");
     FLAG_SET_DEFAULT(UseSHA512Intrinsics, false);
   }
 
-  if (!(UseSHA1Intrinsics || UseSHA256Intrinsics || UseSHA3Intrinsics || UseSHA512Intrinsics)) {
-    FLAG_SET_DEFAULT(UseSHA, false);
-  }
-
-  if (_features & CPU_PMULL) {
+  if (supports_pmull()) {
     if (FLAG_IS_DEFAULT(UseGHASHIntrinsics)) {
       FLAG_SET_DEFAULT(UseGHASHIntrinsics, true);
     }
   } else if (UseGHASHIntrinsics) {
     warning("GHASH intrinsics are not available on this CPU");
     FLAG_SET_DEFAULT(UseGHASHIntrinsics, false);
+  }
+
+  if (supports_feature(CPU_ASIMD)) {
+    if (FLAG_IS_DEFAULT(UseChaCha20Intrinsics)) {
+      UseChaCha20Intrinsics = true;
+    }
+  } else if (UseChaCha20Intrinsics) {
+    if (!FLAG_IS_DEFAULT(UseChaCha20Intrinsics)) {
+      warning("ChaCha20 intrinsic requires ASIMD instructions");
+    }
+    FLAG_SET_DEFAULT(UseChaCha20Intrinsics, false);
+  }
+
+  if (supports_feature(CPU_ASIMD)) {
+      if (FLAG_IS_DEFAULT(UseKyberIntrinsics)) {
+          UseKyberIntrinsics = true;
+      }
+  } else if (UseKyberIntrinsics) {
+      if (!FLAG_IS_DEFAULT(UseKyberIntrinsics)) {
+          warning("Kyber intrinsics require ASIMD instructions");
+      }
+      FLAG_SET_DEFAULT(UseKyberIntrinsics, false);
+  }
+
+  if (supports_feature(CPU_ASIMD)) {
+      if (FLAG_IS_DEFAULT(UseDilithiumIntrinsics)) {
+          UseDilithiumIntrinsics = true;
+      }
+  } else if (UseDilithiumIntrinsics) {
+      if (!FLAG_IS_DEFAULT(UseDilithiumIntrinsics)) {
+          warning("Dilithium intrinsics require ASIMD instructions");
+      }
+      FLAG_SET_DEFAULT(UseDilithiumIntrinsics, false);
   }
 
   if (FLAG_IS_DEFAULT(UseBASE64Intrinsics)) {
@@ -344,23 +485,45 @@ void VM_Version::initialize() {
       FLAG_SET_DEFAULT(UseBlockZeroing, true);
     }
     if (FLAG_IS_DEFAULT(BlockZeroingLowLimit)) {
-      FLAG_SET_DEFAULT(BlockZeroingLowLimit, 4 * VM_Version::zva_length());
+      FLAG_SET_DEFAULT(BlockZeroingLowLimit, 4 * zva_length());
     }
   } else if (UseBlockZeroing) {
-    warning("DC ZVA is not available on this CPU");
+    if (!FLAG_IS_DEFAULT(UseBlockZeroing)) {
+      warning("DC ZVA is not available on this CPU");
+    }
     FLAG_SET_DEFAULT(UseBlockZeroing, false);
   }
 
-  if (_features & CPU_SVE) {
+  if (supports_sve2()) {
     if (FLAG_IS_DEFAULT(UseSVE)) {
-      FLAG_SET_DEFAULT(UseSVE, (_features & CPU_SVE2) ? 2 : 1);
+      FLAG_SET_DEFAULT(UseSVE, 2);
     }
-    if (UseSVE > 0) {
-      _initial_sve_vector_length = get_current_sve_vector_length();
+  } else if (supports_sve()) {
+    if (FLAG_IS_DEFAULT(UseSVE)) {
+      FLAG_SET_DEFAULT(UseSVE, 1);
+    } else if (UseSVE > 1) {
+      warning("SVE2 specified, but not supported on current CPU. Using SVE.");
+      FLAG_SET_DEFAULT(UseSVE, 1);
     }
   } else if (UseSVE > 0) {
     warning("UseSVE specified, but not supported on current CPU. Disabling SVE.");
     FLAG_SET_DEFAULT(UseSVE, 0);
+  }
+
+  if (UseSVE > 0) {
+    int vl = get_current_sve_vector_length();
+    if (vl < 0) {
+      warning("Unable to get SVE vector length on this system. "
+              "Disabling SVE. Specify -XX:UseSVE=0 to shun this warning.");
+      FLAG_SET_DEFAULT(UseSVE, 0);
+    } else if ((vl == 0) || ((vl % FloatRegister::sve_vl_min) != 0) || !is_power_of_2(vl)) {
+      warning("Detected SVE vector length (%d) should be a power of two and a multiple of %d. "
+              "Disabling SVE. Specify -XX:UseSVE=0 to shun this warning.",
+              vl, FloatRegister::sve_vl_min);
+      FLAG_SET_DEFAULT(UseSVE, 0);
+    } else {
+      _initial_sve_vector_length = vl;
+    }
   }
 
   // This machine allows unaligned memory accesses
@@ -375,6 +538,34 @@ void VM_Version::initialize() {
   if (!UsePopCountInstruction) {
     warning("UsePopCountInstruction is always enabled on this CPU");
     UsePopCountInstruction = true;
+  }
+
+  if (UseBranchProtection == nullptr || strcmp(UseBranchProtection, "none") == 0) {
+    _rop_protection = false;
+  } else if (strcmp(UseBranchProtection, "standard") == 0 ||
+             strcmp(UseBranchProtection, "pac-ret") == 0) {
+    _rop_protection = false;
+    // Enable ROP-protection if
+    // 1) this code has been built with branch-protection and
+    // 2) the CPU/OS supports it
+#ifdef __ARM_FEATURE_PAC_DEFAULT
+    if (!supports_paca()) {
+      // Disable PAC to prevent illegal instruction crashes.
+      warning("ROP-protection specified, but not supported on this CPU. Disabling ROP-protection.");
+    } else {
+      _rop_protection = true;
+    }
+#else
+    warning("ROP-protection specified, but this VM was built without ROP-protection support. Disabling ROP-protection.");
+#endif
+  } else {
+    vm_exit_during_initialization(err_msg("Unsupported UseBranchProtection: %s", UseBranchProtection));
+  }
+
+  if (_rop_protection == true) {
+    // Determine the mask of address bits used for PAC. Clear bit 55 of
+    // the input to make it look like a user address.
+    _pac_mask = (uintptr_t)pauth_strip_pointer((address)~(UINT64_C(1) << 55));
   }
 
 #ifdef COMPILER2
@@ -400,30 +591,37 @@ void VM_Version::initialize() {
   if (UseSVE > 0) {
     if (FLAG_IS_DEFAULT(MaxVectorSize)) {
       MaxVectorSize = _initial_sve_vector_length;
-    } else if (MaxVectorSize < 16) {
-      warning("SVE does not support vector length less than 16 bytes. Disabling SVE.");
+    } else if (MaxVectorSize < FloatRegister::sve_vl_min) {
+      warning("SVE does not support vector length less than %d bytes. Disabling SVE.",
+              FloatRegister::sve_vl_min);
       UseSVE = 0;
-    } else if ((MaxVectorSize % 16) == 0 && is_power_of_2(MaxVectorSize)) {
-      int new_vl = set_and_get_current_sve_vector_length(MaxVectorSize);
-      _initial_sve_vector_length = new_vl;
-      // Update MaxVectorSize to the largest supported value.
-      if (new_vl < 0) {
-        vm_exit_during_initialization(
-          err_msg("Current system does not support SVE vector length for MaxVectorSize: %d",
-                  (int)MaxVectorSize));
-      } else if (new_vl != MaxVectorSize) {
-        warning("Current system only supports max SVE vector length %d. Set MaxVectorSize to %d",
-                new_vl, new_vl);
-      }
-      MaxVectorSize = new_vl;
-    } else {
+    } else if (!((MaxVectorSize % FloatRegister::sve_vl_min) == 0 && is_power_of_2(MaxVectorSize))) {
       vm_exit_during_initialization(err_msg("Unsupported MaxVectorSize: %d", (int)MaxVectorSize));
+    }
+
+    if (UseSVE > 0) {
+      // Acquire the largest supported vector length of this machine
+      _max_supported_sve_vector_length = set_and_get_current_sve_vector_length(FloatRegister::sve_vl_max);
+
+      if (MaxVectorSize != _max_supported_sve_vector_length) {
+        int new_vl = set_and_get_current_sve_vector_length(MaxVectorSize);
+        if (new_vl < 0) {
+          vm_exit_during_initialization(
+            err_msg("Current system does not support SVE vector length for MaxVectorSize: %d",
+                    (int)MaxVectorSize));
+        } else if (new_vl != MaxVectorSize) {
+          warning("Current system only supports max SVE vector length %d. Set MaxVectorSize to %d",
+                  new_vl, new_vl);
+        }
+        MaxVectorSize = new_vl;
+      }
+      _initial_sve_vector_length = MaxVectorSize;
     }
   }
 
   if (UseSVE == 0) {  // NEON
     int min_vector_size = 8;
-    int max_vector_size = 16;
+    int max_vector_size = FloatRegister::neon_vl;
     if (!FLAG_IS_DEFAULT(MaxVectorSize)) {
       if (!is_power_of_2(MaxVectorSize)) {
         vm_exit_during_initialization(err_msg("Unsupported MaxVectorSize: %d", (int)MaxVectorSize));
@@ -435,8 +633,16 @@ void VM_Version::initialize() {
         FLAG_SET_DEFAULT(MaxVectorSize, max_vector_size);
       }
     } else {
-      FLAG_SET_DEFAULT(MaxVectorSize, 16);
+      FLAG_SET_DEFAULT(MaxVectorSize, FloatRegister::neon_vl);
     }
+  }
+
+  int inline_size = (UseSVE > 0 && MaxVectorSize >= FloatRegister::sve_vl_min) ? MaxVectorSize : 0;
+  if (FLAG_IS_DEFAULT(ArrayOperationPartialInlineSize)) {
+    FLAG_SET_DEFAULT(ArrayOperationPartialInlineSize, inline_size);
+  } else if (ArrayOperationPartialInlineSize != 0 && ArrayOperationPartialInlineSize != inline_size) {
+    warning("Setting ArrayOperationPartialInlineSize to %d", inline_size);
+    ArrayOperationPartialInlineSize = inline_size;
   }
 
   if (FLAG_IS_DEFAULT(OptoScheduling)) {
@@ -446,7 +652,210 @@ void VM_Version::initialize() {
   if (FLAG_IS_DEFAULT(AlignVector)) {
     AlignVector = AvoidUnalignedAccesses;
   }
+
+  if (FLAG_IS_DEFAULT(UsePoly1305Intrinsics)) {
+    FLAG_SET_DEFAULT(UsePoly1305Intrinsics, true);
+  }
+
+  if (FLAG_IS_DEFAULT(UseVectorizedHashCodeIntrinsic)) {
+    FLAG_SET_DEFAULT(UseVectorizedHashCodeIntrinsic, true);
+  }
 #endif
 
-  UNSUPPORTED_OPTION(CriticalJNINatives);
+  _spin_wait = get_spin_wait_desc();
+
+  check_virtualizations();
+
+#ifdef __APPLE__
+  DefaultWXWriteMode = UseOldWX ? WXWrite : WXArmedForWrite;
+
+  if (TraceWXHealing) {
+    if (pthread_jit_write_protect_supported_np()) {
+      tty->print_cr("### TraceWXHealing is in use");
+      if (StressWXHealing) {
+        tty->print_cr("### StressWXHealing is in use");
+      }
+    } else {
+      tty->print_cr("WX Healing is not in use because MAP_JIT write protection "
+                    "does not work on this system.");
+    }
+  }
+#endif
+
+  // Sync SVE related CPU features with flags
+  if (UseSVE < 2) {
+    clear_feature(CPU_SVE2);
+    clear_feature(CPU_SVEBITPERM);
+  }
+  if (UseSVE < 1) {
+    clear_feature(CPU_SVE);
+  }
+
+  if (FLAG_IS_DEFAULT(UseSingleICacheInvalidation) && is_cache_idc_enabled() && is_cache_dic_enabled()) {
+    FLAG_SET_DEFAULT(UseSingleICacheInvalidation, true);
+  }
+
+  if (FLAG_IS_DEFAULT(NeoverseN1ICacheErratumMitigation) && has_neoverse_n1_errata_1542419()
+      && is_cache_idc_enabled() && !is_cache_dic_enabled()) {
+    if (_ic_ivau_trapped) {
+      FLAG_SET_DEFAULT(NeoverseN1ICacheErratumMitigation, true);
+    } else {
+      log_info(os)("IC IVAU is not trapped; disabling NeoverseN1ICacheErratumMitigation");
+      FLAG_SET_DEFAULT(NeoverseN1ICacheErratumMitigation, false);
+    }
+  }
+
+  if (NeoverseN1ICacheErratumMitigation) {
+    if (!has_neoverse_n1_errata_1542419()) {
+      vm_exit_during_initialization("NeoverseN1ICacheErratumMitigation is set for the CPU not having Neoverse N1 errata 1542419");
+    }
+    // If the user explicitly set the flag, verify the trap is active.
+    if (!FLAG_IS_DEFAULT(NeoverseN1ICacheErratumMitigation) && !_ic_ivau_trapped) {
+      vm_exit_during_initialization("NeoverseN1ICacheErratumMitigation is set but IC IVAU is not trapped. "
+                                    "The optimization is not safe on this system.");
+    }
+    if (FLAG_IS_DEFAULT(UseSingleICacheInvalidation)) {
+      FLAG_SET_DEFAULT(UseSingleICacheInvalidation, true);
+    }
+
+    if (!UseSingleICacheInvalidation) {
+      vm_exit_during_initialization("NeoverseN1ICacheErratumMitigation is set but UseSingleICacheInvalidation is not enabled");
+    }
+  }
+
+  if (UseSingleICacheInvalidation
+      && (!is_cache_idc_enabled() || (!is_cache_dic_enabled() && !NeoverseN1ICacheErratumMitigation))) {
+    vm_exit_during_initialization("UseSingleICacheInvalidation is set but neither IDC nor DIC nor NeoverseN1ICacheErratumMitigation is enabled");
+  }
+
+  // Construct the "features" string
+  stringStream ss(512);
+  ss.print("0x%02x:0x%x:0x%03x:%d", _cpu, _variant, _model, _revision);
+  if (_model2) {
+    ss.print("(0x%03x)", _model2);
+  }
+  ss.print(", ");
+  int features_offset = (int)ss.size();
+  insert_features_names(_features, ss);
+
+  _cpu_info_string = ss.as_string(true);
+  _features_string = _cpu_info_string + features_offset;
+}
+
+void VM_Version::insert_features_names(uint64_t features, stringStream& ss) {
+  int i = 0;
+  ss.join([&]() {
+    const char* str = nullptr;
+    while ((i < MAX_CPU_FEATURES) && (str == nullptr)) {
+      if (supports_feature(features, (VM_Version::Feature_Flag)i)) {
+        str = _features_names[i];
+      }
+      i += 1;
+    }
+    return str;
+  }, ", ");
+}
+
+void VM_Version::get_cpu_features_name(void* features_buffer, stringStream& ss) {
+  uint64_t features = *(uint64_t*)features_buffer;
+  insert_features_names(features, ss);
+}
+
+void VM_Version::get_missing_features_name(void* features_set1, void* features_set2, stringStream& ss) {
+  uint64_t vm_features_set1 = *(uint64_t*)features_set1;
+  uint64_t vm_features_set2 = *(uint64_t*)features_set2;
+  int i = 0;
+  ss.join([&]() {
+    const char* str = nullptr;
+    while ((i < MAX_CPU_FEATURES) && (str == nullptr)) {
+      Feature_Flag flag = (Feature_Flag)i;
+      if (supports_feature(vm_features_set1, flag) && !supports_feature(vm_features_set2, flag)) {
+        str = _features_names[i];
+      }
+      i += 1;
+    }
+    return str;
+  }, ", ");
+}
+
+int VM_Version::cpu_features_size() {
+  return sizeof(_features);
+}
+
+void VM_Version::store_cpu_features(void* buf) {
+  *(uint64_t*)buf = _features;
+}
+
+bool VM_Version::verify_aot_code_cache_features(void* features_buffer) {
+  uint64_t features_to_test = *(uint64_t*)features_buffer;
+  return (_features == features_to_test);
+}
+
+#if defined(LINUX)
+static bool check_info_file(const char* fpath,
+                            const char* virt1, VirtualizationType vt1,
+                            const char* virt2, VirtualizationType vt2) {
+  char line[500];
+  FILE* fp = os::fopen(fpath, "r");
+  if (fp == nullptr) {
+    return false;
+  }
+  while (fgets(line, sizeof(line), fp) != nullptr) {
+    if (strcasestr(line, virt1) != nullptr) {
+      Abstract_VM_Version::_detected_virtualization = vt1;
+      fclose(fp);
+      return true;
+    }
+    if (virt2 != nullptr && strcasestr(line, virt2) != nullptr) {
+      Abstract_VM_Version::_detected_virtualization = vt2;
+      fclose(fp);
+      return true;
+    }
+  }
+  fclose(fp);
+  return false;
+}
+#endif
+
+void VM_Version::check_virtualizations() {
+#if defined(LINUX)
+  const char* pname_file = "/sys/devices/virtual/dmi/id/product_name";
+  const char* tname_file = "/sys/hypervisor/type";
+  if (check_info_file(pname_file, "KVM", KVM, "VMWare", VMWare)) {
+    return;
+  }
+  check_info_file(tname_file, "Xen", XenPVHVM, nullptr, NoDetectedVirtualization);
+#endif
+}
+
+void VM_Version::print_platform_virtualization_info(outputStream* st) {
+#if defined(LINUX)
+  VirtualizationType vrt = VM_Version::get_detected_virtualization();
+  if (vrt == KVM) {
+    st->print_cr("KVM virtualization detected");
+  } else if (vrt == VMWare) {
+    st->print_cr("VMWare virtualization detected");
+  } else if (vrt == XenPVHVM) {
+    st->print_cr("Xen virtualization detected");
+  }
+#endif
+}
+
+void VM_Version::initialize_cpu_information(void) {
+  // do nothing if cpu info has been initialized
+  if (_initialized) {
+    return;
+  }
+
+  _no_of_cores  = os::processor_count();
+  _no_of_threads = _no_of_cores;
+  _no_of_sockets = _no_of_cores;
+  os::snprintf_checked(_cpu_name, CPU_TYPE_DESC_BUF_SIZE - 1, "AArch64");
+
+  int desc_len = os::snprintf(_cpu_desc, CPU_DETAILED_DESC_BUF_SIZE, "AArch64 ");
+  get_compatible_board(_cpu_desc + desc_len, CPU_DETAILED_DESC_BUF_SIZE - desc_len);
+  desc_len = (int)strlen(_cpu_desc);
+  os::snprintf_checked(_cpu_desc + desc_len, CPU_DETAILED_DESC_BUF_SIZE - desc_len, " %s", _cpu_info_string);
+
+  _initialized = true;
 }

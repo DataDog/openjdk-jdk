@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -74,7 +74,7 @@ typedef struct _XRadialGradient {
       TRANSFORM.matrix[2][2] = 1<<16;                                                          \
     }
 
-/* The xrender pipleine requires libXrender.so version 0.9.3 or later. */
+/* The xrender pipeline requires libXrender.so version 0.9.3 or later. */
 #define REQUIRED_XRENDER_VER1 0
 #define REQUIRED_XRENDER_VER2 9
 #define REQUIRED_XRENDER_VER3 3
@@ -177,7 +177,7 @@ static jboolean IsXRenderAvailable(jboolean verbose, jboolean ignoreLinuxVersion
                 numProcessed = sscanf(version, "%d.%d.%d", &v1, &v2, &v3);
 
                 if (numProcessed == numNeeded) {
-                  // we successfuly read the library version
+                  // we successfully read the library version
                   versionInfoIsFound = JNI_TRUE;
 
                   if (REQUIRED_XRENDER_VER1 == v1 &&
@@ -339,7 +339,7 @@ Java_sun_java2d_xr_XRBackendNative_createPixmap(JNIEnv *env, jobject this,
 JNIEXPORT jint JNICALL
 Java_sun_java2d_xr_XRBackendNative_createPictureNative
  (JNIEnv *env, jclass cls, jint drawable, jlong formatPtr) {
-  XRenderPictureAttributes pict_attr;
+  XRenderPictureAttributes pict_attr = {0};
   return XRenderCreatePicture(awt_display, (Drawable) drawable,
                               (XRenderPictFormat *) jlong_to_ptr(formatPtr),
                                0, &pict_attr);

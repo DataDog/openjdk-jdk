@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,15 +23,15 @@
 
 /*
  * @test
- * @run testng/othervm -Diters=10    -Xint                   VarHandleTestAccessLong
- * @run testng/othervm -Diters=20000 -XX:TieredStopAtLevel=1 VarHandleTestAccessLong
- * @run testng/othervm -Diters=20000                         VarHandleTestAccessLong
- * @run testng/othervm -Diters=20000 -XX:-TieredCompilation  VarHandleTestAccessLong
+ * @run junit/othervm -Diters=10   -Xint                                                   VarHandleTestAccessLong
+ *
+ * @comment Set CompileThresholdScaling to 0.1 so that the warmup loop sets to 2000 iterations
+ *          to hit compilation thresholds
+ *
+ * @run junit/othervm -Diters=2000 -XX:CompileThresholdScaling=0.1 -XX:TieredStopAtLevel=1 VarHandleTestAccessLong
+ * @run junit/othervm -Diters=2000 -XX:CompileThresholdScaling=0.1                         VarHandleTestAccessLong
+ * @run junit/othervm -Diters=2000 -XX:CompileThresholdScaling=0.1 -XX:-TieredCompilation  VarHandleTestAccessLong
  */
-
-import org.testng.annotations.BeforeClass;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
@@ -39,8 +39,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import static org.testng.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class VarHandleTestAccessLong extends VarHandleBaseTest {
     static final long static_final_v = 0x0123456789ABCDEFL;
 
@@ -104,7 +110,7 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
         return vhs.toArray(new VarHandle[0]);
     }
 
-    @BeforeClass
+    @BeforeAll
     public void setup() throws Exception {
         vhFinalField = MethodHandles.lookup().findVarHandle(
                 VarHandleTestAccessLong.class, "final_v", long.class);
@@ -121,8 +127,6 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
         vhArray = MethodHandles.arrayElementVarHandle(long[].class);
     }
 
-
-    @DataProvider
     public Object[][] varHandlesProvider() throws Exception {
         List<VarHandle> vhs = new ArrayList<>();
         vhs.add(vhField);
@@ -152,7 +156,8 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
         }
     }
 
-    @Test(dataProvider = "varHandlesProvider")
+    @ParameterizedTest
+    @MethodSource("varHandlesProvider")
     public void testIsAccessModeSupported(VarHandle vh) {
         assertTrue(vh.isAccessModeSupported(VarHandle.AccessMode.GET));
         assertTrue(vh.isAccessModeSupported(VarHandle.AccessMode.SET));
@@ -190,8 +195,6 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
         assertTrue(vh.isAccessModeSupported(VarHandle.AccessMode.GET_AND_BITWISE_XOR_RELEASE));
     }
 
-
-    @DataProvider
     public Object[][] typesProvider() throws Exception {
         List<Object[]> types = new ArrayList<>();
         types.add(new Object[] {vhField, Arrays.asList(VarHandleTestAccessLong.class)});
@@ -201,15 +204,15 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
         return types.stream().toArray(Object[][]::new);
     }
 
-    @Test(dataProvider = "typesProvider")
+    @ParameterizedTest
+    @MethodSource("typesProvider")
     public void testTypes(VarHandle vh, List<Class<?>> pts) {
-        assertEquals(vh.varType(), long.class);
+        assertEquals(long.class, vh.varType());
 
-        assertEquals(vh.coordinateTypes(), pts);
+        assertEquals(pts, vh.coordinateTypes());
 
         testTypes(vh);
     }
-
 
     @Test
     public void testLookupInstanceToStatic() {
@@ -237,8 +240,6 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
         });
     }
 
-
-    @DataProvider
     public Object[][] accessTestCaseProvider() throws Exception {
         List<AccessTestCase<?>> cases = new ArrayList<>();
 
@@ -280,7 +281,8 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
         return cases.stream().map(tc -> new Object[]{tc.toString(), tc}).toArray(Object[][]::new);
     }
 
-    @Test(dataProvider = "accessTestCaseProvider")
+    @ParameterizedTest
+    @MethodSource("accessTestCaseProvider")
     public <T> void testAccess(String desc, AccessTestCase<T> atc) throws Throwable {
         T t = atc.get();
         int iters = atc.requiresLoop() ? ITERS : 1;
@@ -289,33 +291,30 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
         }
     }
 
-
-
-
     static void testInstanceFinalField(VarHandleTestAccessLong recv, VarHandle vh) {
         // Plain
         {
             long x = (long) vh.get(recv);
-            assertEquals(x, 0x0123456789ABCDEFL, "get long value");
+            assertEquals(0x0123456789ABCDEFL, x, "get long value");
         }
 
 
         // Volatile
         {
             long x = (long) vh.getVolatile(recv);
-            assertEquals(x, 0x0123456789ABCDEFL, "getVolatile long value");
+            assertEquals(0x0123456789ABCDEFL, x, "getVolatile long value");
         }
 
         // Lazy
         {
             long x = (long) vh.getAcquire(recv);
-            assertEquals(x, 0x0123456789ABCDEFL, "getRelease long value");
+            assertEquals(0x0123456789ABCDEFL, x, "getRelease long value");
         }
 
         // Opaque
         {
             long x = (long) vh.getOpaque(recv);
-            assertEquals(x, 0x0123456789ABCDEFL, "getOpaque long value");
+            assertEquals(0x0123456789ABCDEFL, x, "getOpaque long value");
         }
     }
 
@@ -345,26 +344,26 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
         // Plain
         {
             long x = (long) vh.get();
-            assertEquals(x, 0x0123456789ABCDEFL, "get long value");
+            assertEquals(0x0123456789ABCDEFL, x, "get long value");
         }
 
 
         // Volatile
         {
             long x = (long) vh.getVolatile();
-            assertEquals(x, 0x0123456789ABCDEFL, "getVolatile long value");
+            assertEquals(0x0123456789ABCDEFL, x, "getVolatile long value");
         }
 
         // Lazy
         {
             long x = (long) vh.getAcquire();
-            assertEquals(x, 0x0123456789ABCDEFL, "getRelease long value");
+            assertEquals(0x0123456789ABCDEFL, x, "getRelease long value");
         }
 
         // Opaque
         {
             long x = (long) vh.getOpaque();
-            assertEquals(x, 0x0123456789ABCDEFL, "getOpaque long value");
+            assertEquals(0x0123456789ABCDEFL, x, "getOpaque long value");
         }
     }
 
@@ -395,7 +394,7 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
         {
             vh.set(recv, 0x0123456789ABCDEFL);
             long x = (long) vh.get(recv);
-            assertEquals(x, 0x0123456789ABCDEFL, "set long value");
+            assertEquals(0x0123456789ABCDEFL, x, "set long value");
         }
 
 
@@ -403,21 +402,21 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
         {
             vh.setVolatile(recv, 0xCAFEBABECAFEBABEL);
             long x = (long) vh.getVolatile(recv);
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "setVolatile long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "setVolatile long value");
         }
 
         // Lazy
         {
             vh.setRelease(recv, 0x0123456789ABCDEFL);
             long x = (long) vh.getAcquire(recv);
-            assertEquals(x, 0x0123456789ABCDEFL, "setRelease long value");
+            assertEquals(0x0123456789ABCDEFL, x, "setRelease long value");
         }
 
         // Opaque
         {
             vh.setOpaque(recv, 0xCAFEBABECAFEBABEL);
             long x = (long) vh.getOpaque(recv);
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "setOpaque long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "setOpaque long value");
         }
 
         vh.set(recv, 0x0123456789ABCDEFL);
@@ -427,96 +426,128 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
             boolean r = vh.compareAndSet(recv, 0x0123456789ABCDEFL, 0xCAFEBABECAFEBABEL);
             assertEquals(r, true, "success compareAndSet long");
             long x = (long) vh.get(recv);
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "success compareAndSet long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "success compareAndSet long value");
         }
 
         {
             boolean r = vh.compareAndSet(recv, 0x0123456789ABCDEFL, 0xDEADBEEFDEADBEEFL);
             assertEquals(r, false, "failing compareAndSet long");
             long x = (long) vh.get(recv);
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "failing compareAndSet long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "failing compareAndSet long value");
         }
 
         {
             long r = (long) vh.compareAndExchange(recv, 0xCAFEBABECAFEBABEL, 0x0123456789ABCDEFL);
             assertEquals(r, 0xCAFEBABECAFEBABEL, "success compareAndExchange long");
             long x = (long) vh.get(recv);
-            assertEquals(x, 0x0123456789ABCDEFL, "success compareAndExchange long value");
+            assertEquals(0x0123456789ABCDEFL, x, "success compareAndExchange long value");
         }
 
         {
             long r = (long) vh.compareAndExchange(recv, 0xCAFEBABECAFEBABEL, 0xDEADBEEFDEADBEEFL);
             assertEquals(r, 0x0123456789ABCDEFL, "failing compareAndExchange long");
             long x = (long) vh.get(recv);
-            assertEquals(x, 0x0123456789ABCDEFL, "failing compareAndExchange long value");
+            assertEquals(0x0123456789ABCDEFL, x, "failing compareAndExchange long value");
         }
 
         {
             long r = (long) vh.compareAndExchangeAcquire(recv, 0x0123456789ABCDEFL, 0xCAFEBABECAFEBABEL);
             assertEquals(r, 0x0123456789ABCDEFL, "success compareAndExchangeAcquire long");
             long x = (long) vh.get(recv);
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "success compareAndExchangeAcquire long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "success compareAndExchangeAcquire long value");
         }
 
         {
             long r = (long) vh.compareAndExchangeAcquire(recv, 0x0123456789ABCDEFL, 0xDEADBEEFDEADBEEFL);
             assertEquals(r, 0xCAFEBABECAFEBABEL, "failing compareAndExchangeAcquire long");
             long x = (long) vh.get(recv);
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "failing compareAndExchangeAcquire long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "failing compareAndExchangeAcquire long value");
         }
 
         {
             long r = (long) vh.compareAndExchangeRelease(recv, 0xCAFEBABECAFEBABEL, 0x0123456789ABCDEFL);
             assertEquals(r, 0xCAFEBABECAFEBABEL, "success compareAndExchangeRelease long");
             long x = (long) vh.get(recv);
-            assertEquals(x, 0x0123456789ABCDEFL, "success compareAndExchangeRelease long value");
+            assertEquals(0x0123456789ABCDEFL, x, "success compareAndExchangeRelease long value");
         }
 
         {
             long r = (long) vh.compareAndExchangeRelease(recv, 0xCAFEBABECAFEBABEL, 0xDEADBEEFDEADBEEFL);
             assertEquals(r, 0x0123456789ABCDEFL, "failing compareAndExchangeRelease long");
             long x = (long) vh.get(recv);
-            assertEquals(x, 0x0123456789ABCDEFL, "failing compareAndExchangeRelease long value");
+            assertEquals(0x0123456789ABCDEFL, x, "failing compareAndExchangeRelease long value");
         }
 
         {
             boolean success = false;
             for (int c = 0; c < WEAK_ATTEMPTS && !success; c++) {
                 success = vh.weakCompareAndSetPlain(recv, 0x0123456789ABCDEFL, 0xCAFEBABECAFEBABEL);
+                if (!success) weakDelay();
             }
-            assertEquals(success, true, "weakCompareAndSetPlain long");
+            assertEquals(success, true, "success weakCompareAndSetPlain long");
             long x = (long) vh.get(recv);
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "weakCompareAndSetPlain long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "success weakCompareAndSetPlain long value");
+        }
+
+        {
+            boolean success = vh.weakCompareAndSetPlain(recv, 0x0123456789ABCDEFL, 0xDEADBEEFDEADBEEFL);
+            assertEquals(success, false, "failing weakCompareAndSetPlain long");
+            long x = (long) vh.get(recv);
+            assertEquals(0xCAFEBABECAFEBABEL, x, "failing weakCompareAndSetPlain long value");
         }
 
         {
             boolean success = false;
             for (int c = 0; c < WEAK_ATTEMPTS && !success; c++) {
                 success = vh.weakCompareAndSetAcquire(recv, 0xCAFEBABECAFEBABEL, 0x0123456789ABCDEFL);
+                if (!success) weakDelay();
             }
-            assertEquals(success, true, "weakCompareAndSetAcquire long");
+            assertEquals(success, true, "success weakCompareAndSetAcquire long");
             long x = (long) vh.get(recv);
-            assertEquals(x, 0x0123456789ABCDEFL, "weakCompareAndSetAcquire long");
+            assertEquals(0x0123456789ABCDEFL, x, "success weakCompareAndSetAcquire long");
+        }
+
+        {
+            boolean success = vh.weakCompareAndSetAcquire(recv, 0xCAFEBABECAFEBABEL, 0xDEADBEEFDEADBEEFL);
+            assertEquals(success, false, "failing weakCompareAndSetAcquire long");
+            long x = (long) vh.get(recv);
+            assertEquals(0x0123456789ABCDEFL, x, "failing weakCompareAndSetAcquire long value");
         }
 
         {
             boolean success = false;
             for (int c = 0; c < WEAK_ATTEMPTS && !success; c++) {
                 success = vh.weakCompareAndSetRelease(recv, 0x0123456789ABCDEFL, 0xCAFEBABECAFEBABEL);
+                if (!success) weakDelay();
             }
-            assertEquals(success, true, "weakCompareAndSetRelease long");
+            assertEquals(success, true, "success weakCompareAndSetRelease long");
             long x = (long) vh.get(recv);
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "weakCompareAndSetRelease long");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "success weakCompareAndSetRelease long");
+        }
+
+        {
+            boolean success = vh.weakCompareAndSetRelease(recv, 0x0123456789ABCDEFL, 0xDEADBEEFDEADBEEFL);
+            assertEquals(success, false, "failing weakCompareAndSetRelease long");
+            long x = (long) vh.get(recv);
+            assertEquals(0xCAFEBABECAFEBABEL, x, "failing weakCompareAndSetRelease long value");
         }
 
         {
             boolean success = false;
             for (int c = 0; c < WEAK_ATTEMPTS && !success; c++) {
                 success = vh.weakCompareAndSet(recv, 0xCAFEBABECAFEBABEL, 0x0123456789ABCDEFL);
+                if (!success) weakDelay();
             }
-            assertEquals(success, true, "weakCompareAndSet long");
+            assertEquals(success, true, "success weakCompareAndSet long");
             long x = (long) vh.get(recv);
-            assertEquals(x, 0x0123456789ABCDEFL, "weakCompareAndSet long value");
+            assertEquals(0x0123456789ABCDEFL, x, "success weakCompareAndSet long value");
+        }
+
+        {
+            boolean success = vh.weakCompareAndSet(recv, 0xCAFEBABECAFEBABEL, 0xDEADBEEFDEADBEEFL);
+            assertEquals(success, false, "failing weakCompareAndSet long");
+            long x = (long) vh.get(recv);
+            assertEquals(0x0123456789ABCDEFL, x, "failing weakCompareAndSet long value");
         }
 
         // Compare set and get
@@ -524,27 +555,27 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
             vh.set(recv, 0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndSet(recv, 0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndSet long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndSet long");
             long x = (long) vh.get(recv);
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "getAndSet long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "getAndSet long value");
         }
 
         {
             vh.set(recv, 0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndSetAcquire(recv, 0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndSetAcquire long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndSetAcquire long");
             long x = (long) vh.get(recv);
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "getAndSetAcquire long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "getAndSetAcquire long value");
         }
 
         {
             vh.set(recv, 0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndSetRelease(recv, 0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndSetRelease long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndSetRelease long");
             long x = (long) vh.get(recv);
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "getAndSetRelease long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "getAndSetRelease long value");
         }
 
         // get and add, add and get
@@ -552,27 +583,27 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
             vh.set(recv, 0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndAdd(recv, 0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndAdd long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndAdd long");
             long x = (long) vh.get(recv);
-            assertEquals(x, (long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), "getAndAdd long value");
+            assertEquals((long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), x, "getAndAdd long value");
         }
 
         {
             vh.set(recv, 0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndAddAcquire(recv, 0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndAddAcquire long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndAddAcquire long");
             long x = (long) vh.get(recv);
-            assertEquals(x, (long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), "getAndAddAcquire long value");
+            assertEquals((long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), x, "getAndAddAcquire long value");
         }
 
         {
             vh.set(recv, 0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndAddRelease(recv, 0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndAddReleaselong");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndAddReleaselong");
             long x = (long) vh.get(recv);
-            assertEquals(x, (long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), "getAndAddRelease long value");
+            assertEquals((long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), x, "getAndAddRelease long value");
         }
 
         // get and bitwise or
@@ -580,27 +611,27 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
             vh.set(recv, 0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseOr(recv, 0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseOr long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseOr long");
             long x = (long) vh.get(recv);
-            assertEquals(x, (long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), "getAndBitwiseOr long value");
+            assertEquals((long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), x, "getAndBitwiseOr long value");
         }
 
         {
             vh.set(recv, 0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseOrAcquire(recv, 0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseOrAcquire long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseOrAcquire long");
             long x = (long) vh.get(recv);
-            assertEquals(x, (long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), "getAndBitwiseOrAcquire long value");
+            assertEquals((long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), x, "getAndBitwiseOrAcquire long value");
         }
 
         {
             vh.set(recv, 0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseOrRelease(recv, 0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseOrRelease long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseOrRelease long");
             long x = (long) vh.get(recv);
-            assertEquals(x, (long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), "getAndBitwiseOrRelease long value");
+            assertEquals((long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), x, "getAndBitwiseOrRelease long value");
         }
 
         // get and bitwise and
@@ -608,27 +639,27 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
             vh.set(recv, 0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseAnd(recv, 0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseAnd long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseAnd long");
             long x = (long) vh.get(recv);
-            assertEquals(x, (long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), "getAndBitwiseAnd long value");
+            assertEquals((long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), x, "getAndBitwiseAnd long value");
         }
 
         {
             vh.set(recv, 0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseAndAcquire(recv, 0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseAndAcquire long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseAndAcquire long");
             long x = (long) vh.get(recv);
-            assertEquals(x, (long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), "getAndBitwiseAndAcquire long value");
+            assertEquals((long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), x, "getAndBitwiseAndAcquire long value");
         }
 
         {
             vh.set(recv, 0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseAndRelease(recv, 0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseAndRelease long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseAndRelease long");
             long x = (long) vh.get(recv);
-            assertEquals(x, (long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), "getAndBitwiseAndRelease long value");
+            assertEquals((long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), x, "getAndBitwiseAndRelease long value");
         }
 
         // get and bitwise xor
@@ -636,27 +667,27 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
             vh.set(recv, 0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseXor(recv, 0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseXor long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseXor long");
             long x = (long) vh.get(recv);
-            assertEquals(x, (long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), "getAndBitwiseXor long value");
+            assertEquals((long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), x, "getAndBitwiseXor long value");
         }
 
         {
             vh.set(recv, 0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseXorAcquire(recv, 0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseXorAcquire long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseXorAcquire long");
             long x = (long) vh.get(recv);
-            assertEquals(x, (long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), "getAndBitwiseXorAcquire long value");
+            assertEquals((long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), x, "getAndBitwiseXorAcquire long value");
         }
 
         {
             vh.set(recv, 0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseXorRelease(recv, 0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseXorRelease long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseXorRelease long");
             long x = (long) vh.get(recv);
-            assertEquals(x, (long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), "getAndBitwiseXorRelease long value");
+            assertEquals((long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), x, "getAndBitwiseXorRelease long value");
         }
     }
 
@@ -671,7 +702,7 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
         {
             vh.set(0x0123456789ABCDEFL);
             long x = (long) vh.get();
-            assertEquals(x, 0x0123456789ABCDEFL, "set long value");
+            assertEquals(0x0123456789ABCDEFL, x, "set long value");
         }
 
 
@@ -679,21 +710,21 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
         {
             vh.setVolatile(0xCAFEBABECAFEBABEL);
             long x = (long) vh.getVolatile();
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "setVolatile long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "setVolatile long value");
         }
 
         // Lazy
         {
             vh.setRelease(0x0123456789ABCDEFL);
             long x = (long) vh.getAcquire();
-            assertEquals(x, 0x0123456789ABCDEFL, "setRelease long value");
+            assertEquals(0x0123456789ABCDEFL, x, "setRelease long value");
         }
 
         // Opaque
         {
             vh.setOpaque(0xCAFEBABECAFEBABEL);
             long x = (long) vh.getOpaque();
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "setOpaque long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "setOpaque long value");
         }
 
         vh.set(0x0123456789ABCDEFL);
@@ -703,96 +734,128 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
             boolean r = vh.compareAndSet(0x0123456789ABCDEFL, 0xCAFEBABECAFEBABEL);
             assertEquals(r, true, "success compareAndSet long");
             long x = (long) vh.get();
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "success compareAndSet long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "success compareAndSet long value");
         }
 
         {
             boolean r = vh.compareAndSet(0x0123456789ABCDEFL, 0xDEADBEEFDEADBEEFL);
             assertEquals(r, false, "failing compareAndSet long");
             long x = (long) vh.get();
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "failing compareAndSet long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "failing compareAndSet long value");
         }
 
         {
             long r = (long) vh.compareAndExchange(0xCAFEBABECAFEBABEL, 0x0123456789ABCDEFL);
             assertEquals(r, 0xCAFEBABECAFEBABEL, "success compareAndExchange long");
             long x = (long) vh.get();
-            assertEquals(x, 0x0123456789ABCDEFL, "success compareAndExchange long value");
+            assertEquals(0x0123456789ABCDEFL, x, "success compareAndExchange long value");
         }
 
         {
             long r = (long) vh.compareAndExchange(0xCAFEBABECAFEBABEL, 0xDEADBEEFDEADBEEFL);
             assertEquals(r, 0x0123456789ABCDEFL, "failing compareAndExchange long");
             long x = (long) vh.get();
-            assertEquals(x, 0x0123456789ABCDEFL, "failing compareAndExchange long value");
+            assertEquals(0x0123456789ABCDEFL, x, "failing compareAndExchange long value");
         }
 
         {
             long r = (long) vh.compareAndExchangeAcquire(0x0123456789ABCDEFL, 0xCAFEBABECAFEBABEL);
             assertEquals(r, 0x0123456789ABCDEFL, "success compareAndExchangeAcquire long");
             long x = (long) vh.get();
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "success compareAndExchangeAcquire long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "success compareAndExchangeAcquire long value");
         }
 
         {
             long r = (long) vh.compareAndExchangeAcquire(0x0123456789ABCDEFL, 0xDEADBEEFDEADBEEFL);
             assertEquals(r, 0xCAFEBABECAFEBABEL, "failing compareAndExchangeAcquire long");
             long x = (long) vh.get();
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "failing compareAndExchangeAcquire long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "failing compareAndExchangeAcquire long value");
         }
 
         {
             long r = (long) vh.compareAndExchangeRelease(0xCAFEBABECAFEBABEL, 0x0123456789ABCDEFL);
             assertEquals(r, 0xCAFEBABECAFEBABEL, "success compareAndExchangeRelease long");
             long x = (long) vh.get();
-            assertEquals(x, 0x0123456789ABCDEFL, "success compareAndExchangeRelease long value");
+            assertEquals(0x0123456789ABCDEFL, x, "success compareAndExchangeRelease long value");
         }
 
         {
             long r = (long) vh.compareAndExchangeRelease(0xCAFEBABECAFEBABEL, 0xDEADBEEFDEADBEEFL);
             assertEquals(r, 0x0123456789ABCDEFL, "failing compareAndExchangeRelease long");
             long x = (long) vh.get();
-            assertEquals(x, 0x0123456789ABCDEFL, "failing compareAndExchangeRelease long value");
+            assertEquals(0x0123456789ABCDEFL, x, "failing compareAndExchangeRelease long value");
         }
 
         {
             boolean success = false;
             for (int c = 0; c < WEAK_ATTEMPTS && !success; c++) {
                 success = vh.weakCompareAndSetPlain(0x0123456789ABCDEFL, 0xCAFEBABECAFEBABEL);
+                if (!success) weakDelay();
             }
-            assertEquals(success, true, "weakCompareAndSetPlain long");
+            assertEquals(success, true, "success weakCompareAndSetPlain long");
             long x = (long) vh.get();
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "weakCompareAndSetPlain long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "success weakCompareAndSetPlain long value");
+        }
+
+        {
+            boolean success = vh.weakCompareAndSetPlain(0x0123456789ABCDEFL, 0xDEADBEEFDEADBEEFL);
+            assertEquals(success, false, "failing weakCompareAndSetPlain long");
+            long x = (long) vh.get();
+            assertEquals(0xCAFEBABECAFEBABEL, x, "failing weakCompareAndSetPlain long value");
         }
 
         {
             boolean success = false;
             for (int c = 0; c < WEAK_ATTEMPTS && !success; c++) {
                 success = vh.weakCompareAndSetAcquire(0xCAFEBABECAFEBABEL, 0x0123456789ABCDEFL);
+                if (!success) weakDelay();
             }
-            assertEquals(success, true, "weakCompareAndSetAcquire long");
+            assertEquals(success, true, "success weakCompareAndSetAcquire long");
             long x = (long) vh.get();
-            assertEquals(x, 0x0123456789ABCDEFL, "weakCompareAndSetAcquire long");
+            assertEquals(0x0123456789ABCDEFL, x, "success weakCompareAndSetAcquire long");
+        }
+
+        {
+            boolean success = vh.weakCompareAndSetAcquire(0xCAFEBABECAFEBABEL, 0xDEADBEEFDEADBEEFL);
+            assertEquals(success, false, "failing weakCompareAndSetAcquire long");
+            long x = (long) vh.get();
+            assertEquals(0x0123456789ABCDEFL, x, "failing weakCompareAndSetAcquire long value");
         }
 
         {
             boolean success = false;
             for (int c = 0; c < WEAK_ATTEMPTS && !success; c++) {
                 success = vh.weakCompareAndSetRelease(0x0123456789ABCDEFL, 0xCAFEBABECAFEBABEL);
+                if (!success) weakDelay();
             }
-            assertEquals(success, true, "weakCompareAndSetRelease long");
+            assertEquals(success, true, "success weakCompareAndSetRelease long");
             long x = (long) vh.get();
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "weakCompareAndSetRelease long");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "success weakCompareAndSetRelease long");
+        }
+
+        {
+            boolean success = vh.weakCompareAndSetRelease(0x0123456789ABCDEFL, 0xDEADBEEFDEADBEEFL);
+            assertEquals(success, false, "failing weakCompareAndSetRelease long");
+            long x = (long) vh.get();
+            assertEquals(0xCAFEBABECAFEBABEL, x, "failing weakCompareAndSetRelease long value");
         }
 
         {
             boolean success = false;
             for (int c = 0; c < WEAK_ATTEMPTS && !success; c++) {
                 success = vh.weakCompareAndSet(0xCAFEBABECAFEBABEL, 0x0123456789ABCDEFL);
+                if (!success) weakDelay();
             }
-            assertEquals(success, true, "weakCompareAndSet long");
+            assertEquals(success, true, "success weakCompareAndSet long");
             long x = (long) vh.get();
-            assertEquals(x, 0x0123456789ABCDEFL, "weakCompareAndSet long");
+            assertEquals(0x0123456789ABCDEFL, x, "success weakCompareAndSet long");
+        }
+
+        {
+            boolean success = vh.weakCompareAndSet(0xCAFEBABECAFEBABEL, 0xDEADBEEFDEADBEEFL);
+            assertEquals(success, false, "failing weakCompareAndSet long");
+            long x = (long) vh.get();
+            assertEquals(0x0123456789ABCDEFL, x, "failing weakCompareAndSet long value");
         }
 
         // Compare set and get
@@ -800,27 +863,27 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
             vh.set(0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndSet(0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndSet long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndSet long");
             long x = (long) vh.get();
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "getAndSet long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "getAndSet long value");
         }
 
         {
             vh.set(0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndSetAcquire(0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndSetAcquire long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndSetAcquire long");
             long x = (long) vh.get();
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "getAndSetAcquire long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "getAndSetAcquire long value");
         }
 
         {
             vh.set(0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndSetRelease(0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndSetRelease long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndSetRelease long");
             long x = (long) vh.get();
-            assertEquals(x, 0xCAFEBABECAFEBABEL, "getAndSetRelease long value");
+            assertEquals(0xCAFEBABECAFEBABEL, x, "getAndSetRelease long value");
         }
 
         // get and add, add and get
@@ -828,27 +891,27 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
             vh.set(0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndAdd(0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndAdd long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndAdd long");
             long x = (long) vh.get();
-            assertEquals(x, (long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), "getAndAdd long value");
+            assertEquals((long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), x, "getAndAdd long value");
         }
 
         {
             vh.set(0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndAddAcquire(0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndAddAcquire long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndAddAcquire long");
             long x = (long) vh.get();
-            assertEquals(x, (long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), "getAndAddAcquire long value");
+            assertEquals((long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), x, "getAndAddAcquire long value");
         }
 
         {
             vh.set(0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndAddRelease(0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndAddReleaselong");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndAddReleaselong");
             long x = (long) vh.get();
-            assertEquals(x, (long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), "getAndAddRelease long value");
+            assertEquals((long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), x, "getAndAddRelease long value");
         }
 
         // get and bitwise or
@@ -856,27 +919,27 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
             vh.set(0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseOr(0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseOr long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseOr long");
             long x = (long) vh.get();
-            assertEquals(x, (long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), "getAndBitwiseOr long value");
+            assertEquals((long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), x, "getAndBitwiseOr long value");
         }
 
         {
             vh.set(0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseOrAcquire(0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseOrAcquire long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseOrAcquire long");
             long x = (long) vh.get();
-            assertEquals(x, (long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), "getAndBitwiseOrAcquire long value");
+            assertEquals((long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), x, "getAndBitwiseOrAcquire long value");
         }
 
         {
             vh.set(0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseOrRelease(0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseOrRelease long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseOrRelease long");
             long x = (long) vh.get();
-            assertEquals(x, (long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), "getAndBitwiseOrRelease long value");
+            assertEquals((long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), x, "getAndBitwiseOrRelease long value");
         }
 
         // get and bitwise and
@@ -884,27 +947,27 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
             vh.set(0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseAnd(0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseAnd long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseAnd long");
             long x = (long) vh.get();
-            assertEquals(x, (long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), "getAndBitwiseAnd long value");
+            assertEquals((long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), x, "getAndBitwiseAnd long value");
         }
 
         {
             vh.set(0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseAndAcquire(0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseAndAcquire long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseAndAcquire long");
             long x = (long) vh.get();
-            assertEquals(x, (long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), "getAndBitwiseAndAcquire long value");
+            assertEquals((long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), x, "getAndBitwiseAndAcquire long value");
         }
 
         {
             vh.set(0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseAndRelease(0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseAndRelease long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseAndRelease long");
             long x = (long) vh.get();
-            assertEquals(x, (long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), "getAndBitwiseAndRelease long value");
+            assertEquals((long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), x, "getAndBitwiseAndRelease long value");
         }
 
         // get and bitwise xor
@@ -912,27 +975,27 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
             vh.set(0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseXor(0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseXor long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseXor long");
             long x = (long) vh.get();
-            assertEquals(x, (long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), "getAndBitwiseXor long value");
+            assertEquals((long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), x, "getAndBitwiseXor long value");
         }
 
         {
             vh.set(0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseXorAcquire(0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseXorAcquire long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseXorAcquire long");
             long x = (long) vh.get();
-            assertEquals(x, (long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), "getAndBitwiseXorAcquire long value");
+            assertEquals((long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), x, "getAndBitwiseXorAcquire long value");
         }
 
         {
             vh.set(0x0123456789ABCDEFL);
 
             long o = (long) vh.getAndBitwiseXorRelease(0xCAFEBABECAFEBABEL);
-            assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseXorRelease long");
+            assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseXorRelease long");
             long x = (long) vh.get();
-            assertEquals(x, (long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), "getAndBitwiseXorRelease long value");
+            assertEquals((long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), x, "getAndBitwiseXorRelease long value");
         }
     }
 
@@ -950,7 +1013,7 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
             {
                 vh.set(array, i, 0x0123456789ABCDEFL);
                 long x = (long) vh.get(array, i);
-                assertEquals(x, 0x0123456789ABCDEFL, "get long value");
+                assertEquals(0x0123456789ABCDEFL, x, "get long value");
             }
 
 
@@ -958,21 +1021,21 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
             {
                 vh.setVolatile(array, i, 0xCAFEBABECAFEBABEL);
                 long x = (long) vh.getVolatile(array, i);
-                assertEquals(x, 0xCAFEBABECAFEBABEL, "setVolatile long value");
+                assertEquals(0xCAFEBABECAFEBABEL, x, "setVolatile long value");
             }
 
             // Lazy
             {
                 vh.setRelease(array, i, 0x0123456789ABCDEFL);
                 long x = (long) vh.getAcquire(array, i);
-                assertEquals(x, 0x0123456789ABCDEFL, "setRelease long value");
+                assertEquals(0x0123456789ABCDEFL, x, "setRelease long value");
             }
 
             // Opaque
             {
                 vh.setOpaque(array, i, 0xCAFEBABECAFEBABEL);
                 long x = (long) vh.getOpaque(array, i);
-                assertEquals(x, 0xCAFEBABECAFEBABEL, "setOpaque long value");
+                assertEquals(0xCAFEBABECAFEBABEL, x, "setOpaque long value");
             }
 
             vh.set(array, i, 0x0123456789ABCDEFL);
@@ -982,96 +1045,128 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
                 boolean r = vh.compareAndSet(array, i, 0x0123456789ABCDEFL, 0xCAFEBABECAFEBABEL);
                 assertEquals(r, true, "success compareAndSet long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, 0xCAFEBABECAFEBABEL, "success compareAndSet long value");
+                assertEquals(0xCAFEBABECAFEBABEL, x, "success compareAndSet long value");
             }
 
             {
                 boolean r = vh.compareAndSet(array, i, 0x0123456789ABCDEFL, 0xDEADBEEFDEADBEEFL);
                 assertEquals(r, false, "failing compareAndSet long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, 0xCAFEBABECAFEBABEL, "failing compareAndSet long value");
+                assertEquals(0xCAFEBABECAFEBABEL, x, "failing compareAndSet long value");
             }
 
             {
                 long r = (long) vh.compareAndExchange(array, i, 0xCAFEBABECAFEBABEL, 0x0123456789ABCDEFL);
                 assertEquals(r, 0xCAFEBABECAFEBABEL, "success compareAndExchange long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, 0x0123456789ABCDEFL, "success compareAndExchange long value");
+                assertEquals(0x0123456789ABCDEFL, x, "success compareAndExchange long value");
             }
 
             {
                 long r = (long) vh.compareAndExchange(array, i, 0xCAFEBABECAFEBABEL, 0xDEADBEEFDEADBEEFL);
                 assertEquals(r, 0x0123456789ABCDEFL, "failing compareAndExchange long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, 0x0123456789ABCDEFL, "failing compareAndExchange long value");
+                assertEquals(0x0123456789ABCDEFL, x, "failing compareAndExchange long value");
             }
 
             {
                 long r = (long) vh.compareAndExchangeAcquire(array, i, 0x0123456789ABCDEFL, 0xCAFEBABECAFEBABEL);
                 assertEquals(r, 0x0123456789ABCDEFL, "success compareAndExchangeAcquire long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, 0xCAFEBABECAFEBABEL, "success compareAndExchangeAcquire long value");
+                assertEquals(0xCAFEBABECAFEBABEL, x, "success compareAndExchangeAcquire long value");
             }
 
             {
                 long r = (long) vh.compareAndExchangeAcquire(array, i, 0x0123456789ABCDEFL, 0xDEADBEEFDEADBEEFL);
                 assertEquals(r, 0xCAFEBABECAFEBABEL, "failing compareAndExchangeAcquire long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, 0xCAFEBABECAFEBABEL, "failing compareAndExchangeAcquire long value");
+                assertEquals(0xCAFEBABECAFEBABEL, x, "failing compareAndExchangeAcquire long value");
             }
 
             {
                 long r = (long) vh.compareAndExchangeRelease(array, i, 0xCAFEBABECAFEBABEL, 0x0123456789ABCDEFL);
                 assertEquals(r, 0xCAFEBABECAFEBABEL, "success compareAndExchangeRelease long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, 0x0123456789ABCDEFL, "success compareAndExchangeRelease long value");
+                assertEquals(0x0123456789ABCDEFL, x, "success compareAndExchangeRelease long value");
             }
 
             {
                 long r = (long) vh.compareAndExchangeRelease(array, i, 0xCAFEBABECAFEBABEL, 0xDEADBEEFDEADBEEFL);
                 assertEquals(r, 0x0123456789ABCDEFL, "failing compareAndExchangeRelease long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, 0x0123456789ABCDEFL, "failing compareAndExchangeRelease long value");
+                assertEquals(0x0123456789ABCDEFL, x, "failing compareAndExchangeRelease long value");
             }
 
             {
                 boolean success = false;
                 for (int c = 0; c < WEAK_ATTEMPTS && !success; c++) {
                     success = vh.weakCompareAndSetPlain(array, i, 0x0123456789ABCDEFL, 0xCAFEBABECAFEBABEL);
+                    if (!success) weakDelay();
                 }
-                assertEquals(success, true, "weakCompareAndSetPlain long");
+                assertEquals(success, true, "success weakCompareAndSetPlain long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, 0xCAFEBABECAFEBABEL, "weakCompareAndSetPlain long value");
+                assertEquals(0xCAFEBABECAFEBABEL, x, "success weakCompareAndSetPlain long value");
+            }
+
+            {
+                boolean success = vh.weakCompareAndSetPlain(array, i, 0x0123456789ABCDEFL, 0xDEADBEEFDEADBEEFL);
+                assertEquals(success, false, "failing weakCompareAndSetPlain long");
+                long x = (long) vh.get(array, i);
+                assertEquals(0xCAFEBABECAFEBABEL, x, "failing weakCompareAndSetPlain long value");
             }
 
             {
                 boolean success = false;
                 for (int c = 0; c < WEAK_ATTEMPTS && !success; c++) {
                     success = vh.weakCompareAndSetAcquire(array, i, 0xCAFEBABECAFEBABEL, 0x0123456789ABCDEFL);
+                    if (!success) weakDelay();
                 }
-                assertEquals(success, true, "weakCompareAndSetAcquire long");
+                assertEquals(success, true, "success weakCompareAndSetAcquire long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, 0x0123456789ABCDEFL, "weakCompareAndSetAcquire long");
+                assertEquals(0x0123456789ABCDEFL, x, "success weakCompareAndSetAcquire long");
+            }
+
+            {
+                boolean success = vh.weakCompareAndSetAcquire(array, i, 0xCAFEBABECAFEBABEL, 0xDEADBEEFDEADBEEFL);
+                assertEquals(success, false, "failing weakCompareAndSetAcquire long");
+                long x = (long) vh.get(array, i);
+                assertEquals(0x0123456789ABCDEFL, x, "failing weakCompareAndSetAcquire long value");
             }
 
             {
                 boolean success = false;
                 for (int c = 0; c < WEAK_ATTEMPTS && !success; c++) {
                     success = vh.weakCompareAndSetRelease(array, i, 0x0123456789ABCDEFL, 0xCAFEBABECAFEBABEL);
+                    if (!success) weakDelay();
                 }
-                assertEquals(success, true, "weakCompareAndSetRelease long");
+                assertEquals(success, true, "success weakCompareAndSetRelease long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, 0xCAFEBABECAFEBABEL, "weakCompareAndSetRelease long");
+                assertEquals(0xCAFEBABECAFEBABEL, x, "success weakCompareAndSetRelease long");
+            }
+
+            {
+                boolean success = vh.weakCompareAndSetRelease(array, i, 0x0123456789ABCDEFL, 0xDEADBEEFDEADBEEFL);
+                assertEquals(success, false, "failing weakCompareAndSetRelease long");
+                long x = (long) vh.get(array, i);
+                assertEquals(0xCAFEBABECAFEBABEL, x, "failing weakCompareAndSetRelease long value");
             }
 
             {
                 boolean success = false;
                 for (int c = 0; c < WEAK_ATTEMPTS && !success; c++) {
                     success = vh.weakCompareAndSet(array, i, 0xCAFEBABECAFEBABEL, 0x0123456789ABCDEFL);
+                    if (!success) weakDelay();
                 }
-                assertEquals(success, true, "weakCompareAndSet long");
+                assertEquals(success, true, "success weakCompareAndSet long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, 0x0123456789ABCDEFL, "weakCompareAndSet long");
+                assertEquals(0x0123456789ABCDEFL, x, "success weakCompareAndSet long");
+            }
+
+            {
+                boolean success = vh.weakCompareAndSet(array, i, 0xCAFEBABECAFEBABEL, 0xDEADBEEFDEADBEEFL);
+                assertEquals(success, false, "failing weakCompareAndSet long");
+                long x = (long) vh.get(array, i);
+                assertEquals(0x0123456789ABCDEFL, x, "failing weakCompareAndSet long value");
             }
 
             // Compare set and get
@@ -1079,27 +1174,27 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
                 vh.set(array, i, 0x0123456789ABCDEFL);
 
                 long o = (long) vh.getAndSet(array, i, 0xCAFEBABECAFEBABEL);
-                assertEquals(o, 0x0123456789ABCDEFL, "getAndSet long");
+                assertEquals(0x0123456789ABCDEFL, o, "getAndSet long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, 0xCAFEBABECAFEBABEL, "getAndSet long value");
+                assertEquals(0xCAFEBABECAFEBABEL, x, "getAndSet long value");
             }
 
             {
                 vh.set(array, i, 0x0123456789ABCDEFL);
 
                 long o = (long) vh.getAndSetAcquire(array, i, 0xCAFEBABECAFEBABEL);
-                assertEquals(o, 0x0123456789ABCDEFL, "getAndSetAcquire long");
+                assertEquals(0x0123456789ABCDEFL, o, "getAndSetAcquire long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, 0xCAFEBABECAFEBABEL, "getAndSetAcquire long value");
+                assertEquals(0xCAFEBABECAFEBABEL, x, "getAndSetAcquire long value");
             }
 
             {
                 vh.set(array, i, 0x0123456789ABCDEFL);
 
                 long o = (long) vh.getAndSetRelease(array, i, 0xCAFEBABECAFEBABEL);
-                assertEquals(o, 0x0123456789ABCDEFL, "getAndSetRelease long");
+                assertEquals(0x0123456789ABCDEFL, o, "getAndSetRelease long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, 0xCAFEBABECAFEBABEL, "getAndSetRelease long value");
+                assertEquals(0xCAFEBABECAFEBABEL, x, "getAndSetRelease long value");
             }
 
             // get and add, add and get
@@ -1107,27 +1202,27 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
                 vh.set(array, i, 0x0123456789ABCDEFL);
 
                 long o = (long) vh.getAndAdd(array, i, 0xCAFEBABECAFEBABEL);
-                assertEquals(o, 0x0123456789ABCDEFL, "getAndAdd long");
+                assertEquals(0x0123456789ABCDEFL, o, "getAndAdd long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, (long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), "getAndAdd long value");
+                assertEquals((long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), x, "getAndAdd long value");
             }
 
             {
                 vh.set(array, i, 0x0123456789ABCDEFL);
 
                 long o = (long) vh.getAndAddAcquire(array, i, 0xCAFEBABECAFEBABEL);
-                assertEquals(o, 0x0123456789ABCDEFL, "getAndAddAcquire long");
+                assertEquals(0x0123456789ABCDEFL, o, "getAndAddAcquire long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, (long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), "getAndAddAcquire long value");
+                assertEquals((long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), x, "getAndAddAcquire long value");
             }
 
             {
                 vh.set(array, i, 0x0123456789ABCDEFL);
 
                 long o = (long) vh.getAndAddRelease(array, i, 0xCAFEBABECAFEBABEL);
-                assertEquals(o, 0x0123456789ABCDEFL, "getAndAddReleaselong");
+                assertEquals(0x0123456789ABCDEFL, o, "getAndAddReleaselong");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, (long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), "getAndAddRelease long value");
+                assertEquals((long)(0x0123456789ABCDEFL + 0xCAFEBABECAFEBABEL), x, "getAndAddRelease long value");
             }
 
             // get and bitwise or
@@ -1135,27 +1230,27 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
                 vh.set(array, i, 0x0123456789ABCDEFL);
 
                 long o = (long) vh.getAndBitwiseOr(array, i, 0xCAFEBABECAFEBABEL);
-                assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseOr long");
+                assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseOr long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, (long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), "getAndBitwiseOr long value");
+                assertEquals((long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), x, "getAndBitwiseOr long value");
             }
 
             {
                 vh.set(array, i, 0x0123456789ABCDEFL);
 
                 long o = (long) vh.getAndBitwiseOrAcquire(array, i, 0xCAFEBABECAFEBABEL);
-                assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseOrAcquire long");
+                assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseOrAcquire long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, (long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), "getAndBitwiseOrAcquire long value");
+                assertEquals((long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), x, "getAndBitwiseOrAcquire long value");
             }
 
             {
                 vh.set(array, i, 0x0123456789ABCDEFL);
 
                 long o = (long) vh.getAndBitwiseOrRelease(array, i, 0xCAFEBABECAFEBABEL);
-                assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseOrRelease long");
+                assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseOrRelease long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, (long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), "getAndBitwiseOrRelease long value");
+                assertEquals((long)(0x0123456789ABCDEFL | 0xCAFEBABECAFEBABEL), x, "getAndBitwiseOrRelease long value");
             }
 
             // get and bitwise and
@@ -1163,27 +1258,27 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
                 vh.set(array, i, 0x0123456789ABCDEFL);
 
                 long o = (long) vh.getAndBitwiseAnd(array, i, 0xCAFEBABECAFEBABEL);
-                assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseAnd long");
+                assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseAnd long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, (long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), "getAndBitwiseAnd long value");
+                assertEquals((long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), x, "getAndBitwiseAnd long value");
             }
 
             {
                 vh.set(array, i, 0x0123456789ABCDEFL);
 
                 long o = (long) vh.getAndBitwiseAndAcquire(array, i, 0xCAFEBABECAFEBABEL);
-                assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseAndAcquire long");
+                assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseAndAcquire long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, (long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), "getAndBitwiseAndAcquire long value");
+                assertEquals((long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), x, "getAndBitwiseAndAcquire long value");
             }
 
             {
                 vh.set(array, i, 0x0123456789ABCDEFL);
 
                 long o = (long) vh.getAndBitwiseAndRelease(array, i, 0xCAFEBABECAFEBABEL);
-                assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseAndRelease long");
+                assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseAndRelease long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, (long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), "getAndBitwiseAndRelease long value");
+                assertEquals((long)(0x0123456789ABCDEFL & 0xCAFEBABECAFEBABEL), x, "getAndBitwiseAndRelease long value");
             }
 
             // get and bitwise xor
@@ -1191,27 +1286,27 @@ public class VarHandleTestAccessLong extends VarHandleBaseTest {
                 vh.set(array, i, 0x0123456789ABCDEFL);
 
                 long o = (long) vh.getAndBitwiseXor(array, i, 0xCAFEBABECAFEBABEL);
-                assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseXor long");
+                assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseXor long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, (long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), "getAndBitwiseXor long value");
+                assertEquals((long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), x, "getAndBitwiseXor long value");
             }
 
             {
                 vh.set(array, i, 0x0123456789ABCDEFL);
 
                 long o = (long) vh.getAndBitwiseXorAcquire(array, i, 0xCAFEBABECAFEBABEL);
-                assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseXorAcquire long");
+                assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseXorAcquire long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, (long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), "getAndBitwiseXorAcquire long value");
+                assertEquals((long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), x, "getAndBitwiseXorAcquire long value");
             }
 
             {
                 vh.set(array, i, 0x0123456789ABCDEFL);
 
                 long o = (long) vh.getAndBitwiseXorRelease(array, i, 0xCAFEBABECAFEBABEL);
-                assertEquals(o, 0x0123456789ABCDEFL, "getAndBitwiseXorRelease long");
+                assertEquals(0x0123456789ABCDEFL, o, "getAndBitwiseXorRelease long");
                 long x = (long) vh.get(array, i);
-                assertEquals(x, (long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), "getAndBitwiseXorRelease long value");
+                assertEquals((long)(0x0123456789ABCDEFL ^ 0xCAFEBABECAFEBABEL), x, "getAndBitwiseXorRelease long value");
             }
         }
     }

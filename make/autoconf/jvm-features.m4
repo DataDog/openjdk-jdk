@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
 # questions.
 #
 
-###############################################################################
+################################################################################
 # Terminology used in this file:
 #
 # Valid features      == All possible features that the JVM knows about.
@@ -36,7 +36,7 @@
 #
 # All valid features are considered available, unless listed as unavailable.
 # All available features will be turned on as default, unless listed in a filter.
-###############################################################################
+################################################################################
 
 # We need these as m4 defines to be able to loop over them using m4 later on.
 
@@ -45,14 +45,13 @@ m4_define(jvm_features_valid, m4_normalize( \
     ifdef([custom_jvm_features_valid], custom_jvm_features_valid) \
     \
     cds compiler1 compiler2 dtrace epsilongc g1gc jfr jni-check \
-    jvmci jvmti link-time-opt management minimal nmt opt-size parallelgc \
-    serialgc services shenandoahgc static-build vm-structs zero zgc \
+    jvmci jvmti link-time-opt management minimal opt-size parallelgc \
+    serialgc services shenandoahgc vm-structs zero zgc \
 ))
 
 # Deprecated JVM features (these are ignored, but with a warning)
-m4_define(jvm_features_deprecated, m4_normalize(
-    cmsgc trace \
-))
+# This list is empty at the moment.
+m4_define(jvm_features_deprecated, m4_normalize( ))
 
 # Feature descriptions
 m4_define(jvm_feature_desc_cds, [enable class data sharing (CDS)])
@@ -68,7 +67,6 @@ m4_define(jvm_feature_desc_jvmti, [enable Java Virtual Machine Tool Interface (J
 m4_define(jvm_feature_desc_link_time_opt, [enable link time optimization])
 m4_define(jvm_feature_desc_management, [enable java.lang.management API support])
 m4_define(jvm_feature_desc_minimal, [support building variant 'minimal'])
-m4_define(jvm_feature_desc_nmt, [include native memory tracking (NMT)])
 m4_define(jvm_feature_desc_opt_size, [optimize the JVM library for size])
 m4_define(jvm_feature_desc_parallelgc, [include the parallel garbage collector])
 m4_define(jvm_feature_desc_serialgc, [include the serial garbage collector])
@@ -79,7 +77,7 @@ m4_define(jvm_feature_desc_vm_structs, [export JVM structures to the Serviceabli
 m4_define(jvm_feature_desc_zero, [support building variant 'zero'])
 m4_define(jvm_feature_desc_zgc, [include the Z garbage collector])
 
-###############################################################################
+################################################################################
 # Parse command line options for JVM feature selection. After this function
 # has run $JVM_FEATURES_ENABLED, $JVM_FEATURES_DISABLED and $JVM_FEATURES_VALID
 # can be used.
@@ -200,7 +198,7 @@ AC_DEFUN_ONCE([JVM_FEATURES_PARSE_OPTIONS],
   AC_SUBST(VALID_JVM_FEATURES)
 ])
 
-###############################################################################
+################################################################################
 # Helper function for the JVM_FEATURES_CHECK_* suite.
 # The code in the code block should assign 'false' to the variable AVAILABLE
 # if the feature is not available, and this function will handle everything
@@ -226,7 +224,7 @@ AC_DEFUN([JVM_FEATURES_CHECK_AVAILABILITY],
   fi
 ])
 
-###############################################################################
+################################################################################
 # Check if the feature 'cds' is available on this platform.
 #
 AC_DEFUN_ONCE([JVM_FEATURES_CHECK_CDS],
@@ -242,14 +240,20 @@ AC_DEFUN_ONCE([JVM_FEATURES_CHECK_CDS],
   ])
 ])
 
-###############################################################################
+################################################################################
 # Check if the feature 'dtrace' is available on this platform.
 #
 AC_DEFUN_ONCE([JVM_FEATURES_CHECK_DTRACE],
 [
   JVM_FEATURES_CHECK_AVAILABILITY(dtrace, [
-    AC_MSG_CHECKING([for dtrace tool])
-    if test "x$DTRACE" != "x" && test -x "$DTRACE"; then
+    AC_MSG_CHECKING([for dtrace tool and platform support])
+    if test "x$OPENJDK_TARGET_CPU_ARCH" = "xppc"; then
+      AC_MSG_RESULT([no, $OPENJDK_TARGET_CPU_ARCH])
+      AVAILABLE=false
+    elif test "x$OPENJDK_TARGET_CPU_ARCH" = "xs390"; then
+      AC_MSG_RESULT([no, $OPENJDK_TARGET_CPU_ARCH])
+      AVAILABLE=false
+    elif test "x$DTRACE" != "x" && test -x "$DTRACE"; then
       AC_MSG_RESULT([$DTRACE])
     else
       AC_MSG_RESULT([no])
@@ -265,23 +269,7 @@ AC_DEFUN_ONCE([JVM_FEATURES_CHECK_DTRACE],
   ])
 ])
 
-###############################################################################
-# Check if the feature 'jfr' is available on this platform.
-#
-AC_DEFUN_ONCE([JVM_FEATURES_CHECK_JFR],
-[
-  JVM_FEATURES_CHECK_AVAILABILITY(jfr, [
-    AC_MSG_CHECKING([if platform is supported by JFR])
-    if test "x$OPENJDK_TARGET_OS" = xaix; then
-      AC_MSG_RESULT([no, $OPENJDK_TARGET_OS-$OPENJDK_TARGET_CPU])
-      AVAILABLE=false
-    else
-      AC_MSG_RESULT([yes])
-    fi
-  ])
-])
-
-###############################################################################
+################################################################################
 # Check if the feature 'jvmci' is available on this platform.
 #
 AC_DEFUN_ONCE([JVM_FEATURES_CHECK_JVMCI],
@@ -292,6 +280,8 @@ AC_DEFUN_ONCE([JVM_FEATURES_CHECK_JVMCI],
       AC_MSG_RESULT([yes])
     elif test "x$OPENJDK_TARGET_CPU" = "xaarch64"; then
       AC_MSG_RESULT([yes])
+    elif test "x$OPENJDK_TARGET_CPU" = "xriscv64"; then
+      AC_MSG_RESULT([yes])
     else
       AC_MSG_RESULT([no, $OPENJDK_TARGET_CPU])
       AVAILABLE=false
@@ -299,7 +289,7 @@ AC_DEFUN_ONCE([JVM_FEATURES_CHECK_JVMCI],
   ])
 ])
 
-###############################################################################
+################################################################################
 # Check if the feature 'shenandoahgc' is available on this platform.
 #
 AC_DEFUN_ONCE([JVM_FEATURES_CHECK_SHENANDOAHGC],
@@ -307,7 +297,9 @@ AC_DEFUN_ONCE([JVM_FEATURES_CHECK_SHENANDOAHGC],
   JVM_FEATURES_CHECK_AVAILABILITY(shenandoahgc, [
     AC_MSG_CHECKING([if platform is supported by Shenandoah])
     if test "x$OPENJDK_TARGET_CPU_ARCH" = "xx86" || \
-        test "x$OPENJDK_TARGET_CPU" = "xaarch64" ; then
+        test "x$OPENJDK_TARGET_CPU" = "xaarch64" || \
+        test "x$OPENJDK_TARGET_CPU" = "xppc64le" || \
+        test "x$OPENJDK_TARGET_CPU" = "xriscv64"; then
       AC_MSG_RESULT([yes])
     else
       AC_MSG_RESULT([no, $OPENJDK_TARGET_CPU])
@@ -316,23 +308,7 @@ AC_DEFUN_ONCE([JVM_FEATURES_CHECK_SHENANDOAHGC],
   ])
 ])
 
-###############################################################################
-# Check if the feature 'static-build' is available on this platform.
-#
-AC_DEFUN_ONCE([JVM_FEATURES_CHECK_STATIC_BUILD],
-[
-  JVM_FEATURES_CHECK_AVAILABILITY(static-build, [
-    AC_MSG_CHECKING([if static-build is enabled in configure])
-    if test "x$STATIC_BUILD" = "xtrue"; then
-      AC_MSG_RESULT([yes])
-    else
-      AC_MSG_RESULT([no, use --enable-static-build to enable static build.])
-      AVAILABLE=false
-    fi
-  ])
-])
-
-###############################################################################
+################################################################################
 # Check if the feature 'zgc' is available on this platform.
 #
 AC_DEFUN_ONCE([JVM_FEATURES_CHECK_ZGC],
@@ -352,6 +328,14 @@ AC_DEFUN_ONCE([JVM_FEATURES_CHECK_ZGC],
       if test "x$OPENJDK_TARGET_OS" = "xlinux" || \
           test "x$OPENJDK_TARGET_OS" = "xwindows" || \
           test "x$OPENJDK_TARGET_OS" = "xmacosx"; then
+        AC_MSG_RESULT([yes])
+      else
+        AC_MSG_RESULT([no, $OPENJDK_TARGET_OS-$OPENJDK_TARGET_CPU])
+        AVAILABLE=false
+      fi
+    elif test "x$OPENJDK_TARGET_CPU" = "xppc64le" || \
+        test "x$OPENJDK_TARGET_CPU" = "xriscv64"; then
+      if test "x$OPENJDK_TARGET_OS" = "xlinux"; then
         AC_MSG_RESULT([yes])
       else
         AC_MSG_RESULT([no, $OPENJDK_TARGET_OS-$OPENJDK_TARGET_CPU])
@@ -380,7 +364,7 @@ AC_DEFUN_ONCE([JVM_FEATURES_CHECK_ZGC],
   ])
 ])
 
-###############################################################################
+################################################################################
 # Setup JVM_FEATURES_PLATFORM_UNAVAILABLE and JVM_FEATURES_PLATFORM_FILTER
 # to contain those features that are unavailable, or should be off by default,
 # for this platform, regardless of JVM variant.
@@ -392,21 +376,13 @@ AC_DEFUN_ONCE([JVM_FEATURES_PREPARE_PLATFORM],
 
   JVM_FEATURES_CHECK_CDS
   JVM_FEATURES_CHECK_DTRACE
-  JVM_FEATURES_CHECK_JFR
   JVM_FEATURES_CHECK_JVMCI
   JVM_FEATURES_CHECK_SHENANDOAHGC
-  JVM_FEATURES_CHECK_STATIC_BUILD
   JVM_FEATURES_CHECK_ZGC
 
-  # Filter out features by default for all variants on certain platforms.
-  # Make sure to just add to JVM_FEATURES_PLATFORM_FILTER, since it could
-  # have a value already from custom extensions.
-  if test "x$OPENJDK_TARGET_OS" = xaix; then
-    JVM_FEATURES_PLATFORM_FILTER="$JVM_FEATURES_PLATFORM_FILTER jfr"
-  fi
 ])
 
-###############################################################################
+################################################################################
 # Setup JVM_FEATURES_VARIANT_UNAVAILABLE and JVM_FEATURES_VARIANT_FILTER
 # to contain those features that are unavailable, or should be off by default,
 # for this particular JVM variant.
@@ -424,7 +400,7 @@ AC_DEFUN([JVM_FEATURES_PREPARE_VARIANT],
   elif test "x$variant" = "xcore"; then
     JVM_FEATURES_VARIANT_UNAVAILABLE="cds minimal zero"
   elif test "x$variant" = "xzero"; then
-    JVM_FEATURES_VARIANT_UNAVAILABLE="cds compiler1 compiler2 \
+    JVM_FEATURES_VARIANT_UNAVAILABLE="compiler1 compiler2 \
         jvmci minimal zgc"
   else
     JVM_FEATURES_VARIANT_UNAVAILABLE="minimal zero"
@@ -435,7 +411,7 @@ AC_DEFUN([JVM_FEATURES_PREPARE_VARIANT],
     JVM_FEATURES_VARIANT_FILTER="compiler2 jvmci link-time-opt opt-size"
   elif test "x$variant" = "xminimal"; then
     JVM_FEATURES_VARIANT_FILTER="cds compiler2 dtrace epsilongc g1gc \
-        jfr jni-check jvmci jvmti management nmt parallelgc services \
+        jfr jni-check jvmci jvmti management parallelgc services \
         shenandoahgc vm-structs zgc"
     if test "x$OPENJDK_TARGET_CPU" = xarm ; then
       JVM_FEATURES_VARIANT_FILTER="$JVM_FEATURES_VARIANT_FILTER opt-size"
@@ -454,7 +430,7 @@ AC_DEFUN([JVM_FEATURES_PREPARE_VARIANT],
   fi
 ])
 
-###############################################################################
+################################################################################
 # Calculate the actual set of active JVM features for this JVM variant. Store
 # the result in JVM_FEATURES_ACTIVE.
 #
@@ -502,7 +478,23 @@ AC_DEFUN([JVM_FEATURES_CALCULATE_ACTIVE],
       $JVM_FEATURES_ENABLED, $JVM_FEATURES_DISABLED)
 ])
 
-###############################################################################
+################################################################################
+# Filter the unsupported feature combinations.
+# This is called after JVM_FEATURES_ACTIVE are fully populated.
+#
+AC_DEFUN([JVM_FEATURES_FILTER_UNSUPPORTED],
+[
+  # G1 late barrier expansion in C2 is not implemented for some platforms.
+  # Choose not to support G1 in this configuration.
+  if JVM_FEATURES_IS_ACTIVE(compiler2); then
+    if test "x$OPENJDK_TARGET_CPU" = "xx86"; then
+      AC_MSG_NOTICE([G1 cannot be used with C2 on this platform, disabling G1])
+      UTIL_GET_NON_MATCHING_VALUES(JVM_FEATURES_ACTIVE, $JVM_FEATURES_ACTIVE, "g1gc")
+    fi
+  fi
+])
+
+################################################################################
 # Helper function for JVM_FEATURES_VERIFY. Check if the specified JVM
 # feature is active. To be used in shell if constructs, like this:
 # 'if JVM_FEATURES_IS_ACTIVE(jvmti); then'
@@ -512,7 +504,7 @@ AC_DEFUN([JVM_FEATURES_CALCULATE_ACTIVE],
 AC_DEFUN([JVM_FEATURES_IS_ACTIVE],
 [ [ [[ " $JVM_FEATURES_ACTIVE " =~ ' '$1' ' ]] ] ])
 
-###############################################################################
+################################################################################
 # Verify that the resulting set of features is consistent and legal.
 #
 # arg 1: JVM variant
@@ -521,6 +513,10 @@ AC_DEFUN([JVM_FEATURES_VERIFY],
 [
   variant=$1
 
+  if JVM_FEATURES_IS_ACTIVE(jfr) && ! JVM_FEATURES_IS_ACTIVE(services); then
+    AC_MSG_ERROR([Specified JVM feature 'jfr' requires feature 'services' for variant '$variant'])
+  fi
+
   if JVM_FEATURES_IS_ACTIVE(jvmci) && ! (JVM_FEATURES_IS_ACTIVE(compiler1) || \
       JVM_FEATURES_IS_ACTIVE(compiler2)); then
     AC_MSG_ERROR([Specified JVM feature 'jvmci' requires feature 'compiler2' or 'compiler1' for variant '$variant'])
@@ -528,10 +524,6 @@ AC_DEFUN([JVM_FEATURES_VERIFY],
 
   if JVM_FEATURES_IS_ACTIVE(jvmti) && ! JVM_FEATURES_IS_ACTIVE(services); then
     AC_MSG_ERROR([Specified JVM feature 'jvmti' requires feature 'services' for variant '$variant'])
-  fi
-
-  if JVM_FEATURES_IS_ACTIVE(management) && ! JVM_FEATURES_IS_ACTIVE(nmt); then
-    AC_MSG_ERROR([Specified JVM feature 'management' requires feature 'nmt' for variant '$variant'])
   fi
 
   # For backwards compatibility, disable a feature "globally" if one variant
@@ -554,7 +546,7 @@ AC_DEFUN([JVM_FEATURES_VERIFY],
   fi
 ])
 
-###############################################################################
+################################################################################
 # Set up all JVM features for each enabled JVM variant. Requires that
 # JVM_FEATURES_PARSE_OPTIONS has been called.
 #
@@ -580,6 +572,9 @@ AC_DEFUN_ONCE([JVM_FEATURES_SETUP],
     # Calculate the resulting set of enabled features for this variant.
     # The result is stored in JVM_FEATURES_ACTIVE.
     JVM_FEATURES_CALCULATE_ACTIVE($variant)
+
+    # Filter unsupported feature combinations from JVM_FEATURES_ACTIVE.
+    JVM_FEATURES_FILTER_UNSUPPORTED
 
     # Verify consistency for JVM_FEATURES_ACTIVE.
     JVM_FEATURES_VERIFY($variant)

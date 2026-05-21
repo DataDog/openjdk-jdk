@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -129,7 +129,7 @@ final class ECPointFormatsExtension {
         }
     }
 
-    private static enum ECPointFormat {
+    private enum ECPointFormat {
         UNCOMPRESSED                    ((byte)0, "uncompressed"),
         ANSIX962_COMPRESSED_PRIME       ((byte)1, "ansiX962_compressed_prime"),
         FMT_ANSIX962_COMPRESSED_CHAR2   ((byte)2, "ansiX962_compressed_char2");
@@ -137,7 +137,7 @@ final class ECPointFormatsExtension {
         final byte id;
         final String name;
 
-        private ECPointFormat(byte id, String name) {
+        ECPointFormat(byte id, String name) {
             this.id = id;
             this.name = name;
         }
@@ -153,7 +153,7 @@ final class ECPointFormatsExtension {
     }
 
     /**
-     * Network data producer of a "ec_point_formats" extension in
+     * Network data producer of an "ec_point_formats" extension in
      * the ClientHello handshake message.
      */
     private static final
@@ -171,7 +171,8 @@ final class ECPointFormatsExtension {
 
             // Is it a supported and enabled extension?
             if (!chc.sslConfig.isAvailable(CH_EC_POINT_FORMATS)) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                         "Ignore unavailable ec_point_formats extension");
                 }
@@ -193,7 +194,7 @@ final class ECPointFormatsExtension {
                 return extData;
             }
 
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                     "Need no ec_point_formats extension");
             }
@@ -202,7 +203,7 @@ final class ECPointFormatsExtension {
     }
 
     /**
-     * Network data consumer of a "ec_point_formats" extension in
+     * Network data consumer of an "ec_point_formats" extension in
      * the ClientHello handshake message.
      */
     private static final
@@ -221,7 +222,8 @@ final class ECPointFormatsExtension {
 
             // Is it a supported and enabled extension?
             if (!shc.sslConfig.isAvailable(CH_EC_POINT_FORMATS)) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                         "Ignore unavailable ec_point_formats extension");
                 }
@@ -247,7 +249,7 @@ final class ECPointFormatsExtension {
     }
 
     /**
-     * Network data consumer of a "ec_point_formats" extension in
+     * Network data consumer of an "ec_point_formats" extension in
      * the ServerHello handshake message.
      */
     private static final

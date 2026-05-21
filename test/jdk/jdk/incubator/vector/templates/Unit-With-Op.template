@@ -1,6 +1,7 @@
 
-    @Test(dataProvider = "$type$UnaryOpProvider")
-    static void with$vectorteststype$(IntFunction<$type$ []> fa) {
+    @Test(dataProvider = "$type$BinaryOpProvider")
+    static void with$vectorteststype$(IntFunction<$type$ []> fa, IntFunction<$type$ []> fb) {
 [[KERNEL]]
-        assertInsertArraysEquals(r, a, ($type$)4, 0);
+
+        assertArraysStrictlyEquals(r, a);
     }

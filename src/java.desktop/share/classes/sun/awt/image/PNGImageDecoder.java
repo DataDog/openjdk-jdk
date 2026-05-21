@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,7 +32,7 @@ import java.awt.image.*;
 import java.awt.Color;
 
 /** PNG - Portable Network Graphics - image file reader.
-    See <a href=http://www.ietf.org/rfc/rfc2083.txt>RFC2083</a> for details. */
+    See <a href="https://www.rfc-editor.org/info/rfc2083">RFC2083</a> for details. */
 public class PNGImageDecoder extends ImageDecoder
 {
     private static final int GRAY=0;
@@ -302,8 +302,16 @@ public class PNGImageDecoder extends ImageDecoder
             int bitsPerPixel = samplesPerPixel*bitDepth;
             int bytesPerPixel = (bitsPerPixel+7)>>3;
             int pass, passLimit;
-            if(interlaceMethod==0) { pass = -1; passLimit = 0; }
-            else { pass = 0; passLimit = 7; }
+            boolean isDirectByteCopy;
+            if(interlaceMethod==0) {
+                pass = -1;
+                passLimit = 0;
+                isDirectByteCopy = bPixels != null && bitDepth == 8;
+            } else {
+                pass = 0;
+                passLimit = 7;
+                isDirectByteCopy = false;
+            }
             while(++pass<=passLimit) {
                 int row = startingRow[pass];
                 int rowInc = rowIncrement[pass];
@@ -334,7 +342,11 @@ public class PNGImageDecoder extends ImageDecoder
                     int spos=0;
                     int pixel = 0;
                     while (col < width) {
-                        if(wPixels !=null) {
+                        if (isDirectByteCopy) {
+                            System.arraycopy(rowByteBuffer, spos, bPixels, col + rowOffset, width);
+                            spos += width;
+                            break;
+                        } else if(wPixels !=null) {
                             switch(combinedType) {
                                 case COLOR|ALPHA|(8<<3):
                                     wPixels[col+rowOffset] =

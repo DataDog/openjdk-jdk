@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,8 +28,8 @@ package sun.java2d.xr;
 import java.awt.*;
 import java.awt.geom.*;
 import sun.awt.SunToolkit;
-import sun.java2d.InvalidPipeException;
 import sun.java2d.SunGraphics2D;
+import sun.java2d.SurfaceData;
 import sun.java2d.loops.*;
 import sun.java2d.pipe.Region;
 import sun.java2d.pipe.PixelDrawPipe;
@@ -43,7 +43,7 @@ import static sun.java2d.xr.XRUtils.clampToShort;
 import static sun.java2d.xr.XRUtils.clampToUShort;
 
 /**
- * XRender provides only accalerated rectangles. To emulate higher "order"
+ * XRender provides only accelerated rectangles. To emulate higher "order"
  *  geometry we have to pass everything else to DoPath/FillSpans.
  *
  * TODO: DrawRect could be instrified
@@ -51,7 +51,7 @@ import static sun.java2d.xr.XRUtils.clampToUShort;
  * @author Clemens Eisserer
  */
 
-public class XRRenderer implements PixelDrawPipe, PixelFillPipe, ShapeDrawPipe {
+public final class XRRenderer implements PixelDrawPipe, PixelFillPipe, ShapeDrawPipe {
     XRDrawHandler drawHandler;
     MaskTileManager tileManager;
     XRDrawLine lineGen;
@@ -70,17 +70,14 @@ public class XRRenderer implements PixelDrawPipe, PixelFillPipe, ShapeDrawPipe {
      * destination context.
      */
     private void validateSurface(SunGraphics2D sg2d) {
-        XRSurfaceData xrsd;
-        try {
-            xrsd = (XRSurfaceData) sg2d.surfaceData;
-        } catch (ClassCastException e) {
-            throw new InvalidPipeException("wrong surface data type: " + sg2d.surfaceData);
-        }
+        XRSurfaceData xrsd = SurfaceData.convertTo(XRSurfaceData.class,
+                                                   sg2d.surfaceData);
         xrsd.validateAsDestination(sg2d, sg2d.getCompClip());
         xrsd.maskBuffer.validateCompositeState(sg2d.composite, sg2d.transform,
                                                sg2d.paint, sg2d);
     }
 
+    @Override
     public void drawLine(SunGraphics2D sg2d, int x1, int y1, int x2, int y2) {
         Region compClip = sg2d.getCompClip();
         int transX1 = Region.clipAdd(x1, sg2d.transX);
@@ -100,11 +97,13 @@ public class XRRenderer implements PixelDrawPipe, PixelFillPipe, ShapeDrawPipe {
         }
     }
 
+    @Override
     public void drawRect(SunGraphics2D sg2d,
                          int x, int y, int width, int height) {
         draw(sg2d, new Rectangle2D.Float(x, y, width, height));
     }
 
+    @Override
     public void drawPolyline(SunGraphics2D sg2d,
                              int[] xpoints, int[] ypoints, int npoints) {
         Path2D.Float p2d = new Path2D.Float();
@@ -118,11 +117,13 @@ public class XRRenderer implements PixelDrawPipe, PixelFillPipe, ShapeDrawPipe {
         draw(sg2d, p2d);
     }
 
+    @Override
     public void drawPolygon(SunGraphics2D sg2d,
                             int[] xpoints, int[] ypoints, int npoints) {
         draw(sg2d, new Polygon(xpoints, ypoints, npoints));
     }
 
+    @Override
     public void fillRect(SunGraphics2D sg2d, int x, int y, int width, int height) {
         x = Region.clipAdd(x, sg2d.transX);
         y = Region.clipAdd(y, sg2d.transY);
@@ -162,11 +163,13 @@ public class XRRenderer implements PixelDrawPipe, PixelFillPipe, ShapeDrawPipe {
         }
     }
 
+    @Override
     public void fillPolygon(SunGraphics2D sg2d,
                             int[] xpoints, int[] ypoints, int npoints) {
         fill(sg2d, new Polygon(xpoints, ypoints, npoints));
     }
 
+    @Override
     public void drawRoundRect(SunGraphics2D sg2d,
                               int x, int y, int width, int height,
                               int arcWidth, int arcHeight) {
@@ -174,6 +177,7 @@ public class XRRenderer implements PixelDrawPipe, PixelFillPipe, ShapeDrawPipe {
                                               arcWidth, arcHeight));
     }
 
+    @Override
     public void fillRoundRect(SunGraphics2D sg2d, int x, int y,
                               int width, int height,
                               int arcWidth, int arcHeight) {
@@ -181,16 +185,19 @@ public class XRRenderer implements PixelDrawPipe, PixelFillPipe, ShapeDrawPipe {
                                               arcWidth, arcHeight));
     }
 
+    @Override
     public void drawOval(SunGraphics2D sg2d,
                          int x, int y, int width, int height) {
         draw(sg2d, new Ellipse2D.Float(x, y, width, height));
     }
 
+    @Override
     public void fillOval(SunGraphics2D sg2d,
                          int x, int y, int width, int height) {
         fill(sg2d, new Ellipse2D.Float(x, y, width, height));
     }
 
+    @Override
     public void drawArc(SunGraphics2D sg2d,
                        int x, int y, int width, int height,
                         int startAngle, int arcAngle) {
@@ -198,6 +205,7 @@ public class XRRenderer implements PixelDrawPipe, PixelFillPipe, ShapeDrawPipe {
                                    startAngle, arcAngle, Arc2D.OPEN));
     }
 
+    @Override
     public void fillArc(SunGraphics2D sg2d,
                          int x, int y, int width, int height,
                          int startAngle, int arcAngle) {
@@ -205,7 +213,7 @@ public class XRRenderer implements PixelDrawPipe, PixelFillPipe, ShapeDrawPipe {
              startAngle, arcAngle, Arc2D.PIE));
     }
 
-    private class XRDrawHandler extends ProcessPath.DrawHandler {
+    private final class XRDrawHandler extends ProcessPath.DrawHandler {
         DirtyRegion region;
 
         XRDrawHandler() {
@@ -226,6 +234,7 @@ public class XRRenderer implements PixelDrawPipe, PixelFillPipe, ShapeDrawPipe {
             validateSurface(sg2d);
         }
 
+        @Override
         public void drawLine(int x1, int y1, int x2, int y2) {
             region.setDirtyLineRegion(x1, y1, x2, y2);
             int xDiff = region.x2 - region.x;
@@ -247,10 +256,12 @@ public class XRRenderer implements PixelDrawPipe, PixelFillPipe, ShapeDrawPipe {
             }
         }
 
+        @Override
         public void drawPixel(int x, int y) {
             rectBuffer.pushRectValues(x, y, 1, 1);
         }
 
+        @Override
         public void drawScanline(int x1, int x2, int y) {
             rectBuffer.pushRectValues(x1, y, x2 - x1 + 1, 1);
         }
@@ -300,6 +311,7 @@ public class XRRenderer implements PixelDrawPipe, PixelFillPipe, ShapeDrawPipe {
         }
     }
 
+    @Override
     public void draw(SunGraphics2D sg2d, Shape s) {
         if (sg2d.strokeState == SunGraphics2D.STROKE_THIN) {
             Path2D.Float p2df;
@@ -330,6 +342,7 @@ public class XRRenderer implements PixelDrawPipe, PixelFillPipe, ShapeDrawPipe {
         }
     }
 
+    @Override
     public void fill(SunGraphics2D sg2d, Shape s) {
         int transx, transy;
 

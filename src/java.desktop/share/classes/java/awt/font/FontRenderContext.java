@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -62,19 +62,18 @@ import java.awt.geom.AffineTransform;
 *   @see java.awt.Graphics2D#getFontRenderContext()
 *   @see java.awt.font.LineMetrics
 */
-
 public class FontRenderContext {
-    private transient AffineTransform tx;
-    private transient Object aaHintValue;
-    private transient Object fmHintValue;
-    private transient boolean defaulting;
+    private final transient AffineTransform tx;
+    private final transient Object aaHintValue;
+    private final transient Object fmHintValue;
+    private final transient boolean defaulting;
 
     /**
      * Constructs a new {@code FontRenderContext}
      * object.
-     *
      */
     protected FontRenderContext() {
+        tx = null;
         aaHintValue = VALUE_TEXT_ANTIALIAS_DEFAULT;
         fmHintValue = VALUE_FRACTIONALMETRICS_DEFAULT;
         defaulting = true;
@@ -105,6 +104,8 @@ public class FontRenderContext {
                             boolean usesFractionalMetrics) {
         if (tx != null && !tx.isIdentity()) {
             this.tx = new AffineTransform(tx);
+        } else {
+            this.tx = null;
         }
         if (isAntiAliased) {
             aaHintValue = VALUE_TEXT_ANTIALIAS_ON;
@@ -116,6 +117,7 @@ public class FontRenderContext {
         } else {
             fmHintValue = VALUE_FRACTIONALMETRICS_OFF;
         }
+        defaulting = false;
     }
 
     /**
@@ -126,13 +128,13 @@ public class FontRenderContext {
      * @param tx the transform which is used to scale typographical points
      * to pixels in this {@code FontRenderContext}.  If null, an
      * identity transform is used.
-     * @param aaHint - one of the text antialiasing rendering hint values
+     * @param aaHint one of the text antialiasing rendering hint values
      * defined in {@link java.awt.RenderingHints java.awt.RenderingHints}.
      * Any other value will throw {@code IllegalArgumentException}.
      * {@link java.awt.RenderingHints#VALUE_TEXT_ANTIALIAS_DEFAULT VALUE_TEXT_ANTIALIAS_DEFAULT}
      * may be specified, in which case the mode used is implementation
      * dependent.
-     * @param fmHint - one of the text fractional rendering hint values defined
+     * @param fmHint one of the text fractional rendering hint values defined
      * in {@link java.awt.RenderingHints java.awt.RenderingHints}.
      * {@link java.awt.RenderingHints#VALUE_FRACTIONALMETRICS_DEFAULT VALUE_FRACTIONALMETRICS_DEFAULT}
      * may be specified, in which case the mode used is implementation
@@ -145,6 +147,8 @@ public class FontRenderContext {
     public FontRenderContext(AffineTransform tx, Object aaHint, Object fmHint){
         if (tx != null && !tx.isIdentity()) {
             this.tx = new AffineTransform(tx);
+        } else {
+            this.tx = null;
         }
         try {
             if (KEY_TEXT_ANTIALIASING.isCompatibleValue(aaHint)) {
@@ -164,6 +168,7 @@ public class FontRenderContext {
         } catch (Exception e) {
             throw new IllegalArgumentException("FM hint:" +fmHint);
         }
+        defaulting = false;
     }
 
     /**

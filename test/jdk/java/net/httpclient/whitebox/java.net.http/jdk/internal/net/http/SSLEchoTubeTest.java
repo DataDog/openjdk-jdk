@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,7 +28,6 @@ import jdk.internal.net.http.common.FlowTube;
 import jdk.internal.net.http.common.SSLTube;
 import jdk.internal.net.http.common.SequentialScheduler;
 import jdk.internal.net.http.common.Utils;
-import org.testng.annotations.Test;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -44,7 +43,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-@Test
+import org.junit.jupiter.api.Test;
+
 public class SSLEchoTubeTest extends AbstractSSLTubeTest {
 
     @Test
@@ -299,12 +299,12 @@ public class SSLEchoTubeTest extends AbstractSSLTubeTest {
             Flow.Subscription s = subscription;
             if (s == null || cancelled.get()) return;
             long unfulfilled = queue.size() + --requested;
-            if (unfulfilled <= maxQueueSize/2) {
+            if (unfulfilled <= maxQueueSize / 2) {
                 long req = maxQueueSize - unfulfilled;
                 requested += req;
                 s.request(req);
                 System.out.printf("EchoTube request: %s [requested:%s, queue:%s, unfulfilled:%s]%n",
-                        req, requested-req, queue.size(), unfulfilled );
+                        req, requested - req, queue.size(), unfulfilled);
             }
         }
 

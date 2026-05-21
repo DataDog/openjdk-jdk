@@ -29,11 +29,11 @@
 
 #include "classfile/classLoaderDataGraph.hpp"
 #include "gc/shared/oopStorageSetParState.inline.hpp"
+#include "gc/shenandoah/heuristics/shenandoahHeuristics.hpp"
 #include "gc/shenandoah/shenandoahClosures.inline.hpp"
 #include "gc/shenandoah/shenandoahHeap.inline.hpp"
 #include "gc/shenandoah/shenandoahPhaseTimings.hpp"
 #include "gc/shenandoah/shenandoahUtils.hpp"
-#include "gc/shenandoah/heuristics/shenandoahHeuristics.hpp"
 #include "memory/resourceArea.hpp"
 #include "runtime/mutexLocker.hpp"
 #include "runtime/safepoint.hpp"
@@ -75,40 +75,37 @@ void ShenandoahVMRoots<CONCURRENT>::oops_do(T* cl, uint worker_id) {
   _strong_roots.oops_do(cl);
 }
 
-template <bool CONCURRENT, bool SINGLE_THREADED>
-ShenandoahClassLoaderDataRoots<CONCURRENT, SINGLE_THREADED>::ShenandoahClassLoaderDataRoots(ShenandoahPhaseTimings::Phase phase, uint n_workers) :
+template <bool CONCURRENT>
+ShenandoahClassLoaderDataRoots<CONCURRENT>::ShenandoahClassLoaderDataRoots(ShenandoahPhaseTimings::Phase phase, uint n_workers, bool heap_iteration) :
   _semaphore(worker_count(n_workers)),
   _phase(phase) {
-  if (!SINGLE_THREADED) {
-    ClassLoaderDataGraph::clear_claimed_marks();
+  if (heap_iteration) {
+    ClassLoaderDataGraph::clear_claimed_marks(ClassLoaderData::_claim_other);
+  } else {
+    ClassLoaderDataGraph::clear_claimed_marks(ClassLoaderData::_claim_strong);
   }
-  if (CONCURRENT && !SINGLE_THREADED) {
+
+  if (CONCURRENT) {
     ClassLoaderDataGraph_lock->lock();
   }
 
-  // Non-concurrent mode only runs at safepoints by VM thread
+  // Non-concurrent mode only runs at safepoints
   assert(CONCURRENT || SafepointSynchronize::is_at_safepoint(), "Must be at a safepoint");
-  assert(CONCURRENT || Thread::current()->is_VM_thread(), "Can only be done by VM thread");
 }
 
-template <bool CONCURRENT, bool SINGLE_THREADED>
-ShenandoahClassLoaderDataRoots<CONCURRENT, SINGLE_THREADED>::~ShenandoahClassLoaderDataRoots() {
-  if (CONCURRENT && !SINGLE_THREADED) {
+template <bool CONCURRENT>
+ShenandoahClassLoaderDataRoots<CONCURRENT>::~ShenandoahClassLoaderDataRoots() {
+  if (CONCURRENT) {
     ClassLoaderDataGraph_lock->unlock();
   }
 }
 
-template <bool CONCURRENT, bool SINGLE_THREADED>
-void ShenandoahClassLoaderDataRoots<CONCURRENT, SINGLE_THREADED>::cld_do_impl(CldDo f, CLDClosure* clds, uint worker_id) {
+template <bool CONCURRENT>
+void ShenandoahClassLoaderDataRoots<CONCURRENT>::cld_do_impl(CldDo f, CLDClosure* clds, uint worker_id) {
   if (CONCURRENT) {
     if (_semaphore.try_acquire()) {
       ShenandoahWorkerTimingsTracker timer(_phase, ShenandoahPhaseTimings::CLDGRoots, worker_id);
-      if (SINGLE_THREADED){
-        MutexLocker ml(ClassLoaderDataGraph_lock, Mutex::_no_safepoint_check_flag);
-        f(clds);
-      } else {
-        f(clds);
-      }
+      f(clds);
       _semaphore.claim_all();
     }
   } else {
@@ -117,30 +114,73 @@ void ShenandoahClassLoaderDataRoots<CONCURRENT, SINGLE_THREADED>::cld_do_impl(Cl
   }
 }
 
-template <bool CONCURRENT, bool SINGLE_THREADED>
-void ShenandoahClassLoaderDataRoots<CONCURRENT, SINGLE_THREADED>::always_strong_cld_do(CLDClosure* clds, uint worker_id) {
+template <bool CONCURRENT>
+void ShenandoahClassLoaderDataRoots<CONCURRENT>::always_strong_cld_do(CLDClosure* clds, uint worker_id) {
   cld_do_impl(&ClassLoaderDataGraph::always_strong_cld_do, clds, worker_id);
 }
 
-template <bool CONCURRENT, bool SINGLE_THREADED>
-void ShenandoahClassLoaderDataRoots<CONCURRENT, SINGLE_THREADED>::cld_do(CLDClosure* clds, uint worker_id) {
+template <bool CONCURRENT>
+void ShenandoahClassLoaderDataRoots<CONCURRENT>::cld_do(CLDClosure* clds, uint worker_id) {
   cld_do_impl(&ClassLoaderDataGraph::cld_do, clds, worker_id);
 }
 
 class ShenandoahParallelOopsDoThreadClosure : public ThreadClosure {
 private:
   OopClosure* _f;
-  CodeBlobClosure* _cf;
+  NMethodClosure* _cf;
   ThreadClosure* _thread_cl;
 public:
-  ShenandoahParallelOopsDoThreadClosure(OopClosure* f, CodeBlobClosure* cf, ThreadClosure* thread_cl) :
+  ShenandoahParallelOopsDoThreadClosure(OopClosure* f, NMethodClosure* cf, ThreadClosure* thread_cl) :
     _f(f), _cf(cf), _thread_cl(thread_cl) {}
 
   void do_thread(Thread* t) {
-    if (_thread_cl != NULL) {
+    if (_thread_cl != nullptr) {
       _thread_cl->do_thread(t);
     }
     t->oops_do(_f, _cf);
+  }
+};
+
+class ShenandoahInvisibleRootsMarkClosure : public ThreadClosure {
+public:
+  void do_thread(Thread* t) {
+    assert_at_safepoint();
+
+    HeapWord* invisible_root = ShenandoahThreadLocalData::get_invisible_root(t);
+    if (invisible_root == nullptr) {
+      return;
+    }
+    size_t invisible_root_word_size = ShenandoahThreadLocalData::get_invisible_root_word_size(t);
+
+    ShenandoahHeap* const heap = ShenandoahHeap::heap();
+    ShenandoahMarkingContext* const marking_context = heap->marking_context();
+    // Mark the invisible root if it is not marked.
+    if (!marking_context->is_marked(invisible_root)) {
+      bool was_upgraded = false;
+      if (!marking_context->mark_strong(cast_to_oop(invisible_root), was_upgraded)) {
+        return;
+      }
+
+      // Update region liveness data
+      ShenandoahHeapRegion* region = heap->heap_region_containing(invisible_root);
+      if (region->is_regular_or_regular_pinned()) {
+        assert(!ShenandoahHeapRegion::requires_humongous(invisible_root_word_size), "Must not be humongous.");
+        region->increase_live_data_alloc_words(invisible_root_word_size);
+      } else if (region->is_humongous_start()) {
+        DEBUG_ONLY(size_t total_live_words = 0;)
+        do {
+          size_t current = region->get_live_data_words();
+          size_t region_used_words = region->used() >> LogHeapWordSize;
+          DEBUG_ONLY(total_live_words += region_used_words;)
+          assert(current == 0 || current == region_used_words, "Must be");
+          if (current == 0) {
+            region->increase_live_data_alloc_words(region_used_words);
+          }
+          region = heap->get_region(region->index() + 1);
+        } while (region != nullptr && region->is_humongous_continuation());
+        assert(total_live_words == invisible_root_word_size, "Must be");
+      }
+    }
   }
 };
 
@@ -155,16 +195,16 @@ public:
 //      we risk executing that code cache blob, and crashing.
 template <typename T>
 void ShenandoahSTWRootScanner::roots_do(T* oops, uint worker_id) {
-  MarkingCodeBlobClosure blobs_cl(oops, !CodeBlobToOopClosure::FixRelocations);
+  MarkingNMethodClosure nmethods_cl(oops);
   CLDToOopClosure clds(oops, ClassLoaderData::_claim_strong);
   ResourceMark rm;
 
   if (_unload_classes) {
-    _thread_roots.oops_do(oops, &blobs_cl, worker_id);
+    _thread_roots.oops_do(oops, &nmethods_cl, worker_id);
     _cld_roots.always_strong_cld_do(&clds, worker_id);
   } else {
-    _thread_roots.oops_do(oops, NULL, worker_id);
-    _code_roots.code_blobs_do(&blobs_cl, worker_id);
+    _thread_roots.oops_do(oops, nullptr, worker_id);
+    _code_roots.nmethods_do(&nmethods_cl, worker_id);
     _cld_roots.cld_do(&clds, worker_id);
   }
 
@@ -173,12 +213,8 @@ void ShenandoahSTWRootScanner::roots_do(T* oops, uint worker_id) {
 
 template <typename IsAlive, typename KeepAlive>
 void ShenandoahRootUpdater::roots_do(uint worker_id, IsAlive* is_alive, KeepAlive* keep_alive) {
-  CodeBlobToOopClosure update_blobs(keep_alive, CodeBlobToOopClosure::FixRelocations);
-  ShenandoahCodeBlobAndDisarmClosure blobs_and_disarm_Cl(keep_alive);
-  CodeBlobToOopClosure* codes_cl = (ClassUnloading && ShenandoahNMethodBarrier) ?
-                                   static_cast<CodeBlobToOopClosure*>(&blobs_and_disarm_Cl) :
-                                   static_cast<CodeBlobToOopClosure*>(&update_blobs);
-
+  NMethodToOopClosure update_nmethods(keep_alive, NMethodToOopClosure::FixRelocations);
+  ShenandoahNMethodAndDisarmClosure nmethods_and_disarm_Cl(keep_alive);
   CLDToOopClosure clds(keep_alive, ClassLoaderData::_claim_strong);
 
   // Process light-weight/limited parallel roots then
@@ -187,8 +223,8 @@ void ShenandoahRootUpdater::roots_do(uint worker_id, IsAlive* is_alive, KeepAliv
   _cld_roots.cld_do(&clds, worker_id);
 
   // Process heavy-weight/fully parallel roots the last
-  _code_roots.code_blobs_do(codes_cl, worker_id);
-  _thread_roots.oops_do(keep_alive, NULL, worker_id);
+  _code_roots.nmethods_do(&nmethods_and_disarm_Cl, worker_id);
+  _thread_roots.oops_do(keep_alive, nullptr, worker_id);
 }
 
 #endif // SHARE_GC_SHENANDOAH_SHENANDOAHROOTPROCESSOR_INLINE_HPP

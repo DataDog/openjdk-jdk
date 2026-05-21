@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -81,6 +81,24 @@ public abstract class Frame implements Cloneable {
     return pcReturnOffset;
   }
 
+  protected void adjustForDeopt() {
+    if (pc != null) {
+      // Look for a deopt pc and if it is deopted convert to original pc
+      CodeBlob cb = VM.getVM().getCodeCache().findBlob(pc);
+      if (cb != null && cb.isJavaMethod()) {
+        NMethod nm = (NMethod) cb;
+        if (pc.equals(nm.deoptHandlerEntry())) {
+          if (Assert.ASSERTS_ENABLED) {
+            Assert.that(this.getUnextendedSP() != null, "null SP in Java frame");
+          }
+          // adjust pc if frame is deoptimized.
+          pc = this.getUnextendedSP().getAddressAt(nm.origPCOffset());
+          deoptimized = true;
+        }
+      }
+    }
+  }
+
   private static synchronized void initialize(TypeDataBase db) {
     Type ConstMethodType = db.lookupType("ConstMethod");
     // FIXME: not sure whether alignment here is correct or how to
@@ -120,6 +138,7 @@ public abstract class Frame implements Cloneable {
   }
 
   public abstract Address getSP();
+  public abstract void setSP(Address newSP);
   public abstract Address getID();
   public abstract Address getFP();
 
@@ -276,7 +295,7 @@ public abstract class Frame implements Cloneable {
   public abstract Address addressOfInterpreterFrameLocals();
 
   public Address addressOfInterpreterFrameLocal(int slot) {
-    return addressOfInterpreterFrameLocals().getAddressAt(0).addOffsetTo(-slot * VM.getVM().getAddressSize());
+    return addressOfInterpreterFrameLocals().addOffsetTo(-slot * VM.getVM().getAddressSize());
   }
 
   // FIXME: not yet implementable
@@ -599,7 +618,7 @@ public abstract class Frame implements Cloneable {
         // => process callee's arguments
         //
         // Note: The expression stack can be empty if an exception
-        //       occured during method resolution/execution. In all
+        //       occurred during method resolution/execution. In all
         //       cases we empty the expression stack completely be-
         //       fore handling the exception (the exception handling
         //       code in the interpreter calls a blocking runtime

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,10 +21,9 @@
  * questions.
  */
 
-#include "precompiled.hpp"
 #include "gc/shared/oopStorage.inline.hpp"
 #include "gc/shared/oopStorageParState.inline.hpp"
-#include "gc/shared/workgroup.hpp"
+#include "gc/shared/workerThread.hpp"
 #include "logging/log.hpp"
 #include "logging/logConfiguration.hpp"
 #include "memory/allocation.inline.hpp"
@@ -52,57 +51,57 @@ static uint _num_workers = 0;
 const size_t _storage_entries = 1000000;
 
 class OopStorageParIterPerf : public ::testing::Test {
+  OopStorage* _storage;
+
 public:
   OopStorageParIterPerf();
   ~OopStorageParIterPerf();
 
-  WorkGang* workers() const;
+  WorkerThreads* workers() const;
 
   class VM_ParStateTime;
   class Task;
   class Closure;
 
+  OopStorage& storage() const { return *_storage; }
   Tickspan run_task(Task* task, uint nthreads);
   void show_task(const Task* task, Tickspan duration, uint nthreads);
   void run_test(uint nthreads);
 
-  static WorkGang* _workers;
+  static WorkerThreads* _workers;
 
-  OopStorage _storage;
   oop* _entries[_storage_entries];
 };
 
-WorkGang* OopStorageParIterPerf::_workers = NULL;
+WorkerThreads* OopStorageParIterPerf::_workers = nullptr;
 
-WorkGang* OopStorageParIterPerf::workers() const {
-  if (_workers == NULL) {
-    WorkGang* wg = new WorkGang("OopStorageParIterPerf workers",
-                                _num_workers,
-                                false,
-                                false);
+WorkerThreads* OopStorageParIterPerf::workers() const {
+  if (_workers == nullptr) {
+    WorkerThreads* wg = new WorkerThreads("OopStorageParIterPerf workers", _num_workers);
     wg->initialize_workers();
-    wg->update_active_workers(_num_workers);
+    wg->set_active_workers(_num_workers);
     _workers = wg;
   }
   return _workers;
 }
 
 OopStorageParIterPerf::OopStorageParIterPerf() :
-  _storage("Test Storage", mtGC)
+  _storage(OopStorage::create("Test Storage", mtGC))
 {
   for (size_t i = 0; i < _storage_entries; ++i) {
-    _entries[i] = _storage.allocate();
+    _entries[i] = storage().allocate();
   }
   _num_workers = MIN2(_max_workers, (uint)os::processor_count());
 }
 
 OopStorageParIterPerf::~OopStorageParIterPerf() {
-  _storage.release(_entries, ARRAY_SIZE(_entries));
+  storage().release(_entries, ARRAY_SIZE(_entries));
+  delete _storage;
 }
 
 class OopStorageParIterPerf::VM_ParStateTime : public VM_GTestExecuteAtSafepoint {
 public:
-  VM_ParStateTime(WorkGang* workers, AbstractGangTask* task, uint nthreads) :
+  VM_ParStateTime(WorkerThreads* workers, WorkerTask* task, uint nthreads) :
     _workers(workers), _task(task), _nthreads(nthreads)
   {}
 
@@ -111,12 +110,12 @@ public:
   }
 
 private:
-  WorkGang* _workers;
-  AbstractGangTask* _task;
+  WorkerThreads* _workers;
+  WorkerTask* _task;
   uint _nthreads;
 };
 
-class OopStorageParIterPerf::Task : public AbstractGangTask {
+class OopStorageParIterPerf::Task : public WorkerTask {
   typedef OopStorage::ParState<false, false> StateType;
 
   Tickspan* _worker_times;
@@ -125,8 +124,8 @@ class OopStorageParIterPerf::Task : public AbstractGangTask {
 
 public:
   Task(OopStorage* storage, OopClosure* closure, uint nthreads) :
-    AbstractGangTask("OopStorageParIterPerf::Task"),
-    _worker_times(NULL),
+    WorkerTask("OopStorageParIterPerf::Task"),
+    _worker_times(nullptr),
     _state(storage, nthreads),
     _closure(closure)
   {
@@ -138,7 +137,7 @@ public:
   }
 
   ~Task() {
-    FREE_C_HEAP_ARRAY(Tickspan, _worker_times);
+    FREE_C_HEAP_ARRAY(_worker_times);
   }
 
   virtual void work(uint worker_id) {
@@ -152,7 +151,7 @@ public:
 
 class OopStorageParIterPerf::Closure : public OopClosure {
 public:
-  virtual void do_oop(oop* p) { guarantee(*p == NULL, "expected NULL"); }
+  virtual void do_oop(oop* p) { guarantee(*p == nullptr, "expected null"); }
   virtual void do_oop(narrowOop* p) { ShouldNotReachHere(); }
 };
 
@@ -180,7 +179,7 @@ void OopStorageParIterPerf::run_test(uint nthreads) {
   if (nthreads <= _num_workers) {
     SCOPED_TRACE(err_msg("Running test with %u threads", nthreads).buffer());
     Closure closure;
-    Task task(&_storage, &closure, nthreads);
+    Task task(&storage(), &closure, nthreads);
     Tickspan t = run_task(&task, nthreads);
     show_task(&task, t, nthreads);
   }

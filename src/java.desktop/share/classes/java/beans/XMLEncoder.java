@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -218,7 +218,7 @@ public class XMLEncoder extends Encoder implements AutoCloseable {
     private boolean preambleWritten = false;
     private NameGenerator nameGenerator;
 
-    private class ValueData {
+    private static class ValueData {
         public int refs = 0;
         public boolean marked = false; // Marked -> refs > 0 unless ref was a target.
         public String name = null;
@@ -321,6 +321,7 @@ public class XMLEncoder extends Encoder implements AutoCloseable {
      *
      * @see XMLDecoder#readObject
      */
+    @Override
     public void writeObject(Object o) {
         if (internal) {
             super.writeObject(o);
@@ -391,6 +392,7 @@ public class XMLEncoder extends Encoder implements AutoCloseable {
      *               to the stream.
      * @see java.beans.PersistenceDelegate#initialize
      */
+    @Override
     public void writeStatement(Statement oldStm) {
         // System.out.println("XMLEncoder::writeStatement: " + oldStm);
         boolean internal = this.internal;
@@ -445,6 +447,7 @@ public class XMLEncoder extends Encoder implements AutoCloseable {
      *               to the stream.
      * @see java.beans.PersistenceDelegate#initialize
      */
+    @Override
     public void writeExpression(Expression oldExp) {
         boolean internal = this.internal;
         this.internal = true;
@@ -502,6 +505,7 @@ public class XMLEncoder extends Encoder implements AutoCloseable {
         clear();
     }
 
+    @Override
     void clear() {
         super.clear();
         nameGenerator.clear();
@@ -526,6 +530,7 @@ public class XMLEncoder extends Encoder implements AutoCloseable {
      * postamble and then closes the output stream associated
      * with this stream.
      */
+    @Override
     public void close() {
         flush();
         writeln("</java>");

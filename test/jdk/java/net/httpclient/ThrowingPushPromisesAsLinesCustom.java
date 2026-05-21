@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,21 +26,20 @@
  * @bug 8229822
  * @summary Tests what happens when push promise handlers and their
  *          response body handlers and subscribers throw unexpected exceptions.
- * @library /test/lib http2/server
- * @build jdk.test.lib.net.SimpleSSLContext HttpServerAdapters
-  *       ReferenceTracker AbstractThrowingPushPromises ThrowingPushPromisesAsLinesCustom
- * @modules java.base/sun.net.www.http
- *          java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- * @run testng/othervm -Djdk.internal.httpclient.debug=true ThrowingPushPromisesAsLinesCustom
+ * @library /test/lib /test/jdk/java/net/httpclient/lib
+ * @build jdk.test.lib.net.SimpleSSLContext
+ *        ReferenceTracker AbstractThrowingPushPromises ThrowingPushPromisesAsLinesCustom
+ *        jdk.httpclient.test.lib.common.HttpServerAdapters
+ * @run junit/othervm -Djdk.internal.httpclient.debug=true ${test.main.class}
  */
 
-import org.testng.annotations.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 public class ThrowingPushPromisesAsLinesCustom extends AbstractThrowingPushPromises {
 
-    @Test(dataProvider = "customVariants")
+    @ParameterizedTest
+    @MethodSource("customVariants")
     public void testThrowingAsLines(String uri, boolean sameClient, Thrower thrower)
             throws Exception {
         super.testThrowingAsLinesImpl(uri, sameClient, thrower);

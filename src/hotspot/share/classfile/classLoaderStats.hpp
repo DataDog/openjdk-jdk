@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,15 +25,13 @@
 #ifndef SHARE_CLASSFILE_CLASSLOADERSTATS_HPP
 #define SHARE_CLASSFILE_CLASSLOADERSTATS_HPP
 
-
 #include "classfile/classLoaderData.hpp"
 #include "oops/klass.hpp"
 #include "oops/oop.hpp"
 #include "oops/oopsHierarchy.hpp"
 #include "runtime/vmOperation.hpp"
 #include "services/diagnosticCommand.hpp"
-#include "utilities/resourceHash.hpp"
-
+#include "utilities/hashTable.hpp"
 
 class ClassLoaderStatsDCmd : public DCmd {
 public:
@@ -58,12 +56,6 @@ public:
   static int num_arguments() {
     return 0;
   }
-
-  static const JavaPermission permission() {
-    JavaPermission p = {"java.lang.management.ManagementPermission",
-                        "monitor", NULL};
-    return p;
-  }
 };
 
 
@@ -82,9 +74,9 @@ public:
   uintx             _hidden_classes_count;
 
   ClassLoaderStats() :
-    _cld(0),
-    _class_loader(0),
-    _parent(0),
+    _cld(nullptr),
+    _class_loader(),
+    _parent(),
     _chunk_sz(0),
     _block_sz(0),
     _classes_count(0),
@@ -111,8 +103,8 @@ protected:
     return hash;
   }
 
-  typedef ResourceHashtable<oop, ClassLoaderStats,
-                            256, ResourceObj::RESOURCE_AREA, mtInternal,
+  typedef HashTable<oop, ClassLoaderStats,
+                            256, AnyObj::C_HEAP, mtStatistics,
                             ClassLoaderStatsClosure::oop_hash> StatsTable;
 
   outputStream* _out;
@@ -125,11 +117,15 @@ protected:
 public:
   ClassLoaderStatsClosure(outputStream* out) :
     _out(out),
-    _stats(new StatsTable()),
+    _stats(new (mtStatistics)StatsTable()),
     _total_loaders(0),
     _total_classes(0),
     _total_chunk_sz(0),
     _total_block_sz(0) {
+  }
+
+  ~ClassLoaderStatsClosure() {
+    delete _stats;
   }
 
   virtual void do_cld(ClassLoaderData* cld);

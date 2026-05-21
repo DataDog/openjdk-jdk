@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -64,6 +64,7 @@ public class equals001a {
 
     static Object lock = new Object();
     static Object wait = new Object();
+    static Thread thread1 = null;
 
     //------------------------------------------------------ mutable common method
 
@@ -73,7 +74,7 @@ public class equals001a {
         log = new Log(System.err, argHandler);
         pipe = argHandler.createDebugeeIOPipe(log);
         try {
-            Thread thread1 = new equals001aThread("thread1");
+            thread1 = JDIThreadFactory.newThread(new equals001aThread("thread1"));
 
             synchronized (lock) {
                  synchronized(wait) {
@@ -108,7 +109,7 @@ public class equals001a {
 
 //--------------------------------------------------------- test specific classes
 
-class equals001aThread extends Thread {
+class equals001aThread extends NamedTask {
 
     String name;
 
@@ -126,7 +127,7 @@ class equals001aThread extends Thread {
 
         foo();
 
-        equals001aThread1 thread2 = new equals001aThread1();
+        Thread thread2 = JDIThreadFactory.newThread(new equals001aThread1());
         thread2.start();
 
         try {
@@ -147,7 +148,7 @@ class equals001aThread extends Thread {
     }
 }
 
-class equals001aThread1 extends Thread {
+class equals001aThread1 implements Runnable {
     public void run() {
     }
 }

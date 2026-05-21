@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,14 +23,13 @@
 
 /*
  * @test
- * @modules java.base/sun.net.www.http
- *          java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- * @library /test/lib server
- * @build Http2TestServer
- * @build jdk.test.lib.net.SimpleSSLContext
- * @run testng/othervm -Djdk.internal.httpclient.debug=true BadHeadersTest
+ * @bug 8303965 8354276
+ * @summary This test verifies the behaviour of the HttpClient when presented
+ *          with a HEADERS frame followed by CONTINUATION frames, and when presented
+ *          with bad header fields.
+ * @library /test/lib /test/jdk/java/net/httpclient/lib
+ * @build jdk.httpclient.test.lib.http2.Http2TestServer jdk.test.lib.net.SimpleSSLContext
+ * @run junit/othervm -Djdk.internal.httpclient.debug=true ${test.main.class}
  */
 
 import jdk.internal.net.http.common.HttpHeadersBuilder;
@@ -39,15 +38,16 @@ import jdk.internal.net.http.frame.HeaderFrame;
 import jdk.internal.net.http.frame.HeadersFrame;
 import jdk.internal.net.http.frame.Http2Frame;
 import jdk.test.lib.net.SimpleSSLContext;
-import org.testng.annotations.AfterTest;
-import org.testng.annotations.BeforeTest;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSession;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.ProtocolException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
@@ -61,10 +61,18 @@ import java.util.List;
 import java.util.Map.Entry;
 import java.util.concurrent.ExecutionException;
 import java.util.function.BiFunction;
+
+import jdk.httpclient.test.lib.http2.Http2TestServer;
+import jdk.httpclient.test.lib.http2.Http2TestExchange;
+import jdk.httpclient.test.lib.http2.Http2TestExchangeImpl;
+import jdk.httpclient.test.lib.http2.Http2Handler;
+import jdk.httpclient.test.lib.http2.BodyOutputStream;
+import jdk.httpclient.test.lib.http2.Http2TestServerConnection;
 import static java.util.List.of;
 import static java.util.Map.entry;
-import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 // Code copied from ContinuationFrameTest
 public class BadHeadersTest {
@@ -74,17 +82,19 @@ public class BadHeadersTest {
         of(entry(":status", "200"),  entry("hell o", "value")),                    // Space in the name
         of(entry(":status", "200"),  entry("hello", "line1\r\n  line2\r\n")),      // Multiline value
         of(entry(":status", "200"),  entry("hello", "DE" + ((char) 0x7F) + "L")),  // Bad byte in value
+        of(entry(":status", "200"),  entry("connection", "close")),                // Prohibited connection-specific header
+        of(entry(":status", "200"),  entry(":scheme", "https")),                   // Request pseudo-header in response
         of(entry("hello", "world!"), entry(":status", "200"))                      // Pseudo header is not the first one
     );
 
-    SSLContext sslContext;
-    Http2TestServer http2TestServer;   // HTTP/2 ( h2c )
-    Http2TestServer https2TestServer;  // HTTP/2 ( h2  )
-    String http2URI;
-    String https2URI;
+    private static final SSLContext sslContext = SimpleSSLContext.findSSLContext();
+    private static Http2TestServer http2TestServer;   // HTTP/2 ( h2c )
+    private static Http2TestServer https2TestServer;  // HTTP/2 ( h2  )
+    private static String http2URI;
+    private static String https2URI;
 
     /**
-     * A function that returns a list of 1) a HEADERS frame ( with an empty
+     * A function that returns a list of 1) one HEADERS frame ( with an empty
      * payload ), and 2) a CONTINUATION frame with the actual headers.
      */
     static BiFunction<Integer,List<ByteBuffer>,List<Http2Frame>> oneContinuation =
@@ -98,7 +108,7 @@ public class BadHeadersTest {
             };
 
     /**
-     * A function that returns a list of a HEADERS frame followed by a number of
+     * A function that returns a list of one HEADERS frame followed by a number of
      * CONTINUATION frames. Each frame contains just a single byte of payload.
      */
     static BiFunction<Integer,List<ByteBuffer>,List<Http2Frame>> byteAtATime =
@@ -119,8 +129,7 @@ public class BadHeadersTest {
                 return frames;
             };
 
-    @DataProvider(name = "variants")
-    public Object[][] variants() {
+    static Object[][] variants() {
         return new Object[][] {
                 { http2URI,  false, oneContinuation },
                 { https2URI, false, oneContinuation },
@@ -134,8 +143,8 @@ public class BadHeadersTest {
         };
     }
 
-
-    @Test(dataProvider = "variants")
+    @ParameterizedTest
+    @MethodSource("variants")
     void test(String uri,
               boolean sameClient,
               BiFunction<Integer,List<ByteBuffer>,List<Http2Frame>> headerFramesSupplier)
@@ -164,7 +173,8 @@ public class BadHeadersTest {
         }
     }
 
-    @Test(dataProvider = "variants")
+    @ParameterizedTest
+    @MethodSource("variants")
     void testAsync(String uri,
                    boolean sameClient,
                    BiFunction<Integer,List<ByteBuffer>,List<Http2Frame>> headerFramesSupplier)
@@ -187,12 +197,13 @@ public class BadHeadersTest {
             try {
                 HttpResponse<String> response = cc.sendAsync(request, BodyHandlers.ofString()).get();
                 fail("Expected exception, got :" + response + ", " + response.body());
-            } catch (Throwable t0) {
+            } catch (Exception t0) {
                 System.out.println("Got EXPECTED: " + t0);
                 if (t0 instanceof ExecutionException) {
-                    t0 = t0.getCause();
+                    t = t0.getCause();
+                } else {
+                    t = t0;
                 }
-                t = t0;
             }
             assertDetailMessage(t, i);
         }
@@ -201,29 +212,36 @@ public class BadHeadersTest {
     // Assertions based on implementation specific detail messages. Keep in
     // sync with implementation.
     static void assertDetailMessage(Throwable throwable, int iterationIndex) {
-        assertTrue(throwable instanceof IOException,
-                   "Expected IOException, got, " + throwable);
-        assertTrue(throwable.getMessage().contains("protocol error"),
-                "Expected \"protocol error\" in: " + throwable.getMessage());
+        try {
+            assertInstanceOf(ProtocolException.class, throwable, "Expected ProtocolException, got " + throwable);
+            assertTrue(throwable.getMessage().contains("malformed response"),
+                    "Expected \"malformed response\" in: " + throwable.getMessage());
 
-        if (iterationIndex == 0) { // unknown
-            assertTrue(throwable.getMessage().contains("Unknown pseudo-header"),
-                    "Expected \"Unknown pseudo-header\" in: " + throwable.getMessage());
-        } else if (iterationIndex == 4) { // unexpected
-            assertTrue(throwable.getMessage().contains(" Unexpected pseudo-header"),
-                    "Expected \" Unexpected pseudo-header\" in: " + throwable.getMessage());
-        } else {
-            assertTrue(throwable.getMessage().contains("Bad header"),
-                    "Expected \"Bad header\" in: " + throwable.getMessage());
+            if (iterationIndex == 0) { // unknown
+                assertTrue(throwable.getMessage().contains("Unknown pseudo-header"),
+                        "Expected \"Unknown pseudo-header\" in: " + throwable.getMessage());
+            } else if (iterationIndex == 4) { // prohibited
+                assertTrue(throwable.getMessage().contains("Prohibited header name"),
+                        "Expected \"Prohibited header name\" in: " + throwable.getMessage());
+            } else if (iterationIndex == 5) { // unexpected type
+                assertTrue(throwable.getMessage().contains("not valid in context"),
+                        "Expected \"not valid in context\" in: " + throwable.getMessage());
+            } else if (iterationIndex == 6) { // unexpected sequence
+                assertTrue(throwable.getMessage().contains(" Unexpected pseudo-header"),
+                        "Expected \" Unexpected pseudo-header\" in: " + throwable.getMessage());
+            } else {
+                assertTrue(throwable.getMessage().contains("Bad header"),
+                        "Expected \"Bad header\" in: " + throwable.getMessage());
+            }
+        } catch (AssertionError e) {
+            System.out.println("Exception does not match expectation: " + throwable);
+            throwable.printStackTrace(System.out);
+            throw e;
         }
     }
 
-    @BeforeTest
-    public void setup() throws Exception {
-        sslContext = new SimpleSSLContext().get();
-        if (sslContext == null)
-            throw new AssertionError("Unexpected null sslContext");
-
+    @BeforeAll
+    static void setup() throws Exception {
         http2TestServer = new Http2TestServer("localhost", false, 0);
         http2TestServer.addHandler(new Http2EchoHandler(), "/http2/echo");
         int port = http2TestServer.getAddress().getPort();
@@ -243,8 +261,8 @@ public class BadHeadersTest {
         https2TestServer.start();
     }
 
-    @AfterTest
-    public void teardown() throws Exception {
+    @AfterAll
+    static void teardown() throws Exception {
         http2TestServer.stop();
         https2TestServer.stop();
     }
@@ -302,11 +320,12 @@ public class BadHeadersTest {
 
             if (responseLength < 0) {
                 headerFrames.get(headerFrames.size() -1).setFlag(HeadersFrame.END_STREAM);
-                os.closeInternal();
+                os.markClosed();
             }
 
-            for (Http2Frame f : headerFrames)
-                conn.outputQ.put(f);
+            for (Http2Frame f : headerFrames) {
+                conn.addToOutputQ(f);
+            }
 
             os.goodToGo();
             System.err.println("Sent response headers " + rCode);

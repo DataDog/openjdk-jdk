@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,10 +28,10 @@
  * @modules java.base/jdk.internal.misc
  *          java.management
  * @requires vm.opt.TieredStopAtLevel==null
- * @build sun.hotspot.WhiteBox
- * @run driver jdk.test.lib.helpers.ClassFileInstaller sun.hotspot.WhiteBox
+ * @build jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run main/othervm -Xbootclasspath/a:. -XX:-TieredCompilation
- *                   -XX:+UnlockDiagnosticVMOptions -XX:+WhiteBoxAPI -XX:-UseCounterDecay
+ *                   -XX:+UnlockDiagnosticVMOptions -XX:+WhiteBoxAPI
  *                   -XX:CompileCommand=compileonly,compiler.whitebox.SimpleTestCaseHelper::*
  *                   compiler.tiered.NonTieredLevelsTest
  */
@@ -47,10 +47,10 @@ public class NonTieredLevelsTest extends CompLevelsTest {
     private static final int AVAILABLE_COMP_LEVEL;
     private static final IntPredicate IS_AVAILABLE_COMPLEVEL;
     static {
-        if (Platform.isServer() && !Platform.isEmulatedClient()) {
+        if (Platform.isServer()) {
             AVAILABLE_COMP_LEVEL = COMP_LEVEL_FULL_OPTIMIZATION;
             IS_AVAILABLE_COMPLEVEL = x -> x == COMP_LEVEL_FULL_OPTIMIZATION;
-        } else if (Platform.isClient() || Platform.isMinimal() || Platform.isEmulatedClient()) {
+        } else if (Platform.isClient() || Platform.isMinimal()) {
             AVAILABLE_COMP_LEVEL = COMP_LEVEL_SIMPLE;
             IS_AVAILABLE_COMPLEVEL = x -> x == COMP_LEVEL_SIMPLE;
         } else {

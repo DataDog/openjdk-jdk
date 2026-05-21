@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,7 +29,7 @@
 // PcDescs map a physical PC (given as offset from start of nmethod) to
 // the corresponding source scope and byte code index.
 
-class CompiledMethod;
+class nmethod;
 
 class PcDesc {
   friend class VMStructs;
@@ -40,12 +40,10 @@ class PcDesc {
 
   enum {
     PCDESC_reexecute                 = 1 << 0,
-    PCDESC_is_method_handle_invoke   = 1 << 1,
-    PCDESC_return_oop                = 1 << 2,
-    PCDESC_rethrow_exception         = 1 << 3,
-    PCDESC_has_ea_local_in_scope     = 1 << 4,
-    PCDESC_arg_escape                = 1 << 5,
-    PCDESC_is_optimized_linkToNative = 1 << 6
+    PCDESC_return_oop                = 1 << 1,
+    PCDESC_rethrow_exception         = 1 << 2,
+    PCDESC_has_ea_local_in_scope     = 1 << 3,
+    PCDESC_arg_escape                = 1 << 4
   };
 
   int _flags;
@@ -86,12 +84,6 @@ class PcDesc {
       _flags == pd->_flags;
   }
 
-  bool     is_method_handle_invoke()       const { return (_flags & PCDESC_is_method_handle_invoke) != 0;     }
-  void set_is_method_handle_invoke(bool z)       { set_flag(PCDESC_is_method_handle_invoke, z); }
-
-  bool     is_optimized_linkToNative()     const { return (_flags & PCDESC_is_optimized_linkToNative) != 0;     }
-  void set_is_optimized_linkToNative(bool z)     { set_flag(PCDESC_is_optimized_linkToNative, z); }
-
   bool     return_oop()                    const { return (_flags & PCDESC_return_oop) != 0;     }
   void set_return_oop(bool z)                    { set_flag(PCDESC_return_oop, z); }
 
@@ -106,11 +98,11 @@ class PcDesc {
   void set_arg_escape(bool z)                    { set_flag(PCDESC_arg_escape, z); }
 
   // Returns the real pc
-  address real_pc(const CompiledMethod* code) const;
+  address real_pc(const nmethod* code) const;
 
-  void print(CompiledMethod* code) { print_on(tty, code); }
-  void print_on(outputStream* st, CompiledMethod* code);
-  bool verify(CompiledMethod* code);
+  void print(nmethod* code) { print_on(tty, code); }
+  void print_on(outputStream* st, nmethod* code);
+  bool verify(nmethod* code);
 };
 
 #endif // SHARE_CODE_PCDESC_HPP

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -141,7 +141,7 @@ final class SSLEngineInputRecord extends InputRecord implements SSLRecord {
                         (packet.get(pos + 1) & 0xFF) + (isShort ? 2 : 3);
 
             } else {
-                // Gobblygook!
+                // Gobbledygook!
                 throw new SSLException(
                         "Unrecognized SSL message, plaintext connection?");
             }
@@ -172,7 +172,7 @@ final class SSLEngineInputRecord extends InputRecord implements SSLRecord {
             return null;
         }
 
-        if (SSLLogger.isOn && SSLLogger.isOn("packet")) {
+        if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.RECORD_PACKET)) {
             SSLLogger.fine("Raw read", packet);
         }
 
@@ -209,7 +209,7 @@ final class SSLEngineInputRecord extends InputRecord implements SSLRecord {
         byte minorVersion = packet.get();                  // pos: 2
         int contentLen = Record.getInt16(packet);          // pos: 3, 4
 
-        if (SSLLogger.isOn && SSLLogger.isOn("record")) {
+        if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.RECORD)) {
             SSLLogger.fine(
                     "READ: " +
                     ProtocolVersion.nameOf(majorVersion, minorVersion) +
@@ -242,8 +242,7 @@ final class SSLEngineInputRecord extends InputRecord implements SSLRecord {
         } catch (BadPaddingException bpe) {
             throw bpe;
         } catch (GeneralSecurityException gse) {
-            throw (SSLProtocolException)(new SSLProtocolException(
-                    "Unexpected exception")).initCause(gse);
+            throw new SSLProtocolException("Unexpected exception", gse);
         } finally {
             // consume a complete record
             packet.limit(srcLim);
@@ -264,6 +263,12 @@ final class SSLEngineInputRecord extends InputRecord implements SSLRecord {
         // parse handshake messages
         //
         if (contentType == ContentType.HANDSHAKE.id) {
+            if (contentLen == 0) {
+                // From RFC 8446: "Implementations MUST NOT send zero-length fragments
+                // of Handshake types, even if those fragments contain padding."
+                throw new SSLProtocolException("Handshake packets must not be zero-length");
+            }
+
             ByteBuffer handshakeFrag = fragment;
             if ((handshakeBuffer != null) &&
                     (handshakeBuffer.remaining() != 0)) {
@@ -353,12 +358,11 @@ final class SSLEngineInputRecord extends InputRecord implements SSLRecord {
     }
 
     private Plaintext[] handleUnknownRecord(ByteBuffer packet)
-            throws IOException, BadPaddingException {
+            throws IOException {
         //
         // The packet should be a complete record.
         //
         int srcPos = packet.position();
-        int srcLim = packet.limit();
 
         byte firstByte = packet.get(srcPos);
         byte thirdByte = packet.get(srcPos + 2);
@@ -384,7 +388,7 @@ final class SSLEngineInputRecord extends InputRecord implements SSLRecord {
                  * error message, one that's treated as fatal by
                  * clients (Otherwise we'll hang.)
                  */
-                if (SSLLogger.isOn && SSLLogger.isOn("record")) {
+                if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.RECORD)) {
                    SSLLogger.fine(
                             "Requested to negotiate unsupported SSLv2!");
                 }
@@ -406,7 +410,8 @@ final class SSLEngineInputRecord extends InputRecord implements SSLRecord {
 
             ByteBuffer converted = convertToClientHello(packet);
 
-            if (SSLLogger.isOn && SSLLogger.isOn("packet")) {
+            if (SSLLogger.isOn() &&
+                    SSLLogger.isOn(SSLLogger.Opt.RECORD_PACKET)) {
                 SSLLogger.fine(
                         "[Converted] ClientHello", converted);
             }

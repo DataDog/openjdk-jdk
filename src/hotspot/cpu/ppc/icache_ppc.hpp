@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2002, 2019, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2012, 2013 SAP SE. All rights reserved.
+ * Copyright (c) 2002, 2026, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,16 +35,15 @@ class ICache : public AbstractICache {
 
  public:
   enum {
-    // Actually, cache line size is 64, but keeping it as it is to be
-    // on the safe side on ALL PPC64 implementations.
-    log2_line_size = 5,
+    // Cache line size is 128 on all supported PPC64 implementations.
+    log2_line_size = 7,
     line_size      = 1 << log2_line_size
   };
 
   static void ppc64_flush_icache_bytes(address start, int bytes) {
     // Align start address to an icache line boundary and transform
     // nbytes to an icache line count.
-    const uint line_offset = mask_address_bits(start, line_size - 1);
+    const uint line_offset = (uintptr_t)start & (line_size - 1);
     ppc64_flush_icache(start - line_offset, (bytes + line_offset + line_size - 1) >> log2_line_size, 0);
   }
 };

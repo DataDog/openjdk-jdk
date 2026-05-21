@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,36 +22,38 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "jfr/recorder/service/jfrPostBox.hpp"
 #include "jfr/utilities/jfrTryLock.hpp"
-#include "runtime/atomic.hpp"
-#include "runtime/thread.inline.hpp"
+#include "runtime/atomicAccess.hpp"
+#include "runtime/handles.hpp"
+#include "runtime/interfaceSupport.inline.hpp"
+#include "runtime/javaThread.hpp"
 
 #define MSG_IS_SYNCHRONOUS ( (MSGBIT(MSG_ROTATE)) |          \
                              (MSGBIT(MSG_STOP))   |          \
                              (MSGBIT(MSG_START))  |          \
                              (MSGBIT(MSG_CLONE_IN_MEMORY)) | \
                              (MSGBIT(MSG_VM_ERROR))        | \
-                             (MSGBIT(MSG_FLUSHPOINT))        \
+                             (MSGBIT(MSG_FLUSHPOINT))      | \
+                             (MSGBIT(MSG_EMIT_LEAKP_REFCHAINS)) \
                            )
 
-static JfrPostBox* _instance = NULL;
+static JfrPostBox* _instance = nullptr;
 
 JfrPostBox& JfrPostBox::instance() {
   return *_instance;
 }
 
 JfrPostBox* JfrPostBox::create() {
-  assert(_instance == NULL, "invariant");
+  assert(_instance == nullptr, "invariant");
   _instance = new JfrPostBox();
   return _instance;
 }
 
 void JfrPostBox::destroy() {
-  assert(_instance != NULL, "invariant");
+  assert(_instance != nullptr, "invariant");
   delete _instance;
-  _instance = NULL;
+  _instance = nullptr;
 }
 
 JfrPostBox::JfrPostBox() :
@@ -84,10 +86,10 @@ void JfrPostBox::post(JFR_Msg msg) {
 
 void JfrPostBox::deposit(int new_messages) {
   while (true) {
-    const int current_msgs = Atomic::load(&_messages);
+    const int current_msgs = AtomicAccess::load(&_messages);
     // OR the new message
     const int exchange_value = current_msgs | new_messages;
-    const int result = Atomic::cmpxchg(&_messages, current_msgs, exchange_value);
+    const int result = AtomicAccess::cmpxchg(&_messages, current_msgs, exchange_value);
     if (result == current_msgs) {
       return;
     }
@@ -101,7 +103,7 @@ void JfrPostBox::deposit(int new_messages) {
 void JfrPostBox::asynchronous_post(int msg) {
   assert(!is_synchronous(msg), "invariant");
   deposit(msg);
-  JfrMonitorTryLock try_msg_lock(JfrMsg_lock);
+  JfrMutexTryLock try_msg_lock(JfrMsg_lock);
   if (try_msg_lock.acquired()) {
     JfrMsg_lock->notify_all();
   }
@@ -110,11 +112,12 @@ void JfrPostBox::asynchronous_post(int msg) {
 void JfrPostBox::synchronous_post(int msg) {
   assert(is_synchronous(msg), "invariant");
   assert(!JfrMsg_lock->owned_by_self(), "should not hold JfrMsg_lock here!");
-  MonitorLocker msg_lock(JfrMsg_lock);
+  ThreadBlockInVM transition(JavaThread::current());
+  MonitorLocker msg_lock(JfrMsg_lock, Mutex::_no_safepoint_check_flag);
   deposit(msg);
   // serial_id is used to check when what we send in has been processed.
   // _msg_read_serial is read under JfrMsg_lock protection.
-  const uintptr_t serial_id = Atomic::load(&_msg_read_serial) + 1;
+  const uintptr_t serial_id = AtomicAccess::load(&_msg_read_serial) + 1;
   msg_lock.notify_all();
   while (!is_message_processed(serial_id)) {
     msg_lock.wait();
@@ -129,17 +132,17 @@ void JfrPostBox::synchronous_post(int msg) {
  */
 bool JfrPostBox::is_message_processed(uintptr_t serial_id) const {
   assert(JfrMsg_lock->owned_by_self(), "_msg_handled_serial must be read under JfrMsg_lock protection");
-  return serial_id <= Atomic::load(&_msg_handled_serial);
+  return serial_id <= AtomicAccess::load(&_msg_handled_serial);
 }
 
 bool JfrPostBox::is_empty() const {
   assert(JfrMsg_lock->owned_by_self(), "not holding JfrMsg_lock!");
-  return Atomic::load(&_messages) == 0;
+  return AtomicAccess::load(&_messages) == 0;
 }
 
 int JfrPostBox::collect() {
   // get pending and reset to 0
-  const int messages = Atomic::xchg(&_messages, 0);
+  const int messages = AtomicAccess::xchg(&_messages, 0);
   if (check_waiters(messages)) {
     _has_waiters = true;
     assert(JfrMsg_lock->owned_by_self(), "incrementing _msg_read_serial is protected by JfrMsg_lock");
@@ -163,11 +166,11 @@ void JfrPostBox::notify_waiters() {
   assert(JfrMsg_lock->owned_by_self(), "incrementing _msg_handled_serial is protected by JfrMsg_lock.");
   // Update made visible on release of JfrMsg_lock via fence instruction in Monitor::IUnlock.
   ++_msg_handled_serial;
-  JfrMsg_lock->notify();
+  JfrMsg_lock->notify_all();
 }
 
 // safeguard to ensure no threads are left waiting
 void JfrPostBox::notify_collection_stop() {
-  MutexLocker msg_lock(JfrMsg_lock);
+  assert(JfrMsg_lock->owned_by_self(), "invariant");
   JfrMsg_lock->notify_all();
 }

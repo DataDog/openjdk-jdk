@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -111,7 +111,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
     @Deprecated
     protected KeyStroke rightKey;
 
-// Transient variables (recalculated each time TabbedPane is layed out)
+// Transient variables (recalculated each time TabbedPane is laid out)
 
     protected int[] tabRuns = new int[10];
     protected int runCount = 0;
@@ -211,6 +211,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
 
 // UI Installation/De-installation
 
+    @Override
     public void installUI(final JComponent c) {
         this.tabPane = (JTabbedPane)c;
 
@@ -224,6 +225,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
         installKeyboardActions();
     }
 
+    @Override
     public void uninstallUI(final JComponent c) {
         uninstallKeyboardActions();
         uninstallListeners();
@@ -404,7 +406,11 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
         }
         tabPane.addContainerListener(getHandler());
         if (tabPane.getTabCount() > 0) {
-            htmlViews = createHTMLVector();
+            Boolean htmlDisabled = (Boolean)
+                                   tabPane.getClientProperty("html.disable");
+            if (!(Boolean.TRUE.equals(htmlDisabled))) {
+                htmlViews = createHTMLVector();
+            }
         }
     }
 
@@ -572,11 +578,13 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
         return rolloverTabIndex;
     }
 
+    @Override
     public Dimension getMinimumSize(final JComponent c) {
         // Default to LayoutManager's minimumLayoutSize
         return null;
     }
 
+    @Override
     public Dimension getMaximumSize(final JComponent c) {
         // Default to LayoutManager's maximumLayoutSize
         return null;
@@ -590,6 +598,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
      * @see javax.swing.JComponent#getBaseline(int, int)
      * @since 1.6
      */
+    @Override
     public int getBaseline(final JComponent c, final int width, final int height) {
         super.getBaseline(c, width, height);
         int baseline = calculateBaselineIfNecessary();
@@ -621,6 +630,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
      * @see javax.swing.JComponent#getBaseline(int, int)
      * @since 1.6
      */
+    @Override
     public Component.BaselineResizeBehavior getBaselineResizeBehavior(final JComponent c) {
         super.getBaselineResizeBehavior(c);
         switch (tabPane.getTabPlacement()) {
@@ -638,7 +648,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
      * Returns the baseline for the specified tab.
      *
      * @param tab index of tab to get baseline for
-     * @exception IndexOutOfBoundsException if index is out of range
+     * @throws IndexOutOfBoundsException if index is out of range
      *            (index < 0 || index >= tab count)
      * @return baseline or a value &lt; 0 indicating there is no reasonable
      *                  baseline
@@ -742,6 +752,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
 
 // UI Rendering
 
+    @Override
     public void paint(final Graphics g, final JComponent c) {
         final int selectedIndex = tabPane.getSelectedIndex();
         final int tabPlacement = tabPane.getTabPlacement();
@@ -1051,7 +1062,6 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
             case TOP:
             default:
                 nudge = isSelected ? -1 : 1;
-                ;
         }
         return nudge;
     }
@@ -1350,12 +1360,14 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
      * Returns the bounds of the specified tab index.  The bounds are
      * with respect to the JTabbedPane's coordinate space.
      */
+    @Override
     public Rectangle getTabBounds(final JTabbedPane pane, final int i) {
         ensureCurrentLayout();
         final Rectangle tabRect = new Rectangle();
         return getTabBounds(i, tabRect);
     }
 
+    @Override
     public int getTabRunCount(final JTabbedPane pane) {
         ensureCurrentLayout();
         return runCount;
@@ -1365,6 +1377,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
      * Returns the tab index which intersects the specified point
      * in the JTabbedPane's coordinate space.
      */
+    @Override
     public int tabForCoordinate(final JTabbedPane pane, final int x, final int y) {
         return tabForCoordinate(pane, x, y, true);
     }
@@ -2011,7 +2024,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
         return SwingUtilities2.tabbedPaneChangeFocusTo(getVisibleComponent());
     }
 
-    private static class Actions extends UIAction {
+    private static final class Actions extends UIAction {
         static final String NEXT = "navigateNext";
         static final String PREVIOUS = "navigatePrevious";
         static final String RIGHT = "navigateRight";
@@ -2038,6 +2051,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
             return null;
         }
 
+        @Override
         public void actionPerformed(final ActionEvent e) {
             final String key = getName();
             final JTabbedPane pane = (JTabbedPane)e.getSource();
@@ -2118,14 +2132,18 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
         }
         // END MACOSX
 
+        @Override
         public void addLayoutComponent(final String name, final Component comp) {}
 
+        @Override
         public void removeLayoutComponent(final Component comp) {}
 
+        @Override
         public Dimension preferredLayoutSize(final Container parent) {
             return calculateSize(false);
         }
 
+        @Override
         public Dimension minimumLayoutSize(final Container parent) {
             return calculateSize(true);
         }
@@ -2203,6 +2221,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
             return total;
         }
 
+        @Override
         @SuppressWarnings("deprecation")
         public void layoutContainer(final Container parent) {
             /* Some of the code in this method deals with changing the
@@ -2243,7 +2262,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
 
             // In order to allow programs to use a single component
             // as the display for multiple tabs, we will not change
-            // the visible compnent if the currently selected tab
+            // the visible component if the currently selected tab
             // has a null component.  This is a bit dicey, as we don't
             // explicitly state we support this in the spec, but since
             // programs are now depending on this, we're making it work.
@@ -2688,16 +2707,19 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
         }
     }
 
-    class TabbedPaneScrollLayout extends TabbedPaneLayout {
+    final class TabbedPaneScrollLayout extends TabbedPaneLayout {
 
+        @Override
         protected int preferredTabAreaHeight(final int tabPlacement, final int width) {
             return calculateMaxTabHeight(tabPlacement);
         }
 
+        @Override
         protected int preferredTabAreaWidth(final int tabPlacement, final int height) {
             return calculateMaxTabWidth(tabPlacement);
         }
 
+        @Override
         @SuppressWarnings("deprecation")
         public void layoutContainer(final Container parent) {
             /* Some of the code in this method deals with changing the
@@ -2742,7 +2764,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
 
             // In order to allow programs to use a single component
             // as the display for multiple tabs, we will not change
-            // the visible compnent if the currently selected tab
+            // the visible component if the currently selected tab
             // has a null component.  This is a bit dicey, as we don't
             // explicitly state we support this in the spec, but since
             // programs are now depending on this, we're making it work.
@@ -2932,6 +2954,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
             }
         }
 
+        @Override
         protected void calculateTabRects(final int tabPlacement, final int tabCount) {
             final FontMetrics metrics = getFontMetrics();
             final Dimension size = tabPane.getSize();
@@ -3030,7 +3053,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
         }
     }
 
-    private class ScrollableTabSupport implements ActionListener, ChangeListener {
+    private final class ScrollableTabSupport implements ActionListener, ChangeListener {
         public ScrollableTabViewport viewport;
         public ScrollableTabPanel tabPanel;
         public JButton scrollForwardButton;
@@ -3128,6 +3151,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
             viewport.setViewPosition(tabViewPosition);
         }
 
+        @Override
         public void stateChanged(final ChangeEvent e) {
             updateView();
         }
@@ -3186,6 +3210,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
         /**
          * ActionListener for the scroll buttons.
          */
+        @Override
         public void actionPerformed(final ActionEvent e) {
             final ActionMap map = tabPane.getActionMap();
 
@@ -3205,14 +3230,18 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
             }
         }
 
+        @Override
         public String toString() {
-            return new String("viewport.viewSize=" + viewport.getViewSize() + "\n" + "viewport.viewRectangle=" + viewport.getViewRect() + "\n" + "leadingTabIndex=" + leadingTabIndex + "\n" + "tabViewPosition=" + tabViewPosition);
+            return "viewport.viewSize=" + viewport.getViewSize() + "\n"
+                    + "viewport.viewRectangle=" + viewport.getViewRect() + "\n"
+                    + "leadingTabIndex=" + leadingTabIndex + "\n"
+                    + "tabViewPosition=" + tabViewPosition;
         }
 
     }
 
     @SuppressWarnings("serial") // Superclass is not serializable across versions
-    private class ScrollableTabViewport extends JViewport implements UIResource {
+    private final class ScrollableTabViewport extends JViewport implements UIResource {
         public ScrollableTabViewport() {
             super();
             setName("TabbedPane.scrollableViewport");
@@ -3227,7 +3256,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
     }
 
     @SuppressWarnings("serial") // Superclass is not serializable across versions
-    private class ScrollableTabPanel extends JPanel implements UIResource {
+    private final class ScrollableTabPanel extends JPanel implements UIResource {
         public ScrollableTabPanel() {
             super(null);
             setOpaque(tabPane.isOpaque());
@@ -3238,6 +3267,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
             setBackground(bgColor);
         }
 
+        @Override
         public void paintComponent(final Graphics g) {
             super.paintComponent(g);
             AquaTabbedPaneCopyFromBasicUI.this.paintTabArea(g, tabPane.getTabPlacement(), tabPane.getSelectedIndex());
@@ -3249,6 +3279,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
             }
         }
 
+        @Override
         public void doLayout() {
             if (getComponentCount() > 0) {
                 final Component child = getComponent(0);
@@ -3258,7 +3289,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
     }
 
     @SuppressWarnings("serial") // Superclass is not serializable across versions
-    private class ScrollableTabButton extends javax.swing.plaf.basic.BasicArrowButton implements UIResource, SwingConstants {
+    private static final class ScrollableTabButton extends javax.swing.plaf.basic.BasicArrowButton implements UIResource, SwingConstants {
         public ScrollableTabButton(final int direction) {
             super(direction, UIManager.getColor("TabbedPane.selected"), UIManager.getColor("TabbedPane.shadow"), UIManager.getColor("TabbedPane.darkShadow"), UIManager.getColor("TabbedPane.highlight"));
         }
@@ -3266,10 +3297,11 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
 
 // Controller: event listeners
 
-    private class Handler implements ChangeListener, ContainerListener, FocusListener, MouseListener, MouseMotionListener, PropertyChangeListener {
+    private final class Handler implements ChangeListener, ContainerListener, FocusListener, MouseListener, MouseMotionListener, PropertyChangeListener {
         //
         // PropertyChangeListener
         //
+        @Override
         public void propertyChange(final PropertyChangeEvent e) {
             final JTabbedPane pane = (JTabbedPane)e.getSource();
             final String name = e.getPropertyName();
@@ -3328,6 +3360,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
         //
         // ChangeListener
         //
+        @Override
         public void stateChanged(final ChangeEvent e) {
             final JTabbedPane tabPane = (JTabbedPane)e.getSource();
             tabPane.revalidate();
@@ -3346,18 +3379,23 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
         //
         // MouseListener
         //
+        @Override
         public void mouseClicked(final MouseEvent e) {}
 
+        @Override
         public void mouseReleased(final MouseEvent e) {}
 
+        @Override
         public void mouseEntered(final MouseEvent e) {
             setRolloverTab(e.getX(), e.getY());
         }
 
+        @Override
         public void mouseExited(final MouseEvent e) {
             setRolloverTab(-1);
         }
 
+        @Override
         public void mousePressed(final MouseEvent e) {
             if (!tabPane.isEnabled()) {
                 return;
@@ -3381,8 +3419,10 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
         //
         // MouseMotionListener
         //
+        @Override
         public void mouseDragged(final MouseEvent e) {}
 
+        @Override
         public void mouseMoved(final MouseEvent e) {
             setRolloverTab(e.getX(), e.getY());
         }
@@ -3390,10 +3430,12 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
         //
         // FocusListener
         //
+        @Override
         public void focusGained(final FocusEvent e) {
             setFocusIndex(tabPane.getSelectedIndex(), true);
         }
 
+        @Override
         public void focusLost(final FocusEvent e) {
             repaintTab(focusIndex);
         }
@@ -3431,6 +3473,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
            changes to tab text, this code should be removed and
            replaced by something which uses that.  */
 
+        @Override
         public void componentAdded(final ContainerEvent e) {
             final JTabbedPane tp = (JTabbedPane)e.getContainer();
             final Component child = e.getChild();
@@ -3443,8 +3486,10 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
 
         private void updateHtmlViews(int index, boolean inserted) {
             final String title = tabPane.getTitleAt(index);
+            Boolean htmlDisabled = (Boolean)
+                                   tabPane.getClientProperty("html.disable");
             final boolean isHTML = BasicHTML.isHTMLString(title);
-            if (isHTML) {
+            if (isHTML && !(Boolean.TRUE.equals(htmlDisabled))) {
                 if (htmlViews == null) { // Initialize vector
                     htmlViews = createHTMLVector();
                 } else { // Vector already exists
@@ -3467,6 +3512,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
             }
         }
 
+        @Override
         public void componentRemoved(final ContainerEvent e) {
             final JTabbedPane tp = (JTabbedPane)e.getContainer();
             final Component child = e.getChild();
@@ -3503,6 +3549,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
         // its functionality has been moved into Handler. If you need to add
         // new functionality add it to the Handler, but make sure this
         // class calls into the Handler.
+        @Override
         public void propertyChange(final PropertyChangeEvent e) {
             getHandler().propertyChange(e);
         }
@@ -3512,11 +3559,12 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
      * This class should be treated as a &quot;protected&quot; inner class.
      * Instantiate it only within subclasses of BasicTabbedPaneUI.
      */
-    public class TabSelectionHandler implements ChangeListener {
+    public final class TabSelectionHandler implements ChangeListener {
         // NOTE: This class exists only for backward compatibility. All
         // its functionality has been moved into Handler. If you need to add
         // new functionality add it to the Handler, but make sure this
         // class calls into the Handler.
+        @Override
         public void stateChanged(final ChangeEvent e) {
             getHandler().stateChanged(e);
         }
@@ -3526,11 +3574,12 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
      * This class should be treated as a &quot;protected&quot; inner class.
      * Instantiate it only within subclasses of BasicTabbedPaneUI.
      */
-    public class MouseHandler extends MouseAdapter {
+    public final class MouseHandler extends MouseAdapter {
         // NOTE: This class exists only for backward compatibility. All
         // its functionality has been moved into Handler. If you need to add
         // new functionality add it to the Handler, but make sure this
         // class calls into the Handler.
+        @Override
         public void mousePressed(final MouseEvent e) {
             getHandler().mousePressed(e);
         }
@@ -3540,15 +3589,17 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
      * This class should be treated as a &quot;protected&quot; inner class.
      * Instantiate it only within subclasses of BasicTabbedPaneUI.
      */
-    public class FocusHandler extends FocusAdapter {
+    public final class FocusHandler extends FocusAdapter {
         // NOTE: This class exists only for backward compatibility. All
         // its functionality has been moved into Handler. If you need to add
         // new functionality add it to the Handler, but make sure this
         // class calls into the Handler.
+        @Override
         public void focusGained(final FocusEvent e) {
             getHandler().focusGained(e);
         }
 
+        @Override
         public void focusLost(final FocusEvent e) {
             getHandler().focusLost(e);
         }
@@ -3571,7 +3622,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
     }
 
     @SuppressWarnings("serial") // Superclass is not serializable across versions
-    private class TabContainer extends JPanel implements UIResource {
+    private final class TabContainer extends JPanel implements UIResource {
         private boolean notifyTabbedPane = true;
 
         public TabContainer() {
@@ -3579,6 +3630,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
             setOpaque(false);
         }
 
+        @Override
         public void remove(final Component comp) {
             final int index = tabPane.indexOfTabComponent(comp);
             super.remove(comp);
@@ -3598,10 +3650,12 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
             }
         }
 
+        @Override
         public boolean isOptimizedDrawingEnabled() {
             return tabScroller != null && !tabScroller.croppedEdge.isParamsSet();
         }
 
+        @Override
         public void doLayout() {
             // We layout tabComponents in JTabbedPane's layout manager
             // and use this method as a hook for repainting tabs
@@ -3616,7 +3670,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
     }
 
     @SuppressWarnings("serial") // Superclass is not serializable across versions
-    private class CroppedEdge extends JPanel implements UIResource {
+    private final class CroppedEdge extends JPanel implements UIResource {
         private Shape shape;
         private int tabIndex;
         private int cropline;
@@ -3673,6 +3727,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
             return UIManager.getColor("control");
         }
 
+        @Override
         protected void paintComponent(final Graphics g) {
             super.paintComponent(g);
             if (isParamsSet() && g instanceof Graphics2D) {
@@ -3696,7 +3751,7 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
      * @author Scott Violet
      */
     @SuppressWarnings("serial") // Superclass is not serializable across versions
-    static class LazyActionMap extends ActionMapUIResource {
+    static final class LazyActionMap extends ActionMapUIResource {
         /**
          * Object to invoke {@code loadActionMap} on. This may be
          * a Class object.
@@ -3754,41 +3809,49 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
             put(action.getValue(Action.NAME), action);
         }
 
+        @Override
         public void put(final Object key, final Action action) {
             loadIfNecessary();
             super.put(key, action);
         }
 
+        @Override
         public Action get(final Object key) {
             loadIfNecessary();
             return super.get(key);
         }
 
+        @Override
         public void remove(final Object key) {
             loadIfNecessary();
             super.remove(key);
         }
 
+        @Override
         public void clear() {
             loadIfNecessary();
             super.clear();
         }
 
+        @Override
         public Object[] keys() {
             loadIfNecessary();
             return super.keys();
         }
 
+        @Override
         public int size() {
             loadIfNecessary();
             return super.size();
         }
 
+        @Override
         public Object[] allKeys() {
             loadIfNecessary();
             return super.allKeys();
         }
 
+        @Override
         public void setParent(final ActionMap map) {
             loadIfNecessary();
             super.setParent(map);
@@ -3805,12 +3868,8 @@ public class AquaTabbedPaneCopyFromBasicUI extends TabbedPaneUI implements Swing
                     method.invoke(klass, new Object[] { this });
                 } catch (final NoSuchMethodException nsme) {
                     assert false : "LazyActionMap unable to load actions " + klass;
-                } catch (final IllegalAccessException iae) {
-                    assert false : "LazyActionMap unable to load actions " + iae;
-                } catch (final InvocationTargetException ite) {
-                    assert false : "LazyActionMap unable to load actions " + ite;
-                } catch (final IllegalArgumentException iae) {
-                    assert false : "LazyActionMap unable to load actions " + iae;
+                } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
+                    assert false : "LazyActionMap unable to load actions " + e;
                 }
             }
         }

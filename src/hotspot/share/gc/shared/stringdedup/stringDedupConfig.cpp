@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,7 @@
  *
  */
 
-#include "precompiled.hpp"
+#include "cds/cdsConfig.hpp"
 #include "classfile/altHashing.hpp"
 #include "gc/shared/stringdedup/stringDedupConfig.hpp"
 #include "logging/log.hpp"
@@ -161,6 +161,6 @@ void StringDedup::Config::initialize() {
   _load_factor_for_shrink = StringDeduplicationShrinkTableLoad;
   _load_factor_target = StringDeduplicationTargetTableLoad;
   _minimum_dead_for_cleanup = StringDeduplicationCleanupDeadMinimum;
-  _dead_factor_for_cleanup = percent_of(StringDeduplicationCleanupDeadPercent, 100);
+  _dead_factor_for_cleanup = StringDeduplicationCleanupDeadPercent / 100.0;
   _hash_seed = initial_hash_seed();
 }

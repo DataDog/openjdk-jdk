@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,35 +26,20 @@
  * @bug 8201186
  * @summary Tests an asynchronous BodySubscriber that completes
  *          immediately with a Publisher<List<ByteBuffer>>
- * @library /test/lib http2/server
- * @build jdk.test.lib.net.SimpleSSLContext
- * @modules java.base/sun.net.www.http
- *          java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- * @run testng/othervm ResponsePublisher
+ * @library /test/lib /test/jdk/java/net/httpclient/lib
+ * @build jdk.test.lib.net.SimpleSSLContext jdk.httpclient.test.lib.common.HttpServerAdapters
+ * @run junit/othervm/timeout=480 ${test.main.class}
  */
 
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpHandler;
-import com.sun.net.httpserver.HttpServer;
-import com.sun.net.httpserver.HttpsConfigurator;
-import com.sun.net.httpserver.HttpsServer;
+import jdk.internal.net.http.common.OperationTrackers;
 import jdk.test.lib.net.SimpleSSLContext;
-import org.testng.annotations.AfterTest;
-import org.testng.annotations.BeforeTest;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 
 import javax.net.ssl.SSLContext;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandler;
@@ -73,32 +58,56 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.Flow.Publisher;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import jdk.httpclient.test.lib.common.HttpServerAdapters;
 
 import static java.lang.System.out;
+import static java.net.http.HttpClient.Version.HTTP_1_1;
+import static java.net.http.HttpClient.Version.HTTP_2;
+import static java.net.http.HttpClient.Version.HTTP_3;
+import static java.net.http.HttpOption.Http3DiscoveryMode.HTTP_3_URI_ONLY;
+import static java.net.http.HttpOption.H3_DISCOVERY;
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertNotNull;
-import static org.testng.Assert.assertTrue;
+
+import org.junit.jupiter.api.AfterAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 public class ResponsePublisher implements HttpServerAdapters {
 
-    SSLContext sslContext;
-    HttpTestServer httpTestServer;    // HTTP/1.1    [ 4 servers ]
-    HttpTestServer httpsTestServer;   // HTTPS/1.1
-    HttpTestServer http2TestServer;   // HTTP/2 ( h2c )
-    HttpTestServer https2TestServer;  // HTTP/2 ( h2  )
-    String httpURI_fixed;
-    String httpURI_chunk;
-    String httpsURI_fixed;
-    String httpsURI_chunk;
-    String http2URI_fixed;
-    String http2URI_chunk;
-    String https2URI_fixed;
-    String https2URI_chunk;
+    private static final SSLContext sslContext = SimpleSSLContext.findSSLContext();
+    private static HttpTestServer httpTestServer;    // HTTP/1.1    [ 5 servers ]
+    private static HttpTestServer httpsTestServer;   // HTTPS/1.1
+    private static HttpTestServer http2TestServer;   // HTTP/2 ( h2c )
+    private static HttpTestServer https2TestServer;  // HTTP/2 ( h2  )
+    private static HttpTestServer http3TestServer;   // HTTP/3 ( h3  )
+    private static String httpURI_fixed;
+    private static String httpURI_chunk;
+    private static String httpsURI_fixed;
+    private static String httpsURI_chunk;
+    private static String http2URI_fixed;
+    private static String http2URI_chunk;
+    private static String https2URI_fixed;
+    private static String https2URI_chunk;
+    private static String http3URI_fixed;
+    private static String http3URI_chunk;
 
     static final int ITERATION_COUNT = 3;
     // a shared executor helps reduce the amount of threads created by the test
     static final Executor executor = Executors.newCachedThreadPool();
+
+    static final long start = System.nanoTime();
+
+    public static String now() {
+        long now = System.nanoTime() - start;
+        long secs = now / 1000_000_000;
+        long mill = (now % 1000_000_000) / 1000_000;
+        long nan = now % 1000_000;
+        return String.format("[%d s, %d ms, %d ns] ", secs, mill, nan);
+    }
 
     interface BHS extends Supplier<BodyHandler<Publisher<List<ByteBuffer>>>> {
         static BHS of(BHS impl, String name) {
@@ -129,9 +138,18 @@ public class ResponsePublisher implements HttpServerAdapters {
     static final Supplier<BodyHandler<Publisher<List<ByteBuffer>>>> OF_PUBLISHER_TEST =
             BHS.of(PublishingBodyHandler::new, "PublishingBodyHandler::new");
 
-    @DataProvider(name = "variants")
-    public Object[][] variants() {
+    public static Object[][] variants() {
         return new Object[][]{
+                { http3URI_fixed,   false, OF_PUBLISHER_API },
+                { http3URI_chunk,   false, OF_PUBLISHER_API },
+                { http3URI_fixed,   true,  OF_PUBLISHER_API },
+                { http3URI_chunk,   true,  OF_PUBLISHER_API },
+
+                { http3URI_fixed,   false, OF_PUBLISHER_TEST },
+                { http3URI_chunk,   false, OF_PUBLISHER_TEST },
+                { http3URI_fixed,   true,  OF_PUBLISHER_TEST },
+                { http3URI_chunk,   true,  OF_PUBLISHER_TEST },
+
                 { httpURI_fixed,    false, OF_PUBLISHER_API },
                 { httpURI_chunk,    false, OF_PUBLISHER_API },
                 { httpsURI_fixed,   false, OF_PUBLISHER_API },
@@ -170,22 +188,35 @@ public class ResponsePublisher implements HttpServerAdapters {
         };
     }
 
-    final ReferenceTracker TRACKER = ReferenceTracker.INSTANCE;
-    HttpClient newHttpClient() {
-        return TRACKER.track(HttpClient.newBuilder()
+    private static final ReferenceTracker TRACKER = ReferenceTracker.INSTANCE;
+    HttpClient newHttpClient(String uri) {
+        var builder = uri.contains("/http3/")
+                ? newClientBuilderForH3()
+                : HttpClient.newBuilder();
+        return TRACKER.track(builder
                          .executor(executor)
                          .sslContext(sslContext)
                          .build());
     }
 
-    @Test(dataProvider = "variants")
-    public void testExceptions(String uri, boolean sameClient, BHS handlers) throws Exception {
+    private HttpRequest.Builder newRequestBuilder(URI uri) {
+        var builder = HttpRequest.newBuilder(uri);
+        if (uri.getRawPath().contains("/http3/")) {
+            builder = builder.version(HTTP_3)
+                    .setOption(H3_DISCOVERY, HTTP_3_URI_ONLY);
+        }
+        return builder;
+    }
+
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testExceptions(String uri, boolean sameClient, BHS handlers) throws Exception {
         HttpClient client = null;
         for (int i=0; i< ITERATION_COUNT; i++) {
             if (!sameClient || client == null)
-                client = newHttpClient();
+                client = newHttpClient(uri);
 
-            HttpRequest req = HttpRequest.newBuilder(URI.create(uri))
+            HttpRequest req = newRequestBuilder(URI.create(uri))
                     .build();
             BodyHandler<Publisher<List<ByteBuffer>>> handler = handlers.get();
             HttpResponse<Publisher<List<ByteBuffer>>> response = client.send(req, handler);
@@ -215,18 +246,25 @@ public class ResponsePublisher implements HttpServerAdapters {
             }
             // Get the final result and compare it with the expected body
             String body = ofString.getBody().toCompletableFuture().get();
-            assertEquals(body, "");
+            assertEquals("", body);
+            // ensure client closes before next iteration
+            if (!sameClient) {
+                var tracker = TRACKER.getTracker(client);
+                client = null;
+                clientCleanup(tracker);
+            }
         }
     }
 
-    @Test(dataProvider = "variants")
-    public void testNoBody(String uri, boolean sameClient, BHS handlers) throws Exception {
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testNoBody(String uri, boolean sameClient, BHS handlers) throws Exception {
         HttpClient client = null;
         for (int i=0; i< ITERATION_COUNT; i++) {
             if (!sameClient || client == null)
-                client = newHttpClient();
+                client = newHttpClient(uri);
 
-            HttpRequest req = HttpRequest.newBuilder(URI.create(uri))
+            HttpRequest req = newRequestBuilder(URI.create(uri))
                     .build();
             BodyHandler<Publisher<List<ByteBuffer>>> handler = handlers.get();
             HttpResponse<Publisher<List<ByteBuffer>>> response = client.send(req, handler);
@@ -238,18 +276,25 @@ public class ResponsePublisher implements HttpServerAdapters {
             response.body().subscribe(ofString);
             // Get the final result and compare it with the expected body
             String body = ofString.getBody().toCompletableFuture().get();
-            assertEquals(body, "");
+            assertEquals("", body);
+            // ensure client closes before next iteration
+            if (!sameClient) {
+                var tracker = TRACKER.getTracker(client);
+                client = null;
+                clientCleanup(tracker);
+            }
         }
     }
 
-    @Test(dataProvider = "variants")
-    public void testNoBodyAsync(String uri, boolean sameClient, BHS handlers) throws Exception {
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testNoBodyAsync(String uri, boolean sameClient, BHS handlers) throws Exception {
         HttpClient client = null;
         for (int i=0; i< ITERATION_COUNT; i++) {
             if (!sameClient || client == null)
-                client = newHttpClient();
+                client = newHttpClient(uri);
 
-            HttpRequest req = HttpRequest.newBuilder(URI.create(uri))
+            HttpRequest req = newRequestBuilder(URI.create(uri))
                     .build();
             BodyHandler<Publisher<List<ByteBuffer>>> handler = handlers.get();
             // We can reuse our BodySubscribers implementations to subscribe to the
@@ -264,18 +309,25 @@ public class ResponsePublisher implements HttpServerAdapters {
                                 return ofString.getBody();
                             });
             // Get the final result and compare it with the expected body
-            assertEquals(result.get(), "");
+            assertEquals("", result.get());
+            // ensure client closes before next iteration
+            if (!sameClient) {
+                var tracker = TRACKER.getTracker(client);
+                client = null;
+                clientCleanup(tracker);
+            }
         }
     }
 
-    @Test(dataProvider = "variants")
-    public void testAsString(String uri, boolean sameClient, BHS handlers) throws Exception {
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testAsString(String uri, boolean sameClient, BHS handlers) throws Exception {
         HttpClient client = null;
         for (int i=0; i< ITERATION_COUNT; i++) {
             if (!sameClient || client == null)
-                client = newHttpClient();
+                client = newHttpClient(uri);
 
-            HttpRequest req = HttpRequest.newBuilder(URI.create(uri+"/withBody"))
+            HttpRequest req = newRequestBuilder(URI.create(uri+"/withBody"))
                     .build();
             BodyHandler<Publisher<List<ByteBuffer>>> handler = handlers.get();
             HttpResponse<Publisher<List<ByteBuffer>>> response = client.send(req, handler);
@@ -287,18 +339,25 @@ public class ResponsePublisher implements HttpServerAdapters {
             response.body().subscribe(ofString);
             // Get the final result and compare it with the expected body
             String body = ofString.getBody().toCompletableFuture().get();
-            assertEquals(body, WITH_BODY);
+            assertEquals(WITH_BODY, body);
+            // ensure client closes before next iteration
+            if (!sameClient) {
+                var tracker = TRACKER.getTracker(client);
+                client = null;
+                clientCleanup(tracker);
+            }
         }
     }
 
-    @Test(dataProvider = "variants")
-    public void testAsStringAsync(String uri, boolean sameClient, BHS handlers) throws Exception {
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testAsStringAsync(String uri, boolean sameClient, BHS handlers) throws Exception {
         HttpClient client = null;
         for (int i=0; i< ITERATION_COUNT; i++) {
             if (!sameClient || client == null)
-                client = newHttpClient();
+                client = newHttpClient(uri);
 
-            HttpRequest req = HttpRequest.newBuilder(URI.create(uri+"/withBody"))
+            HttpRequest req = newRequestBuilder(URI.create(uri+"/withBody"))
                     .build();
             BodyHandler<Publisher<List<ByteBuffer>>> handler = handlers.get();
             // We can reuse our BodySubscribers implementations to subscribe to the
@@ -313,7 +372,13 @@ public class ResponsePublisher implements HttpServerAdapters {
                     });
             // Get the final result and compare it with the expected body
             String body = result.get();
-            assertEquals(body, WITH_BODY);
+            assertEquals(WITH_BODY, body);
+            // ensure client closes before next iteration
+            if (!sameClient) {
+                var tracker = TRACKER.getTracker(client);
+                client = null;
+                clientCleanup(tracker);
+            }
         }
     }
 
@@ -321,7 +386,7 @@ public class ResponsePublisher implements HttpServerAdapters {
     static class PublishingBodyHandler implements BodyHandler<Publisher<List<ByteBuffer>>> {
         @Override
         public BodySubscriber<Publisher<List<ByteBuffer>>> apply(HttpResponse.ResponseInfo rinfo) {
-            assertEquals(rinfo.statusCode(), 200);
+            assertEquals(200, rinfo.statusCode());
             return new PublishingBodySubscriber();
         }
     }
@@ -330,7 +395,7 @@ public class ResponsePublisher implements HttpServerAdapters {
     static class PublishingBodySubscriber implements BodySubscriber<Publisher<List<ByteBuffer>>> {
         private final CompletableFuture<Flow.Subscription> subscriptionCF = new CompletableFuture<>();
         private final CompletableFuture<Flow.Subscriber<? super List<ByteBuffer>>> subscribedCF = new CompletableFuture<>();
-        private AtomicReference<Flow.Subscriber<? super List<ByteBuffer>>> subscriberRef = new AtomicReference<>();
+        private final AtomicReference<Flow.Subscriber<? super List<ByteBuffer>>> subscriberRef = new AtomicReference<>();
         private final CompletionStage<Publisher<List<ByteBuffer>>> body =
                 subscriptionCF.thenCompose((s) -> CompletableFuture.completedStage(this::subscribe));
                 //CompletableFuture.completedStage(this::subscribe);
@@ -387,30 +452,18 @@ public class ResponsePublisher implements HttpServerAdapters {
         }
     }
 
-    static String serverAuthority(HttpServer server) {
-        return InetAddress.getLoopbackAddress().getHostName() + ":"
-                + server.getAddress().getPort();
-    }
-
-    @BeforeTest
-    public void setup() throws Exception {
-        sslContext = new SimpleSSLContext().get();
-        if (sslContext == null)
-            throw new AssertionError("Unexpected null sslContext");
-
+    @BeforeAll
+    public static void setup() throws Exception {
         // HTTP/1.1
         HttpTestHandler h1_fixedLengthHandler = new HTTP_FixedLengthHandler();
         HttpTestHandler h1_chunkHandler = new HTTP_VariableLengthHandler();
-        InetSocketAddress sa = new InetSocketAddress(InetAddress.getLoopbackAddress(), 0);
-        httpTestServer = HttpTestServer.of(HttpServer.create(sa, 0));
+        httpTestServer = HttpTestServer.create(HTTP_1_1);
         httpTestServer.addHandler( h1_fixedLengthHandler, "/http1/fixed");
         httpTestServer.addHandler(h1_chunkHandler,"/http1/chunk");
         httpURI_fixed = "http://" + httpTestServer.serverAuthority() + "/http1/fixed";
         httpURI_chunk = "http://" + httpTestServer.serverAuthority() + "/http1/chunk";
 
-        HttpsServer httpsServer = HttpsServer.create(sa, 0);
-        httpsServer.setHttpsConfigurator(new HttpsConfigurator(sslContext));
-        httpsTestServer = HttpTestServer.of(httpsServer);
+        httpsTestServer = HttpTestServer.create(HTTP_1_1, sslContext);
         httpsTestServer.addHandler(h1_fixedLengthHandler, "/https1/fixed");
         httpsTestServer.addHandler(h1_chunkHandler, "/https1/chunk");
         httpsURI_fixed = "https://" + httpsTestServer.serverAuthority() + "/https1/fixed";
@@ -420,26 +473,37 @@ public class ResponsePublisher implements HttpServerAdapters {
         HttpTestHandler h2_fixedLengthHandler = new HTTP_FixedLengthHandler();
         HttpTestHandler h2_chunkedHandler = new HTTP_VariableLengthHandler();
 
-        http2TestServer = HttpTestServer.of(new Http2TestServer("localhost", false, 0));
+        http2TestServer = HttpTestServer.create(HTTP_2);
         http2TestServer.addHandler(h2_fixedLengthHandler, "/http2/fixed");
         http2TestServer.addHandler(h2_chunkedHandler, "/http2/chunk");
         http2URI_fixed = "http://" + http2TestServer.serverAuthority() + "/http2/fixed";
         http2URI_chunk = "http://" + http2TestServer.serverAuthority() + "/http2/chunk";
 
-        https2TestServer = HttpTestServer.of(new Http2TestServer("localhost", true, sslContext));
+        https2TestServer = HttpTestServer.create(HTTP_2, sslContext);
         https2TestServer.addHandler(h2_fixedLengthHandler, "/https2/fixed");
         https2TestServer.addHandler(h2_chunkedHandler, "/https2/chunk");
         https2URI_fixed = "https://" + https2TestServer.serverAuthority() + "/https2/fixed";
         https2URI_chunk = "https://" + https2TestServer.serverAuthority() + "/https2/chunk";
 
+        // HTTP/3
+        HttpTestHandler h3_fixedLengthHandler = new HTTP_FixedLengthHandler();
+        HttpTestHandler h3_chunkedHandler = new HTTP_VariableLengthHandler();
+
+        http3TestServer = HttpTestServer.create(HTTP_3_URI_ONLY, sslContext);
+        http3TestServer.addHandler(h3_fixedLengthHandler, "/http3/fixed");
+        http3TestServer.addHandler(h3_chunkedHandler, "/http3/chunk");
+        http3URI_fixed = "https://" + http3TestServer.serverAuthority() + "/http3/fixed";
+        http3URI_chunk = "https://" + http3TestServer.serverAuthority() + "/http3/chunk";
+
         httpTestServer.start();
         httpsTestServer.start();
         http2TestServer.start();
         https2TestServer.start();
+        http3TestServer.start();
     }
 
-    @AfterTest
-    public void teardown() throws Exception {
+    @AfterAll
+    public static void teardown() throws Exception {
         Thread.sleep(100);
         AssertionError fail = TRACKER.check(500);
         try {
@@ -447,11 +511,29 @@ public class ResponsePublisher implements HttpServerAdapters {
             httpsTestServer.stop();
             http2TestServer.stop();
             https2TestServer.stop();
+            http3TestServer.stop();
         } finally {
             if (fail != null) {
                 throw fail;
             }
         }
+    }
+
+    // Wait for the client to be garbage collected.
+    // we use the ReferenceTracker API rather than HttpClient::close here,
+    // because we want to get some diagnosis if a client doesn't release
+    // its resources and terminates as expected
+    // By using the ReferenceTracker, we will get some diagnosis about what
+    // is keeping the client alive if it doesn't get GC'ed within the
+    // expected time frame.
+    public void clientCleanup(OperationTrackers.Tracker tracker){
+        System.gc();
+        System.out.println(now() + "waiting for client to shutdown: " + tracker.getName());
+        System.err.println(now() + "waiting for client to shutdown: " + tracker.getName());
+        var error = TRACKER.check(tracker, 10000);
+        if (error != null) throw error;
+        System.out.println(now() + "client shutdown normally: " + tracker.getName());
+        System.err.println(now() + "client shutdown normally: " + tracker.getName());
     }
 
     static final String WITH_BODY = "Lorem ipsum dolor sit amet, consectetur" +

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@
   @test
   @bug 4190081
   @summary  Confirm that the you see "Z" shapes on the printed page.
-  @author prr/rbi: area=PrinterJob
+  @key printer
   @run main/manual ThinLines
 */
 
@@ -41,9 +41,6 @@
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.print.*;
-
-// This test is a "main" test as applets would need Runtime permission
-// "queuePrintJob".
 
 public class ThinLines implements Printable {
 

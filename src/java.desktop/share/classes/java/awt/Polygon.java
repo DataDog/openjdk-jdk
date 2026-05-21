@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -139,12 +139,12 @@ public class Polygon implements Shape, java.io.Serializable {
      * @param ypoints an array of Y coordinates
      * @param npoints the total number of points in the
      *                          {@code Polygon}
-     * @exception  NegativeArraySizeException if the value of
+     * @throws  NegativeArraySizeException if the value of
      *                       {@code npoints} is negative.
-     * @exception  IndexOutOfBoundsException if {@code npoints} is
+     * @throws  IndexOutOfBoundsException if {@code npoints} is
      *             greater than the length of {@code xpoints}
      *             or the length of {@code ypoints}.
-     * @exception  NullPointerException if {@code xpoints} or
+     * @throws  NullPointerException if {@code xpoints} or
      *             {@code ypoints} is {@code null}.
      * @since 1.0
      */
@@ -160,7 +160,7 @@ public class Polygon implements Shape, java.io.Serializable {
         if (npoints < 0) {
             throw new NegativeArraySizeException("npoints < 0");
         }
-        // Fix 6343431: Applet compatibility problems if arrays are not
+        // Fix 6343431: compatibility problems if arrays are not
         // exactly npoints in length
         this.npoints = npoints;
         this.xpoints = Arrays.copyOf(xpoints, npoints);
@@ -575,7 +575,7 @@ public class Polygon implements Shape, java.io.Serializable {
         return getPathIterator(at);
     }
 
-    class PolygonPathIterator implements PathIterator {
+    static class PolygonPathIterator implements PathIterator {
         Polygon poly;
         AffineTransform transform;
         int index;

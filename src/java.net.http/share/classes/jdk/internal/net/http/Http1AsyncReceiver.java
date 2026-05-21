@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -116,7 +116,7 @@ class Http1AsyncReceiver {
         public AbstractSubscription subscription();
 
         /**
-         * Called to make sure resources are released when the
+         * Called to make sure resources are released
          * when the Http1AsyncReceiver is stopped.
          * @param error The Http1AsyncReceiver pending error ref,
          *              if any.
@@ -259,8 +259,10 @@ class Http1AsyncReceiver {
             checkRequestMore();
 
         } catch (Throwable t) {
-            Throwable x = error;
-            if (x == null) error = t; // will be handled in the finally block
+            synchronized (this) {
+                Throwable x = error;
+                if (x == null) error = t; // will be handled in the finally block
+            }
             if (debug.on()) debug.log("Unexpected error caught in flush()", t);
         } finally {
             // Handles any pending error.
@@ -312,7 +314,7 @@ class Http1AsyncReceiver {
                 // close the upstream connection.
                 Http1Exchange<?> exchg = owner;
                 stop();
-                if (exchg != null) exchg.connection().close();
+                if (exchg != null) exchg.connection().close(x);
             }
         }
     }
@@ -346,7 +348,7 @@ class Http1AsyncReceiver {
         AbstractSubscription subscription = delegate.subscription();
         long demand = subscription.demand().get();
         if (debug.on())
-            debug.log("downstream subscription demand is %s", demand);
+            debug.log("downstream subscription demand is %s for %s", demand, delegate);
         return demand > 0;
     }
 
@@ -419,7 +421,7 @@ class Http1AsyncReceiver {
     }
 
     void subscribe(Http1AsyncDelegate delegate) {
-        synchronized(this) {
+        synchronized (this) {
             pendingDelegateRef.set(delegate);
         }
         if (queue.isEmpty()) {
@@ -443,11 +445,15 @@ class Http1AsyncReceiver {
     }
 
     void unsubscribe(Http1AsyncDelegate delegate) {
-        synchronized(this) {
+        boolean unsubscribed = false;
+        synchronized (this) {
             if (this.delegate == delegate) {
-                if (debug.on()) debug.log("Unsubscribed %s", delegate);
                 this.delegate = null;
+                unsubscribed = true;
             }
+        }
+        if (unsubscribed) {
+            if (debug.on()) debug.log("Unsubscribed %s", delegate);
         }
     }
 
@@ -478,7 +484,7 @@ class Http1AsyncReceiver {
                 // the pool.
                 if (retry && (ex instanceof IOException)) {
                     // could be either EOFException, or
-                    // IOException("connection reset by peer), or
+                    // IOException("connection reset by peer"), or
                     // SSLHandshakeException resulting from the server having
                     // closed the SSL session.
                     if (received.get() == 0) {
@@ -497,7 +503,8 @@ class Http1AsyncReceiver {
         final Throwable t = (recorded == null ? ex : recorded);
         if (debug.on())
             debug.log("recorded " + t + "\n\t delegate: " + delegate
-                      + "\t\t queue.isEmpty: " + queue.isEmpty(), ex);
+                      + "\n\t queue.isEmpty: " + queue.isEmpty()
+                      + "\n\tstopRequested: " + stopRequested, ex);
         if (Log.errors()) {
             Log.logError("HTTP/1 read subscriber recorded error: {0} - {1}", describe(), t);
         }
@@ -568,7 +575,7 @@ class Http1AsyncReceiver {
             if (canRequestMore.compareAndSet(true, false)) {
                 if (!completed && !dropped) {
                     if (debug.on())
-                        debug.log("Http1TubeSubscriber: requesting one more from upstream");
+                        debug.log("Http1TubeSubscriber: requesting one more from upstream: " + s);
                     s.request(1);
                     return;
                 }
@@ -709,7 +716,7 @@ class Http1AsyncReceiver {
         for (ByteBuffer b : lbb) {
             if (!sbb.remove(b)) {
                 msg.append(sep)
-                   .append(String.valueOf(b))
+                   .append(b)
                    .append("[remaining=")
                    .append(b.remaining())
                    .append(", position=")
@@ -727,14 +734,12 @@ class Http1AsyncReceiver {
     String dbgString() {
         String tag = dbgTag;
         if (tag == null) {
-            String flowTag = null;
             Http1Exchange<?> exchg = owner;
             Object flow = (exchg != null)
                     ? exchg.connection().getConnectionFlow()
                     : null;
-            flowTag = tag = flow == null ? null: (String.valueOf(flow));
-            if (flowTag != null) {
-                dbgTag = tag = "Http1AsyncReceiver("+ flowTag + ")";
+            if (flow != null) {
+                dbgTag = tag = "Http1AsyncReceiver(" + flow + ")";
             } else {
                 tag = "Http1AsyncReceiver(?)";
             }

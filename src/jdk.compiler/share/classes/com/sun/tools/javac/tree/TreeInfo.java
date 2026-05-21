@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,7 @@ package com.sun.tools.javac.tree;
 import com.sun.source.tree.Tree;
 import com.sun.source.util.TreePath;
 import com.sun.tools.javac.code.*;
-import com.sun.tools.javac.comp.AttrContext;
+import com.sun.tools.javac.code.Symbol.RecordComponent;
 import com.sun.tools.javac.comp.Env;
 import com.sun.tools.javac.tree.JCTree.*;
 import com.sun.tools.javac.tree.JCTree.JCPolyExpression.*;
@@ -46,8 +46,11 @@ import static com.sun.tools.javac.tree.JCTree.Tag.*;
 import static com.sun.tools.javac.tree.JCTree.Tag.BLOCK;
 import static com.sun.tools.javac.tree.JCTree.Tag.SYNCHRONIZED;
 
+import javax.lang.model.element.ElementKind;
 import javax.tools.JavaFileObject;
 
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
 
 import static com.sun.tools.javac.tree.JCTree.JCOperatorExpression.OperandPos.LEFT;
@@ -110,25 +113,6 @@ public class TreeInfo {
         return false;
     }
 
-    /** Is there a constructor invocation in the given list of trees?
-     */
-    public static Name getConstructorInvocationName(List<? extends JCTree> trees, Names names) {
-        for (JCTree tree : trees) {
-            if (tree.hasTag(EXEC)) {
-                JCExpressionStatement stat = (JCExpressionStatement)tree;
-                if (stat.expr.hasTag(APPLY)) {
-                    JCMethodInvocation apply = (JCMethodInvocation)stat.expr;
-                    Name methName = TreeInfo.name(apply.meth);
-                    if (methName == names._this ||
-                        methName == names._super) {
-                        return methName;
-                    }
-                }
-            }
-        }
-        return names.empty;
-    }
-
     public static boolean isMultiCatch(JCCatch catchClause) {
         return catchClause.param.vartype.hasTag(TYPEUNION);
     }
@@ -167,18 +151,6 @@ public class TreeInfo {
         return null;
     }
 
-    /** Is this a call to this or super?
-     */
-    public static boolean isSelfCall(JCTree tree) {
-        Name name = calledMethodName(tree);
-        if (name != null) {
-            Names names = name.table.names;
-            return name==names._this || name==names._super;
-        } else {
-            return false;
-        }
-    }
-
     /** Is this tree a 'this' identifier?
      */
     public static boolean isThisQualifier(JCTree tree) {
@@ -204,6 +176,41 @@ public class TreeInfo {
                 return true;
             case SELECT:
                 return isThisQualifier(((JCFieldAccess)tree).selected);
+            default:
+                return false;
+        }
+    }
+
+    /** Check if the given tree is an explicit reference to the 'this' instance of the
+     *  class currently being compiled. This is true if tree is:
+     *  - An unqualified 'this' identifier
+     *  - A 'super' identifier qualified by a class name whose type is 'currentClass' or a supertype
+     *  - A 'this' identifier qualified by a class name whose type is 'currentClass' or a supertype
+     *    but also NOT an enclosing outer class of 'currentClass'.
+     */
+    public static boolean isExplicitThisReference(Types types, Type.ClassType currentClass, JCTree tree) {
+        switch (tree.getTag()) {
+            case PARENS:
+                return isExplicitThisReference(types, currentClass, skipParens(tree));
+            case IDENT: {
+                JCIdent ident = (JCIdent)tree;
+                Names names = ident.name.table.names;
+                return ident.name == names._this || ident.name == names._super;
+            }
+            case SELECT: {
+                JCFieldAccess select = (JCFieldAccess)tree;
+                Type selectedType = types.erasure(select.selected.type);
+                if (!selectedType.hasTag(TypeTag.CLASS))
+                    return false;
+                Symbol.ClassSymbol currentClassSym = (Symbol.ClassSymbol)((Type.ClassType)types.erasure(currentClass)).tsym;
+                Symbol.ClassSymbol selectedClassSym = (Symbol.ClassSymbol)((Type.ClassType)selectedType).tsym;
+                Names names = select.name.table.names;
+                return currentClassSym.isSubClass(selectedClassSym, types) &&
+                        (select.name == names._super ||
+                        (select.name == names._this &&
+                            (currentClassSym == selectedClassSym ||
+                            !currentClassSym.isEnclosedBy(selectedClassSym))));
+            }
             default:
                 return false;
         }
@@ -235,32 +242,115 @@ public class TreeInfo {
                 .collect(List.collector());
     }
 
-    /** Is this a constructor whose first (non-synthetic) statement is not
-     *  of the form this(...)?
-     */
-    public static boolean isInitialConstructor(JCTree tree) {
-        JCMethodInvocation app = firstConstructorCall(tree);
-        if (app == null) return false;
-        Name meth = name(app.meth);
-        return meth == null || meth != meth.table.names._this;
+    /** Is the given method a constructor containing a super() or this() call?
+      */
+    public static boolean hasAnyConstructorCall(JCMethodDecl tree) {
+        return hasConstructorCall(tree, null);
     }
 
-    /** Return the first call in a constructor definition. */
-    public static JCMethodInvocation firstConstructorCall(JCTree tree) {
-        if (!tree.hasTag(METHODDEF)) return null;
-        JCMethodDecl md = (JCMethodDecl) tree;
-        Names names = md.name.table.names;
-        if (md.name != names.init) return null;
-        if (md.body == null) return null;
-        List<JCStatement> stats = md.body.stats;
-        // Synthetic initializations can appear before the super call.
-        while (stats.nonEmpty() && isSyntheticInit(stats.head))
-            stats = stats.tail;
-        if (stats.isEmpty()) return null;
-        if (!stats.head.hasTag(EXEC)) return null;
-        JCExpressionStatement exec = (JCExpressionStatement) stats.head;
-        if (!exec.expr.hasTag(APPLY)) return null;
-        return (JCMethodInvocation)exec.expr;
+    /** Is the given method a constructor containing a super() and/or this() call?
+      * The "target" is either names._this, names._super, or null for either/both.
+      */
+    public static boolean hasConstructorCall(JCMethodDecl tree, Name target) {
+        JCMethodInvocation app = findConstructorCall(tree);
+        return app != null && (target == null || target == name(app.meth));
+    }
+
+    /** Find the first super() or init() call in the given constructor.
+     */
+    public static JCMethodInvocation findConstructorCall(JCMethodDecl md) {
+        if (!TreeInfo.isConstructor(md) || md.body == null)
+            return null;
+        return new ConstructorCallFinder(md.name.table.names).find(md).head;
+    }
+
+    /** Finds all calls to this() and/or super() in a given constructor.
+     *  We can't assume they will be "top level" statements, because
+     *  some synthetic calls to super() are added inside { } blocks.
+     *  So we must recurse through the method's entire syntax tree.
+     */
+    private static class ConstructorCallFinder extends TreeScanner {
+
+        final ListBuffer<JCMethodInvocation> calls = new ListBuffer<>();
+        final Names names;
+
+        ConstructorCallFinder(Names names) {
+            this.names = names;
+        }
+
+        List<JCMethodInvocation> find(JCMethodDecl meth) {
+            scan(meth);
+            return calls.toList();
+        }
+
+        @Override
+        public void visitApply(JCMethodInvocation invoke) {
+            Name name = TreeInfo.name(invoke.meth);
+            if ((name == names._this || name == names._super))
+                calls.append(invoke);
+            super.visitApply(invoke);
+        }
+
+        @Override
+        public void visitClassDef(JCClassDecl tree) {
+            // don't descend any further
+        }
+
+        @Override
+        public void visitLambda(JCLambda tree) {
+            // don't descend any further
+        }
+    }
+
+    /**
+     * Is the given method invocation an invocation of this(...) or super(...)?
+     */
+    public static boolean isConstructorCall(JCMethodInvocation invoke) {
+        Name name = TreeInfo.name(invoke.meth);
+        Names names = name.table.names;
+
+        return (name == names._this || name == names._super);
+    }
+
+    /** Finds super() invocations and translates them using the given mapping.
+     */
+    public static void mapSuperCalls(JCBlock block, Function<? super JCExpressionStatement, ? extends JCStatement> mapper) {
+        block.stats = block.stats.map(new TreeInfo.SuperCallTranslator(mapper)::translate);
+    }
+
+    /** Finds all super() invocations and translates them somehow.
+     */
+    private static class SuperCallTranslator extends TreeTranslator {
+
+        final Function<? super JCExpressionStatement, ? extends JCStatement> translator;
+
+        /** Constructor.
+         *
+         * @param translator translates super() invocations, returning replacement statement or null for no change
+         */
+        SuperCallTranslator(Function<? super JCExpressionStatement, ? extends JCStatement> translator) {
+            this.translator = translator;
+        }
+
+        // Because it returns void, anywhere super() can legally appear must be a location where a JCStatement
+        // could also appear, so it's OK that we are replacing a JCExpressionStatement with a JCStatement here.
+        @Override
+        public void visitExec(JCExpressionStatement stat) {
+            if (!TreeInfo.isSuperCall(stat) || (result = this.translator.apply(stat)) == null)
+                super.visitExec(stat);
+        }
+
+        @Override
+        public void visitClassDef(JCClassDecl tree) {
+            // don't descend any further
+            result = tree;
+        }
+
+        @Override
+        public void visitLambda(JCLambda tree) {
+            // don't descend any further
+            result = tree;
+        }
     }
 
     /** Return true if a tree represents a diamond new expr. */
@@ -346,6 +436,19 @@ public class TreeInfo {
      * Return true if the AST corresponds to a static select of the kind A.B
      */
     public static boolean isStaticSelector(JCTree base, Names names) {
+        return isTypeSelector(base, names, TreeInfo::isStaticSym);
+    }
+    //where
+        private static boolean isStaticSym(JCTree tree) {
+            Symbol sym = symbol(tree);
+            return (sym.kind == TYP || sym.kind == PCK);
+        }
+
+    public static boolean isType(JCTree base, Names names) {
+        return isTypeSelector(base, names, _ -> true);
+    }
+
+    private static boolean isTypeSelector(JCTree base, Names names, Predicate<JCTree> checkStaticSym) {
         if (base == null)
             return false;
         switch (base.getTag()) {
@@ -353,9 +456,9 @@ public class TreeInfo {
                 JCIdent id = (JCIdent)base;
                 return id.name != names._this &&
                         id.name != names._super &&
-                        isStaticSym(base);
+                        checkStaticSym.test(base);
             case SELECT:
-                return isStaticSym(base) &&
+                return checkStaticSym.test(base) &&
                     isStaticSelector(((JCFieldAccess)base).selected, names);
             case TYPEAPPLY:
             case TYPEARRAY:
@@ -366,11 +469,6 @@ public class TreeInfo {
                 return false;
         }
     }
-    //where
-        private static boolean isStaticSym(JCTree tree) {
-            Symbol sym = symbol(tree);
-            return (sym.kind == TYP || sym.kind == PCK);
-        }
 
     /** Return true if a tree represents the null literal. */
     public static boolean isNull(JCTree tree) {
@@ -399,13 +497,6 @@ public class TreeInfo {
         return (docComments == null) ? null : docComments.getCommentText(tree);
     }
 
-    public static DCTree.DCDocComment getCommentTree(Env<?> env, JCTree tree) {
-        DocCommentTable docComments = (tree.hasTag(JCTree.Tag.TOPLEVEL))
-                ? ((JCCompilationUnit) tree).docComments
-                : env.toplevel.docComments;
-        return (docComments == null) ? null : docComments.getCommentTree(tree);
-    }
-
     /** The position of the first statement in a block, or the position of
      *  the block itself if it is empty.
      */
@@ -416,12 +507,12 @@ public class TreeInfo {
             return tree.pos;
     }
 
-    /** The end position of given tree, if it is a block with
-     *  defined endpos.
+    /** The closing brace position of given tree, if it is a block with
+     *  defined bracePos.
      */
     public static int endPos(JCTree tree) {
-        if (tree.hasTag(BLOCK) && ((JCBlock) tree).endpos != Position.NOPOS)
-            return ((JCBlock) tree).endpos;
+        if (tree.hasTag(BLOCK) && ((JCBlock) tree).bracePos != Position.NOPOS)
+            return ((JCBlock) tree).bracePos;
         else if (tree.hasTag(SYNCHRONIZED))
             return endPos(((JCSynchronized) tree).body);
         else if (tree.hasTag(TRY)) {
@@ -429,11 +520,11 @@ public class TreeInfo {
             return endPos((t.finalizer != null) ? t.finalizer
                           : (t.catchers.nonEmpty() ? t.catchers.last().body : t.body));
         } else if (tree.hasTag(SWITCH) &&
-                   ((JCSwitch) tree).endpos != Position.NOPOS) {
-            return ((JCSwitch) tree).endpos;
+                   ((JCSwitch) tree).bracePos != Position.NOPOS) {
+            return ((JCSwitch) tree).bracePos;
         } else if (tree.hasTag(SWITCH_EXPRESSION) &&
-                   ((JCSwitchExpression) tree).endpos != Position.NOPOS) {
-            return ((JCSwitchExpression) tree).endpos;
+                   ((JCSwitchExpression) tree).bracePos != Position.NOPOS) {
+            return ((JCSwitchExpression) tree).bracePos;
         } else
             return tree.pos;
     }
@@ -526,25 +617,16 @@ public class TreeInfo {
             }
             case VARDEF: {
                 JCVariableDecl node = (JCVariableDecl)tree;
-                if (node.startPos != Position.NOPOS) {
-                    return node.startPos;
-                } else if (node.mods.pos != Position.NOPOS) {
+                if (node.mods.pos != Position.NOPOS) {
                     return node.mods.pos;
-                } else if (node.vartype == null || node.vartype.pos == Position.NOPOS) {
-                    //if there's no type (partially typed lambda parameter)
-                    //simply return node position
-                    return node.pos;
-                } else {
+                } else if (node.vartype != null) {
                     return getStartPos(node.vartype);
                 }
+                break;
             }
             case BINDINGPATTERN: {
                 JCBindingPattern node = (JCBindingPattern)tree;
                 return getStartPos(node.var);
-            }
-            case GUARDPATTERN: {
-                JCGuardPattern node = (JCGuardPattern) tree;
-                return getStartPos(node.patt);
             }
             case ERRONEOUS: {
                 JCErroneous node = (JCErroneous)tree;
@@ -562,18 +644,13 @@ public class TreeInfo {
 
     /** The end position of given tree, given  a table of end positions generated by the parser
      */
-    public static int getEndPos(JCTree tree, EndPosTable endPosTable) {
+    public static int getEndPos(JCTree tree) {
         if (tree == null)
             return Position.NOPOS;
 
-        if (endPosTable == null) {
-            // fall back on limited info in the tree
-            return endPos(tree);
-        }
-
-        int mapPos = endPosTable.getEndPos(tree);
-        if (mapPos != Position.NOPOS)
-            return mapPos;
+        int endpos = tree.endpos;
+        if (endpos != Position.NOPOS)
+            return endpos;
 
         switch(tree.getTag()) {
             case BITOR_ASG: case BITXOR_ASG: case BITAND_ASG:
@@ -593,65 +670,57 @@ public class TreeInfo {
             case COMPL:
             case PREINC:
             case PREDEC:
-                return getEndPos(((JCOperatorExpression) tree).getOperand(RIGHT), endPosTable);
+                return getEndPos(((JCOperatorExpression) tree).getOperand(RIGHT));
             case CASE:
-                return getEndPos(((JCCase) tree).stats.last(), endPosTable);
+                return getEndPos(((JCCase) tree).stats.last());
             case CATCH:
-                return getEndPos(((JCCatch) tree).body, endPosTable);
+                return getEndPos(((JCCatch) tree).body);
             case CONDEXPR:
-                return getEndPos(((JCConditional) tree).falsepart, endPosTable);
+                return getEndPos(((JCConditional) tree).falsepart);
             case FORLOOP:
-                return getEndPos(((JCForLoop) tree).body, endPosTable);
+                return getEndPos(((JCForLoop) tree).body);
             case FOREACHLOOP:
-                return getEndPos(((JCEnhancedForLoop) tree).body, endPosTable);
+                return getEndPos(((JCEnhancedForLoop) tree).body);
             case IF: {
                 JCIf node = (JCIf)tree;
                 if (node.elsepart == null) {
-                    return getEndPos(node.thenpart, endPosTable);
+                    return getEndPos(node.thenpart);
                 } else {
-                    return getEndPos(node.elsepart, endPosTable);
+                    return getEndPos(node.elsepart);
                 }
             }
             case LABELLED:
-                return getEndPos(((JCLabeledStatement) tree).body, endPosTable);
+                return getEndPos(((JCLabeledStatement) tree).body);
             case MODIFIERS:
-                return getEndPos(((JCModifiers) tree).annotations.last(), endPosTable);
+                return getEndPos(((JCModifiers) tree).annotations.last());
             case SYNCHRONIZED:
-                return getEndPos(((JCSynchronized) tree).body, endPosTable);
+                return getEndPos(((JCSynchronized) tree).body);
             case TOPLEVEL:
-                return getEndPos(((JCCompilationUnit) tree).defs.last(), endPosTable);
+                return getEndPos(((JCCompilationUnit) tree).defs.last());
             case TRY: {
                 JCTry node = (JCTry)tree;
                 if (node.finalizer != null) {
-                    return getEndPos(node.finalizer, endPosTable);
+                    return getEndPos(node.finalizer);
                 } else if (!node.catchers.isEmpty()) {
-                    return getEndPos(node.catchers.last(), endPosTable);
+                    return getEndPos(node.catchers.last());
                 } else {
-                    return getEndPos(node.body, endPosTable);
+                    return getEndPos(node.body);
                 }
             }
             case WILDCARD:
-                return getEndPos(((JCWildcard) tree).inner, endPosTable);
+                return getEndPos(((JCWildcard) tree).inner);
             case TYPECAST:
-                return getEndPos(((JCTypeCast) tree).expr, endPosTable);
+                return getEndPos(((JCTypeCast) tree).expr);
             case TYPETEST:
-                return getEndPos(((JCInstanceOf) tree).pattern, endPosTable);
+                return getEndPos(((JCInstanceOf) tree).pattern);
             case WHILELOOP:
-                return getEndPos(((JCWhileLoop) tree).body, endPosTable);
+                return getEndPos(((JCWhileLoop) tree).body);
             case ANNOTATED_TYPE:
-                return getEndPos(((JCAnnotatedType) tree).underlyingType, endPosTable);
-            case PARENTHESIZEDPATTERN: {
-                JCParenthesizedPattern node = (JCParenthesizedPattern) tree;
-                return getEndPos(node.pattern, endPosTable);
-            }
-            case GUARDPATTERN: {
-                JCGuardPattern node = (JCGuardPattern) tree;
-                return getEndPos(node.expr, endPosTable);
-            }
+                return getEndPos(((JCAnnotatedType) tree).underlyingType);
             case ERRONEOUS: {
                 JCErroneous node = (JCErroneous)tree;
                 if (node.errs != null && node.errs.nonEmpty())
-                    return getEndPos(node.errs.last(), endPosTable);
+                    return getEndPos(node.errs.last());
             }
         }
         return Position.NOPOS;
@@ -659,8 +728,8 @@ public class TreeInfo {
 
 
     /** A DiagnosticPosition with the preferred position set to the
-     *  end position of given tree, if it is a block with
-     *  defined endpos.
+     *  closing brace position of given tree, if it is a block with
+     *  defined closing brace position.
      */
     public static DiagnosticPosition diagEndPos(final JCTree tree) {
         final int endPos = TreeInfo.endPos(tree);
@@ -668,8 +737,8 @@ public class TreeInfo {
             public JCTree getTree() { return tree; }
             public int getStartPosition() { return TreeInfo.getStartPos(tree); }
             public int getPreferredPosition() { return endPos; }
-            public int getEndPosition(EndPosTable endPosTable) {
-                return TreeInfo.getEndPos(tree, endPosTable);
+            public int getEndPosition() {
+                return TreeInfo.getEndPos(tree);
             }
         };
     }
@@ -718,21 +787,26 @@ public class TreeInfo {
     }
 
     public static DiagnosticPosition diagnosticPositionFor(final Symbol sym, final JCTree tree, boolean returnNullIfNotFound) {
+        return diagnosticPositionFor(sym, tree, returnNullIfNotFound, null);
+    }
+
+    public static DiagnosticPosition diagnosticPositionFor(final Symbol sym, final JCTree tree, boolean returnNullIfNotFound,
+            Predicate<? super JCTree> filter) {
         class DiagScanner extends DeclScanner {
-            DiagScanner(Symbol sym) {
-                super(sym);
+            DiagScanner(Symbol sym, Predicate<? super JCTree> filter) {
+                super(sym, filter);
             }
 
             public void visitIdent(JCIdent that) {
-                if (that.sym == sym) result = that;
-                else super.visitIdent(that);
+                if (!checkMatch(that, that.sym))
+                    super.visitIdent(that);
             }
             public void visitSelect(JCFieldAccess that) {
-                if (that.sym == sym) result = that;
-                else super.visitSelect(that);
+                if (!checkMatch(that, that.sym))
+                    super.visitSelect(that);
             }
         }
-        DiagScanner s = new DiagScanner(sym);
+        DiagScanner s = new DiagScanner(sym, filter);
         tree.accept(s);
         JCTree decl = s.result;
         if (decl == null && returnNullIfNotFound) { return null; }
@@ -745,9 +819,14 @@ public class TreeInfo {
 
     private static class DeclScanner extends TreeScanner {
         final Symbol sym;
+        final Predicate<? super JCTree> filter;
 
         DeclScanner(final Symbol sym) {
+            this(sym, null);
+        }
+        DeclScanner(final Symbol sym, Predicate<? super JCTree> filter) {
             this.sym = sym;
+            this.filter = filter;
         }
 
         JCTree result = null;
@@ -756,32 +835,46 @@ public class TreeInfo {
                 tree.accept(this);
         }
         public void visitTopLevel(JCCompilationUnit that) {
-            if (that.packge == sym) result = that;
-            else super.visitTopLevel(that);
+            if (!checkMatch(that, that.packge))
+                super.visitTopLevel(that);
         }
         public void visitModuleDef(JCModuleDecl that) {
-            if (that.sym == sym) result = that;
+            checkMatch(that, that.sym);
             // no need to scan within module declaration
         }
         public void visitPackageDef(JCPackageDecl that) {
-            if (that.packge == sym) result = that;
-            else super.visitPackageDef(that);
+            if (!checkMatch(that, that.packge))
+                super.visitPackageDef(that);
         }
         public void visitClassDef(JCClassDecl that) {
-            if (that.sym == sym) result = that;
-            else super.visitClassDef(that);
+            if (!checkMatch(that, that.sym))
+                super.visitClassDef(that);
         }
         public void visitMethodDef(JCMethodDecl that) {
-            if (that.sym == sym) result = that;
-            else super.visitMethodDef(that);
+            if (!checkMatch(that, that.sym))
+                super.visitMethodDef(that);
         }
         public void visitVarDef(JCVariableDecl that) {
-            if (that.sym == sym) result = that;
-            else super.visitVarDef(that);
+            if (!checkMatch(that, that.sym))
+                super.visitVarDef(that);
         }
         public void visitTypeParameter(JCTypeParameter that) {
-            if (that.type != null && that.type.tsym == sym) result = that;
-            else super.visitTypeParameter(that);
+            if (that.type == null || !checkMatch(that, that.type.tsym))
+                super.visitTypeParameter(that);
+        }
+
+        protected boolean checkMatch(JCTree that, Symbol thatSym) {
+            if (thatSym == this.sym && (filter == null || filter.test(that))) {
+                result = that;
+                return true;
+            }
+            if (this.sym.getKind() == ElementKind.RECORD_COMPONENT) {
+                if (thatSym != null && thatSym.getKind() == ElementKind.FIELD && (thatSym.flags_field & RECORD) != 0) {
+                    RecordComponent rc = thatSym.enclClass().getRecordComponent((VarSymbol)thatSym);
+                    return checkMatch(rc.declarationFor(), rc);
+                }
+            }
+            return false;
         }
     }
 
@@ -791,43 +884,6 @@ public class TreeInfo {
         DeclScanner s = new DeclScanner(sym);
         tree.accept(s);
         return s.result;
-    }
-
-    public static Env<AttrContext> scopeFor(JCTree node, JCCompilationUnit unit) {
-        return scopeFor(pathFor(node, unit));
-    }
-
-    public static Env<AttrContext> scopeFor(List<JCTree> path) {
-        // TODO: not implemented yet
-        throw new UnsupportedOperationException("not implemented yet");
-    }
-
-    public static List<JCTree> pathFor(final JCTree node, final JCCompilationUnit unit) {
-        class Result extends Error {
-            static final long serialVersionUID = -5942088234594905625L;
-            List<JCTree> path;
-            Result(List<JCTree> path) {
-                this.path = path;
-            }
-        }
-        class PathFinder extends TreeScanner {
-            List<JCTree> path = List.nil();
-            public void scan(JCTree tree) {
-                if (tree != null) {
-                    path = path.prepend(tree);
-                    if (tree == node)
-                        throw new Result(path);
-                    super.scan(tree);
-                    path = path.tail;
-                }
-            }
-        }
-        try {
-            new PathFinder().scan(unit);
-        } catch (Result result) {
-            return result.path;
-        }
-        return List.nil();
     }
 
     /** Return the statement referenced by a label.
@@ -982,6 +1038,8 @@ public class TreeInfo {
             return symbol(((JCAnnotatedType) tree).underlyingType);
         case REFERENCE:
             return ((JCMemberReference) tree).sym;
+        case CLASSDEF:
+            return ((JCClassDecl) tree).sym;
         default:
             return null;
         }
@@ -1332,15 +1390,6 @@ public class TreeInfo {
                 && tree.getModuleDecl() != null;
     }
 
-    public static JCModuleDecl getModule(JCCompilationUnit t) {
-        if (t.defs.nonEmpty()) {
-            JCTree def = t.defs.head;
-            if (def.hasTag(MODULEDEF))
-                return (JCModuleDecl) def;
-        }
-        return null;
-    }
-
     public static boolean isPackageInfo(JCCompilationUnit tree) {
         return tree.sourcefile.isNameCompatible("package-info", JavaFileObject.Kind.SOURCE);
     }
@@ -1348,39 +1397,52 @@ public class TreeInfo {
     public static boolean isErrorEnumSwitch(JCExpression selector, List<JCCase> cases) {
         return selector.type.tsym.kind == Kinds.Kind.ERR &&
                cases.stream().flatMap(c -> c.labels.stream())
+                             .filter(l -> l.hasTag(CONSTANTCASELABEL))
+                             .map(l -> ((JCConstantCaseLabel) l).expr)
                              .allMatch(p -> p.hasTag(IDENT));
     }
 
-    public static PatternPrimaryType primaryPatternType(JCPattern pat) {
+    public static Type primaryPatternType(JCTree pat) {
         return switch (pat.getTag()) {
-            case BINDINGPATTERN -> new PatternPrimaryType(((JCBindingPattern) pat).type, true);
-            case GUARDPATTERN -> {
-                JCGuardPattern guarded = (JCGuardPattern) pat;
-                PatternPrimaryType nested = primaryPatternType(guarded.patt);
-                boolean unconditional = nested.unconditional();
-                if (guarded.expr.type.hasTag(BOOLEAN) && unconditional) {
-                    unconditional = false;
-                    var constValue = guarded.expr.type.constValue();
-                    if (constValue != null && ((int) constValue) == 1) {
-                        unconditional = true;
-                    }
-                }
-                yield new PatternPrimaryType(nested.type(), unconditional);
-            }
-            case PARENTHESIZEDPATTERN -> primaryPatternType(((JCParenthesizedPattern) pat).pattern);
+            case BINDINGPATTERN -> pat.type;
+            case RECORDPATTERN -> ((JCRecordPattern) pat).type;
+            case ANYPATTERN -> ((JCAnyPattern) pat).type;
             default -> throw new AssertionError();
         };
     }
 
-    public static JCBindingPattern primaryPatternTree(JCPattern pat) {
+    public static JCTree primaryPatternTypeTree(JCTree pat) {
         return switch (pat.getTag()) {
-            case BINDINGPATTERN -> (JCBindingPattern) pat;
-            case GUARDPATTERN -> primaryPatternTree(((JCGuardPattern) pat).patt);
-            case PARENTHESIZEDPATTERN -> primaryPatternTree(((JCParenthesizedPattern) pat).pattern);
+            case BINDINGPATTERN -> ((JCBindingPattern) pat).var.vartype;
+            case RECORDPATTERN -> ((JCRecordPattern) pat).deconstructor;
             default -> throw new AssertionError();
         };
     }
 
-    public record PatternPrimaryType(Type type, boolean unconditional) {}
+    public static boolean expectedExhaustive(JCSwitch tree) {
+        return tree.patternSwitch ||
+               tree.cases.stream()
+                         .flatMap(c -> c.labels.stream())
+                         .anyMatch(l -> TreeInfo.isNullCaseLabel(l));
+    }
 
+    public static boolean unguardedCase(JCCase cse) {
+        JCExpression guard = cse.guard;
+        if (guard == null) {
+            return true;
+        }
+        return isBooleanWithValue(guard, 1);
+    }
+
+    public static boolean isBooleanWithValue(JCExpression guard, int value) {
+        var constValue = guard.type.constValue();
+        return constValue != null &&
+                guard.type.hasTag(BOOLEAN) &&
+                ((int) constValue) == value;
+    }
+
+    public static boolean isNullCaseLabel(JCCaseLabel label) {
+        return label.hasTag(CONSTANTCASELABEL) &&
+               TreeInfo.isNull(((JCConstantCaseLabel) label).expr);
+    }
 }

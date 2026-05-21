@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,28 +23,34 @@
 
 /*
  * @test
- * @bug 8048123 8054214 8173423
+ * @bug 8048123 8054214 8173423 8350646
  * @summary Test for jdk.calendar.japanese.supplemental.era support
  * @library /test/lib
  * @build SupplementalJapaneseEraTest
- * @run testng/othervm SupplementalJapaneseEraTestRun
+ * @run junit/othervm SupplementalJapaneseEraTestRun
  */
 
 import java.util.Calendar;
 import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
-import static java.util.Calendar.*;
+import java.util.stream.Stream;
+
+import static java.util.Calendar.DAY_OF_YEAR;
+import static java.util.Calendar.ERA;
+import static java.util.Calendar.FEBRUARY;
+import static java.util.Calendar.LONG;
+import static java.util.Calendar.YEAR;
 
 import jdk.test.lib.process.ProcessTools;
-import jdk.test.lib.JDKToolLauncher;
 import jdk.test.lib.Utils;
 
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class SupplementalJapaneseEraTestRun {
-    @DataProvider(name = "validprop")
     Object[][] validPropertyData() {
         return new Object[][] {
                 //Tests with valid property values
@@ -53,7 +59,6 @@ public class SupplementalJapaneseEraTestRun {
         };
     }
 
-    @DataProvider(name = "invalidprop")
     Object[][] invalidPropertyData() {
         return new Object[][] {
                 //Tests with invalid property values
@@ -71,7 +76,8 @@ public class SupplementalJapaneseEraTestRun {
         };
     }
 
-    @Test(dataProvider = "validprop")
+    @ParameterizedTest
+    @MethodSource("validPropertyData")
     public void ValidPropertyValuesTest(String prop)
             throws Throwable {
         //get the start time of the fictional next era
@@ -79,7 +85,8 @@ public class SupplementalJapaneseEraTestRun {
         testRun(prop + startTime, List.of("-t"));
     }
 
-    @Test(dataProvider = "invalidprop")
+    @ParameterizedTest
+    @MethodSource("invalidPropertyData")
     public void InvalidPropertyValuesTest(String prop)
             throws Throwable {
         //get the start time of the fictional next era
@@ -91,19 +98,18 @@ public class SupplementalJapaneseEraTestRun {
     }
 
     private static void testRun(String property, List<String> javaParam)
-            throws Throwable{
-        JDKToolLauncher launcher = JDKToolLauncher.createUsingTestJDK("java");
-        launcher.addToolArg("-ea")
-                .addToolArg("-esa")
-                .addToolArg("-cp")
-                .addToolArg(Utils.TEST_CLASS_PATH)
-                .addToolArg("-Djdk.calendar.japanese.supplemental.era=" + property)
-                .addToolArg("SupplementalJapaneseEraTest");
-        for (String para: javaParam) {
-            launcher.addToolArg(para);
-        }
-        int exitCode = ProcessTools.executeCommand(launcher.getCommand())
-                .getExitValue();
+            throws Throwable {
+        List<String> params = List.of(
+                "-ea", "-esa",
+                "-cp", Utils.TEST_CLASS_PATH,
+                "-Djdk.calendar.japanese.supplemental.era=" + property,
+                "SupplementalJapaneseEraTest");
+        // Build process (with VM flags)
+        ProcessBuilder pb = ProcessTools.createTestJavaProcessBuilder(
+                Stream.concat(params.stream(), javaParam.stream()).toList());
+        // Evaluate process status
+        int exitCode = ProcessTools.executeCommand(pb).getExitValue();
+
         System.out.println(property + ":pass");
         if (exitCode != 0) {
             System.out.println(property + ":fail");

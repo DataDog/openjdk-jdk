@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -116,7 +116,6 @@ class ValueMap: public CompilationResourceObj {
   void kill_memory();
   void kill_field(ciField* field, bool all_offsets);
   void kill_array(ValueType* type);
-  void kill_exception();
   void kill_map(ValueMap* map);
   void kill_all();
 
@@ -165,7 +164,12 @@ class ValueNumberingVisitor: public InstructionVisitor {
 
   void do_Phi            (Phi*             x) { /* nothing to do */ }
   void do_Local          (Local*           x) { /* nothing to do */ }
-  void do_Constant       (Constant*        x) { /* nothing to do */ }
+  void do_Constant       (Constant*        x) {
+    if (x->kills_memory()) {
+      assert(x->can_trap(), "already linked");
+      kill_memory();
+    }
+  }
   void do_LoadField      (LoadField*       x) {
     if (x->is_init_point() ||         // getstatic is an initialization point so treat it as a wide kill
         x->field()->is_volatile()) {  // the JMM requires this
@@ -183,7 +187,13 @@ class ValueNumberingVisitor: public InstructionVisitor {
   void do_Convert        (Convert*         x) { /* nothing to do */ }
   void do_NullCheck      (NullCheck*       x) { /* nothing to do */ }
   void do_TypeCast       (TypeCast*        x) { /* nothing to do */ }
-  void do_NewInstance    (NewInstance*     x) { /* nothing to do */ }
+  void do_NewInstance    (NewInstance*     x) {
+    ciInstanceKlass* c = x->klass();
+    if (c != nullptr && !c->is_initialized() &&
+        (!c->is_loaded() || c->has_class_initializer())) {
+      kill_memory();
+    }
+  }
   void do_NewTypeArray   (NewTypeArray*    x) { /* nothing to do */ }
   void do_NewObjectArray (NewObjectArray*  x) { /* nothing to do */ }
   void do_NewMultiArray  (NewMultiArray*   x) { /* nothing to do */ }
@@ -199,7 +209,6 @@ class ValueNumberingVisitor: public InstructionVisitor {
   void do_Base           (Base*            x) { /* nothing to do */ }
   void do_OsrEntry       (OsrEntry*        x) { /* nothing to do */ }
   void do_ExceptionObject(ExceptionObject* x) { /* nothing to do */ }
-  void do_RoundFP        (RoundFP*         x) { /* nothing to do */ }
   void do_ProfileCall    (ProfileCall*     x) { /* nothing to do */ }
   void do_ProfileReturnType (ProfileReturnType*  x) { /* nothing to do */ }
   void do_ProfileInvoke  (ProfileInvoke*   x) { /* nothing to do */ };
@@ -239,7 +248,7 @@ class GlobalValueNumbering: public ValueNumberingVisitor {
   Compilation*  compilation() const              { return _compilation; }
   ValueMap*     current_map()                    { return _current_map; }
   ValueMap*     value_map_of(BlockBegin* block)  { return _value_maps.at(block->linear_scan_number()); }
-  void          set_value_map_of(BlockBegin* block, ValueMap* map)   { assert(value_map_of(block) == NULL, ""); _value_maps.at_put(block->linear_scan_number(), map); }
+  void          set_value_map_of(BlockBegin* block, ValueMap* map) { assert(value_map_of(block) == nullptr, ""); _value_maps.at_put(block->linear_scan_number(), map); }
 
   bool          is_processed(Value v)            { return _processed_values.contains(v); }
   void          set_processed(Value v)           { _processed_values.put(v); }

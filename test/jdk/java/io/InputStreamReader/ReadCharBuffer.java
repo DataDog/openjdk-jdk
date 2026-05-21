@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,14 +23,10 @@
 
 /*
  * @test
- * @bug 4926314
+ * @bug 4926314 8287003
  * @summary Test for InputStreamReader#read(CharBuffer).
- * @run testng ReadCharBuffer
+ * @run junit ReadCharBuffer
  */
-
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
-
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -38,25 +34,38 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
+import java.nio.charset.CodingErrorAction;
 import java.util.Arrays;
+import java.util.stream.Stream;
 
 import static java.nio.charset.StandardCharsets.US_ASCII;
-import static org.testng.Assert.assertEquals;
+import static java.nio.charset.StandardCharsets.UTF_8;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class ReadCharBuffer {
 
     private static final int BUFFER_SIZE = 24;
 
-    @DataProvider(name = "buffers")
-    public Object[][] createBuffers() {
+    public static Stream<CharBuffer> buffers() {
         // test both on-heap and off-heap buffers as they make use different code paths
-        return new Object[][]{
-                new Object[]{CharBuffer.allocate(BUFFER_SIZE)},
-                new Object[]{ByteBuffer.allocateDirect(BUFFER_SIZE * 2).asCharBuffer()}
-        };
+        return Stream.of(CharBuffer.allocate(BUFFER_SIZE),
+                         ByteBuffer.allocateDirect(BUFFER_SIZE * 2).asCharBuffer());
     }
 
-    @Test(dataProvider = "buffers")
+    private void fillBuffer(CharBuffer buffer) {
+        char[] filler = new char[BUFFER_SIZE];
+        Arrays.fill(filler, 'x');
+        buffer.put(filler);
+        buffer.clear();
+    }
+
+    @ParameterizedTest
+    @MethodSource("buffers")
     public void read(CharBuffer buffer) throws IOException {
         fillBuffer(buffer);
 
@@ -78,11 +87,19 @@ public class ReadCharBuffer {
         assertEquals(buffer.toString(), "xABCDEFxGHIJKLMNxxxxxxxx");
     }
 
-    private void fillBuffer(CharBuffer buffer) {
-        char[] filler = new char[BUFFER_SIZE];
-        Arrays.fill(filler, 'x');
-        buffer.put(filler);
-        buffer.clear();
+    @Test
+    public void readLeftover() throws IOException {
+        byte[] b = new byte[] {'a', 'b', (byte) 0xC2};
+        ByteArrayInputStream bais = new ByteArrayInputStream(b);
+        InputStreamReader r = new InputStreamReader(bais,
+            UTF_8.newDecoder().onMalformedInput(CodingErrorAction.IGNORE));
+        int n = r.read();
+        assertEquals((char)n, 'a');
+        char[] c = new char[3];
+        n = r.read(c, 0, 3);
+        assertEquals(n, 1);
+        assertEquals((char)c[0], 'b');
+        n = r.read();
+        assertEquals(n, -1);
     }
-
 }

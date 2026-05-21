@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -43,27 +43,6 @@ static const char *HPRINTER_STR = "hPrintJob";
 /* constants for DeviceCapability buffer lengths */
 #define PAPERNAME_LENGTH 64
 #define TRAYNAME_LENGTH 24
-
-
-static BOOL IsSupportedLevel(HANDLE hPrinter, DWORD dwLevel) {
-    BOOL isSupported = FALSE;
-    DWORD cbBuf = 0;
-    LPBYTE pPrinter = NULL;
-
-    DASSERT(hPrinter != NULL);
-
-    VERIFY(::GetPrinter(hPrinter, dwLevel, NULL, 0, &cbBuf) == 0);
-    if (::GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
-        pPrinter = new BYTE[cbBuf];
-        if (::GetPrinter(hPrinter, dwLevel, pPrinter, cbBuf, &cbBuf)) {
-            isSupported = TRUE;
-        }
-        delete[] pPrinter;
-    }
-
-    return isSupported;
-}
-
 
 extern "C" {
 
@@ -729,7 +708,7 @@ Java_sun_print_Win32PrintService_getPrinterPort(JNIEnv *env,
   }
 
   jstring jPort;
-  LPTSTR printerName = NULL, printerPort = TEXT("LPT1");
+  LPTSTR printerName = NULL, printerPort = (LPTSTR)TEXT("LPT1");
   LPBYTE buffer = NULL;
   DWORD cbBuf = 0;
 
@@ -745,7 +724,7 @@ Java_sun_print_Win32PrintService_getPrinterPort(JNIEnv *env,
   }
 
   if (printerPort == NULL) {
-    printerPort = TEXT("LPT1");
+    printerPort = (LPTSTR)TEXT("LPT1");
   }
   jPort = JNU_NewStringPlatform(env, printerPort);
   delete [] buffer;
@@ -1110,7 +1089,7 @@ Java_sun_print_Win32PrintJob_startPrintRawData(JNIEnv *env,
   // Fill in the structure with info about this "document."
   DocInfo.pDocName = jname;
   DocInfo.pOutputFile = NULL;
-  DocInfo.pDatatype = TEXT("RAW");
+  DocInfo.pDatatype = (LPTSTR)TEXT("RAW");
 
   // Inform the spooler the document is beginning.
   if( (::StartDocPrinter(hPrinter, 1, (LPBYTE)&DocInfo)) == 0 ) {

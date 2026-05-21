@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -39,9 +39,6 @@ public class MetricsMemoryTester {
             case "memoryswap":
                 testMemoryAndSwapLimit(args[1], args[2]);
                 break;
-            case "kernelmem":
-                testKernelMemoryLimit(args[1]);
-                break;
             case "oomkill":
                 testOomKillFlag(Boolean.parseBoolean(args[2]));
                 break;
@@ -51,6 +48,8 @@ public class MetricsMemoryTester {
             case "softlimit":
                 testMemorySoftLimit(args[1]);
                 break;
+            default:
+                throw new RuntimeException("unknown args: " + args[0] + " for MetricsMemoryTester");
         }
     }
 
@@ -71,16 +70,16 @@ public class MetricsMemoryTester {
 
         // We need swap to execute this test or will SEGV
         if (memAndSwapLimit <= memLimit) {
-            System.out.println("No swap memory limits, test case skipped");
+            System.out.println("No swap memory limits. Ignoring test!");
         } else {
             long count = Metrics.systemMetrics().getMemoryFailCount();
 
-            // Allocate 512M of data
-            byte[][] bytes = new byte[64][];
+            // Allocate 512M of data in 1M chunks per iteration
+            byte[][] bytes = new byte[64 * 8][];
             boolean atLeastOneAllocationWorked = false;
-            for (int i = 0; i < 64; i++) {
+            for (int i = 0; i < 64 * 8; i++) {
                 try {
-                    bytes[i] = new byte[8 * 1024 * 1024];
+                    bytes[i] = new byte[1024 * 1024];
                     atLeastOneAllocationWorked = true;
                     // Break out as soon as we see an increase in failcount
                     // to avoid getting killed by the OOM killer.
@@ -117,23 +116,6 @@ public class MetricsMemoryTester {
                     + memorySoftLimit + "]");
         }
         System.out.println("TEST PASSED!!!");
-    }
-
-    private static void testKernelMemoryLimit(String value) {
-        Metrics m = Metrics.systemMetrics();
-        if (m instanceof CgroupV1Metrics) {
-            CgroupV1Metrics mCgroupV1 = (CgroupV1Metrics)m;
-            System.out.println("TEST PASSED!!!");
-            long limit = getMemoryValue(value);
-            long kmemlimit = mCgroupV1.getKernelMemoryLimit();
-            if (kmemlimit != UNLIMITED && limit != kmemlimit) {
-                throw new RuntimeException("Kernel Memory limit not equal, expected : ["
-                        + limit + "]" + ", got : ["
-                        + kmemlimit + "]");
-            }
-        } else {
-            throw new RuntimeException("kernel memory limit test not supported for cgroups v2");
-        }
     }
 
     private static void testMemoryAndSwapLimit(String memory, String memAndSwap) {

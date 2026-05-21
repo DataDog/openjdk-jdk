@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@ package com.sun.hotspot.igv.difference;
 
 import com.sun.hotspot.igv.data.Properties;
 import com.sun.hotspot.igv.data.*;
+import com.sun.hotspot.igv.data.services.PreProcessor;
 import com.sun.hotspot.igv.data.services.Scheduler;
 import java.util.*;
 import org.openide.util.Lookup;
@@ -84,6 +85,8 @@ public class Difference {
             s.schedule(a);
             a.ensureNodesInBlocks();
         }
+        PreProcessor p = Lookup.getDefault().lookup(PreProcessor.class);
+        p.preProcess(a);
     }
 
     private static InputGraph createDiff(InputGraph a, InputGraph b, Set<NodePair> pairs) {
@@ -105,18 +108,24 @@ public class Difference {
             }
         }
         g.getProperties().setProperty("name", "Difference");
-        InputGraph graph = new InputGraph(a.getName() + ", " + b.getName());
+        InputGraph graph = new InputGraph(a, b);
         g.addElement(graph);
 
         Map<InputBlock, InputBlock> blocksMap = new HashMap<>();
         for (InputBlock blk : a.getBlocks()) {
             InputBlock diffblk = graph.addBlock(blk.getName());
+            if (blk.isArtificial()) {
+                diffblk.setArtificial();
+            }
             blocksMap.put(blk, diffblk);
         }
         for (InputBlock blk : b.getBlocks()) {
             InputBlock diffblk = graph.getBlock(blk.getName());
             if (diffblk == null) {
                 diffblk = graph.addBlock(blk.getName());
+            }
+            if (blk.isArtificial()) {
+                diffblk.setArtificial();
             }
             blocksMap.put(blk, diffblk);
         }
@@ -246,6 +255,9 @@ public class Difference {
             }
         }
 
+        Scheduler s = Lookup.getDefault().lookup(Scheduler.class);
+        s.scheduleLocally(graph);
+
         return graph;
     }
 
@@ -287,9 +299,6 @@ public class Difference {
     }
 
     private static InputGraph createDiff(InputGraph a, InputGraph b) {
-
-        Set<InputNode> matched = new HashSet<>();
-
         Set<NodePair> pairs = new HashSet<>();
         for (InputNode n : a.getNodes()) {
             String s = n.getProperties().get(MAIN_PROPERTY);
@@ -356,7 +365,7 @@ public class Difference {
     private static void markAsChanged(InputNode n, InputNode firstNode, InputNode otherNode) {
 
         boolean difference = false;
-        for (Property p : otherNode.getProperties()) {
+        for (Property p : otherNode.getPrimaryProperties()) {
             String s = firstNode.getProperties().get(p.getName());
             if (!p.getValue().equals(s)) {
                 difference = true;
@@ -364,7 +373,7 @@ public class Difference {
             }
         }
 
-        for (Property p : firstNode.getProperties()) {
+        for (Property p : firstNode.getPrimaryProperties()) {
             String s = otherNode.getProperties().get(p.getName());
             if (s == null && p.getValue().length() > 0) {
                 difference = true;

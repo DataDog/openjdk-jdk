@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2025, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2014, Red Hat Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -23,7 +23,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "c1/c1_FrameMap.hpp"
 #include "c1/c1_LIR.hpp"
 #include "runtime/sharedRuntime.hpp"
@@ -154,8 +153,8 @@ LIR_Opr FrameMap::long1_opr;
 LIR_Opr FrameMap::fpu0_float_opr;
 LIR_Opr FrameMap::fpu0_double_opr;
 
-LIR_Opr FrameMap::_caller_save_cpu_regs[] = { 0, };
-LIR_Opr FrameMap::_caller_save_fpu_regs[] = { 0, };
+LIR_Opr FrameMap::_caller_save_cpu_regs[] = {};
+LIR_Opr FrameMap::_caller_save_fpu_regs[] = {};
 
 //--------------------------------------------------------
 //               FrameMap
@@ -194,9 +193,26 @@ void FrameMap::initialize() {
   map_register(i, r25); r25_opr = LIR_OprFact::single_cpu(i); i++;
   map_register(i, r26); r26_opr = LIR_OprFact::single_cpu(i); i++;
 
-  map_register(i, r27); r27_opr = LIR_OprFact::single_cpu(i); i++; // rheapbase
+  // r27 is allocated conditionally. With compressed oops it holds
+  // the heapbase value and is not visible to the allocator.
+  bool preserve_rheapbase = i >= nof_caller_save_cpu_regs();
+  if (!preserve_rheapbase) {
+    map_register(i, r27); r27_opr = LIR_OprFact::single_cpu(i); i++; // rheapbase
+  }
+
+  if(!PreserveFramePointer) {
+    map_register(i, r29); r29_opr = LIR_OprFact::single_cpu(i); i++;
+  }
+
+  // The unallocatable registers are at the end
+
+  if (preserve_rheapbase) {
+    map_register(i, r27); r27_opr = LIR_OprFact::single_cpu(i); i++; // rheapbase
+  }
   map_register(i, r28); r28_opr = LIR_OprFact::single_cpu(i); i++; // rthread
-  map_register(i, r29); r29_opr = LIR_OprFact::single_cpu(i); i++; // rfp
+  if(PreserveFramePointer) {
+    map_register(i, r29); r29_opr = LIR_OprFact::single_cpu(i); i++; // rfp
+  }
   map_register(i, r30); r30_opr = LIR_OprFact::single_cpu(i); i++; // lr
   map_register(i, r31_sp); sp_opr = LIR_OprFact::single_cpu(i); i++; // sp
   map_register(i, r8); r8_opr = LIR_OprFact::single_cpu(i); i++;   // rscratch1
@@ -239,6 +255,19 @@ void FrameMap::initialize() {
   // See comment in register_aarch64.hpp
   _caller_save_cpu_regs[16] = r18_opr;
 #endif
+
+  _caller_save_cpu_regs[17 R18_RESERVED_ONLY(-1)] = r19_opr;
+  _caller_save_cpu_regs[18 R18_RESERVED_ONLY(-1)] = r20_opr;
+  _caller_save_cpu_regs[19 R18_RESERVED_ONLY(-1)] = r21_opr;
+  _caller_save_cpu_regs[20 R18_RESERVED_ONLY(-1)] = r22_opr;
+  _caller_save_cpu_regs[21 R18_RESERVED_ONLY(-1)] = r23_opr;
+  _caller_save_cpu_regs[22 R18_RESERVED_ONLY(-1)] = r24_opr;
+  _caller_save_cpu_regs[23 R18_RESERVED_ONLY(-1)] = r25_opr;
+  _caller_save_cpu_regs[24 R18_RESERVED_ONLY(-1)] = r26_opr;
+
+  if (nof_caller_save_cpu_regs() > 25 R18_RESERVED_ONLY(-1)) {
+    _caller_save_cpu_regs[25 R18_RESERVED_ONLY(-1)] = r27_opr;
+  }
 
   for (int i = 0; i < 8; i++) {
     _caller_save_fpu_regs[i] = LIR_OprFact::single_fpu(i);
@@ -300,8 +329,6 @@ void FrameMap::initialize() {
 
 
 Address FrameMap::make_new_address(ByteSize sp_offset) const {
-  // for rbp, based address use this:
-  // return Address(rbp, in_bytes(sp_offset) - (framesize() - 2) * 4);
   return Address(sp, in_bytes(sp_offset));
 }
 
@@ -355,13 +382,6 @@ VMReg FrameMap::fpu_regname (int n) {
 LIR_Opr FrameMap::stack_pointer() {
   return FrameMap::sp_opr;
 }
-
-
-// JSR 292
-LIR_Opr FrameMap::method_handle_invoke_SP_save_opr() {
-  return LIR_OprFact::illegalOpr;  // Not needed on aarch64
-}
-
 
 bool FrameMap::validate_frame() {
   return true;

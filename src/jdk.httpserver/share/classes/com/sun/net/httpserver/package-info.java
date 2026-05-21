@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,24 @@
    and RFC <a href="https://www.ietf.org/rfc/rfc2818.txt">2818</a> (HTTP over TLS).
    Any HTTP functionality not provided by this API can be implemented by application code
    using the API.
+   <p>
+ * The main components are:
+ * <ul>
+ * <li>the {@link com.sun.net.httpserver.HttpExchange} class that describes a
+ * request and response pair,</li>
+ * <li>the {@link com.sun.net.httpserver.HttpHandler} interface to handle
+ * incoming requests, plus the {@link com.sun.net.httpserver.HttpHandlers} class
+ * that provides useful handler implementations,</li>
+ * <li>the {@link com.sun.net.httpserver.HttpContext} class that maps a URI path
+ * to a {@code HttpHandler},</li>
+ * <li>the {@link com.sun.net.httpserver.HttpServer} class to listen for
+ * connections and dispatch requests to handlers,</li>
+ * <li>the {@link com.sun.net.httpserver.Filter} class that allows pre- and post-
+ * processing of requests.</li></ul>
+ * <p>
+ * The {@link com.sun.net.httpserver.SimpleFileServer} class offers a simple
+ * HTTP-only file server (intended for testing, development and debugging purposes
+ * only). A default implementation is provided via the {@code jwebserver} tool.
    <p>
    Programmers must implement the {@link com.sun.net.httpserver.HttpHandler} interface. This interface
    provides a callback which is invoked to handle incoming requests from clients.
@@ -99,28 +117,26 @@
    The following code shows how the SSLContext is then used in a HttpsConfigurator
    and how the SSLContext and HttpsConfigurator are linked to the HttpsServer.
    <blockquote><pre>
-    server.setHttpsConfigurator (new HttpsConfigurator(sslContext) {
-        public void configure (HttpsParameters params) {
+   server.setHttpsConfigurator(new HttpsConfigurator(sslContext) {
+       public void configure(HttpsParameters params) {
 
-        // get the remote address if needed
-        InetSocketAddress remote = params.getClientAddress();
+           // get the remote address if needed
+           InetSocketAddress remote = params.getClientAddress();
 
-        SSLContext c = getSSLContext();
+           SSLContext c = getSSLContext();
 
-        // get the default parameters
-        SSLParameters sslparams = c.getDefaultSSLParameters();
-        if (remote.equals (...) ) {
-            // modify the default set for client x
-        }
+           // get the default parameters
+           SSLParameters sslparams = c.getDefaultSSLParameters();
+           if (remote.equals(...)) {
+               // modify the default set for client x
+           }
 
-        params.setSSLParameters(sslparams);
-        // statement above could throw IAE if any params invalid.
-        // eg. if app has a UI and parameters supplied by a user.
-
-        }
-    });
+           params.setSSLParameters(sslparams);
+           // statement above could throw IAE if any params invalid.
+           // eg. if app has a UI and parameters supplied by a user.
+       }
+   });
    </pre></blockquote>
-
    @since 1.6
  */
 package com.sun.net.httpserver;

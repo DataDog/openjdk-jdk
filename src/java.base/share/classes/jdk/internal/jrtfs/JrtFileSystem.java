@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -54,7 +54,6 @@ import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.UserPrincipalLookupService;
 import java.nio.file.spi.FileSystemProvider;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -64,7 +63,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 import jdk.internal.jimage.ImageReader.Node;
-import static java.util.stream.Collectors.toList;
+import jdk.internal.jimage.PreviewMode;
 
 /**
  * jrt file system implementation built on System jimage files.
@@ -87,7 +86,8 @@ class JrtFileSystem extends FileSystem {
             throws IOException
     {
         this.provider = provider;
-        this.image = SystemImage.open();  // open image file
+        // TODO: Obtain and pass correct preview mode flag value here.
+        this.image = SystemImage.open(PreviewMode.DISABLED);  // open image file
         this.isOpen = true;
         this.isClosable = env != null;
     }
@@ -175,8 +175,8 @@ class JrtFileSystem extends FileSystem {
     @Override
     public PathMatcher getPathMatcher(String syntaxAndInput) {
         int pos = syntaxAndInput.indexOf(':');
-        if (pos <= 0 || pos == syntaxAndInput.length()) {
-            throw new IllegalArgumentException("pos is " + pos);
+        if (pos <= 0) {
+            throw new IllegalArgumentException();
         }
         String syntax = syntaxAndInput.substring(0, pos);
         String input = syntaxAndInput.substring(pos + 1);
@@ -225,19 +225,19 @@ class JrtFileSystem extends FileSystem {
             throw new NotDirectoryException(path.getName());
         }
         if (filter == null) {
-            return node.getChildren()
-                       .stream()
-                       .map(child -> (Path)(path.resolve(new JrtPath(this, child.getNameString()).getFileName())))
-                       .iterator();
+            return node.getChildNames()
+                    .map(child -> (Path) (path.resolve(new JrtPath(this, child).getFileName())))
+                    .iterator();
         }
-        return node.getChildren()
-                   .stream()
-                   .map(child -> (Path)(path.resolve(new JrtPath(this, child.getNameString()).getFileName())))
-                   .filter(p ->  { try { return filter.accept(p);
-                                   } catch (IOException x) {}
-                                   return false;
-                                  })
-                   .iterator();
+        return node.getChildNames()
+                .map(child -> (Path) (path.resolve(new JrtPath(this, child).getFileName())))
+                .filter(p -> {
+                    try {
+                        return filter.accept(p);
+                    } catch (IOException x) {}
+                    return false;
+                })
+                .iterator();
     }
 
     // returns the content of the file resource specified by the path
@@ -274,7 +274,7 @@ class JrtFileSystem extends FileSystem {
 
     // check that the options passed are supported by (read-only) jrt file system
     static void checkOptions(Set<? extends OpenOption> options) {
-        // check for options of null type and option is an intance of StandardOpenOption
+        // check for options of null type and option is an instance of StandardOpenOption
         for (OpenOption option : options) {
             Objects.requireNonNull(option);
             if (!(option instanceof StandardOpenOption)) {

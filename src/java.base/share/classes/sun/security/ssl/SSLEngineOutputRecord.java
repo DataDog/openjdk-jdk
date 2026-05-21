@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -71,9 +71,9 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
     }
 
     @Override
-    void encodeAlert(byte level, byte description) throws IOException {
+    void encodeAlert(byte level, byte description) {
         if (isClosed()) {
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.SSL)) {
                 SSLLogger.warning("outbound has closed, ignore outbound " +
                     "alert message: " + Alert.nameOf(description));
             }
@@ -89,9 +89,9 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
 
     @Override
     void encodeHandshake(byte[] source,
-            int offset, int length) throws IOException {
+            int offset, int length) {
         if (isClosed()) {
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.SSL)) {
                 SSLLogger.warning("outbound has closed, ignore outbound " +
                         "handshake message",
                         ByteBuffer.wrap(source, offset, length));
@@ -136,9 +136,9 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
     }
 
     @Override
-    void encodeChangeCipherSpec() throws IOException {
+    void encodeChangeCipherSpec() {
         if (isClosed()) {
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.SSL)) {
                 SSLLogger.warning("outbound has closed, ignore outbound " +
                     "change_cipher_spec message");
             }
@@ -152,7 +152,16 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
     }
 
     @Override
-    void encodeV2NoCipher() throws IOException {
+    void disposeWriteCipher() {
+        if (fragmenter == null) {
+            writeCipher.dispose();
+        } else {
+            fragmenter.queueUpCipherDispose();
+        }
+    }
+
+    @Override
+    void encodeV2NoCipher() {
         isTalkingToV2 = true;
     }
 
@@ -162,14 +171,14 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
         ByteBuffer[] dsts, int dstsOffset, int dstsLength) throws IOException {
 
         if (isClosed) {
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.SSL)) {
                 SSLLogger.warning("outbound has closed, ignore outbound " +
                     "application data or cached messages");
             }
 
             return null;
         } else if (isCloseWaiting) {
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.SSL)) {
                 SSLLogger.warning("outbound has closed, ignore outbound " +
                     "application data");
             }
@@ -184,7 +193,7 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
             ByteBuffer destination) throws IOException {
 
         if (writeCipher.authenticator.seqNumOverflow()) {
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.SSL)) {
                 SSLLogger.fine(
                     "sequence number extremely close to overflow " +
                     "(2^64-1 packets). Closing connection.");
@@ -193,7 +202,7 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
             throw new SSLHandshakeException("sequence number overflow");
         }
 
-        // Don't process the incoming record until all of the
+        // Don't process the incoming record until all the
         // buffered records get handled.
         Ciphertext ct = acquireCiphertext(destination);
         if (ct != null) {
@@ -221,7 +230,6 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
         while (needMorePayload) {
             int fragLen;
             if (isFirstRecordOfThePayload && needToSplitPayload()) {
-                needMorePayload = true;
 
                 fragLen = 1;
                 isFirstRecordOfThePayload = false;
@@ -267,7 +275,7 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
             destination.limit(destination.position());
             destination.position(dstContent);
 
-            if (SSLLogger.isOn && SSLLogger.isOn("record")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.RECORD)) {
                 SSLLogger.fine(
                         "WRITE: " + protocolVersion.name + " " +
                         ContentType.APPLICATION_DATA.name +
@@ -280,7 +288,8 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
                     dstPos, dstLim, headerSize,
                     protocolVersion);
 
-            if (SSLLogger.isOn && SSLLogger.isOn("packet")) {
+            if (SSLLogger.isOn() &&
+                    SSLLogger.isOn(SSLLogger.Opt.RECORD_PACKET)) {
                 ByteBuffer temporary = destination.duplicate();
                 temporary.limit(temporary.position());
                 temporary.position(dstPos);
@@ -309,7 +318,8 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
             //
             // Please don't change the limit of the destination buffer.
             destination.put(SSLRecord.v2NoCipher);
-            if (SSLLogger.isOn && SSLLogger.isOn("packet")) {
+            if (SSLLogger.isOn() &&
+                    SSLLogger.isOn(SSLLogger.Opt.RECORD_PACKET)) {
                 SSLLogger.fine("Raw write", SSLRecord.v2NoCipher);
             }
 
@@ -323,14 +333,14 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
             // deliver the SSLv2 format ClientHello message
             //
             // Please don't change the limit of the destination buffer.
-            if (SSLLogger.isOn) {
-                if (SSLLogger.isOn("record")) {
+            if (SSLLogger.isOn()) {
+                if (SSLLogger.isOn(SSLLogger.Opt.RECORD)) {
                      SSLLogger.fine(Thread.currentThread().getName() +
                             ", WRITE: SSLv2 ClientHello message" +
                             ", length = " + v2ClientHello.remaining());
                 }
 
-                if (SSLLogger.isOn("packet")) {
+                if (SSLLogger.isOn(SSLLogger.Opt.RECORD_PACKET)) {
                     SSLLogger.fine("Raw write", v2ClientHello);
                 }
             }
@@ -361,6 +371,7 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
         byte            majorVersion;
         byte            minorVersion;
         SSLWriteCipher  encodeCipher;
+        boolean         disposeCipher;
 
         byte[]          fragment;
     }
@@ -375,7 +386,7 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
                 new LinkedList<>();
 
         void queueUpFragment(byte[] source,
-                int offset, int length) throws IOException {
+                int offset, int length) {
             HandshakeMemo memo = new HandshakeMemo();
 
             memo.contentType = ContentType.HANDSHAKE.id;
@@ -420,6 +431,15 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
             memo.fragment[1] = description;
 
             handshakeMemos.add(memo);
+        }
+
+        void queueUpCipherDispose() {
+            RecordMemo lastMemo = handshakeMemos.peekLast();
+            if (lastMemo != null) {
+                lastMemo.disposeCipher = true;
+            } else {
+                writeCipher.dispose();
+            }
         }
 
         Ciphertext acquireCiphertext(ByteBuffer dstBuf) throws IOException {
@@ -507,7 +527,7 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
             dstBuf.limit(dstBuf.position());
             dstBuf.position(dstContent);
 
-            if (SSLLogger.isOn && SSLLogger.isOn("record")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.RECORD)) {
                 SSLLogger.fine(
                         "WRITE: " + protocolVersion.name + " " +
                         ContentType.nameOf(memo.contentType) +
@@ -521,8 +541,12 @@ final class SSLEngineOutputRecord extends OutputRecord implements SSLRecord {
                     dstPos, dstLim, headerSize,
                     ProtocolVersion.valueOf(memo.majorVersion,
                             memo.minorVersion));
+            if (memo.disposeCipher) {
+                memo.encodeCipher.dispose();
+            }
 
-            if (SSLLogger.isOn && SSLLogger.isOn("packet")) {
+            if (SSLLogger.isOn() &&
+                    SSLLogger.isOn(SSLLogger.Opt.RECORD_PACKET)) {
                 ByteBuffer temporary = dstBuf.duplicate();
                 temporary.limit(temporary.position());
                 temporary.position(dstPos);

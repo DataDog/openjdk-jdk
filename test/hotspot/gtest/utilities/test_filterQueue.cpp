@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,7 +21,6 @@
  * questions.
  */
 
-#include "precompiled.hpp"
 #include "runtime/mutex.hpp"
 #include "utilities/filterQueue.inline.hpp"
 #include "threadHelper.inline.hpp"
@@ -196,7 +195,7 @@ public:
 
 TEST_VM(FilterQueue, stress) {
   FilterQueue<uintptr_t> queue;
-  Mutex lock(Mutex::leaf, "Test Lock", Mutex::_safepoint_check_never);
+  Mutex lock(Mutex::nosafepoint, "Test_lock");
   static const int nthreads = 4;
   Semaphore post;
   FilterQueueTestThread* threads[nthreads] = {};

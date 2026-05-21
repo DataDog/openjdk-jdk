@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,8 @@
 
 package sun.security.util;
 
+import jdk.internal.util.StaticProperty;
+
 import javax.security.auth.callback.Callback;
 import javax.security.auth.callback.CallbackHandler;
 import javax.security.auth.callback.ConfirmationCallback;
@@ -36,6 +38,7 @@ import javax.security.auth.callback.UnsupportedCallbackException;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.charset.Charset;
 
 /**
  * A {@code CallbackHandler} that prompts and reads from the command line
@@ -63,8 +66,7 @@ public class ConsoleCallbackHandler implements CallbackHandler {
         ConfirmationCallback confirmation = null;
 
         for (int i = 0; i < callbacks.length; i++) {
-            if (callbacks[i] instanceof TextOutputCallback) {
-                TextOutputCallback tc = (TextOutputCallback) callbacks[i];
+            if (callbacks[i] instanceof TextOutputCallback tc) {
 
                 String text;
                 switch (tc.getMessageType()) {
@@ -90,8 +92,7 @@ public class ConsoleCallbackHandler implements CallbackHandler {
                     System.err.println(text);
                 }
 
-            } else if (callbacks[i] instanceof NameCallback) {
-                NameCallback nc = (NameCallback) callbacks[i];
+            } else if (callbacks[i] instanceof NameCallback nc) {
 
                 if (nc.getDefaultName() == null) {
                     System.err.print(nc.getPrompt());
@@ -108,8 +109,7 @@ public class ConsoleCallbackHandler implements CallbackHandler {
 
                 nc.setName(result);
 
-            } else if (callbacks[i] instanceof PasswordCallback) {
-                PasswordCallback pc = (PasswordCallback) callbacks[i];
+            } else if (callbacks[i] instanceof PasswordCallback pc) {
 
                 System.err.print(pc.getPrompt());
                 System.err.flush();
@@ -133,8 +133,9 @@ public class ConsoleCallbackHandler implements CallbackHandler {
 
     /* Reads a line of input */
     private String readLine() throws IOException {
-        String result = new BufferedReader
-            (new InputStreamReader(System.in)).readLine();
+        Charset charset = Charset.forName(StaticProperty.stdinEncoding(), Charset.defaultCharset());
+        InputStreamReader reader = new InputStreamReader(System.in, charset);
+        String result = new BufferedReader(reader).readLine();
         if (result == null) {
             throw new IOException("Cannot read from System.in");
         }
@@ -162,8 +163,8 @@ public class ConsoleCallbackHandler implements CallbackHandler {
         }
 
         class OptionInfo {
-            String name;
-            int value;
+            final String name;
+            final int value;
             OptionInfo(String name, int value) {
                 this.name = name;
                 this.value = value;

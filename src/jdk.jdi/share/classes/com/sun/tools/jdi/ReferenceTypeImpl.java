@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -118,9 +118,8 @@ public abstract class ReferenceTypeImpl extends TypeImpl implements ReferenceTyp
         // Fetch all methods for the class, check performance impact
         // Needs no synchronization now, since methods() returns
         // unmodifiable local data
-        Iterator<Method> it = methods().iterator();
-        while (it.hasNext()) {
-            MethodImpl method = (MethodImpl)it.next();
+        for (Method m : methods()) {
+            MethodImpl method = (MethodImpl)m;
             if (method.ref() == ref) {
                 return method;
             }
@@ -132,9 +131,8 @@ public abstract class ReferenceTypeImpl extends TypeImpl implements ReferenceTyp
         // Fetch all fields for the class, check performance impact
         // Needs no synchronization now, since fields() returns
         // unmodifiable local data
-        Iterator<Field>it = fields().iterator();
-        while (it.hasNext()) {
-            FieldImpl field = (FieldImpl)it.next();
+        for (Field f : fields()) {
+            FieldImpl field = (FieldImpl)f;
             if (field.ref() == ref) {
                 return field;
             }
@@ -143,8 +141,7 @@ public abstract class ReferenceTypeImpl extends TypeImpl implements ReferenceTyp
     }
 
     public boolean equals(Object obj) {
-        if ((obj != null) && (obj instanceof ReferenceTypeImpl)) {
-            ReferenceTypeImpl other = (ReferenceTypeImpl)obj;
+        if (obj instanceof ReferenceTypeImpl other) {
             return (ref() == other.ref()) &&
                 (vm.equals(other.virtualMachine()));
         } else {
@@ -152,8 +149,9 @@ public abstract class ReferenceTypeImpl extends TypeImpl implements ReferenceTyp
         }
     }
 
+    @Override
     public int hashCode() {
-        return(int)ref();
+        return Long.hashCode(ref());
     }
 
     public int compareTo(ReferenceType object) {
@@ -184,8 +182,7 @@ public abstract class ReferenceTypeImpl extends TypeImpl implements ReferenceTyp
 
     public String signature() {
         if (signature == null) {
-            // Does not need synchronization, since worst-case
-            // static info is fetched twice
+            // Does not need synchronization. Worst case is static info is fetched twice.
             if (vm.canGet1_5LanguageFeatures()) {
                 /*
                  * we might as well get both the signature and the
@@ -207,8 +204,7 @@ public abstract class ReferenceTypeImpl extends TypeImpl implements ReferenceTyp
     public String genericSignature() {
         // This gets both the signature and the generic signature
         if (vm.canGet1_5LanguageFeatures() && !genericSignatureGotten) {
-            // Does not need synchronization, since worst-case
-            // static info is fetched twice
+            // Does not need synchronization. Worst case is static info is fetched twice.
             JDWP.ReferenceType.SignatureWithGeneric result;
             try {
                 result = JDWP.ReferenceType.SignatureWithGeneric.
@@ -224,8 +220,7 @@ public abstract class ReferenceTypeImpl extends TypeImpl implements ReferenceTyp
 
     public ClassLoaderReference classLoader() {
         if (!isClassLoaderCached) {
-            // Does not need synchronization, since worst-case
-            // static info is fetched twice
+            // Does not need synchronization. Worst case is static info is fetched twice.
             try {
                 classLoader = JDWP.ReferenceType.ClassLoader.
                     process(vm, this).classLoader;
@@ -241,9 +236,8 @@ public abstract class ReferenceTypeImpl extends TypeImpl implements ReferenceTyp
         if (module != null) {
             return module;
         }
-        // Does not need synchronization, since worst-case
-        // static info is fetched twice
         try {
+            // Does not need synchronization. Worst case is static info is fetched twice.
             ModuleReferenceImpl m = JDWP.ReferenceType.Module.
                 process(vm, this).module;
             module = vm.getModule(m.ref());
@@ -420,12 +414,11 @@ public abstract class ReferenceTypeImpl extends TypeImpl implements ReferenceTyp
 
         /* Add inherited, visible fields */
         List<? extends ReferenceType> types = inheritedTypes();
-        Iterator<? extends ReferenceType> iter = types.iterator();
-        while (iter.hasNext()) {
+        for (ReferenceType referenceType : types) {
             /*
              * TO DO: Be defensive and check for cyclic interface inheritance
              */
-            ReferenceTypeImpl type = (ReferenceTypeImpl)iter.next();
+            ReferenceTypeImpl type = (ReferenceTypeImpl)referenceType;
             type.addVisibleFields(visibleList, visibleTable, ambiguousNames);
         }
 
@@ -454,9 +447,8 @@ public abstract class ReferenceTypeImpl extends TypeImpl implements ReferenceTyp
 
             /* Add inherited fields */
             List<? extends ReferenceType> types = inheritedTypes();
-            Iterator<? extends ReferenceType> iter = types.iterator();
-            while (iter.hasNext()) {
-                ReferenceTypeImpl type = (ReferenceTypeImpl)iter.next();
+            for (ReferenceType referenceType : types) {
+                ReferenceTypeImpl type = (ReferenceTypeImpl)referenceType;
                 type.addAllFields(fieldList, typeSet);
             }
         }
@@ -568,7 +560,7 @@ public abstract class ReferenceTypeImpl extends TypeImpl implements ReferenceTyp
         return list;
     }
 
-    abstract public List<Method> allMethods();
+    public abstract List<Method> allMethods();
 
     public List<Method> methodsByName(String name) {
         List<Method> methods = visibleMethods();
@@ -698,17 +690,12 @@ public abstract class ReferenceTypeImpl extends TypeImpl implements ReferenceTyp
 
     public ClassObjectReference classObject() {
         if (classObject == null) {
-            // Are classObjects unique for an Object, or
-            // created each time? Is this spec'ed?
-            synchronized(this) {
-                if (classObject == null) {
-                    try {
-                        classObject = JDWP.ReferenceType.ClassObject.
-                            process(vm, this).classObject;
-                    } catch (JDWPException exc) {
-                        throw exc.toJDIException();
-                    }
-                }
+            // Does not need synchronization. Worst case is static info is fetched twice.
+            try {
+                classObject = JDWP.ReferenceType.ClassObject.
+                    process(vm, this).classObject;
+            } catch (JDWPException exc) {
+                throw exc.toJDIException();
             }
         }
         return classObject;
@@ -751,8 +738,7 @@ public abstract class ReferenceTypeImpl extends TypeImpl implements ReferenceTyp
     String baseSourceName() throws AbsentInformationException {
         String bsn = baseSourceName;
         if (bsn == null) {
-            // Does not need synchronization, since worst-case
-            // static info is fetched twice
+            // Does not need synchronization. Worst case is static info is fetched twice.
             try {
                 bsn = JDWP.ReferenceType.SourceFile.
                     process(vm, this).sourceFile;
@@ -916,9 +902,8 @@ public abstract class ReferenceTypeImpl extends TypeImpl implements ReferenceTyp
 
         List<Location> list = new ArrayList<Location>();
 
-        Iterator<Method> iter = methods.iterator();
-        while(iter.hasNext()) {
-            MethodImpl method = (MethodImpl)iter.next();
+        for (Method m : methods) {
+            MethodImpl method = (MethodImpl)m;
             // eliminate native and abstract to eliminate
             // false positives
             if (!method.isAbstract() &&
@@ -1070,13 +1055,12 @@ public abstract class ReferenceTypeImpl extends TypeImpl implements ReferenceTyp
         }
     }
 
-    // Does not need synchronization, since worst-case
-    // static info is fetched twice
     void getModifiers() {
         if (modifiers != -1) {
             return;
         }
         try {
+            // Does not need synchronization. Worst case is static info is fetched twice.
             modifiers = JDWP.ReferenceType.Modifiers.
                                   process(vm, this).modBits;
         } catch (JDWPException exc) {

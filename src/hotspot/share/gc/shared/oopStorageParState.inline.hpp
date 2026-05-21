@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,8 +27,8 @@
 
 #include "gc/shared/oopStorageParState.hpp"
 
+#include "cppstdlib/type_traits.hpp"
 #include "gc/shared/oopStorage.inline.hpp"
-#include "metaprogramming/conditional.hpp"
 #include "utilities/macros.hpp"
 
 template<typename F>
@@ -56,7 +56,7 @@ inline void OopStorage::BasicParState::iterate(F f) {
   while (claim_next_segment(&data)) {
     assert(data._segment_start < data._segment_end, "invariant");
     assert(data._segment_end <= _block_count, "invariant");
-    typedef typename Conditional<is_const, const Block*, Block*>::type BlockPtr;
+    using BlockPtr = std::conditional_t<is_const, const Block*, Block*>;
     size_t i = data._segment_start;
     do {
       BlockPtr block = _active_array->at(i);

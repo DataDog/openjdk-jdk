@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,27 +25,22 @@
 #ifndef SHARE_CLASSFILE_STRINGTABLE_HPP
 #define SHARE_CLASSFILE_STRINGTABLE_HPP
 
-#include "memory/allocation.hpp"
+#include "memory/allStatic.hpp"
 #include "memory/padded.hpp"
 #include "oops/oop.hpp"
+#include "oops/oopHandle.hpp"
 #include "oops/weakHandle.hpp"
 #include "utilities/tableStatistics.hpp"
 
 class CompactHashtableWriter;
-class DumpedInternedStrings;
 class JavaThread;
 class SerializeClosure;
 
-class StringTable;
 class StringTableConfig;
-class StringTableCreateEntry;
 
-class StringTable : public CHeapObj<mtSymbol>{
-  friend class VMStructs;
-  friend class Symbol;
+class StringTable : AllStatic {
   friend class StringTableConfig;
-  friend class StringTableCreateEntry;
-
+  class VerifyCompStrings;
   static volatile bool _has_work;
 
   // Set if one bucket is out of balance due to hash algorithm deficiency
@@ -59,22 +54,33 @@ class StringTable : public CHeapObj<mtSymbol>{
   static double get_load_factor();
   static double get_dead_factor(size_t num_dead);
 
+public:
+  typedef struct StringWrapperInternal StringWrapper;
+
+  // Unnamed int needed to fit CompactHashtable's equals type signature
+  static bool wrapped_string_equals(oop java_string, const StringWrapper& wrapped_str, int = 0);
+
+private:
+  static const char* get_symbol_utf8(const StringWrapper& symbol_str);
+  static unsigned int hash_wrapped_string(const StringWrapper& wrapped_str);
+  static const jchar* to_unicode(const StringWrapper& wrapped_str, int &len, TRAPS);
+  static Handle handle_from_wrapped_string(const StringWrapper& wrapped_str, TRAPS);
+
   // GC support
 
   // Callback for GC to notify of changes that might require cleaning or resize.
   static void gc_notification(size_t num_dead);
   static void trigger_concurrent_work();
 
-  static size_t item_added();
+  static void item_added();
   static void item_removed();
+  static size_t items_count_acquire();
 
-  static oop intern(Handle string_or_null_h, const jchar* name, int len, TRAPS);
-  static oop do_intern(Handle string_or_null, const jchar* name, int len, uintx hash, TRAPS);
-  static oop do_lookup(const jchar* name, int len, uintx hash);
+  static oop intern(const StringWrapper& name, TRAPS);
+  static oop do_intern(const StringWrapper& name, uintx hash, TRAPS);
+  static oop do_lookup(const StringWrapper& name, uintx hash);
 
-  static void print_table_statistics(outputStream* st, const char* table_name);
-
-  static bool do_rehash();
+  static void print_table_statistics(outputStream* st);
 
  public:
   static size_t table_size();
@@ -92,27 +98,28 @@ class StringTable : public CHeapObj<mtSymbol>{
   // Interning
   static oop intern(Symbol* symbol, TRAPS);
   static oop intern(oop string, TRAPS);
-  static oop intern(const char *utf8_string, TRAPS);
+  static oop intern(const char* utf8_string, TRAPS);
 
   // Rehash the string table if it gets out of balance
+private:
+  static bool should_grow();
+  static bool maybe_rehash_table();
+public:
   static void rehash_table();
   static bool needs_rehashing() { return _needs_rehashing; }
-  static inline void update_needs_rehash(bool rehash) {
-    if (rehash) {
-      _needs_rehashing = true;
-    }
-  }
+  static inline void update_needs_rehash(bool rehash);
 
-  // Sharing
- private:
-  static oop lookup_shared(const jchar* name, int len, unsigned int hash) NOT_CDS_JAVA_HEAP_RETURN_(NULL);
- public:
-  static oop lookup_shared(const jchar* name, int len) NOT_CDS_JAVA_HEAP_RETURN_(NULL);
+  // AOT support
+  static inline oop read_string_from_compact_hashtable(address base_address, u4 index) NOT_CDS_JAVA_HEAP_RETURN_(nullptr);
+private:
+  static oop lookup_shared(const StringWrapper& name, unsigned int hash) NOT_CDS_JAVA_HEAP_RETURN_(nullptr);
+public:
+  static oop lookup_shared(const jchar* name, int len) NOT_CDS_JAVA_HEAP_RETURN_(nullptr);
   static size_t shared_entry_count() NOT_CDS_JAVA_HEAP_RETURN_(0);
-  static oop create_archived_string(oop s) NOT_CDS_JAVA_HEAP_RETURN_(NULL);
-  static void write_to_archive(const DumpedInternedStrings* dumped_interned_strings) NOT_CDS_JAVA_HEAP_RETURN;
+  static void init_shared_table() NOT_CDS_JAVA_HEAP_RETURN;
+  static void write_shared_table() NOT_CDS_JAVA_HEAP_RETURN;
   static void serialize_shared_table_header(SerializeClosure* soc) NOT_CDS_JAVA_HEAP_RETURN;
-  static void transfer_shared_strings_to_local_table() NOT_CDS_JAVA_HEAP_RETURN;
+  static void move_shared_strings_into_runtime_table();
 
   // Jcmd
   static void dump(outputStream* st, bool verbose=false);

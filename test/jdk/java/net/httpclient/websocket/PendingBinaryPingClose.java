@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,14 +24,12 @@
 /*
  * @test
  * @build DummyWebSocketServer
- * @run testng/othervm
+ * @run junit/othervm
  *      -Djdk.httpclient.sendBufferSize=8192
  *      -Djdk.internal.httpclient.debug=true
  *      -Djdk.internal.httpclient.websocket.debug=true
- *       PendingBinaryPingClose
+ *       ${test.main.class}
  */
-
-import org.testng.annotations.Test;
 
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
@@ -39,13 +37,17 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+
 public class PendingBinaryPingClose extends PendingOperations {
 
     CompletableFuture<WebSocket> cfBinary;
     CompletableFuture<WebSocket> cfPing;
     CompletableFuture<WebSocket> cfClose;
 
-    @Test(dataProvider = "booleans")
+    @ParameterizedTest
+    @MethodSource("booleans")
     public void pendingBinaryPingClose(boolean last) throws Exception {
         repeatable(() -> {
             server = Support.notReadingServer();
@@ -60,7 +62,7 @@ public class PendingBinaryPingClose extends PendingOperations {
                 System.out.printf("begin cycle #%s at %s%n", i, start);
                 cfBinary = webSocket.sendBinary(data, last);
                 try {
-                    cfBinary.get(MAX_WAIT_SEC, TimeUnit.SECONDS);
+                    cfBinary.get(waitSec, TimeUnit.SECONDS);
                     data.clear();
                 } catch (TimeoutException e) {
                     break;
@@ -74,17 +76,16 @@ public class PendingBinaryPingClose extends PendingOperations {
             assertFails(ISE, webSocket.sendBinary(ByteBuffer.allocate(0), true));
             assertFails(ISE, webSocket.sendBinary(ByteBuffer.allocate(0), false));
             cfPing = webSocket.sendPing(ByteBuffer.allocate(125));
-            assertHangs(cfPing);
             assertFails(ISE, webSocket.sendPing(ByteBuffer.allocate(125)));
             assertFails(ISE, webSocket.sendPong(ByteBuffer.allocate(125)));
             cfClose = webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "ok");
-            assertHangs(cfClose);
+            assertAllHang(cfPing, cfClose);
             assertNotDone(cfBinary);
+            webSocket.abort();
+            assertFails(IOE, cfBinary);
+            assertFails(IOE, cfPing);
+            assertFails(IOE, cfClose);
             return null;
         }, () -> cfBinary.isDone());
-        webSocket.abort();
-        assertFails(IOE, cfBinary);
-        assertFails(IOE, cfPing);
-        assertFails(IOE, cfClose);
     }
 }

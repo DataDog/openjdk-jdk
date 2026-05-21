@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,7 +32,7 @@ import com.sun.tools.javac.code.Kinds.KindSelector;
 import com.sun.tools.javac.code.Scope.WriteableScope;
 import com.sun.tools.javac.code.Source.Feature;
 import com.sun.tools.javac.code.Symbol.*;
-import com.sun.tools.javac.code.TypeMetadata.Entry.Kind;
+import com.sun.tools.javac.code.TypeMetadata.Annotations;
 import com.sun.tools.javac.comp.Check.CheckContext;
 import com.sun.tools.javac.resources.CompilerProperties.Errors;
 import com.sun.tools.javac.resources.CompilerProperties.Fragments;
@@ -89,9 +89,7 @@ public class Annotate {
     private final Attr attr;
     private final Check chk;
     private final ConstFold cfolder;
-    private final DeferredLintHandler deferredLintHandler;
     private final Enter enter;
-    private final Lint lint;
     private final Log log;
     private final Names names;
     private final Resolve resolve;
@@ -101,19 +99,17 @@ public class Annotate {
     private final Types types;
 
     private final Attribute theUnfinishedDefaultValue;
-    private final boolean allowRepeatedAnnos;
     private final String sourceName;
 
+    @SuppressWarnings("this-escape")
     protected Annotate(Context context) {
         context.put(annotateKey, this);
 
         attr = Attr.instance(context);
         chk = Check.instance(context);
         cfolder = ConstFold.instance(context);
-        deferredLintHandler = DeferredLintHandler.instance(context);
         enter = Enter.instance(context);
         log = Log.instance(context);
-        lint = Lint.instance(context);
         make = TreeMaker.instance(context);
         names = Names.instance(context);
         resolve = Resolve.instance(context);
@@ -124,7 +120,6 @@ public class Annotate {
         theUnfinishedDefaultValue =  new Attribute.Error(syms.errType);
 
         Source source = Source.instance(context);
-        allowRepeatedAnnos = Feature.REPEATED_ANNOTATIONS.allowedInSource(source);
         sourceName = source.name;
 
         blockCount = 1;
@@ -188,17 +183,22 @@ public class Annotate {
 
         startFlushing();
         try {
-            while (q.nonEmpty()) {
-                q.next().run();
-            }
-            while (typesQ.nonEmpty()) {
-                typesQ.next().run();
-            }
-            while (afterTypesQ.nonEmpty()) {
-                afterTypesQ.next().run();
-            }
-            while (validateQ.nonEmpty()) {
-                validateQ.next().run();
+            while (q.nonEmpty() ||
+                   typesQ.nonEmpty() ||
+                   afterTypesQ.nonEmpty() ||
+                   validateQ.nonEmpty()) {
+                while (q.nonEmpty()) {
+                    q.next().run();
+                }
+                while (typesQ.nonEmpty()) {
+                    typesQ.next().run();
+                }
+                while (afterTypesQ.nonEmpty()) {
+                    afterTypesQ.next().run();
+                }
+                while (validateQ.nonEmpty()) {
+                    validateQ.next().run();
+                }
             }
         } finally {
             doneFlushing();
@@ -230,11 +230,9 @@ public class Annotate {
      *
      * @param annotations the list of JCAnnotations to attribute and enter
      * @param localEnv    the enclosing env
-     * @param s           ths Symbol on which to enter the annotations
-     * @param deferPos    report errors here
+     * @param s           the Symbol on which to enter the annotations
      */
-    public void annotateLater(List<JCAnnotation> annotations, Env<AttrContext> localEnv,
-            Symbol s, DiagnosticPosition deferPos)
+    public void annotateLater(List<JCAnnotation> annotations, Env<AttrContext> localEnv, Symbol s)
     {
         if (annotations.isEmpty()) {
             return;
@@ -252,11 +250,6 @@ public class Annotate {
             // been handled, meaning that the set of annotations pending completion is now empty.
             Assert.check(s.kind == PCK || s.annotationsPendingCompletion());
             JavaFileObject prev = log.useSource(localEnv.toplevel.sourcefile);
-            DiagnosticPosition prevLintPos =
-                    deferPos != null
-                            ? deferredLintHandler.setPos(deferPos)
-                            : deferredLintHandler.immediate();
-            Lint prevLint = deferPos != null ? null : chk.setLint(lint);
             try {
                 if (s.hasAnnotations() && annotations.nonEmpty())
                     log.error(annotations.head.pos, Errors.AlreadyAnnotated(Kinds.kindName(s), s));
@@ -267,9 +260,6 @@ public class Annotate {
                 // never called for a type parameter
                 annotateNow(s, annotations, localEnv, false, false);
             } finally {
-                if (prevLint != null)
-                    chk.setLint(prevLint);
-                deferredLintHandler.setPos(prevLintPos);
                 log.useSource(prev);
             }
         });
@@ -286,16 +276,13 @@ public class Annotate {
 
 
     /** Queue processing of an attribute default value. */
-    public void annotateDefaultValueLater(JCExpression defaultValue, Env<AttrContext> localEnv,
-            MethodSymbol m, DiagnosticPosition deferPos)
+    public void annotateDefaultValueLater(JCExpression defaultValue, Env<AttrContext> localEnv, MethodSymbol m)
     {
         normal(() -> {
             JavaFileObject prev = log.useSource(localEnv.toplevel.sourcefile);
-            DiagnosticPosition prevLintPos = deferredLintHandler.setPos(deferPos);
             try {
                 enterDefaultValue(defaultValue, localEnv, m);
             } finally {
-                deferredLintHandler.setPos(prevLintPos);
                 log.useSource(prev);
             }
         });
@@ -345,11 +332,15 @@ public class Annotate {
 
             Assert.checkNonNull(c, "Failed to create annotation");
 
-            if (a.type.tsym.isAnnotationType()) {
+            if (env.info.isAnonymousNewClass) {
+                // Annotations on anonymous class instantiations should be attributed,
+                // but not attached to the enclosing element. They will be visited
+                // separately and attached to the synthetic class declaration.
+                continue;
+            }
+
+            if (a.type.isErroneous() || a.type.tsym.isAnnotationType()) {
                 if (annotated.containsKey(a.type.tsym)) {
-                    if (!allowRepeatedAnnos) {
-                        log.error(DiagnosticFlag.SOURCE_LEVEL, a.pos(), Feature.REPEATED_ANNOTATIONS.error(sourceName));
-                    }
                     ListBuffer<T> l = annotated.get(a.type.tsym);
                     l = l.append(c);
                     annotated.put(a.type.tsym, l);
@@ -382,6 +373,17 @@ public class Annotate {
                     && toAnnotate.kind == TYP
                     && types.isSameType(c.type, syms.valueBasedType)) {
                 toAnnotate.flags_field |= Flags.VALUE_BASED;
+            }
+
+            if (!c.type.isErroneous()
+                    && types.isSameType(c.type, syms.restrictedType)) {
+                toAnnotate.flags_field |= Flags.RESTRICTED;
+            }
+
+            if (!c.type.isErroneous()
+                    && toAnnotate.kind == VAR
+                    && types.isSameType(c.type, syms.requiresIdentityType)) {
+                toAnnotate.flags_field |= Flags.REQUIRES_IDENTITY;
             }
         }
 
@@ -442,7 +444,7 @@ public class Annotate {
      *
      * @param a the tree representing an annotation
      * @param expectedAnnotationType the expected (super)type of the annotation
-     * @param env the the current env in where the annotation instance is found
+     * @param env the current env in where the annotation instance is found
      */
     public Attribute.TypeCompound attributeTypeAnnotation(JCAnnotation a, Type expectedAnnotationType,
                                                           Env<AttrContext> env)
@@ -526,6 +528,7 @@ public class Annotate {
                 left.name, List.nil(), null);
         left.sym = method;
         left.type = method.type;
+        chk.checkDeprecated(left, env.info.scope.owner, method);
         if (method.owner != thisAnnotationType.tsym && !badAnnotation)
             log.error(left.pos(), Errors.NoAnnotationMember(left.name, thisAnnotationType));
         Type resultType = method.type.getReturnType();
@@ -554,7 +557,6 @@ public class Annotate {
 
         if (expectedElementType.hasTag(ARRAY)) {
             return getAnnotationArrayValue(expectedElementType, tree, env);
-
         }
 
         //error recovery
@@ -672,6 +674,12 @@ public class Annotate {
             log.error(tree.pos(), Errors.AttributeValueMustBeConstant);
             return new Attribute.Error(expectedElementType);
         }
+
+        // Scan the annotation element value and then attribute nested annotations if present
+        if (tree.type != null && tree.type.tsym != null) {
+            queueScanTreeAndTypeAnnotate(tree, env, tree.type.tsym);
+        }
+
         result = cfolder.coerce(result, expectedElementType);
         return new Attribute.Constant(expectedElementType, result.constValue());
     }
@@ -700,11 +708,15 @@ public class Annotate {
         }
 
         JCNewArray na = (JCNewArray)tree;
+        List<JCExpression> elems = na.elems;
         if (na.elemtype != null) {
             log.error(na.elemtype.pos(), Errors.NewNotAllowedInAnnotation);
+            if (elems == null) {
+                elems = List.nil();
+            }
         }
         ListBuffer<Attribute> buf = new ListBuffer<>();
-        for (List<JCExpression> l = na.elems; l.nonEmpty(); l=l.tail) {
+        for (List<JCExpression> l = elems; l.nonEmpty(); l = l.tail) {
             buf.append(attributeAnnotationValue(types.elemtype(expectedElementType),
                     l.head,
                     env));
@@ -849,7 +861,6 @@ public class Annotate {
                 if (!chk.validateAnnotationDeferErrors(annoTree))
                     log.error(annoTree.pos(), Errors.DuplicateAnnotationInvalidRepeated(origAnnoType));
 
-                c = attributeAnnotation(annoTree, targetContainerType, ctx.env);
                 c.setSynthesized(true);
 
                 @SuppressWarnings("unchecked")
@@ -934,7 +945,13 @@ public class Annotate {
         boolean fatalError = false;
 
         // Validate that there is a (and only 1) value method
-        Scope scope = targetContainerType.tsym.members();
+        Scope scope = null;
+        try {
+            scope = targetContainerType.tsym.members();
+        } catch (CompletionFailure ex) {
+            chk.completionError(pos, ex);
+            return null;
+        }
         int nr_value_elems = 0;
         boolean error = false;
         for(Symbol elm : scope.getSymbolsByName(names.value)) {
@@ -1004,28 +1021,21 @@ public class Annotate {
         return validRepeated;
     }
 
-    /********************
+    /* ******************
      * Type annotations *
      ********************/
 
     /**
      * Attribute the list of annotations and enter them onto s.
      */
-    public void enterTypeAnnotations(List<JCAnnotation> annotations, Env<AttrContext> env,
-            Symbol s, DiagnosticPosition deferPos, boolean isTypeParam)
+    public void enterTypeAnnotations(List<JCAnnotation> annotations, Env<AttrContext> env, Symbol s, boolean isTypeParam)
     {
         Assert.checkNonNull(s, "Symbol argument to actualEnterTypeAnnotations is nul/");
         JavaFileObject prev = log.useSource(env.toplevel.sourcefile);
-        DiagnosticPosition prevLintPos = null;
 
-        if (deferPos != null) {
-            prevLintPos = deferredLintHandler.setPos(deferPos);
-        }
         try {
             annotateNow(s, annotations, env, true, isTypeParam);
         } finally {
-            if (prevLintPos != null)
-                deferredLintHandler.setPos(prevLintPos);
             log.useSource(prev);
         }
     }
@@ -1033,11 +1043,10 @@ public class Annotate {
     /**
      * Enqueue tree for scanning of type annotations, attaching to the Symbol sym.
      */
-    public void queueScanTreeAndTypeAnnotate(JCTree tree, Env<AttrContext> env, Symbol sym,
-            DiagnosticPosition deferPos)
+    public void queueScanTreeAndTypeAnnotate(JCTree tree, Env<AttrContext> env, Symbol sym)
     {
         Assert.checkNonNull(sym);
-        normal(() -> tree.accept(new TypeAnnotate(env, sym, deferPos)));
+        normal(() -> tree.accept(new TypeAnnotate(env, sym)));
     }
 
     /**
@@ -1047,7 +1056,11 @@ public class Annotate {
         typeAnnotation(() -> {
             List<Attribute.TypeCompound> compounds = fromAnnotations(annotations);
             Assert.check(annotations.size() == compounds.size());
-            storeAt.getMetadataOfKind(Kind.ANNOTATIONS).combine(new TypeMetadata.Annotations(compounds));
+            // the type already has annotation metadata, but it's empty
+            Annotations metadata = storeAt.getMetadata(Annotations.class);
+            Assert.checkNonNull(metadata);
+            Assert.check(metadata.annotationBuffer().isEmpty());
+            metadata.annotationBuffer().appendList(compounds);
         });
     }
 
@@ -1068,33 +1081,32 @@ public class Annotate {
     private class TypeAnnotate extends TreeScanner {
         private final Env<AttrContext> env;
         private final Symbol sym;
-        private DiagnosticPosition deferPos;
 
-        public TypeAnnotate(Env<AttrContext> env, Symbol sym, DiagnosticPosition deferPos) {
+        public TypeAnnotate(Env<AttrContext> env, Symbol sym) {
 
             this.env = env;
             this.sym = sym;
-            this.deferPos = deferPos;
         }
 
         @Override
         public void visitAnnotatedType(JCAnnotatedType tree) {
-            enterTypeAnnotations(tree.annotations, env, sym, deferPos, false);
+            enterTypeAnnotations(tree.annotations, env, sym, false);
             scan(tree.underlyingType);
         }
 
         @Override
         public void visitTypeParameter(JCTypeParameter tree) {
-            enterTypeAnnotations(tree.annotations, env, sym, deferPos, true);
+            enterTypeAnnotations(tree.annotations, env, sym, true);
             scan(tree.bounds);
         }
 
         @Override
         public void visitNewArray(JCNewArray tree) {
-            enterTypeAnnotations(tree.annotations, env, sym, deferPos, false);
+            enterTypeAnnotations(tree.annotations, env, sym, false);
             for (List<JCAnnotation> dimAnnos : tree.dimAnnotations)
-                enterTypeAnnotations(dimAnnos, env, sym, deferPos, false);
+                enterTypeAnnotations(dimAnnos, env, sym, false);
             scan(tree.elemtype);
+            scan(tree.dims);
             scan(tree.elems);
         }
 
@@ -1112,19 +1124,13 @@ public class Annotate {
 
         @Override
         public void visitVarDef(JCVariableDecl tree) {
-            DiagnosticPosition prevPos = deferPos;
-            deferPos = tree.pos();
-            try {
-                if (sym != null && sym.kind == VAR) {
-                    // Don't visit a parameter once when the sym is the method
-                    // and once when the sym is the parameter.
-                    scan(tree.mods);
-                    scan(tree.vartype);
-                }
-                scan(tree.init);
-            } finally {
-                deferPos = prevPos;
+            if (sym != null && sym.kind == VAR) {
+                // Don't visit a parameter once when the sym is the method
+                // and once when the sym is the parameter.
+                scan(tree.mods);
+                scan(tree.vartype);
             }
+            scan(tree.init);
         }
 
         @Override
@@ -1145,15 +1151,27 @@ public class Annotate {
         public void visitNewClass(JCNewClass tree) {
             scan(tree.encl);
             scan(tree.typeargs);
-            if (tree.def == null) {
+            try {
+                env.info.isAnonymousNewClass = tree.def != null;
                 scan(tree.clazz);
+            } finally {
+                env.info.isAnonymousNewClass = false;
             }
             scan(tree.args);
             // the anonymous class instantiation if any will be visited separately.
         }
+
+        @Override
+        public void visitErroneous(JCErroneous tree) {
+            if (tree.errs != null) {
+                for (JCTree err : tree.errs) {
+                    scan(err);
+                }
+            }
+        }
     }
 
-    /*********************
+    /* *******************
      * Completer support *
      *********************/
 

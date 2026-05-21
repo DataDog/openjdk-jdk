@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2024, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2021, JetBrains s.r.o.. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -26,19 +26,22 @@
  * @test
  * @bug 8267388
  * @summary Test implementation of NSAccessibilityTable protocol peer
- * @author Artem.Semenov@jetbrains.com
  * @run main/manual AccessibleJTableTest
  * @requires (os.family == "windows" | os.family == "mac")
  */
 
-import javax.swing.JTable;
-import javax.swing.JPanel;
-import javax.swing.JScrollPane;
-import javax.swing.SwingUtilities;
-
 import java.awt.FlowLayout;
+import java.awt.GridLayout;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import javax.swing.JButton;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTable;
+import javax.swing.SwingUtilities;
+import javax.swing.table.AbstractTableModel;
 
 public class AccessibleJTableTest extends AccessibleComponentTest {
     private static final String[] columnNames = {"One", "Two", "Three"};
@@ -64,6 +67,29 @@ public class AccessibleJTableTest extends AccessibleComponentTest {
                 + "If you can hear table cells ctrl+tab further and press PASS, otherwise press FAIL.\n";
 
         JTable table = new JTable(data, columnNames);
+        table.setPreferredScrollableViewportSize(table.getPreferredSize());
+        JPanel panel = new JPanel();
+        panel.setLayout(new FlowLayout());
+        JScrollPane scrollPane = new JScrollPane(table);
+        panel.add(scrollPane);
+        panel.setFocusable(false);
+        exceptionString = "AccessibleJTable test failed!";
+        super.createUI(panel, "AccessibleJTableTest");
+    }
+
+    public void  createUIDraggable() {
+        INSTRUCTIONS = "INSTRUCTIONS:\n"
+                + "Check that table is properly updated when column order is changed.\n\n"
+                + "Turn screen reader on, and Tab to the table.\n"
+                + "Using arrow keys navigate to the last cell in the first row in the table."
+                + "Screen reader should announce it as \"Column 3 row 1\"\n\n"
+                + "Using mouse drag the header of the last column so the last column becomes the first one."
+                + "Wait for the screen reader to finish announcing new position in table.\n\n"
+                + "If new position in table corresponds to the new table layout ctrl+tab further "
+                + "and press PASS, otherwise press FAIL.\n";
+
+        JTable table = new JTable(data, columnNames);
+        table.setPreferredScrollableViewportSize(table.getPreferredSize());
         JPanel panel = new JPanel();
         panel.setLayout(new FlowLayout());
         JScrollPane scrollPane = new JScrollPane(table);
@@ -81,7 +107,9 @@ public class AccessibleJTableTest extends AccessibleComponentTest {
                 + "If you can hear second table name: \"second table\" - ctrl+tab further and press PASS, otherwise press FAIL.\n";
 
         JTable table = new JTable(data, columnNames);
+        table.setPreferredScrollableViewportSize(table.getPreferredSize());
         JTable secondTable = new JTable(data, columnNames);
+        secondTable.setPreferredScrollableViewportSize(secondTable.getPreferredSize());
         secondTable.getAccessibleContext().setAccessibleName("Second table");
         JPanel panel = new JPanel();
         panel.setLayout(new FlowLayout());
@@ -89,6 +117,65 @@ public class AccessibleJTableTest extends AccessibleComponentTest {
         JScrollPane secondScrollPane = new JScrollPane(secondTable);
         panel.add(scrollPane);
         panel.add(secondScrollPane);
+        panel.setFocusable(false);
+        exceptionString = "AccessibleJTable test failed!";
+        super.createUI(panel, "AccessibleJTableTest");
+    }
+
+    public void  createUIWithChangingContent() {
+        INSTRUCTIONS = "INSTRUCTIONS:\n"
+                + "Check a11y of dynamic JTable.\n\n"
+                + "Turn screen reader on, and Tab to the table.\n"
+                + "Add and remove rows and columns using the appropriate buttons and try to move around the table\n\n"
+                + "If you hear changes in the table - ctrl+tab further and press PASS, otherwise press FAIL.\n";
+
+        JTable table = new JTable(new TestTableModel(3, 3));
+        table.setPreferredScrollableViewportSize(table.getPreferredSize());
+        JPanel panel = new JPanel();
+        panel.setLayout(new FlowLayout());
+        JScrollPane scrollPane = new JScrollPane(table);
+        panel.add(scrollPane);
+
+        JPanel buttonPanel = new JPanel(new GridLayout());
+        JButton addRow = new JButton("Add row");
+        addRow.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                table.setModel(new TestTableModel(table.getModel().getRowCount() + 1, table.getModel().getColumnCount()));
+            }
+        });
+
+        JButton addColumn = new JButton("Add column");
+        addColumn.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                table.setModel(new TestTableModel(table.getModel().getRowCount(), table.getModel().getColumnCount() + 1));
+            }
+        });
+
+        JButton removeRow = new JButton("Remove row");
+        removeRow.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                table.setModel(new TestTableModel(table.getModel().getRowCount() - 1, table.getModel().getColumnCount()));
+            }
+        });
+
+        JButton removeColumn = new JButton("Remove column");
+        removeColumn.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                table.setModel(new TestTableModel(table.getModel().getRowCount(), table.getModel().getColumnCount() - 1));
+            }
+        });
+
+        buttonPanel.add(addRow);
+        buttonPanel.add(addColumn);
+        buttonPanel.add(removeRow);
+        buttonPanel.add(removeColumn);
+
+        panel.add(buttonPanel);
+
         panel.setFocusable(false);
         exceptionString = "AccessibleJTable test failed!";
         super.createUI(panel, "AccessibleJTableTest");
@@ -105,10 +192,51 @@ public class AccessibleJTableTest extends AccessibleComponentTest {
         }
 
         countDownLatch = test.createCountDownLatch();
+        SwingUtilities.invokeAndWait(test::createUIDraggable);
+        countDownLatch.await(15, TimeUnit.MINUTES);
+        if (!testResult) {
+            throw new RuntimeException(exceptionString);
+        }
+
+        countDownLatch = test.createCountDownLatch();
         SwingUtilities.invokeAndWait(test::createUINamed);
         countDownLatch.await(15, TimeUnit.MINUTES);
         if (!testResult) {
             throw new RuntimeException(exceptionString);
+        }
+
+        countDownLatch = test.createCountDownLatch();
+        SwingUtilities.invokeAndWait(test::createUIWithChangingContent);
+        countDownLatch.await(15, TimeUnit.MINUTES);
+        if (!testResult) {
+            throw new RuntimeException(exceptionString);
+        }
+
+    }
+
+    private static class TestTableModel extends AbstractTableModel {
+        private final int rows;
+        private final int cols;
+
+        TestTableModel(final int r, final int c) {
+            super();
+            rows = r;
+            cols = c;
+        }
+
+        @Override
+        public int getRowCount() {
+            return rows >= 0 ? rows : 0;
+        }
+
+        @Override
+        public int getColumnCount() {
+            return cols >= 0 ? cols : 0;
+        }
+
+        @Override
+        public Object getValueAt(int rowIndex, int columnIndex) {
+            return String.valueOf((rowIndex + 1) * (columnIndex + 1));
         }
     }
 }

@@ -30,7 +30,12 @@
 #include "gc/shenandoah/shenandoahLock.hpp"
 #include "gc/shenandoah/shenandoahPadding.hpp"
 #include "memory/allocation.hpp"
+#include "runtime/atomic.hpp"
 #include "utilities/growableArray.hpp"
+
+// Use ShenandoahReentrantLock as ShenandoahNMethodLock
+typedef ShenandoahReentrantLock<ShenandoahSimpleLock> ShenandoahNMethodLock;
+typedef ShenandoahLocker<ShenandoahNMethodLock>       ShenandoahNMethodLocker;
 
 // ShenandoahNMethod tuple records the internal locations of oop slots within reclocation stream in
 // the nmethod. This allows us to quickly scan the oops without doing the nmethod-internal scans,
@@ -43,28 +48,25 @@ private:
   int                     _oops_count;
   bool                    _has_non_immed_oops;
   bool                    _unregistered;
-  ShenandoahReentrantLock _lock;
+  ShenandoahNMethodLock   _lock;
+  ShenandoahNMethodLock   _ic_lock;
 
 public:
   ShenandoahNMethod(nmethod *nm, GrowableArray<oop*>& oops, bool has_non_immed_oops);
   ~ShenandoahNMethod();
 
   inline nmethod* nm() const;
-  inline ShenandoahReentrantLock* lock();
+  inline ShenandoahNMethodLock* lock();
+  inline ShenandoahNMethodLock* ic_lock();
   inline void oops_do(OopClosure* oops, bool fix_relocations = false);
   // Update oops when the nmethod is re-registered
   void update();
 
-  bool has_cset_oops(ShenandoahHeap* heap);
-
-  inline int oop_count() const;
-  inline bool has_oops() const;
-
-  inline void mark_unregistered();
   inline bool is_unregistered() const;
 
   static ShenandoahNMethod* for_nmethod(nmethod* nm);
-  static inline ShenandoahReentrantLock* lock_for_nmethod(nmethod* nm);
+  static inline ShenandoahNMethodLock* lock_for_nmethod(nmethod* nm);
+  static inline ShenandoahNMethodLock* ic_lock_for_nmethod(nmethod* nm);
 
   static void heal_nmethod(nmethod* nm);
   static inline void heal_nmethod_metadata(ShenandoahNMethod* nmethod_data);
@@ -74,10 +76,9 @@ public:
   static inline void attach_gc_data(nmethod* nm, ShenandoahNMethod* gc_data);
 
   void assert_correct() NOT_DEBUG_RETURN;
-  void assert_same_oops(bool allow_dead = false) NOT_DEBUG_RETURN;
+  void assert_same_oops() NOT_DEBUG_RETURN;
 
 private:
-  bool has_non_immed_oops() const { return _has_non_immed_oops; }
   static void detect_reloc_oops(nmethod* nm, GrowableArray<oop*>& oops, bool& _has_non_immed_oops);
 };
 
@@ -119,14 +120,14 @@ private:
   int                         _limit;
 
   shenandoah_padding(0);
-  volatile size_t       _claimed;
+  Atomic<size_t>            _claimed;
   shenandoah_padding(1);
 
 public:
   ShenandoahNMethodTableSnapshot(ShenandoahNMethodTable* table);
   ~ShenandoahNMethodTableSnapshot();
 
-  void parallel_blobs_do(CodeBlobClosure *f);
+  void parallel_nmethods_do(NMethodClosure *f);
   void concurrent_nmethods_do(NMethodClosure* cl);
 };
 
@@ -150,7 +151,6 @@ public:
 
   void register_nmethod(nmethod* nm);
   void unregister_nmethod(nmethod* nm);
-  void flush_nmethod(nmethod* nm);
 
   bool contain(nmethod* nm) const;
   int length() const { return _index; }
@@ -180,20 +180,19 @@ private:
   // Logging support
   void log_register_nmethod(nmethod* nm);
   void log_unregister_nmethod(nmethod* nm);
-  void log_flush_nmethod(nmethod* nm);
 };
 
 class ShenandoahConcurrentNMethodIterator {
 private:
   ShenandoahNMethodTable*         const _table;
   ShenandoahNMethodTableSnapshot*       _table_snapshot;
+  uint                                  _started_workers;
+  uint                                  _finished_workers;
 
 public:
   ShenandoahConcurrentNMethodIterator(ShenandoahNMethodTable* table);
 
-  void nmethods_do_begin();
   void nmethods_do(NMethodClosure* cl);
-  void nmethods_do_end();
 };
 
 #endif // SHARE_GC_SHENANDOAH_SHENANDOAHNMETHOD_HPP

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,26 +26,17 @@
 package java.lang;
 
 /**
- * An instance of {@code ThreadDeath} is thrown in the victim thread
- * when the (deprecated) {@link Thread#stop()} method is invoked.
+ * An instance of {@code ThreadDeath} was originally specified to be thrown
+ * by a victim thread when "stopped" with the {@link Thread} API.
  *
- * <p>An application should catch instances of this class only if it
- * must clean up after being terminated asynchronously.  If
- * {@code ThreadDeath} is caught by a method, it is important that it
- * be rethrown so that the thread actually dies.
- *
- * <p>The {@linkplain ThreadGroup#uncaughtException top-level error
- * handler} does not print out a message if {@code ThreadDeath} is
- * never caught.
- *
- * <p>The class {@code ThreadDeath} is specifically a subclass of
- * {@code Error} rather than {@code Exception}, even though it is a
- * "normal occurrence", because many applications catch all
- * occurrences of {@code Exception} and then discard the exception.
+ * @deprecated {@code Thread} originally specified a "{@code stop}" method to stop a
+ *      victim thread by causing the victim thread to throw a {@code ThreadDeath}. It
+ *      was inherently unsafe and deprecated in an early JDK release. The {@code stop}
+ *      method has since been removed and {@code ThreadDeath} is deprecated, for removal.
  *
  * @since   1.0
  */
-
+@Deprecated(since="20", forRemoval=true)
 public class ThreadDeath extends Error {
     @java.io.Serial
     private static final long serialVersionUID = -4417128565033088268L;

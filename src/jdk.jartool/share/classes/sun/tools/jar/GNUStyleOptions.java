@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,15 +30,26 @@ import java.io.PrintWriter;
 import java.lang.module.ModuleDescriptor.Version;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import jdk.internal.module.ModulePath;
 import jdk.internal.module.ModuleResolution;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 
 /**
  * Parser for GNU Style Options.
  */
 class GNUStyleOptions {
+
+    // Valid --date range
+    static final ZonedDateTime DATE_MIN = ZonedDateTime.parse("1980-01-01T00:00:02Z");
+    static final ZonedDateTime DATE_MAX = ZonedDateTime.parse("2099-12-31T23:59:59Z");
 
     static class BadArgs extends Exception {
         static final long serialVersionUID = 0L;
@@ -169,7 +180,7 @@ class GNUStyleOptions {
                 void process(Main jartool, String opt, String arg) throws BadArgs {
                     ModuleResolution mres = ModuleResolution.empty();
                     if (jartool.moduleResolution.doNotResolveByDefault()) {
-                        mres.withDoNotResolveByDefault();
+                        mres = mres.withDoNotResolveByDefault();
                     }
                     if (arg.equals("deprecated")) {
                         jartool.moduleResolution = mres.withDeprecated();
@@ -186,6 +197,27 @@ class GNUStyleOptions {
             new Option(false, OptionType.CREATE_UPDATE_INDEX, "--no-compress", "-0") {
                 void process(Main jartool, String opt, String arg) {
                     jartool.flag0 = true;
+                }
+            },
+            new Option(true, OptionType.CREATE_UPDATE_INDEX, "--date") {
+                void process(Main jartool, String opt, String arg) throws BadArgs {
+                    try {
+                        ZonedDateTime date = ZonedDateTime.parse(arg, DateTimeFormatter.ISO_ZONED_DATE_TIME)
+                                                             .withZoneSameInstant(ZoneOffset.UTC);
+                        if (date.isBefore(DATE_MIN) || date.isAfter(DATE_MAX)) {
+                            throw new BadArgs("error.date.out.of.range", arg);
+                        }
+                        jartool.date = date.toLocalDateTime();
+                    } catch (DateTimeParseException x) {
+                        throw new BadArgs("error.date.notvalid", arg);
+                    }
+                }
+            },
+
+            // Extract options
+            new Option(false, OptionType.EXTRACT, "--keep-old-files", "-k") {
+                void process(Main jartool, String opt, String arg) {
+                    jartool.kflag = true;
                 }
             },
 
@@ -222,6 +254,14 @@ class GNUStyleOptions {
                     if (jartool.info == null)
                         jartool.info = GNUStyleOptions::printVersion;
                 }
+            },
+            new Option(true, true, OptionType.EXTRACT, "--dir") {
+                void process(Main jartool, String opt, String arg) throws BadArgs {
+                    if (jartool.xdestDir != null) {
+                        throw new BadArgs("error.extract.multiple.dest.dir").showUsage(true);
+                    }
+                    jartool.xdestDir = arg;
+                }
             }
     };
 
@@ -231,6 +271,7 @@ class GNUStyleOptions {
         CREATE("create"),
         CREATE_UPDATE("create.update"),
         CREATE_UPDATE_INDEX("create.update.index"),
+        EXTRACT("extract"),
         OTHER("other");
 
         /** Resource lookup section prefix. */
@@ -239,7 +280,7 @@ class GNUStyleOptions {
         OptionType(String name) { this.name = name; }
     }
 
-    static abstract class Option {
+    abstract static class Option {
         final boolean hasArg;
         final boolean argIsOptional;
         final String[] aliases;

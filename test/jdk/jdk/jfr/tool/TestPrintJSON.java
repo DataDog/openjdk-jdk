@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,6 +28,7 @@ import java.time.OffsetDateTime;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 import jdk.jfr.Timespan;
 import jdk.jfr.Timestamp;
@@ -35,13 +36,14 @@ import jdk.jfr.ValueDescriptor;
 import jdk.jfr.consumer.RecordedEvent;
 import jdk.jfr.consumer.RecordedObject;
 import jdk.jfr.consumer.RecordingFile;
-import jdk.jfr.tool.JSONValue.JSONArray;
+import jdk.test.lib.json.JSONValue;
+import jdk.test.lib.json.JSONValue.JSONArray;
 import jdk.test.lib.Asserts;
 import jdk.test.lib.process.OutputAnalyzer;
 
 /**
  * @test
- * @key jfr
+ * @requires vm.flagless
  * @summary Tests print --json
  * @requires vm.hasJFR
  *
@@ -61,7 +63,7 @@ public class TestPrintJSON {
 
         JSONValue o = JSONValue.parse(json);
         JSONValue recording = o.get("recording");
-        JSONArray jsonEvents = recording.get("events").asArray();
+        List<JSONValue> jsonEvents = recording.get("events").elements();
         List<RecordedEvent> events = RecordingFile.readAllEvents(recordingFile);
         Collections.sort(events, new EndTicksComparator());
         // Verify events are equal
@@ -78,7 +80,7 @@ public class TestPrintJSON {
     private static void assertEquals(Object jsonObject, Object jfrObject) throws Exception {
         // Check object
         if (jfrObject instanceof RecordedObject) {
-            JSONValue values = ((JSONValue) jsonObject).get("values");
+            Map<String, JSONValue> values = ((JSONValue) jsonObject).get("values").members();
             RecordedObject recObject = (RecordedObject) jfrObject;
             Asserts.assertEquals(values.size(), recObject.getFields().size());
             for (ValueDescriptor v : recObject.getFields()) {
@@ -101,7 +103,7 @@ public class TestPrintJSON {
         // Check array
         if (jfrObject != null && jfrObject.getClass().isArray()) {
             Object[] jfrArray = (Object[]) jfrObject;
-            JSONArray jsArray = ((JSONArray) jsonObject);
+            List<JSONValue> jsArray = ((JSONValue) jsonObject).elements();
             for (int i = 0; i < jfrArray.length; i++) {
                 assertEquals(jsArray.get(i), jfrArray[i]);
             }

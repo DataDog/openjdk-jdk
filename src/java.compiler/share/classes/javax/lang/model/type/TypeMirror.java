@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,8 @@ package javax.lang.model.type;
 
 import java.lang.annotation.Annotation;
 import java.util.List;
+
+import javax.lang.model.AnnotatedConstruct;
 import javax.lang.model.element.*;
 import javax.lang.model.util.Types;
 
@@ -50,9 +52,6 @@ import javax.lang.model.util.Types;
  * hierarchy since an implementation may choose to have a single
  * object implement multiple {@code TypeMirror} subinterfaces.
  *
- * @author Joseph D. Darcy
- * @author Scott Seligman
- * @author Peter von der Ah&eacute;
  * @see Element
  * @see Types
  * @jls 4.1 The Kinds of Types and Values
@@ -65,7 +64,7 @@ import javax.lang.model.util.Types;
  * @jls 10.1 Array Types
  * @since 1.6
  */
-public interface TypeMirror extends javax.lang.model.AnnotatedConstruct {
+public interface TypeMirror extends AnnotatedConstruct {
 
     /**
      * {@return the {@code kind} of this type}
@@ -121,6 +120,15 @@ public interface TypeMirror extends javax.lang.model.AnnotatedConstruct {
      * The results of {@code t1.equals(t2)} and
      * {@code Types.isSameType(t1, t2)} may differ.
      *
+     * @apiNote The identity of a {@code TypeMirror} involves implicit
+     * state not directly accessible from its methods, including state
+     * about the presence of unrelated types. {@code TypeMirror}
+     * objects created by different implementations of these
+     * interfaces should <i>not</i> be expected to compare as equal
+     * even if &quot;the same&quot; type is being modeled; this is
+     * analogous to the inequality of {@code Class} objects for the
+     * same class file loaded through different class loaders.
+     *
      * @param obj  the object to be compared with this type
      * @return {@code true} if the specified object is equal to this one
      */
@@ -144,34 +152,34 @@ public interface TypeMirror extends javax.lang.model.AnnotatedConstruct {
     String toString();
 
     /**
-     * {@inheritDoc}
+     * {@inheritDoc AnnotatedConstruct}
      *
      * <p>Note that any annotations returned by this method are type
      * annotations.
      *
-     * @since 8
+     * @since 1.8
      */
     @Override
     List<? extends AnnotationMirror> getAnnotationMirrors();
 
     /**
-     * {@inheritDoc}
+     * {@inheritDoc AnnotatedConstruct}
      *
      * <p>Note that any annotation returned by this method is a type
      * annotation.
      *
-     * @since 8
+     * @since 1.8
      */
     @Override
     <A extends Annotation> A getAnnotation(Class<A> annotationType);
 
     /**
-     * {@inheritDoc}
+     * {@inheritDoc AnnotatedConstruct}
      *
      * <p>Note that any annotations returned by this method are type
      * annotations.
      *
-     * @since 8
+     * @since 1.8
      */
     @Override
     <A extends Annotation> A[] getAnnotationsByType(Class<A> annotationType);

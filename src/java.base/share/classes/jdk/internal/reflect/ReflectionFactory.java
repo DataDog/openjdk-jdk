@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,24 +29,19 @@ import java.io.Externalizable;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.ObjectStreamClass;
+import java.io.ObjectStreamField;
 import java.io.OptionalDataException;
 import java.io.Serializable;
+import java.lang.classfile.ClassFile;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Executable;
-import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.security.PrivilegedAction;
-import java.util.Properties;
+import java.lang.reflect.*;
+import java.util.Set;
+
 import jdk.internal.access.JavaLangReflectAccess;
 import jdk.internal.access.SharedSecrets;
 import jdk.internal.misc.VM;
-import sun.reflect.misc.ReflectUtil;
-import sun.security.action.GetPropertyAction;
-import sun.security.util.SecurityConstants;
+import jdk.internal.vm.annotation.Stable;
 
 /** <P> The master factory for all reflective objects, both those in
     java.lang.reflect (Fields, Methods, Constructors) as well as their
@@ -62,98 +57,29 @@ import sun.security.util.SecurityConstants;
 
 public class ReflectionFactory {
 
-    private static boolean initted = false;
     private static final ReflectionFactory soleInstance = new ReflectionFactory();
 
 
     /* Method for static class initializer <clinit>, or null */
     private static volatile Method hasStaticInitializerMethod;
 
-    //
-    // "Inflation" mechanism. Loading bytecodes to implement
-    // Method.invoke() and Constructor.newInstance() currently costs
-    // 3-4x more than an invocation via native code for the first
-    // invocation (though subsequent invocations have been benchmarked
-    // to be over 20x faster). Unfortunately this cost increases
-    // startup time for certain applications that use reflection
-    // intensively (but only once per class) to bootstrap themselves.
-    // To avoid this penalty we reuse the existing JVM entry points
-    // for the first few invocations of Methods and Constructors and
-    // then switch to the bytecode-based implementations.
-    //
-    // Package-private to be accessible to NativeMethodAccessorImpl
-    // and NativeConstructorAccessorImpl
-    private static boolean noInflation        = false;
-    private static int     inflationThreshold = 15;
-
-    // true if deserialization constructor checking is disabled
-    private static boolean disableSerialConstructorChecks = false;
-
     private final JavaLangReflectAccess langReflectAccess;
+
     private ReflectionFactory() {
         this.langReflectAccess = SharedSecrets.getJavaLangReflectAccess();
-    }
-
-    /**
-     * A convenience class for acquiring the capability to instantiate
-     * reflective objects.  Use this instead of a raw call to {@link
-     * #getReflectionFactory} in order to avoid being limited by the
-     * permissions of your callers.
-     *
-     * <p>An instance of this class can be used as the argument of
-     * <code>AccessController.doPrivileged</code>.
-     */
-    public static final class GetReflectionFactoryAction
-        implements PrivilegedAction<ReflectionFactory> {
-        public ReflectionFactory run() {
-            return getReflectionFactory();
-        }
     }
 
     /**
      * Provides the caller with the capability to instantiate reflective
      * objects.
      *
-     * <p> First, if there is a security manager, its
-     * <code>checkPermission</code> method is called with a {@link
-     * java.lang.RuntimePermission} with target
-     * <code>"reflectionFactoryAccess"</code>.  This may result in a
-     * security exception.
-     *
      * <p> The returned <code>ReflectionFactory</code> object should be
      * carefully guarded by the caller, since it can be used to read and
      * write private data and invoke private methods, as well as to load
      * unverified bytecodes.  It must never be passed to untrusted code.
-     *
-     * @exception SecurityException if a security manager exists and its
-     *             <code>checkPermission</code> method doesn't allow
-     *             access to the RuntimePermission "reflectionFactoryAccess".  */
-    public static ReflectionFactory getReflectionFactory() {
-        @SuppressWarnings("removal")
-        SecurityManager security = System.getSecurityManager();
-        if (security != null) {
-            security.checkPermission(
-                SecurityConstants.REFLECTION_FACTORY_ACCESS_PERMISSION);
-        }
-        return soleInstance;
-    }
-
-    /**
-     * Returns an alternate reflective Method instance for the given method
-     * intended for reflection to invoke, if present.
-     *
-     * A trusted method can define an alternate implementation for a method `foo`
-     * by defining a method named "reflected$foo" that will be invoked
-     * reflectively.
      */
-    private static Method findMethodForReflection(Method method) {
-        String altName = "reflected$" + method.getName();
-        try {
-           return method.getDeclaringClass()
-                        .getDeclaredMethod(altName, method.getParameterTypes());
-        } catch (NoSuchMethodException ex) {
-            return null;
-        }
+    public static ReflectionFactory getReflectionFactory() {
+        return soleInstance;
     }
 
     //--------------------------------------------------------------------------
@@ -170,8 +96,6 @@ public class ReflectionFactory {
      * @param override true if caller has overridden accessibility
      */
     public FieldAccessor newFieldAccessor(Field field, boolean override) {
-        checkInitted();
-
         Field root = langReflectAccess.getRoot(field);
         if (root != null) {
             // FieldAccessor will use the root unless the modifiers have
@@ -182,46 +106,20 @@ public class ReflectionFactory {
         }
         boolean isFinal = Modifier.isFinal(field.getModifiers());
         boolean isReadOnly = isFinal && (!override || langReflectAccess.isTrustedFinalField(field));
-        return UnsafeFieldAccessorFactory.newFieldAccessor(field, isReadOnly);
+        return MethodHandleAccessorFactory.newFieldAccessor(field, isReadOnly);
     }
 
-    public MethodAccessor newMethodAccessor(Method method) {
-        checkInitted();
-
-        if (Reflection.isCallerSensitive(method)) {
-            Method altMethod = findMethodForReflection(method);
-            if (altMethod != null) {
-                method = altMethod;
-            }
-        }
-
+    public MethodAccessor newMethodAccessor(Method method, boolean callerSensitive) {
         // use the root Method that will not cache caller class
         Method root = langReflectAccess.getRoot(method);
         if (root != null) {
             method = root;
         }
 
-        if (noInflation && !method.getDeclaringClass().isHidden()) {
-            return new MethodAccessorGenerator().
-                generateMethod(method.getDeclaringClass(),
-                               method.getName(),
-                               method.getParameterTypes(),
-                               method.getReturnType(),
-                               method.getExceptionTypes(),
-                               method.getModifiers());
-        } else {
-            NativeMethodAccessorImpl acc =
-                new NativeMethodAccessorImpl(method);
-            DelegatingMethodAccessorImpl res =
-                new DelegatingMethodAccessorImpl(acc);
-            acc.setParent(res);
-            return res;
-        }
+        return MethodHandleAccessorFactory.newMethodAccessor(method, callerSensitive);
     }
 
     public ConstructorAccessor newConstructorAccessor(Constructor<?> c) {
-        checkInitted();
-
         Class<?> declaringClass = c.getDeclaringClass();
         if (Modifier.isAbstract(declaringClass.getModifiers())) {
             return new InstantiationExceptionConstructorAccessorImpl(null);
@@ -237,28 +135,7 @@ public class ReflectionFactory {
             c = root;
         }
 
-        // Bootstrapping issue: since we use Class.newInstance() in
-        // the ConstructorAccessor generation process, we have to
-        // break the cycle here.
-        if (Reflection.isSubclassOf(declaringClass,
-                                    ConstructorAccessorImpl.class)) {
-            return new BootstrapConstructorAccessorImpl(c);
-        }
-
-        if (noInflation && !c.getDeclaringClass().isHidden()) {
-            return new MethodAccessorGenerator().
-                generateConstructor(c.getDeclaringClass(),
-                                    c.getParameterTypes(),
-                                    c.getExceptionTypes(),
-                                    c.getModifiers());
-        } else {
-            NativeConstructorAccessorImpl acc =
-                new NativeConstructorAccessorImpl(c);
-            DelegatingConstructorAccessorImpl res =
-                new DelegatingConstructorAccessorImpl(acc);
-            acc.setParent(res);
-            return res;
-        }
+        return MethodHandleAccessorFactory.newConstructorAccessor(c);
     }
 
     //--------------------------------------------------------------------------
@@ -266,41 +143,6 @@ public class ReflectionFactory {
     // Routines used by java.lang
     //
     //
-
-    /** Creates a new java.lang.reflect.Constructor. Access checks as
-        per java.lang.reflect.AccessibleObject are not overridden. */
-    public Constructor<?> newConstructor(Class<?> declaringClass,
-                                         Class<?>[] parameterTypes,
-                                         Class<?>[] checkedExceptions,
-                                         int modifiers,
-                                         int slot,
-                                         String signature,
-                                         byte[] annotations,
-                                         byte[] parameterAnnotations)
-    {
-        return langReflectAccess.newConstructor(declaringClass,
-                                                parameterTypes,
-                                                checkedExceptions,
-                                                modifiers,
-                                                slot,
-                                                signature,
-                                                annotations,
-                                                parameterAnnotations);
-    }
-
-    /** Gets the ConstructorAccessor object for a
-        java.lang.reflect.Constructor */
-    public ConstructorAccessor getConstructorAccessor(Constructor<?> c) {
-        return langReflectAccess.getConstructorAccessor(c);
-    }
-
-    /** Sets the ConstructorAccessor object for a
-        java.lang.reflect.Constructor */
-    public void setConstructorAccessor(Constructor<?> c,
-                                       ConstructorAccessor accessor)
-    {
-        langReflectAccess.setConstructorAccessor(c, accessor);
-    }
 
     /** Makes a copy of the passed method. The returned method is a
         "child" of the passed one; see the comments in Method.java for
@@ -313,9 +155,9 @@ public class ReflectionFactory {
      * a "child" but a "sibling" of the Method in arg. Should only be
      * used on non-root methods. */
     public Method leafCopyMethod(Method arg) {
-        return langReflectAccess.leafCopyMethod(arg);
+        Method root = langReflectAccess.getRoot(arg);
+        return langReflectAccess.copyMethod(root);
     }
-
 
     /** Makes a copy of the passed field. The returned field is a
         "child" of the passed one; see the comments in Field.java for
@@ -436,7 +278,7 @@ public class ReflectionFactory {
         while (Serializable.class.isAssignableFrom(initCl)) {
             Class<?> prev = initCl;
             if ((initCl = initCl.getSuperclass()) == null ||
-                (!disableSerialConstructorChecks && !superHasAccessibleConstructor(prev))) {
+                (!disableSerialConstructorChecks() && !superHasAccessibleConstructor(prev))) {
                 return null;
             }
         }
@@ -457,29 +299,14 @@ public class ReflectionFactory {
 
     private final Constructor<?> generateConstructor(Class<?> cl,
                                                      Constructor<?> constructorToCall) {
-
-
-        ConstructorAccessor acc = new MethodAccessorGenerator().
-            generateSerializationConstructor(cl,
-                                             constructorToCall.getParameterTypes(),
-                                             constructorToCall.getExceptionTypes(),
-                                             constructorToCall.getModifiers(),
-                                             constructorToCall.getDeclaringClass());
-        Constructor<?> c = newConstructor(constructorToCall.getDeclaringClass(),
-                                          constructorToCall.getParameterTypes(),
-                                          constructorToCall.getExceptionTypes(),
-                                          constructorToCall.getModifiers(),
-                                          langReflectAccess.
-                                          getConstructorSlot(constructorToCall),
-                                          langReflectAccess.
-                                          getConstructorSignature(constructorToCall),
-                                          langReflectAccess.
-                                          getConstructorAnnotations(constructorToCall),
-                                          langReflectAccess.
-                                          getConstructorParameterAnnotations(constructorToCall));
-        setConstructorAccessor(c, acc);
-        c.setAccessible(true);
-        return c;
+        ConstructorAccessor acc = MethodHandleAccessorFactory
+                .newSerializableConstructorAccessor(cl, constructorToCall);
+        // Unlike other root constructors, this constructor is not copied for mutation
+        // but directly mutated, as it is not cached. To cache this constructor,
+        // setAccessible call must be done on a copy and return that copy instead.
+        Constructor<?> ctor = langReflectAccess.newConstructorWithAccessor(constructorToCall, acc);
+        ctor.setAccessible(true);
+        return ctor;
     }
 
     public final MethodHandle readObjectForSerialization(Class<?> cl) {
@@ -487,7 +314,7 @@ public class ReflectionFactory {
     }
 
     public final MethodHandle readObjectNoDataForSerialization(Class<?> cl) {
-        return findReadWriteObjectForSerialization(cl, "readObjectNoData", ObjectInputStream.class);
+        return findReadWriteObjectForSerialization(cl, "readObjectNoData", null);
     }
 
     public final MethodHandle writeObjectForSerialization(Class<?> cl) {
@@ -502,7 +329,8 @@ public class ReflectionFactory {
         }
 
         try {
-            Method meth = cl.getDeclaredMethod(methodName, streamClass);
+            Method meth = streamClass == null ? cl.getDeclaredMethod(methodName)
+                    : cl.getDeclaredMethod(methodName, streamClass);
             int mods = meth.getModifiers();
             if (meth.getReturnType() != Void.TYPE ||
                     Modifier.isStatic(mods) ||
@@ -518,11 +346,51 @@ public class ReflectionFactory {
         }
     }
 
+    public final MethodHandle defaultReadObjectForSerialization(Class<?> cl) {
+        if (hasDefaultOrNoSerialization(cl)) {
+            return null;
+        }
+
+        return SharedSecrets.getJavaObjectStreamReflectionAccess().defaultReadObject(cl);
+    }
+
+    public final MethodHandle defaultWriteObjectForSerialization(Class<?> cl) {
+        if (hasDefaultOrNoSerialization(cl)) {
+            return null;
+        }
+
+        return SharedSecrets.getJavaObjectStreamReflectionAccess().defaultWriteObject(cl);
+    }
+
+    /**
+     * These are specific leaf classes which appear to be Serializable, but which
+     * have special semantics according to the serialization specification. We
+     * could theoretically include array classes here, but it is easier and clearer
+     * to just use `Class#isArray` instead.
+     */
+    private static final Set<Class<?>> nonSerializableLeafClasses = Set.of(
+        Class.class,
+        String.class,
+        ObjectStreamClass.class
+    );
+
+    private static boolean hasDefaultOrNoSerialization(Class<?> cl) {
+        return ! Serializable.class.isAssignableFrom(cl)
+            || cl.isInterface()
+            || cl.isArray()
+            || Proxy.isProxyClass(cl)
+            || Externalizable.class.isAssignableFrom(cl)
+            || cl.isEnum()
+            || cl.isRecord()
+            || cl.isHidden()
+            || nonSerializableLeafClasses.contains(cl);
+    }
+
     /**
      * Returns a MethodHandle for {@code writeReplace} on the serializable class
      * or null if no match found.
      * @param cl a serializable class
-     * @returnss the {@code writeReplace} MethodHandle or {@code null} if not found
+     * @return the {@code writeReplace} MethodHandle or {@code null} if not found
      */
     public final MethodHandle writeReplaceForSerialization(Class<?> cl) {
         return getReplaceResolveForSerialization(cl, "writeReplace");
@@ -532,7 +400,7 @@ public class ReflectionFactory {
      * Returns a MethodHandle for {@code readResolve} on the serializable class
      * or null if no match found.
      * @param cl a serializable class
-     * @returns the {@code writeReplace} MethodHandle or {@code null} if not found
+     * @return the {@code writeReplace} MethodHandle or {@code null} if not found
      */
     public final MethodHandle readResolveForSerialization(Class<?> cl) {
         return getReplaceResolveForSerialization(cl, "readResolve");
@@ -543,7 +411,7 @@ public class ReflectionFactory {
      * signature constraints.
      * @param cl a serializable class
      * @param methodName the method name to find
-     * @returns a MethodHandle for the method or {@code null} if not found or
+     * @return a MethodHandle for the method or {@code null} if not found or
      *       has the wrong signature.
      */
     private MethodHandle getReplaceResolveForSerialization(Class<?> cl,
@@ -610,7 +478,7 @@ public class ReflectionFactory {
 
     /**
      * Return the accessible constructor for OptionalDataException signaling eof.
-     * @returns the eof constructor for OptionalDataException
+     * @return the eof constructor for OptionalDataException
      */
     public final Constructor<OptionalDataException> newOptionalDataExceptionForSerialization() {
         try {
@@ -623,49 +491,122 @@ public class ReflectionFactory {
         }
     }
 
+    public final ObjectStreamField[] serialPersistentFields(Class<?> cl) {
+        if (! Serializable.class.isAssignableFrom(cl) || cl.isInterface() || cl.isEnum()) {
+            return null;
+        }
+
+        try {
+            Field field = cl.getDeclaredField("serialPersistentFields");
+            int mods = field.getModifiers();
+            if (! (Modifier.isStatic(mods) && Modifier.isPrivate(mods) && Modifier.isFinal(mods))) {
+                return null;
+            }
+            if (field.getType() != ObjectStreamField[].class) {
+                return null;
+            }
+            field.setAccessible(true);
+            ObjectStreamField[] array = (ObjectStreamField[]) field.get(null);
+            return array != null && array.length > 0 ? array.clone() : array;
+        } catch (ReflectiveOperationException e) {
+            return null;
+        }
+    }
+
+    public final Set<AccessFlag> parseAccessFlags(int mask, AccessFlag.Location location, Class<?> classFile) {
+        var cffv = classFileFormatVersion(classFile);
+        return cffv == null ?
+                AccessFlag.maskToAccessFlags(mask, location) :
+                AccessFlag.maskToAccessFlags(mask, location, cffv);
+    }
+
+    private final ClassFileFormatVersion classFileFormatVersion(Class<?> cl) {
+        int raw = SharedSecrets.getJavaLangAccess().classFileVersion(cl);
+
+        int major = raw & 0xFFFF;
+        int minor = raw >>> Character.SIZE;
+
+        assert VM.isSupportedClassFileVersion(major, minor) : major + "." + minor;
+
+        if (major >= ClassFile.JAVA_12_VERSION) {
+            if (minor == 0)
+                return ClassFileFormatVersion.fromMajor(raw);
+            return null; // preview or old preview, fallback to default handling
+        } else if (major == ClassFile.JAVA_1_VERSION) {
+            return minor < 3 ? ClassFileFormatVersion.RELEASE_0 : ClassFileFormatVersion.RELEASE_1;
+        }
+        return ClassFileFormatVersion.fromMajor(major);
+    }
+
     //--------------------------------------------------------------------------
     //
     // Internals only below this point
     //
 
-    static int inflationThreshold() {
-        return inflationThreshold;
+    /*
+     * If -Djdk.reflect.useNativeAccessorOnly is set, use the native accessor only.
+     * For testing purpose only.
+     */
+    static boolean useNativeAccessorOnly() {
+        return config().useNativeAccessorOnly;
     }
 
-    /** We have to defer full initialization of this class until after
-        the static initializer is run since java.lang.reflect.Method's
-        static initializer (more properly, that for
-        java.lang.reflect.AccessibleObject) causes this class's to be
-        run, before the system properties are set up. */
-    private static void checkInitted() {
-        if (initted) return;
+    private static boolean disableSerialConstructorChecks() {
+        return config().disableSerialConstructorChecks;
+    }
 
-        // Defer initialization until module system is initialized so as
-        // to avoid inflation and spinning bytecode in unnamed modules
-        // during early startup.
+    /**
+     * The configuration is lazily initialized after the module system is initialized. The
+     * default config would be used before the proper config is loaded.
+     *
+     * The static initializer of ReflectionFactory is run before the system properties are set up.
+     * The class initialization is caused by the class initialization of java.lang.reflect.Method
+     * (more properly, caused by the class initialization for java.lang.reflect.AccessibleObject)
+     * that happens very early VM startup, initPhase1.
+     */
+    private static @Stable Config config;
+
+    private static final Config DEFAULT_CONFIG = new Config(false, // useNativeAccessorOnly
+                                                            false); // disableSerialConstructorChecks
+
+    /**
+     * The configurations for the reflection factory. Configurable via
+     * system properties but only available after ReflectionFactory is
+     * loaded during early VM startup.
+     *
+     * Note that the default implementations of the object methods of
+     * this Config record (toString, equals, hashCode) use indy,
+     * which is available to use only after initPhase1. These methods
+     * are currently not called, but should they be needed, a workaround
+     * is to override them.
+     */
+    private record Config(boolean useNativeAccessorOnly,
+                          boolean disableSerialConstructorChecks) {
+    }
+
+    private static Config config() {
+        Config c = config;
+        if (c != null) {
+            return c;
+        }
+
+        // Always use the default configuration until the module system is initialized.
         if (!VM.isModuleSystemInited()) {
-            return;
+            return DEFAULT_CONFIG;
         }
 
-        Properties props = GetPropertyAction.privilegedGetProperties();
-        String val = props.getProperty("sun.reflect.noInflation");
-        if (val != null && val.equals("true")) {
-            noInflation = true;
-        }
+        return config = loadConfig();
+    }
 
-        val = props.getProperty("sun.reflect.inflationThreshold");
-        if (val != null) {
-            try {
-                inflationThreshold = Integer.parseInt(val);
-            } catch (NumberFormatException e) {
-                throw new RuntimeException("Unable to parse property sun.reflect.inflationThreshold", e);
-            }
-        }
+    private static Config loadConfig() {
+        assert VM.isModuleSystemInited();
 
-        disableSerialConstructorChecks =
-            "true".equals(props.getProperty("jdk.disableSerialConstructorChecks"));
+        boolean useNativeAccessorOnly =
+            "true".equals(System.getProperty("jdk.reflect.useNativeAccessorOnly"));
+        boolean disableSerialConstructorChecks =
+            "true".equals(System.getProperty("jdk.disableSerialConstructorChecks"));
 
-        initted = true;
+        return new Config(useNativeAccessorOnly, disableSerialConstructorChecks);
     }
 
     /**
@@ -673,7 +614,7 @@ public class ReflectionFactory {
      * otherwise.
      * @param cl1 a class
      * @param cl2 another class
-     * @returns true if the two classes are in the same classloader and package
+     * @return true if the two classes are in the same classloader and package
      */
     private static boolean packageEquals(Class<?> cl1, Class<?> cl2) {
         assert !cl1.isArray() && !cl2.isArray();
@@ -685,5 +626,4 @@ public class ReflectionFactory {
         return cl1.getClassLoader() == cl2.getClassLoader() &&
                 cl1.getPackageName() == cl2.getPackageName();
     }
-
 }

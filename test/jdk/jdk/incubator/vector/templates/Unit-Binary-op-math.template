@@ -1,9 +1,10 @@
+
     static $type$ [[TEST]]($type$ a, $type$ b) {
         return ($type$)([[TEST_OP]]);
     }
 
     static $type$ strict[[TEST]]($type$ a, $type$ b) {
-        return ($type$)(Strict[[TEST_OP]]);
+        return ($type$)(strict_[[TEST_OP]]);
     }
 
     @Test(dataProvider = "$type$BinaryOpProvider")

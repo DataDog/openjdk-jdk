@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 #ifndef SHARE_OOPS_OOPHANDLE_HPP
 #define SHARE_OOPS_OOPHANDLE_HPP
 
+#include "cppstdlib/type_traits.hpp"
 #include "metaprogramming/primitiveConversions.hpp"
 #include "oops/oopsHierarchy.hpp"
 
@@ -41,7 +42,7 @@ private:
   oop* _obj;
 
 public:
-  OopHandle() : _obj(NULL) {}
+  OopHandle() : _obj(nullptr) {}
   explicit OopHandle(oop* w) : _obj(w) {}
   OopHandle(OopStorage* storage, oop obj);
 
@@ -55,30 +56,23 @@ public:
     return *this;
   }
 
+  void swap(OopHandle& copy) {
+    ::swap(_obj, copy._obj);
+  }
+
   inline oop resolve() const;
   inline oop peek() const;
 
-  bool is_empty() const { return _obj == NULL; }
+  bool is_empty() const { return _obj == nullptr; }
 
   inline void release(OopStorage* storage);
 
   inline void replace(oop obj);
 
   inline oop xchg(oop new_value);
+  inline oop cmpxchg(oop old_value, oop new_value);
 
-  // Used only for removing handle.
   oop* ptr_raw() const { return _obj; }
-};
-
-// Convert OopHandle to oop*
-
-template<>
-struct PrimitiveConversions::Translate<OopHandle> : public TrueType {
-  typedef OopHandle Value;
-  typedef oop* Decayed;
-
-  static Decayed decay(Value x) { return x.ptr_raw(); }
-  static Value recover(Decayed x) { return OopHandle(x); }
 };
 
 #endif // SHARE_OOPS_OOPHANDLE_HPP

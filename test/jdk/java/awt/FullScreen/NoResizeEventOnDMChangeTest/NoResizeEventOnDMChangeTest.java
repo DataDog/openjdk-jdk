@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,8 @@
  * @bug 6646411
  * @summary Tests that full screen window and its children receive resize
             event when display mode changes
- * @author Dmitri.Trembovetski@sun.com: area=Graphics
+ * @library /test/lib
+ * @build   jdk.test.lib.Platform jtreg.SkippedException
  * @run main/othervm NoResizeEventOnDMChangeTest
  * @run main/othervm -Dsun.java2d.d3d=false NoResizeEventOnDMChangeTest
  */
@@ -45,9 +46,21 @@ import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.io.BufferedReader;
+import java.io.IOException;
+
+import static java.util.concurrent.TimeUnit.SECONDS;
+import jdk.test.lib.Platform;
+import jtreg.SkippedException;
 
 public class NoResizeEventOnDMChangeTest {
+
     public static void main(String[] args) {
+        if (Platform.isOnWayland() && !isFixDelivered()) {
+            throw new SkippedException("Test skipped because fix was not" +
+                    "delivered in current GnomeShell version");
+        }
+
         final GraphicsDevice gd = GraphicsEnvironment.
             getLocalGraphicsEnvironment().getDefaultScreenDevice();
 
@@ -151,9 +164,22 @@ public class NoResizeEventOnDMChangeTest {
                             System.err.printf("----------- Setting DM %dx%d:\n",
                                               dm1.getWidth(), dm1.getHeight());
                             try {
+                                Frame f = fsWin instanceof Frame ? (Frame) fsWin : (Frame) fsWin.getOwner();
+                                DisplayMode oldMode = f.getGraphicsConfiguration().getDevice().getDisplayMode();
                                 gd.setDisplayMode(dm1);
-                                r1.incDmChanges();
-                                r2.incDmChanges();
+                                sleep(2000);
+                                // Check if setting new display mode actually results in frame being
+                                // placed onto display with different resolution.
+                                DisplayMode newMode = f.getGraphicsConfiguration().getDevice().getDisplayMode();
+                                if (oldMode.getWidth() != newMode.getWidth()
+                                        || oldMode.getHeight() != newMode.getHeight()) {
+                                    r1.incDmChanges();
+                                    r2.incDmChanges();
+                                } else {
+                                    System.out.println("Skipping this iteration. Details:");
+                                    System.out.println("Requested device = " + gd);
+                                    System.out.println("Actual device = " + f.getGraphicsConfiguration().getDevice());
+                                }
                             } catch (IllegalArgumentException iae) {}
                         }
                     });
@@ -166,6 +192,7 @@ public class NoResizeEventOnDMChangeTest {
             fsWin.removeComponentListener(r1);
             c.removeComponentListener(r2);
         }
+
         try {
            EventQueue.invokeAndWait(new Runnable() {
                public void run() {
@@ -191,10 +218,14 @@ public class NoResizeEventOnDMChangeTest {
     }
 
     static void sleep(long ms) {
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException ex) {}
+        long targetTime = System.currentTimeMillis() + ms;
+        do {
+            try {
+                Thread.sleep(targetTime - System.currentTimeMillis());
+            } catch (InterruptedException ex) {}
+        } while (System.currentTimeMillis() < targetTime);
     }
+
     static class ResizeEventChecker extends ComponentAdapter {
         int dmChanges;
         int resizes;
@@ -213,5 +244,35 @@ public class NoResizeEventOnDMChangeTest {
         public synchronized int getDmChanges() {
             return dmChanges;
         }
+    }
+
+    private static boolean isFixDelivered() {
+        try {
+            Process process =
+                    new ProcessBuilder("/usr/bin/gnome-shell", "--version")
+                            .start();
+
+            try (BufferedReader reader = process.inputReader()) {
+                if (process.waitFor(2, SECONDS) &&  process.exitValue() == 0) {
+                    String line = reader.readLine();
+                    if (line != null) {
+                        System.out.println("Gnome shell version: " + line);
+                        String[] versionComponents = line
+                                .replaceAll("[^\\d.]", "")
+                                .split("\\.");
+
+                        if (versionComponents.length >= 1) {
+                            return Integer.parseInt(versionComponents[0]) > 42;
+                        }
+                    }
+                }
+            }
+        } catch (IOException
+                 | InterruptedException
+                 | IllegalThreadStateException
+                 | NumberFormatException ignored) {
+        }
+
+        return false;
     }
 }

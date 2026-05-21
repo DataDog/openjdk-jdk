@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,8 +25,8 @@
 #ifndef SHARE_COMPILER_DIRECTIVESPARSER_HPP
 #define SHARE_COMPILER_DIRECTIVESPARSER_HPP
 
-#include "utilities/json.hpp"
 #include "compiler/compilerDirectives.hpp"
+#include "utilities/json.hpp"
 
 enum FlagType {
   boolFlag,
@@ -55,8 +55,8 @@ class DirectivesParser : public JSON {
  public:
   static bool has_file();
   static bool parse_from_flag();
-  static bool parse_from_file(const char* filename, outputStream* st);
-  static int  parse_string(const char* string, outputStream* st);
+  static bool parse_from_file(const char* filename, outputStream* st, bool silent = false);
+  static int  parse_string(const char* string, outputStream* st, bool silent = false);
   int install_directives();
 
  private:
@@ -64,7 +64,7 @@ class DirectivesParser : public JSON {
   ~DirectivesParser();
 
   bool callback(JSON_TYPE t, JSON_VAL* v, uint level);
-  static bool parse_from_file_inner(const char* filename, outputStream* st);
+  static bool parse_from_file_inner(const char* filename, outputStream* st, bool silent = false);
 
   // types of "keys". i.e recognized <key>:<value> pairs in our JSON syntax
   typedef enum {

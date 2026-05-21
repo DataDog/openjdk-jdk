@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -111,8 +111,6 @@ import java.awt.peer.TextFieldPeer;
 import java.awt.peer.TrayIconPeer;
 import java.awt.peer.WindowPeer;
 import java.beans.PropertyChangeListener;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -130,8 +128,6 @@ import javax.swing.LookAndFeel;
 import javax.swing.UIDefaults;
 
 import sun.awt.AWTAccessor;
-import sun.awt.AWTPermissions;
-import sun.awt.AppContext;
 import sun.awt.DisplayChangedListener;
 import sun.awt.LightweightFrame;
 import sun.awt.SunToolkit;
@@ -146,8 +142,6 @@ import sun.awt.util.ThreadGroupUtils;
 import sun.font.FontConfigManager;
 import sun.java2d.SunGraphicsEnvironment;
 import sun.print.PrintJob2D;
-import sun.security.action.GetBooleanAction;
-import sun.security.action.GetPropertyAction;
 import sun.util.logging.PlatformLogger;
 
 import static sun.awt.X11.XlibUtil.scaleDown;
@@ -202,7 +196,6 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
     private static final X11GraphicsDevice device;
     private static final long display;
     static int awt_multiclick_time;
-    static boolean securityWarningEnabled;
 
     /**
      * Dimensions of default virtual screen in pixels. These values are used to
@@ -214,7 +207,6 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
     private static XMouseInfoPeer xPeer;
 
     static {
-        initSecurityWarning();
         if (GraphicsEnvironment.isHeadless()) {
             localEnv = null;
             device = null;
@@ -241,18 +233,6 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
     static Thread toolkitThread;
     static boolean isToolkitThread() {
         return Thread.currentThread() == toolkitThread;
-    }
-
-    static void initSecurityWarning() {
-        // Enable warning only for internal builds
-        @SuppressWarnings("removal")
-        String runtime = AccessController.doPrivileged(
-                             new GetPropertyAction("java.runtime.version"));
-        securityWarningEnabled = (runtime != null && runtime.contains("internal"));
-    }
-
-    static boolean isSecurityWarningEnabled() {
-        return securityWarningEnabled;
     }
 
     static native void awt_output_flush();
@@ -325,7 +305,6 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
         }
     }
 
-    @SuppressWarnings("removal")
     void init() {
         awtLock();
         try {
@@ -338,13 +317,10 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
             arrowCursor = XlibWrapper.XCreateFontCursor(XToolkit.getDisplay(),
                 XCursorFontConstants.XC_arrow);
             final String extraButtons = "sun.awt.enableExtraMouseButtons";
-            AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-                areExtraMouseButtonsEnabled =
-                    Boolean.parseBoolean(System.getProperty(extraButtons, "true"));
-                //set system property if not yet assigned
-                System.setProperty(extraButtons, ""+areExtraMouseButtonsEnabled);
-                return null;
-            });
+            areExtraMouseButtonsEnabled =
+                Boolean.parseBoolean(System.getProperty(extraButtons, "true"));
+            //set system property if not yet assigned
+            System.setProperty(extraButtons, "" + areExtraMouseButtonsEnabled);
             // Detect display mode changes
             XlibWrapper.XSelectInput(XToolkit.getDisplay(), XToolkit.getDefaultRootWindow(), XConstants.StructureNotifyMask);
             XToolkit.addEventDispatcher(XToolkit.getDefaultRootWindow(), new XEventDispatcher() {
@@ -358,34 +334,35 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
                         } finally {
                             awtLock();
                         }
+                    } else {
+                        final XAtom XA_NET_WORKAREA = XAtom.get("_NET_WORKAREA");
+                        final boolean rootWindowWorkareaResized = (ev.get_type() == XConstants.PropertyNotify
+                                && ev.get_xproperty().get_atom() == XA_NET_WORKAREA.getAtom());
+                        if (rootWindowWorkareaResized) resetScreenInsetsCache();
                     }
                 }
             });
         } finally {
             awtUnlock();
         }
-        PrivilegedAction<Void> a = () -> {
-            Runnable r = () -> {
-                XSystemTrayPeer peer = XSystemTrayPeer.getPeerInstance();
-                if (peer != null) {
-                    peer.dispose();
-                }
-                if (xs != null) {
-                    ((XAWTXSettings)xs).dispose();
-                }
-                freeXKB();
-                if (log.isLoggable(PlatformLogger.Level.FINE)) {
-                    dumpPeers();
-                }
-            };
-            String name = "XToolkt-Shutdown-Thread";
-            Thread shutdownThread = new Thread(
-                    ThreadGroupUtils.getRootThreadGroup(), r, name, 0, false);
-            shutdownThread.setContextClassLoader(null);
-            Runtime.getRuntime().addShutdownHook(shutdownThread);
-            return null;
+        Runnable r = () -> {
+            XSystemTrayPeer peer = XSystemTrayPeer.getPeerInstance();
+            if (peer != null) {
+                peer.dispose();
+            }
+            if (xs != null) {
+                ((XAWTXSettings)xs).dispose();
+            }
+            freeXKB();
+            if (log.isLoggable(PlatformLogger.Level.FINE)) {
+                dumpPeers();
+            }
         };
-        AccessController.doPrivileged(a);
+        String name = "XToolkt-Shutdown-Thread";
+        Thread shutdownThread = new Thread(
+                ThreadGroupUtils.getRootThreadGroup(), r, name, 0, false);
+        shutdownThread.setContextClassLoader(null);
+        Runtime.getRuntime().addShutdownHook(shutdownThread);
     }
 
     static String getCorrectXIDString(String val) {
@@ -403,7 +380,6 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
         return awtAppClassName;
     }
 
-    @SuppressWarnings("removal")
     public XToolkit() {
         super();
         if (PerformanceLogger.loggingEnabled()) {
@@ -426,16 +402,13 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
             init();
             XWM.init();
 
-            toolkitThread = AccessController.doPrivileged((PrivilegedAction<Thread>) () -> {
-                String name = "AWT-XAWT";
-                Thread thread = new Thread(
+            String name = "AWT-XAWT";
+            toolkitThread = new Thread(
                         ThreadGroupUtils.getRootThreadGroup(), this, name,
                         0, false);
-                thread.setContextClassLoader(null);
-                thread.setPriority(Thread.NORM_PRIORITY + 1);
-                thread.setDaemon(true);
-                return thread;
-            });
+            toolkitThread.setContextClassLoader(null);
+            toolkitThread.setPriority(Thread.NORM_PRIORITY + 1);
+            toolkitThread.setDaemon(true);
             toolkitThread.start();
         }
     }
@@ -624,9 +597,7 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
             }
         }
         if (dispatchers != null) {
-            Iterator<XEventDispatcher> iter = dispatchers.iterator();
-            while (iter.hasNext()) {
-                XEventDispatcher disp = iter.next();
+            for (XEventDispatcher disp : dispatchers) {
                 disp.dispatchEvent(ev);
             }
         }
@@ -653,14 +624,8 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
         while(true) {
             // Fix for 6829923: we should gracefully handle toolkit thread interruption
             if (Thread.currentThread().isInterrupted()) {
-                // We expect interruption from the AppContext.dispose() method only.
                 // If the thread is interrupted from another place, let's skip it
-                // for compatibility reasons. Probably some time later we'll remove
-                // the check for AppContext.isDisposed() and will unconditionally
-                // break the loop here.
-                if (AppContext.getAppContext().isDisposed()) {
-                    break;
-                }
+                // for compatibility reasons.
             }
             awtLock();
             try {
@@ -729,9 +694,6 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
                 }
 
                 dispatchEvent(ev);
-            } catch (ThreadDeath td) {
-                XBaseWindow.ungrabInput();
-                return;
             } catch (Throwable thr) {
                 XBaseWindow.ungrabInput();
                 processException(thr);
@@ -848,8 +810,7 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
      * When two screens overlap and the first contains a dock(*****), then
      * _NET_WORKAREA may start at point x1,y1 and end at point x2,y2.
      */
-    @Override
-    public Insets getScreenInsets(final GraphicsConfiguration gc) {
+    private Insets getScreenInsetsImpl(final GraphicsConfiguration gc) {
         GraphicsDevice gd = gc.getDevice();
         XNETProtocol np = XWM.getWM().getNETProtocol();
         if (np == null || !(gd instanceof X11GraphicsDevice) || !np.active()) {
@@ -874,6 +835,34 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
             return new Insets(0, 0, 0, 0);
         } finally {
             XToolkit.awtUnlock();
+        }
+    }
+
+    private void resetScreenInsetsCache() {
+        final GraphicsDevice[] devices = ((X11GraphicsEnvironment)GraphicsEnvironment.
+                getLocalGraphicsEnvironment()).getScreenDevices();
+        for (var gd : devices) {
+            ((X11GraphicsDevice)gd).resetInsets();
+        }
+    }
+
+    @Override
+    public Insets getScreenInsets(final GraphicsConfiguration gc) {
+        final GraphicsDevice gd = gc.getDevice();
+        if (gd instanceof X11GraphicsDevice x11Device) {
+            Insets insets = x11Device.getInsets();
+            if (insets == null) {
+                synchronized (x11Device) {
+                    insets = x11Device.getInsets();
+                    if (insets == null) {
+                        insets = getScreenInsetsImpl(gc);
+                        x11Device.setInsets(insets);
+                    }
+                }
+            }
+            return (Insets) insets.clone();
+        } else {
+            return super.getScreenInsets(gc);
         }
     }
 
@@ -1092,11 +1081,9 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
      * Returns the value of "sun.awt.disableGtkFileDialogs" property. Default
      * value is {@code false}.
      */
-    @SuppressWarnings("removal")
     public static synchronized boolean getSunAwtDisableGtkFileDialogs() {
         if (sunAwtDisableGtkFileDialogs == null) {
-            sunAwtDisableGtkFileDialogs = AccessController.doPrivileged(
-                                              new GetBooleanAction("sun.awt.disableGtkFileDialogs"));
+            sunAwtDisableGtkFileDialogs = Boolean.getBoolean("sun.awt.disableGtkFileDialogs");
         }
         return sunAwtDisableGtkFileDialogs.booleanValue();
     }
@@ -1237,11 +1224,6 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
 
     @Override
     public  Clipboard getSystemClipboard() {
-        @SuppressWarnings("removal")
-        SecurityManager security = System.getSecurityManager();
-        if (security != null) {
-            security.checkPermission(AWTPermissions.ACCESS_CLIPBOARD_PERMISSION);
-        }
         synchronized (this) {
             if (clipboard == null) {
                 clipboard = new XClipboard("System", "CLIPBOARD");
@@ -1252,11 +1234,6 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
 
     @Override
     public Clipboard getSystemSelection() {
-        @SuppressWarnings("removal")
-        SecurityManager security = System.getSecurityManager();
-        if (security != null) {
-            security.checkPermission(AWTPermissions.ACCESS_CLIPBOARD_PERMISSION);
-        }
         synchronized (this) {
             if (selection == null) {
                 selection = new XClipboard("Selection", "PRIMARY");
@@ -1378,9 +1355,7 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
                         awt_multiclick_time = AWT_MULTICLICK_DEFAULT_TIME;
                     }
                 }
-            } catch (NumberFormatException nf) {
-                awt_multiclick_time = AWT_MULTICLICK_DEFAULT_TIME;
-            } catch (NullPointerException npe) {
+            } catch (NumberFormatException | NullPointerException e) {
                 awt_multiclick_time = AWT_MULTICLICK_DEFAULT_TIME;
             }
         } finally {
@@ -1495,7 +1470,7 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
             } catch (InterruptedException ie) {
             // Note: the returned timeStamp can be incorrect in this case.
                 if (log.isLoggable(PlatformLogger.Level.FINE)) {
-                    log.fine("Catched exception, timeStamp may not be correct (ie = " + ie + ")");
+                    log.fine("Caught exception, timeStamp may not be correct (ie = " + ie + ")");
                 }
             }
         } finally {
@@ -1540,14 +1515,14 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
         try {
             if (numberOfButtons == 0) {
                 numberOfButtons = getNumberOfButtonsImpl();
-                numberOfButtons = (numberOfButtons > MAX_BUTTONS_SUPPORTED)? MAX_BUTTONS_SUPPORTED : numberOfButtons;
+                numberOfButtons = (numberOfButtons > MAX_BUTTONS_SUPPORTED) ? MAX_BUTTONS_SUPPORTED : numberOfButtons;
                 //4th and 5th buttons are for wheel and shouldn't be reported as buttons.
                 //If we have more than 3 physical buttons and a wheel, we report N-2 buttons.
                 //If we have 3 physical buttons and a wheel, we report 3 buttons.
                 //If we have 1,2,3 physical buttons, we report it as is i.e. 1,2 or 3 respectively.
-                if (numberOfButtons >=5) {
+                if (numberOfButtons >= 5) {
                     numberOfButtons -= 2;
-                } else if (numberOfButtons == 4 || numberOfButtons ==5){
+                } else if (numberOfButtons == 4 || numberOfButtons == 5) {
                     numberOfButtons = 3;
                 }
             }
@@ -1569,7 +1544,7 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
     @Override
     protected Object lazilyLoadDesktopProperty(String name) {
         if (name.startsWith(prefix)) {
-            String cursorName = name.substring(prefix.length(), name.length()) + postfix;
+            String cursorName = name.substring(prefix.length()) + postfix;
 
             try {
                 return Cursor.getSystemCustomCursor(cursorName);
@@ -1661,9 +1636,7 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
             return;
         }
 
-        Iterator<Map.Entry<String, Object>> i = updatedSettings.entrySet().iterator();
-        while (i.hasNext()) {
-            Map.Entry<String, Object> e = i.next();
+        for (Map.Entry<String, Object> e : updatedSettings.entrySet()) {
             String name = e.getKey();
 
             name = "gnome." + name;
@@ -1790,7 +1763,11 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
         final int altL = keysymToPrimaryKeycode(XKeySymConstants.XK_Alt_L);
         final int altR = keysymToPrimaryKeycode(XKeySymConstants.XK_Alt_R);
         final int numLock = keysymToPrimaryKeycode(XKeySymConstants.XK_Num_Lock);
-        final int modeSwitch = keysymToPrimaryKeycode(XKeySymConstants.XK_Mode_switch);
+        int modeSwitchTmp = keysymToPrimaryKeycode(XKeySymConstants.XK_Mode_switch);
+        if (modeSwitchTmp == 0) {
+            modeSwitchTmp = keysymToPrimaryKeycode(XKeySymConstants.XK_ISO_Level3_Shift);
+        }
+        final int modeSwitch = modeSwitchTmp;
         final int shiftLock = keysymToPrimaryKeycode(XKeySymConstants.XK_Shift_Lock);
         final int capsLock  = keysymToPrimaryKeycode(XKeySymConstants.XK_Caps_Lock);
 
@@ -1915,7 +1892,7 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
      * @param task a Runnable which {@code run} method will be called
      *        on the toolkit thread when {@code interval} milliseconds
      *        elapse
-     * @param interval an interal in milliseconds
+     * @param interval an interval in milliseconds
      *
      * @throws NullPointerException if {@code task} is {@code null}
      * @throws IllegalArgumentException if {@code interval} is not positive
@@ -1992,9 +1969,7 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
         while (time.compareTo(currentTime) <= 0) {
             java.util.List<Runnable> tasks = timeoutTasks.remove(time);
 
-            for (Iterator<Runnable> iter = tasks.iterator(); iter.hasNext();) {
-                Runnable task = iter.next();
-
+            for (Runnable task : tasks) {
                 if (timeoutTaskLog.isLoggable(PlatformLogger.Level.FINER)) {
                     timeoutTaskLog.finer("XToolkit.callTimeoutTasks(): current time={0}" +
                                          ";  about to run task={1}", Long.valueOf(currentTime), task);
@@ -2002,8 +1977,6 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
 
                 try {
                     task.run();
-                } catch (ThreadDeath td) {
-                    throw td;
                 } catch (Throwable thr) {
                     processException(thr);
                 }
@@ -2074,14 +2047,6 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
                (exclusionType == Dialog.ModalExclusionType.TOOLKIT_EXCLUDE);
     }
 
-    static EventQueue getEventQueue(Object target) {
-        AppContext appContext = targetToAppContext(target);
-        if (appContext != null) {
-            return (EventQueue)appContext.get(AppContext.EVENT_QUEUE_KEY);
-        }
-        return null;
-    }
-
     static void removeSourceEvents(EventQueue queue,
                                    Object source,
                                    boolean removeAllEvents) {
@@ -2119,9 +2084,7 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
     }
 
     private static void setBackingStoreType() {
-        @SuppressWarnings("removal")
-        String prop = AccessController.doPrivileged(
-                new sun.security.action.GetPropertyAction("sun.awt.backingStore"));
+        String prop = System.getProperty("sun.awt.backingStore");
 
         if (prop == null) {
             backingStoreType = XConstants.NotUseful;
@@ -2398,7 +2361,7 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
     private static int oops_position = 0;
 
     /**
-     * @inheritDoc
+     * {@inheritDoc}
      */
     @Override
     protected boolean syncNativeQueue(long timeout) {
@@ -2412,7 +2375,7 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
                     @Override
                     public void dispatchEvent(XEvent e) {
                         if (e.get_type() == XConstants.ConfigureNotify) {
-                            // OOPS ConfigureNotify event catched
+                            // OOPS ConfigureNotify event caught
                             oops_updated = true;
                             awtLockNotifyAll();
                         }
@@ -2545,8 +2508,7 @@ public final class XToolkit extends UNIXToolkit implements Runnable {
      * Returns the value of "sun.awt.disablegrab" property. Default
      * value is {@code false}.
      */
-    @SuppressWarnings("removal")
     public static boolean getSunAwtDisableGrab() {
-        return AccessController.doPrivileged(new GetBooleanAction("sun.awt.disablegrab"));
+        return Boolean.getBoolean("sun.awt.disablegrab");
     }
 }

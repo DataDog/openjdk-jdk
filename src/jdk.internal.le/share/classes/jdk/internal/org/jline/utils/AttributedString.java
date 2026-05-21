@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2016, the original author or authors.
+ * Copyright (c) 2002-2016, the original author(s).
  *
  * This software is distributable under the BSD license. See the terms of the
  * BSD license in the documentation provided with this software.
@@ -15,6 +15,8 @@ import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import jdk.internal.org.jline.terminal.Terminal;
+
 /**
  * Attributed string.
  * Instances of this class are immutables.
@@ -25,7 +27,7 @@ import java.util.regex.Pattern;
 public class AttributedString extends AttributedCharSequence {
 
     final char[] buffer;
-    final int[] style;
+    final long[] style;
     final int start;
     final int end;
     public static final AttributedString EMPTY = new AttributedString("");
@@ -78,7 +80,7 @@ public class AttributedString extends AttributedCharSequence {
             for (int i = 0; i < l; i++) {
                 buffer[i] = str.charAt(start + i);
             }
-            style = new int[l];
+            style = new long[l];
             if (s != null) {
                 Arrays.fill(style, s.getStyle());
             }
@@ -87,7 +89,7 @@ public class AttributedString extends AttributedCharSequence {
         }
     }
 
-    AttributedString(char[] buffer, int[] style, int start, int end) {
+    AttributedString(char[] buffer, long[] style, int start, int end) {
         this.buffer = buffer;
         this.style = style;
         this.start = start;
@@ -103,11 +105,28 @@ public class AttributedString extends AttributedCharSequence {
     }
 
     public static AttributedString fromAnsi(String ansi, List<Integer> tabs) {
+        return fromAnsi(ansi, tabs, null, null);
+    }
+
+    public static AttributedString fromAnsi(String ansi, Terminal terminal) {
+        String alternateIn, alternateOut;
+        if (!DISABLE_ALTERNATE_CHARSET) {
+            alternateIn = Curses.tputs(terminal.getStringCapability(InfoCmp.Capability.enter_alt_charset_mode));
+            alternateOut = Curses.tputs(terminal.getStringCapability(InfoCmp.Capability.exit_alt_charset_mode));
+        } else {
+            alternateIn = null;
+            alternateOut = null;
+        }
+        return fromAnsi(ansi, Arrays.asList(0), alternateIn, alternateOut);
+    }
+
+    public static AttributedString fromAnsi(String ansi, List<Integer> tabs, String altIn, String altOut) {
         if (ansi == null) {
             return null;
         }
         return new AttributedStringBuilder(ansi.length())
                 .tabs(tabs)
+                .altCharset(altIn, altOut)
                 .ansiAppend(ansi)
                 .toAttributedString();
     }
@@ -116,9 +135,7 @@ public class AttributedString extends AttributedCharSequence {
         if (ansi == null) {
             return null;
         }
-        return new AttributedStringBuilder(ansi.length())
-                .ansiAppend(ansi)
-                .toString();
+        return new AttributedStringBuilder(ansi.length()).ansiAppend(ansi).toString();
     }
 
     @Override
@@ -142,7 +159,7 @@ public class AttributedString extends AttributedCharSequence {
     }
 
     @Override
-    int styleCodeAt(int index) {
+    long styleCodeAt(int index) {
         return style[start + index];
     }
 
@@ -155,14 +172,14 @@ public class AttributedString extends AttributedCharSequence {
         Matcher matcher = pattern.matcher(this);
         boolean result = matcher.find();
         if (result) {
-            int[] newstyle = this.style.clone();
+            long[] newstyle = this.style.clone();
             do {
                 for (int i = matcher.start(); i < matcher.end(); i++) {
                     newstyle[this.start + i] = (newstyle[this.start + i] & ~style.getMask()) | style.getStyle();
                 }
                 result = matcher.find();
             } while (result);
-            return new AttributedString(buffer, newstyle, start , end);
+            return new AttributedString(buffer, newstyle, start, end);
         }
         return this;
     }
@@ -179,15 +196,16 @@ public class AttributedString extends AttributedCharSequence {
 
     private boolean arrEq(char[] a1, char[] a2, int s1, int s2, int l) {
         for (int i = 0; i < l; i++) {
-            if (a1[s1+i] != a2[s2+i]) {
+            if (a1[s1 + i] != a2[s2 + i]) {
                 return false;
             }
         }
         return true;
     }
-    private boolean arrEq(int[] a1, int[] a2, int s1, int s2, int l) {
+
+    private boolean arrEq(long[] a1, long[] a2, int s1, int s2, int l) {
         for (int i = 0; i < l; i++) {
-            if (a1[s1+i] != a2[s2+i]) {
+            if (a1[s1 + i] != a2[s2 + i]) {
                 return false;
             }
         }
@@ -221,5 +239,4 @@ public class AttributedString extends AttributedCharSequence {
         }
         return sb.toAttributedString();
     }
-
 }

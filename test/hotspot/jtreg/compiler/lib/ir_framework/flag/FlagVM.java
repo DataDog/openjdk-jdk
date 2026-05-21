@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,8 +27,9 @@ import compiler.lib.ir_framework.CompLevel;
 import compiler.lib.ir_framework.TestFramework;
 import compiler.lib.ir_framework.shared.TestFrameworkException;
 import compiler.lib.ir_framework.shared.TestRunException;
+import jdk.test.lib.Platform;
 import jdk.test.lib.process.ProcessTools;
-import sun.hotspot.WhiteBox;
+import jdk.test.whitebox.WhiteBox;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -37,22 +38,25 @@ import java.util.ArrayList;
 import java.util.Arrays;
 
 /**
- * This class' main method is called from {@link TestFramework} and represents the so-called "flag VM". It uses the
- * Whitebox API to determine the necessary additional flags to run the test VM (e.g. to do IR matching). It returns
+ * This class' main method is called from {@link TestFramework} and represents the so-called "Flag VM". It uses the
+ * Whitebox API to determine the necessary additional flags to run the Test VM (e.g. to do IR matching). It returns
  * the flags over the dedicated TestFramework socket.
  */
 public class FlagVM {
     public static final String TEST_VM_FLAGS_FILE_PREFIX = "test-vm-flags-pid-";
-    public static final String TEST_VM_FLAGS_FILE_POSTFIX = ".log";
+    public static final String FILE_POSTFIX = ".log";
     public static final String TEST_VM_FLAGS_DELIMITER = " ";
+    public static final String TEST_VM_COMPILE_COMMANDS_PREFIX = "test-vm-compile-commands-pid-";
 
-    private static final String TEST_VM_FLAGS_FILE;
+    public static final String TEST_VM_FLAGS_FILE;
+    public static final String TEST_VM_COMPILE_COMMANDS_FILE;
     private static final WhiteBox WHITE_BOX;
 
     static {
         try {
             WHITE_BOX = WhiteBox.getWhiteBox();
-            TEST_VM_FLAGS_FILE = TEST_VM_FLAGS_FILE_PREFIX + ProcessTools.getProcessId() + TEST_VM_FLAGS_FILE_POSTFIX;
+            TEST_VM_FLAGS_FILE = TEST_VM_FLAGS_FILE_PREFIX + ProcessTools.getProcessId() + FILE_POSTFIX;
+            TEST_VM_COMPILE_COMMANDS_FILE = TEST_VM_COMPILE_COMMANDS_PREFIX + ProcessTools.getProcessId() + FILE_POSTFIX;
         } catch (UnsatisfiedLinkError e) {
             throw new TestFrameworkException("Could not load WhiteBox", e);
         } catch (Exception e) {
@@ -72,19 +76,15 @@ public class FlagVM {
     private static final boolean EXCLUDE_RANDOM = Boolean.getBoolean("ExcludeRandom");
     private static final boolean FLIP_C1_C2 = Boolean.getBoolean("FlipC1C2");
     private static final boolean REQUESTED_VERIFY_IR = Boolean.parseBoolean(System.getProperty("VerifyIR", "true"));
-    private static final boolean VERIFY_IR = REQUESTED_VERIFY_IR && USE_COMPILER && !EXCLUDE_RANDOM && !FLIP_C1_C2 && !TEST_C1;
-
-    private static String[] getPrintFlags() {
-        return new String[] {"-XX:+PrintCompilation", "-XX:+UnlockDiagnosticVMOptions"};
-    }
+    private static final boolean VERIFY_IR = REQUESTED_VERIFY_IR && USE_COMPILER && !EXCLUDE_RANDOM && !FLIP_C1_C2 && !TEST_C1 && Platform.isServer();
 
     /**
-     * Main entry point of the flag VM.
+     * Main entry point of the Flag VM.
      */
     public static void main(String[] args) {
         String testClassName = args[0];
         if (VERBOSE) {
-            System.out.println("FlagVM main() called. Prepare test VM flags to run class " + testClassName);
+            System.out.println("FlagVM main() called. Prepare Test VM flags to run class " + testClassName);
         }
         Class<?> testClass;
         try {
@@ -96,8 +96,8 @@ public class FlagVM {
     }
 
     /**
-     * Emit test VM flags to the dedicated test VM flags file to parse them from the TestFramework "driver" VM again
-     * which adds them to the test VM.
+     * Emit Test VM flags to the dedicated Test VM flags file to parse them from the TestFramework Driver VM again
+     * which adds them to the Test VM.
      */
     private static void emitTestVMFlags(ArrayList<String> flags) {
         try (var bw = Files.newBufferedWriter(Paths.get(TEST_VM_FLAGS_FILE))) {
@@ -114,22 +114,24 @@ public class FlagVM {
     private static ArrayList<String> setupIrVerificationFlags(Class<?> testClass) {
         ArrayList<String> cmds = new ArrayList<>();
         if (VERIFY_IR) {
-            // Add print flags for IR verification
-            cmds.addAll(Arrays.asList(getPrintFlags()));
-            cmds.add("-XX:+LogCompilation");
-            cmds.add("-XX:CompileCommand=log," + testClass.getCanonicalName() + "::*");
-            addBoolOptionForClass(cmds, testClass, "PrintIdeal");
-            addBoolOptionForClass(cmds, testClass, "PrintOptoAssembly");
-            // Always trap for exception throwing to not confuse IR verification
-            cmds.add("-XX:-OmitStackTraceInFastThrow");
-            cmds.add("-DShouldDoIRVerification=true");
+            addIRVerificationFlags(cmds, testClass);
         } else {
             cmds.add("-DShouldDoIRVerification=false");
         }
         return cmds;
     }
 
-    private static void addBoolOptionForClass(ArrayList<String> cmds, Class<?> testClass, String option) {
-        cmds.add("-XX:CompileCommand=option," + testClass.getCanonicalName() + "::*,bool," + option + ",true");
+    private static void addIRVerificationFlags(ArrayList<String> cmds, Class<?> testClass) {
+        cmds.addAll(Arrays.asList(getPrintFlags()));
+        cmds.add("-XX:+LogCompilation");
+        CompilerDirectivesFlagBuilder compilerDirectivesFlagBuilder = new CompilerDirectivesFlagBuilder(testClass);
+        cmds.addAll(compilerDirectivesFlagBuilder.build());
+        // Always trap for exception throwing to not confuse IR verification
+        cmds.add("-XX:-OmitStackTraceInFastThrow");
+        cmds.add("-DShouldDoIRVerification=true");
+    }
+
+    private static String[] getPrintFlags() {
+        return new String[] {"-XX:+PrintCompilation", "-XX:+UnlockDiagnosticVMOptions"};
     }
 }

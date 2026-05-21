@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,13 +25,12 @@
 #ifndef SHARE_C1_C1_FRAMEMAP_HPP
 #define SHARE_C1_C1_FRAMEMAP_HPP
 
-#include "asm/macroAssembler.hpp"
 #include "c1/c1_Defs.hpp"
 #include "c1/c1_LIR.hpp"
 #include "code/vmreg.hpp"
 #include "memory/allocation.hpp"
+#include "oops/compressedOops.hpp"
 #include "runtime/frame.hpp"
-#include "runtime/synchronizer.hpp"
 #include "utilities/globalDefinitions.hpp"
 #include "utilities/macros.hpp"
 
@@ -43,7 +42,7 @@ class CallingConvention;
 //--------------------------------------------------------
 
 //  This class is responsible of mapping items (locals, monitors, spill
-//  slots and registers to their frame location
+//  slots and registers) to their frame location
 //
 //  The monitors are specified by a consecutive index, although each monitor entry
 //  occupies two words. The monitor_index is 0.._num_monitors
@@ -58,12 +57,8 @@ class CallingConvention;
 //  |arguments | x | monitors | spill | reserved argument area | ABI |
 //  +----------+---+----------+-------+------------------------+-----+
 //
-//  x =  ABI area (SPARC) or  return adress and link (i486)
+//  x =  ABI area (SPARC) or  return address and link (i486)
 //  ABI  = ABI area (SPARC) or nothing (i486)
-
-
-class LIR_OprDesc;
-typedef LIR_OprDesc* LIR_Opr;
 
 
 class FrameMap : public CompilationResourceObj {
@@ -81,9 +76,14 @@ class FrameMap : public CompilationResourceObj {
     spill_slot_size_in_bytes = 4
   };
 
+  void update_reserved_argument_area_size (int size) {
+    assert(size >= 0, "check");
+    _reserved_argument_area_size = MAX2(_reserved_argument_area_size, size);
+  }
+
 #include CPU_HEADER(c1_FrameMap)
 
-  friend class LIR_OprDesc;
+  friend class LIR_Opr;
 
  private:
   static bool         _init_done;
@@ -109,26 +109,21 @@ class FrameMap : public CompilationResourceObj {
 
   static Register cpu_rnr2reg (int rnr) {
     assert(_init_done, "tables not initialized");
-    debug_only(cpu_range_check(rnr);)
+    DEBUG_ONLY(cpu_range_check(rnr);)
     return _cpu_rnr2reg[rnr];
   }
 
   static int cpu_reg2rnr (Register reg) {
     assert(_init_done, "tables not initialized");
-    debug_only(cpu_range_check(reg->encoding());)
+    DEBUG_ONLY(cpu_range_check(reg->encoding());)
     return _cpu_reg2rnr[reg->encoding()];
   }
 
   static void map_register(int rnr, Register reg) {
-    debug_only(cpu_range_check(rnr);)
-    debug_only(cpu_range_check(reg->encoding());)
+    DEBUG_ONLY(cpu_range_check(rnr);)
+    DEBUG_ONLY(cpu_range_check(reg->encoding());)
     _cpu_rnr2reg[rnr] = reg;
     _cpu_reg2rnr[reg->encoding()] = rnr;
-  }
-
-  void update_reserved_argument_area_size (int size) {
-    assert(size >= 0, "check");
-    _reserved_argument_area_size = MAX2(_reserved_argument_area_size, size);
   }
 
  protected:
@@ -136,7 +131,6 @@ class FrameMap : public CompilationResourceObj {
   static void cpu_range_check (int rnr)          { assert(0 <= rnr && rnr < nof_cpu_regs, "cpu register number is too big"); }
   static void fpu_range_check (int rnr)          { assert(0 <= rnr && rnr < nof_fpu_regs, "fpu register number is too big"); }
 #endif
-
 
   ByteSize sp_offset_for_monitor_base(const int idx) const;
 
@@ -160,9 +154,6 @@ class FrameMap : public CompilationResourceObj {
  public:
   // Opr representing the stack_pointer on this platform
   static LIR_Opr stack_pointer();
-
-  // JSR 292
-  static LIR_Opr method_handle_invoke_SP_save_opr();
 
   static BasicTypeArray*     signature_type_array_for(const ciMethod* method);
 
@@ -231,7 +222,7 @@ class FrameMap : public CompilationResourceObj {
     return location_for_sp_offset(sp_offset_for_monitor_object(monitor_index), Location::oop, loc);
   }
   bool locations_for_slot  (int index, Location::Type loc_type,
-                            Location* loc, Location* second = NULL) const;
+                            Location* loc, Location* second = nullptr) const;
 
   VMReg slot_regname(int index) const {
     return sp_offset2vmreg(sp_offset_for_slot(index));

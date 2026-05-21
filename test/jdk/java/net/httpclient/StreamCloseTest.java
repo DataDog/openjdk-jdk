@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2021, NTT DATA.
  *
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -26,18 +26,12 @@
 /*
  * @test
  * @bug 8257736
- * @modules java.net.http
- *          java.base/sun.net.www.http
- *          java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- * @library http2/server
- * @build Http2TestServer Http2TestExchange
- * @compile HttpServerAdapters.java
- * @run testng/othervm StreamCloseTest
+ * @library /test/jdk/java/net/httpclient/lib
+ * @library /test/lib
+ * @build jdk.httpclient.test.lib.common.HttpServerAdapters
+ *        jdk.httpclient.test.lib.http2.Http2TestServer
+ * @run junit/othervm ${test.main.class}
  */
-
-import com.sun.net.httpserver.HttpServer;
 
 import java.io.InputStream;
 import java.io.IOException;
@@ -47,14 +41,13 @@ import java.net.http.HttpClient.Version;
 import java.net.http.HttpRequest;
 import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse.BodyHandlers;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.net.URI;
+import jdk.httpclient.test.lib.common.HttpServerAdapters;
 
-import org.testng.annotations.AfterTest;
-import org.testng.annotations.BeforeTest;
-import org.testng.annotations.Test;
-import org.testng.Assert;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 public class StreamCloseTest {
 
@@ -89,10 +82,9 @@ public class StreamCloseTest {
 
     private static HttpServerAdapters.HttpTestServer httpTestServer;
 
-    @BeforeTest
-    public void setup() throws Exception {
-        InetSocketAddress sa = new InetSocketAddress(InetAddress.getLoopbackAddress(), 0);
-        httpTestServer = HttpServerAdapters.HttpTestServer.of(HttpServer.create(sa, 0));
+    @BeforeAll
+    public static void setup() throws Exception {
+        httpTestServer = HttpServerAdapters.HttpTestServer.create(Version.HTTP_1_1);
         httpTestServer.addHandler(new HttpServerAdapters.HttpTestEchoHandler(), "/");
         URI uri = URI.create("http://" + httpTestServer.serverAuthority() + "/");
         httpTestServer.start();
@@ -104,8 +96,8 @@ public class StreamCloseTest {
         requestBuilder = HttpRequest.newBuilder(uri);
     }
 
-    @AfterTest
-    public void teardown() throws Exception {
+    @AfterAll
+    public static void teardown() throws Exception {
         httpTestServer.stop();
     }
 
@@ -116,7 +108,7 @@ public class StreamCloseTest {
                                             .POST(BodyPublishers.ofInputStream(() -> in))
                                             .build();
         client.send(request, BodyHandlers.discarding());
-        Assert.assertTrue(in.closeCalled, "InputStream was not closed!");
+        Assertions.assertTrue(in.closeCalled, "InputStream was not closed!");
     }
 
     @Test
@@ -128,9 +120,9 @@ public class StreamCloseTest {
         try {
             client.send(request, BodyHandlers.discarding());
         } catch (IOException e) { // expected
-            Assert.assertTrue(in.closeCalled, "InputStream was not closed!");
+            Assertions.assertTrue(in.closeCalled, "InputStream was not closed!");
             return;
         }
-        Assert.fail("IOException should be occurred!");
+        Assertions.fail("IOException should be occurred!");
     }
 }

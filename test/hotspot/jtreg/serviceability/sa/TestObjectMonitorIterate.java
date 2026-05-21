@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2021, NTT DATA.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -38,6 +38,8 @@ import jdk.test.lib.SA.SATestUtils;
  * @bug 8259008
  * @library /test/lib
  * @requires vm.hasSA
+ * @requires vm.gc != "Z"
+ * @requires (os.arch != "riscv64" | !(vm.cpu.features ~= ".*qemu.*"))
  * @modules jdk.hotspot.agent/sun.jvm.hotspot
  *          jdk.hotspot.agent/sun.jvm.hotspot.oops
  *          jdk.hotspot.agent/sun.jvm.hotspot.runtime
@@ -59,8 +61,12 @@ public class TestObjectMonitorIterate {
 
             while (itr.hasNext()) {
                 ObjectMonitor mon = (ObjectMonitor)itr.next();
-                Oop oop = heap.newOop(mon.object());
-                System.out.println("Monitor found: " + oop.getKlass().getName().asString());
+                if (mon.object() == null) {
+                    System.out.println("Monitor found: object is null");
+                } else {
+                    Oop oop = heap.newOop(mon.object());
+                    System.out.println("Monitor found: " + oop.getKlass().getName().asString());
+                }
             }
         } finally {
             agent.detach();
@@ -69,7 +75,7 @@ public class TestObjectMonitorIterate {
 
     private static void createAnotherToAttach(long lingeredAppPid) throws Exception {
         // Start a new process to attach to the lingered app
-        ProcessBuilder processBuilder = ProcessTools.createJavaProcessBuilder(
+        ProcessBuilder processBuilder = ProcessTools.createLimitedTestJavaProcessBuilder(
             "--add-modules=jdk.hotspot.agent",
             "--add-exports=jdk.hotspot.agent/sun.jvm.hotspot=ALL-UNNAMED",
             "--add-exports=jdk.hotspot.agent/sun.jvm.hotspot.oops=ALL-UNNAMED",
@@ -78,6 +84,7 @@ public class TestObjectMonitorIterate {
              Long.toString(lingeredAppPid));
         SATestUtils.addPrivilegesIfNeeded(processBuilder);
         OutputAnalyzer SAOutput = ProcessTools.executeProcess(processBuilder);
+        SAOutput.shouldContain("SteadyStateLock");
         SAOutput.shouldHaveExitValue(0);
         System.out.println(SAOutput.getOutput());
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,7 +31,6 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import com.sun.imageio.stream.StreamCloser;
-import com.sun.imageio.stream.StreamFinalizer;
 import sun.java2d.Disposer;
 import sun.java2d.DisposerRecord;
 
@@ -58,7 +57,7 @@ public class FileCacheImageInputStream extends ImageInputStreamImpl {
     private boolean foundEOF = false;
 
     /** The referent to be registered with the Disposer. */
-    private final Object disposerReferent;
+    private final Object disposerReferent = new Object();
 
     /** The DisposerRecord that closes the underlying cache. */
     private final DisposerRecord disposerRecord;
@@ -83,9 +82,9 @@ public class FileCacheImageInputStream extends ImageInputStreamImpl {
      * cache file should be created, or {@code null} to use the
      * system directory.
      *
-     * @exception IllegalArgumentException if {@code stream} is
+     * @throws IllegalArgumentException if {@code stream} is
      * {@code null}.
-     * @exception IllegalArgumentException if {@code cacheDir} is
+     * @throws IllegalArgumentException if {@code cacheDir} is
      * non-{@code null} but is not a directory.
      * @throws IOException if a cache file cannot be created.
      */
@@ -109,12 +108,7 @@ public class FileCacheImageInputStream extends ImageInputStreamImpl {
         StreamCloser.addToQueue(closeAction);
 
         disposerRecord = new StreamDisposerRecord(cacheFile, cache);
-        if (getClass() == FileCacheImageInputStream.class) {
-            disposerReferent = new Object();
-            Disposer.addRecord(disposerReferent, disposerRecord);
-        } else {
-            disposerReferent = new StreamFinalizer(this);
-        }
+        Disposer.addRecord(disposerReferent, disposerRecord);
     }
 
     /**
@@ -258,26 +252,7 @@ public class FileCacheImageInputStream extends ImageInputStreamImpl {
         StreamCloser.removeFromQueue(closeAction);
     }
 
-    /**
-     * {@inheritDoc}
-     *
-     * @deprecated The {@code finalize} method has been deprecated.
-     *     Subclasses that override {@code finalize} in order to perform cleanup
-     *     should be modified to use alternative cleanup mechanisms and
-     *     to remove the overriding {@code finalize} method.
-     *     When overriding the {@code finalize} method, its implementation must explicitly
-     *     ensure that {@code super.finalize()} is invoked as described in {@link Object#finalize}.
-     *     See the specification for {@link Object#finalize()} for further
-     *     information about migration options.
-     */
-    @Deprecated(since="9")
-    protected void finalize() throws Throwable {
-        // Empty finalizer: for performance reasons we instead use the
-        // Disposer mechanism for ensuring that the underlying
-        // RandomAccessFile is closed/deleted prior to garbage collection
-    }
-
-    private static class StreamDisposerRecord implements DisposerRecord {
+    static class StreamDisposerRecord implements DisposerRecord {
         private File cacheFile;
         private RandomAccessFile cache;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -54,7 +54,7 @@ final class ConstructKeys {
     private static final PublicKey constructPublicKey(byte[] encodedKey,
             int ofs, int len, String encodedKeyAlgorithm)
             throws InvalidKeyException, NoSuchAlgorithmException {
-        PublicKey key = null;
+        PublicKey key;
         byte[] keyBytes = (ofs == 0 && encodedKey.length == len)
                 ? encodedKey : Arrays.copyOfRange(encodedKey, ofs, ofs + len);
         X509EncodedKeySpec keySpec = new X509EncodedKeySpec(keyBytes);
@@ -76,16 +76,10 @@ final class ConstructKeys {
                                                    encodedKeyAlgorithm +
                                                    "algorithm");
             } catch (InvalidKeySpecException ikse2) {
-                InvalidKeyException ike =
-                    new InvalidKeyException("Cannot construct public key");
-                ike.initCause(ikse2);
-                throw ike;
+                throw new InvalidKeyException("Cannot construct public key", ikse2);
             }
         } catch (InvalidKeySpecException ikse) {
-            InvalidKeyException ike =
-                new InvalidKeyException("Cannot construct public key");
-            ike.initCause(ikse);
-            throw ike;
+            throw new InvalidKeyException("Cannot construct public key", ikse);
         }
 
         return key;
@@ -94,7 +88,7 @@ final class ConstructKeys {
     private static final PrivateKey constructPrivateKey(byte[] encodedKey,
             int ofs, int len, String encodedKeyAlgorithm)
             throws InvalidKeyException, NoSuchAlgorithmException {
-        PrivateKey key = null;
+        PrivateKey key;
         byte[] keyBytes = (ofs == 0 && encodedKey.length == len)
                 ? encodedKey : Arrays.copyOfRange(encodedKey, ofs, ofs + len);
         PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(keyBytes);
@@ -116,16 +110,10 @@ final class ConstructKeys {
                                                    encodedKeyAlgorithm +
                                                    "algorithm");
             } catch (InvalidKeySpecException ikse2) {
-                InvalidKeyException ike =
-                    new InvalidKeyException("Cannot construct private key");
-                ike.initCause(ikse2);
-                throw ike;
+                throw new InvalidKeyException("Cannot construct private key", ikse2);
             }
         } catch (InvalidKeySpecException ikse) {
-            InvalidKeyException ike =
-                new InvalidKeyException("Cannot construct private key");
-            ike.initCause(ikse);
-            throw ike;
+            throw new InvalidKeyException("Cannot construct private key", ikse);
         } finally {
             SharedSecrets.getJavaSecuritySpecAccess().clearEncodedKeySpec(keySpec);
             if (keyBytes != encodedKey) {

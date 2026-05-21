@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -162,8 +162,7 @@ void DAUDIO_GetFormats(INT32 mixerIndex, INT32 deviceID, int isSource, void* cre
                 sampleRate,                 // sample rate
                 DAUDIO_PCM,                 // only accept PCM
                 bits == 8 ? FALSE : TRUE,   // signed
-                bits == 8 ? FALSE           // little-endian for 8bit
-                    : UTIL_IsBigEndianPlatform());
+                FALSE);                     // all supported macOS versions run on LE
         }
     }
     // add default format
@@ -175,7 +174,7 @@ void DAUDIO_GetFormats(INT32 mixerIndex, INT32 deviceID, int isSource, void* cre
             defSampleRate,                  // sample rate
             DAUDIO_PCM,                     // PCM
             TRUE,                           // signed
-            UTIL_IsBigEndianPlatform());    // native endianess
+            FALSE);                         // native endianness; all supported macOS versions run on LE
     }
 
     TRACE0("<<DAUDIO_GetFormats\n");
@@ -848,7 +847,7 @@ void* DAUDIO_Open(INT32 mixerIndex, INT32 deviceID, int isSource,
         if (fabs(sampleRate - hardwareSampleRate) > 1) {
             device->resampler = new Resampler();
 
-            // request HAL for Float32 with native endianess
+            // request HAL for Float32 with native endianness
             FillASBDForNonInterleavedPCM(device->asbd, hardwareSampleRate, channels, 32, true, false, kAudioFormatFlagsNativeEndian != 0);
         } else {
             sampleRate = hardwareSampleRate;    // in case sample rates are not exactly equal

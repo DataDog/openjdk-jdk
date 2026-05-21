@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,31 +22,30 @@
  *
  */
 
-#include "precompiled.hpp"
+#include "cppstdlib/cstdlib.hpp"
 #include "jvm.h"
 #include "memory/allocation.inline.hpp"
 #include "os_linux.inline.hpp"
+#include "os_posix.hpp"
 #include "runtime/os.hpp"
 #include "runtime/os_perf.hpp"
+#include "runtime/vm_version.hpp"
 #include "utilities/globalDefinitions.hpp"
 
-#include CPU_HEADER(vm_version_ext)
-
-#include <stdio.h>
-#include <stdarg.h>
-#include <unistd.h>
+#include <dirent.h>
+#include <dlfcn.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <ifaddrs.h>
+#include <limits.h>
+#include <pthread.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/resource.h>
-#include <sys/types.h>
 #include <sys/stat.h>
-#include <dirent.h>
-#include <stdlib.h>
-#include <dlfcn.h>
-#include <pthread.h>
-#include <limits.h>
-#include <ifaddrs.h>
-#include <fcntl.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 /**
    /proc/[number]/stat
@@ -154,7 +153,7 @@
                      The bitmap of ignored signals.
 
               34. sigcatch %lu
-                     The bitmap of catched signals.
+                     The bitmap of caught signals.
 
               35. wchan %lu
                      This  is the "channel" in which the process is waiting.  It is the address of a system call, and can be looked up in a namelist if you need
@@ -232,10 +231,10 @@ static double get_cpu_load(int which_logical_cpu, CPUPerfCounters* counters, dou
  */
 static int SCANF_ARGS(2, 0) vread_statdata(const char* procfile, _SCANFMT_ const char* fmt, va_list args) {
   FILE*f;
-  int n;
+  ssize_t n;
   char buf[2048];
 
-  if ((f = fopen(procfile, "r")) == NULL) {
+  if ((f = os::fopen(procfile, "r")) == nullptr) {
     return -1;
   }
 
@@ -244,7 +243,7 @@ static int SCANF_ARGS(2, 0) vread_statdata(const char* procfile, _SCANFMT_ const
 
     buf[n-1] = '\0';
     /** skip through pid and exec name. */
-    if ((tmp = strrchr(buf, ')')) != NULL) {
+    if ((tmp = strrchr(buf, ')')) != nullptr) {
       // skip the ')' and the following space
       // but check that buffer is long enough
       tmp += 2;
@@ -272,7 +271,7 @@ static int SCANF_ARGS(2, 3) read_statdata(const char* procfile, _SCANFMT_ const 
 static FILE* open_statfile(void) {
   FILE *f;
 
-  if ((f = fopen("/proc/stat", "r")) == NULL) {
+  if ((f = os::fopen("/proc/stat", "r")) == nullptr) {
     static int haveWarned = 0;
     if (!haveWarned) {
       haveWarned = 1;
@@ -290,7 +289,7 @@ static int get_systemtype(void) {
   }
 
   // Check whether we have a task subdirectory
-  if ((taskDir = opendir("/proc/self/task")) == NULL) {
+  if ((taskDir = opendir("/proc/self/task")) == nullptr) {
     procEntriesType = UNDETECTABLE;
   } else {
     // The task subdirectory exists; we're on a Linux >= 2.6 system
@@ -382,12 +381,12 @@ static double get_cpu_load(int which_logical_cpu, CPUPerfCounters* counters, dou
   } else if (tdiff < (udiff + kdiff)) {
     tdiff = udiff + kdiff;
   }
-  *pkernelLoad = (kdiff / (double)tdiff);
+  *pkernelLoad = ((double)kdiff / (double)tdiff);
   // BUG9044876, normalize return values to sane values
   *pkernelLoad = MAX2<double>(*pkernelLoad, 0.0);
   *pkernelLoad = MIN2<double>(*pkernelLoad, 1.0);
 
-  user_load = (udiff / (double)tdiff);
+  user_load = ((double)udiff / (double)tdiff);
   user_load = MAX2<double>(user_load, 0.0);
   user_load = MIN2<double>(user_load, 1.0);
 
@@ -400,13 +399,13 @@ static int SCANF_ARGS(1, 2) parse_stat(_SCANFMT_ const char* fmt, ...) {
 
   va_start(args, fmt);
 
-  if ((f = open_statfile()) == NULL) {
+  if ((f = open_statfile()) == nullptr) {
     va_end(args);
     return OS_ERR;
   }
   for (;;) {
     char line[80];
-    if (fgets(line, sizeof(line), f) != NULL) {
+    if (fgets(line, sizeof(line), f) != nullptr) {
       if (vsscanf(line, fmt, args) == 1) {
         fclose(f);
         va_end(args);
@@ -430,7 +429,10 @@ static int get_boot_time(uint64_t* time) {
 }
 
 static int perf_context_switch_rate(double* rate) {
+  PRAGMA_DIAG_PUSH
+  PRAGMA_ZERO_AS_NULL_POINTER_CONSTANT_IGNORED
   static pthread_mutex_t contextSwitchLock = PTHREAD_MUTEX_INITIALIZER;
+  PRAGMA_DIAG_POP
   static uint64_t      bootTime;
   static uint64_t      lastTimeNanos;
   static uint64_t      lastSwitches;
@@ -473,7 +475,7 @@ static int perf_context_switch_rate(double* rate) {
     if (d == 0) {
       *rate = lastRate;
     } else if (get_noof_context_switches(&sw) == 0) {
-      *rate      = ( (double)(sw - lastSwitches) / d ) * 1000;
+      *rate      = ( (double)(sw - lastSwitches) / (double)d ) * 1000;
       lastRate     = *rate;
       lastSwitches = sw;
       if (bootTime != 0) {
@@ -515,7 +517,7 @@ class CPUPerformanceInterface::CPUPerformance : public CHeapObj<mtInternal> {
 
 CPUPerformanceInterface::CPUPerformance::CPUPerformance() {
   _counters.nProcs = os::active_processor_count();
-  _counters.cpus = NULL;
+  _counters.cpus = nullptr;
 }
 
 bool CPUPerformanceInterface::CPUPerformance::initialize() {
@@ -542,8 +544,8 @@ bool CPUPerformanceInterface::CPUPerformance::initialize() {
 }
 
 CPUPerformanceInterface::CPUPerformance::~CPUPerformance() {
-  if (_counters.cpus != NULL) {
-    FREE_C_HEAP_ARRAY(char, _counters.cpus);
+  if (_counters.cpus != nullptr) {
+    FREE_C_HEAP_ARRAY(_counters.cpus);
   }
 }
 
@@ -573,9 +575,9 @@ int CPUPerformanceInterface::CPUPerformance::cpu_load_total_process(double* cpu_
 int CPUPerformanceInterface::CPUPerformance::cpu_loads_process(double* pjvmUserLoad, double* pjvmKernelLoad, double* psystemTotalLoad) {
   double u, s, t;
 
-  assert(pjvmUserLoad != NULL, "pjvmUserLoad not inited");
-  assert(pjvmKernelLoad != NULL, "pjvmKernelLoad not inited");
-  assert(psystemTotalLoad != NULL, "psystemTotalLoad not inited");
+  assert(pjvmUserLoad != nullptr, "pjvmUserLoad not inited");
+  assert(pjvmKernelLoad != nullptr, "pjvmKernelLoad not inited");
+  assert(psystemTotalLoad != nullptr, "psystemTotalLoad not inited");
 
   u = get_cpu_load(-1, &_counters, &s, CPU_LOAD_VM_ONLY);
   if (u < 0) {
@@ -603,7 +605,7 @@ int CPUPerformanceInterface::CPUPerformance::context_switch_rate(double* rate) {
 }
 
 CPUPerformanceInterface::CPUPerformanceInterface() {
-  _impl = NULL;
+  _impl = nullptr;
 }
 
 bool CPUPerformanceInterface::initialize() {
@@ -612,7 +614,7 @@ bool CPUPerformanceInterface::initialize() {
 }
 
 CPUPerformanceInterface::~CPUPerformanceInterface() {
-  if (_impl != NULL) {
+  if (_impl != nullptr) {
     delete _impl;
   }
 }
@@ -685,7 +687,7 @@ bool SystemProcessInterface::SystemProcesses::ProcessIterator::is_dir(const char
 }
 
 int SystemProcessInterface::SystemProcesses::ProcessIterator::fsize(const char* name, uint64_t& size) const {
-  assert(name != NULL, "name pointer is NULL!");
+  assert(name != nullptr, "name pointer is null!");
   size = 0;
   struct stat fbuf;
 
@@ -703,11 +705,9 @@ bool SystemProcessInterface::SystemProcesses::ProcessIterator::is_valid_entry(st
 
   if (atoi(entry->d_name) != 0) {
     jio_snprintf(buffer, PATH_MAX, "/proc/%s", entry->d_name);
-    buffer[PATH_MAX - 1] = '\0';
 
     if (is_dir(buffer)) {
       jio_snprintf(buffer, PATH_MAX, "/proc/%s/stat", entry->d_name);
-      buffer[PATH_MAX - 1] = '\0';
       if (fsize(buffer, size) != OS_ERR) {
         return true;
       }
@@ -722,16 +722,15 @@ void SystemProcessInterface::SystemProcesses::ProcessIterator::get_exe_name() {
   char  buffer[PATH_MAX];
 
   jio_snprintf(buffer, PATH_MAX, "/proc/%s/stat", _entry->d_name);
-  buffer[PATH_MAX - 1] = '\0';
-  if ((fp = fopen(buffer, "r")) != NULL) {
-    if (fgets(buffer, PATH_MAX, fp) != NULL) {
+  if ((fp = os::fopen(buffer, "r")) != nullptr) {
+    if (fgets(buffer, PATH_MAX, fp) != nullptr) {
       char* start, *end;
       // exe-name is between the first pair of ( and )
       start = strchr(buffer, '(');
-      if (start != NULL && start[1] != '\0') {
+      if (start != nullptr && start[1] != '\0') {
         start++;
         end = strrchr(start, ')');
-        if (end != NULL) {
+        if (end != nullptr) {
           size_t len;
           len = MIN2<size_t>(end - start, sizeof(_exeName) - 1);
           memcpy(_exeName, start, len);
@@ -747,11 +746,10 @@ void SystemProcessInterface::SystemProcesses::ProcessIterator::get_exe_name() {
 char* SystemProcessInterface::SystemProcesses::ProcessIterator::get_cmdline() {
   FILE* fp;
   char  buffer[PATH_MAX];
-  char* cmdline = NULL;
+  char* cmdline = nullptr;
 
   jio_snprintf(buffer, PATH_MAX, "/proc/%s/cmdline", _entry->d_name);
-  buffer[PATH_MAX - 1] = '\0';
-  if ((fp = fopen(buffer, "r")) != NULL) {
+  if ((fp = os::fopen(buffer, "r")) != nullptr) {
     size_t size = 0;
     char   dummy;
 
@@ -785,15 +783,14 @@ char* SystemProcessInterface::SystemProcesses::ProcessIterator::get_exe_path() {
   char buffer[PATH_MAX];
 
   jio_snprintf(buffer, PATH_MAX, "/proc/%s/exe", _entry->d_name);
-  buffer[PATH_MAX - 1] = '\0';
-  return realpath(buffer, _exePath);
+  return os::realpath(buffer, _exePath, PATH_MAX);
 }
 
 char* SystemProcessInterface::SystemProcesses::ProcessIterator::allocate_string(const char* str) const {
-  if (str != NULL) {
+  if (str != nullptr) {
     return os::strdup_check_oom(str, mtInternal);
   }
-  return NULL;
+  return nullptr;
 }
 
 int SystemProcessInterface::SystemProcesses::ProcessIterator::current(SystemProcess* process_info) {
@@ -806,15 +803,15 @@ int SystemProcessInterface::SystemProcesses::ProcessIterator::current(SystemProc
   get_exe_name();
   process_info->set_name(allocate_string(_exeName));
 
-  if (get_exe_path() != NULL) {
+  if (get_exe_path() != nullptr) {
      process_info->set_path(allocate_string(_exePath));
   }
 
-  char* cmdline = NULL;
+  char* cmdline = nullptr;
   cmdline = get_cmdline();
-  if (cmdline != NULL) {
+  if (cmdline != nullptr) {
     process_info->set_command_line(allocate_string(cmdline));
-    FREE_C_HEAP_ARRAY(char, cmdline);
+    FREE_C_HEAP_ARRAY(cmdline);
   }
 
   return OS_OK;
@@ -827,7 +824,7 @@ int SystemProcessInterface::SystemProcesses::ProcessIterator::next_process() {
 
   do {
     _entry = os::readdir(_dir);
-    if (_entry == NULL) {
+    if (_entry == nullptr) {
       // Error or reached end.  Could use errno to distinguish those cases.
       _valid = false;
       return OS_ERR;
@@ -839,28 +836,28 @@ int SystemProcessInterface::SystemProcesses::ProcessIterator::next_process() {
 }
 
 SystemProcessInterface::SystemProcesses::ProcessIterator::ProcessIterator() {
-  _dir = NULL;
-  _entry = NULL;
+  _dir = nullptr;
+  _entry = nullptr;
   _valid = false;
 }
 
 bool SystemProcessInterface::SystemProcesses::ProcessIterator::initialize() {
   _dir = os::opendir("/proc");
-  _entry = NULL;
-  _valid = true;
+  _entry = nullptr;
+  _valid = _dir != nullptr; // May be null if /proc is not accessible.
   next_process();
 
   return true;
 }
 
 SystemProcessInterface::SystemProcesses::ProcessIterator::~ProcessIterator() {
-  if (_dir != NULL) {
+  if (_dir != nullptr) {
     os::closedir(_dir);
   }
 }
 
 SystemProcessInterface::SystemProcesses::SystemProcesses() {
-  _iterator = NULL;
+  _iterator = nullptr;
 }
 
 bool SystemProcessInterface::SystemProcesses::initialize() {
@@ -869,26 +866,26 @@ bool SystemProcessInterface::SystemProcesses::initialize() {
 }
 
 SystemProcessInterface::SystemProcesses::~SystemProcesses() {
-  if (_iterator != NULL) {
+  if (_iterator != nullptr) {
     delete _iterator;
   }
 }
 
 int SystemProcessInterface::SystemProcesses::system_processes(SystemProcess** system_processes, int* no_of_sys_processes) const {
-  assert(system_processes != NULL, "system_processes pointer is NULL!");
-  assert(no_of_sys_processes != NULL, "system_processes counter pointers is NULL!");
-  assert(_iterator != NULL, "iterator is NULL!");
+  assert(system_processes != nullptr, "system_processes pointer is null!");
+  assert(no_of_sys_processes != nullptr, "system_processes counter pointers is null!");
+  assert(_iterator != nullptr, "iterator is null!");
 
   // initialize pointers
   *no_of_sys_processes = 0;
-  *system_processes = NULL;
+  *system_processes = nullptr;
 
   while (_iterator->is_valid()) {
     SystemProcess* tmp = new SystemProcess();
     _iterator->current(tmp);
 
     //if already existing head
-    if (*system_processes != NULL) {
+    if (*system_processes != nullptr) {
       //move "first to second"
       tmp->set_next(*system_processes);
     }
@@ -907,7 +904,7 @@ int SystemProcessInterface::system_processes(SystemProcess** system_procs, int* 
 }
 
 SystemProcessInterface::SystemProcessInterface() {
-  _impl = NULL;
+  _impl = nullptr;
 }
 
 bool SystemProcessInterface::initialize() {
@@ -916,43 +913,44 @@ bool SystemProcessInterface::initialize() {
 }
 
 SystemProcessInterface::~SystemProcessInterface() {
-  if (_impl != NULL) {
+  if (_impl != nullptr) {
     delete _impl;
   }
 }
 
 CPUInformationInterface::CPUInformationInterface() {
-  _cpu_info = NULL;
+  _cpu_info = nullptr;
 }
 
 bool CPUInformationInterface::initialize() {
   _cpu_info = new CPUInformation();
-  _cpu_info->set_number_of_hardware_threads(VM_Version_Ext::number_of_threads());
-  _cpu_info->set_number_of_cores(VM_Version_Ext::number_of_cores());
-  _cpu_info->set_number_of_sockets(VM_Version_Ext::number_of_sockets());
-  _cpu_info->set_cpu_name(VM_Version_Ext::cpu_name());
-  _cpu_info->set_cpu_description(VM_Version_Ext::cpu_description());
+  VM_Version::initialize_cpu_information();
+  _cpu_info->set_number_of_hardware_threads(VM_Version::number_of_threads());
+  _cpu_info->set_number_of_cores(VM_Version::number_of_cores());
+  _cpu_info->set_number_of_sockets(VM_Version::number_of_sockets());
+  _cpu_info->set_cpu_name(VM_Version::cpu_name());
+  _cpu_info->set_cpu_description(VM_Version::cpu_description());
   return true;
 }
 
 CPUInformationInterface::~CPUInformationInterface() {
-  if (_cpu_info != NULL) {
-    if (_cpu_info->cpu_name() != NULL) {
+  if (_cpu_info != nullptr) {
+    if (_cpu_info->cpu_name() != nullptr) {
       const char* cpu_name = _cpu_info->cpu_name();
-      FREE_C_HEAP_ARRAY(char, cpu_name);
-      _cpu_info->set_cpu_name(NULL);
+      FREE_C_HEAP_ARRAY(cpu_name);
+      _cpu_info->set_cpu_name(nullptr);
     }
-    if (_cpu_info->cpu_description() != NULL) {
+    if (_cpu_info->cpu_description() != nullptr) {
        const char* cpu_desc = _cpu_info->cpu_description();
-       FREE_C_HEAP_ARRAY(char, cpu_desc);
-      _cpu_info->set_cpu_description(NULL);
+       FREE_C_HEAP_ARRAY(cpu_desc);
+      _cpu_info->set_cpu_description(nullptr);
     }
     delete _cpu_info;
   }
 }
 
 int CPUInformationInterface::cpu_information(CPUInformation& cpu_info) {
-  if (_cpu_info == NULL) {
+  if (_cpu_info == nullptr) {
     return OS_ERR;
   }
 
@@ -985,7 +983,7 @@ NetworkPerformanceInterface::NetworkPerformance::~NetworkPerformance() {
 int64_t NetworkPerformanceInterface::NetworkPerformance::read_counter(const char* iface, const char* counter) const {
   char buf[128];
 
-  snprintf(buf, sizeof(buf), "/sys/class/net/%s/statistics/%s", iface, counter);
+  os::snprintf_checked(buf, sizeof(buf), "/sys/class/net/%s/statistics/%s", iface, counter);
 
   int fd = os::open(buf, O_RDONLY, 0);
   if (fd == -1) {
@@ -998,8 +996,7 @@ int64_t NetworkPerformanceInterface::NetworkPerformance::read_counter(const char
     return -1;
   }
 
-  buf[num_bytes] = '\0';
-  int64_t value = strtoll(buf, NULL, 10);
+  int64_t value = strtoll(buf, nullptr, 10);
 
   return value;
 }
@@ -1013,9 +1010,9 @@ int NetworkPerformanceInterface::NetworkPerformance::network_utilization(Network
     return OS_ERR;
   }
 
-  NetworkInterface* ret = NULL;
-  for (cur_address = addresses; cur_address != NULL; cur_address = cur_address->ifa_next) {
-    if ((cur_address->ifa_addr == NULL) || (cur_address->ifa_addr->sa_family != AF_PACKET)) {
+  NetworkInterface* ret = nullptr;
+  for (cur_address = addresses; cur_address != nullptr; cur_address = cur_address->ifa_next) {
+    if ((cur_address->ifa_addr == nullptr) || (cur_address->ifa_addr->sa_family != AF_PACKET)) {
       continue;
     }
 
@@ -1033,11 +1030,11 @@ int NetworkPerformanceInterface::NetworkPerformance::network_utilization(Network
 }
 
 NetworkPerformanceInterface::NetworkPerformanceInterface() {
-  _impl = NULL;
+  _impl = nullptr;
 }
 
 NetworkPerformanceInterface::~NetworkPerformanceInterface() {
-  if (_impl != NULL) {
+  if (_impl != nullptr) {
     delete _impl;
   }
 }

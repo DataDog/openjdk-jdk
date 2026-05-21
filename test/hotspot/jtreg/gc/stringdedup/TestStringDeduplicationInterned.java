@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,7 @@
 package gc.stringdedup;
 
 /*
- * @test TestStringDeduplicationInterned
+ * @test id=Serial
  * @summary Test string deduplication of interned strings
  * @bug 8029075
  * @requires vm.gc.Serial
@@ -37,7 +37,7 @@ package gc.stringdedup;
  */
 
 /*
- * @test TestStringDeduplicationInterned
+ * @test id=G1
  * @summary Test string deduplication of interned strings
  * @bug 8029075
  * @requires vm.gc.G1
@@ -50,7 +50,7 @@ package gc.stringdedup;
  */
 
 /*
- * @test TestStringDeduplicationInterned
+ * @test id=Parallel
  * @summary Test string deduplication of interned strings
  * @bug 8029075
  * @requires vm.gc.Parallel
@@ -63,7 +63,7 @@ package gc.stringdedup;
  */
 
 /*
- * @test TestStringDeduplicationInterned
+ * @test id=Shenandoah
  * @summary Test string deduplication of interned strings
  * @bug 8029075
  * @requires vm.gc.Shenandoah
@@ -76,7 +76,7 @@ package gc.stringdedup;
  */
 
 /*
- * @test TestStringDeduplicationInterned
+ * @test id=Z
  * @summary Test string deduplication of interned strings
  * @bug 8029075
  * @requires vm.gc.Z

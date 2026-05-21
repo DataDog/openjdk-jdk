@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,8 +25,8 @@
 
 package sun.java2d.metal;
 
-import sun.java2d.InvalidPipeException;
 import sun.java2d.SunGraphics2D;
+import sun.java2d.SurfaceData;
 import sun.java2d.loops.GraphicsPrimitive;
 import sun.java2d.pipe.BufferedRenderPipe;
 import sun.java2d.pipe.ParallelogramPipe;
@@ -49,12 +49,8 @@ class MTLRenderer extends BufferedRenderPipe {
         int ctxflags =
                 sg2d.paint.getTransparency() == Transparency.OPAQUE ?
                         MTLContext.SRC_IS_OPAQUE : MTLContext.NO_CONTEXT_FLAGS;
-        MTLSurfaceData dstData;
-        try {
-            dstData = (MTLSurfaceData)sg2d.surfaceData;
-        } catch (ClassCastException e) {
-            throw new InvalidPipeException("wrong surface data type: " + sg2d.surfaceData);
-        }
+        MTLSurfaceData dstData = SurfaceData.convertTo(MTLSurfaceData.class,
+                                                       sg2d.surfaceData);
         MTLContext.validateContext(dstData, dstData,
                 sg2d.getCompClip(), sg2d.composite,
                 null, sg2d.paint, sg2d, ctxflags);
@@ -63,12 +59,8 @@ class MTLRenderer extends BufferedRenderPipe {
     @Override
     protected void validateContextAA(SunGraphics2D sg2d) {
         int ctxflags = MTLContext.NO_CONTEXT_FLAGS;
-        MTLSurfaceData dstData;
-        try {
-            dstData = (MTLSurfaceData)sg2d.surfaceData;
-        } catch (ClassCastException e) {
-            throw new InvalidPipeException("wrong surface data type: " + sg2d.surfaceData);
-        }
+        MTLSurfaceData dstData = SurfaceData.convertTo(MTLSurfaceData.class,
+                                                       sg2d.surfaceData);
         MTLContext.validateContext(dstData, dstData,
                 sg2d.getCompClip(), sg2d.composite,
                 null, sg2d.paint, sg2d, ctxflags);
@@ -82,12 +74,8 @@ class MTLRenderer extends BufferedRenderPipe {
             int ctxflags =
                     sg2d.surfaceData.getTransparency() == Transparency.OPAQUE ?
                             MTLContext.SRC_IS_OPAQUE : MTLContext.NO_CONTEXT_FLAGS;
-            MTLSurfaceData dstData;
-            try {
-                dstData = (MTLSurfaceData)sg2d.surfaceData;
-            } catch (ClassCastException e) {
-                throw new InvalidPipeException("wrong surface data type: " + sg2d.surfaceData);
-            }
+            MTLSurfaceData dstData = SurfaceData.convertTo(MTLSurfaceData.class,
+                                                           sg2d.surfaceData);
             MTLContext.validateContext(dstData, dstData,
                     sg2d.getCompClip(), sg2d.composite,
                     null, null, null, ctxflags);
@@ -110,12 +98,13 @@ class MTLRenderer extends BufferedRenderPipe {
         return new Tracer(this);
     }
 
-    private class Tracer extends MTLRenderer {
+    private static final class Tracer extends MTLRenderer {
         private MTLRenderer mtlr;
         Tracer(MTLRenderer mtlr) {
             super(mtlr.rq);
             this.mtlr = mtlr;
         }
+        @Override
         public ParallelogramPipe getAAParallelogramPipe() {
             final ParallelogramPipe realpipe = mtlr.getAAParallelogramPipe();
             return new ParallelogramPipe() {
@@ -147,19 +136,23 @@ class MTLRenderer extends BufferedRenderPipe {
                 }
             };
         }
+        @Override
         protected void validateContext(SunGraphics2D sg2d) {
             mtlr.validateContext(sg2d);
         }
+        @Override
         public void drawLine(SunGraphics2D sg2d,
                              int x1, int y1, int x2, int y2)
         {
             GraphicsPrimitive.tracePrimitive("MTLDrawLine");
             mtlr.drawLine(sg2d, x1, y1, x2, y2);
         }
+        @Override
         public void drawRect(SunGraphics2D sg2d, int x, int y, int w, int h) {
             GraphicsPrimitive.tracePrimitive("MTLDrawRect");
             mtlr.drawRect(sg2d, x, y, w, h);
         }
+        @Override
         protected void drawPoly(SunGraphics2D sg2d,
                                 int[] xPoints, int[] yPoints,
                                 int nPoints, boolean isClosed)
@@ -167,28 +160,33 @@ class MTLRenderer extends BufferedRenderPipe {
             GraphicsPrimitive.tracePrimitive("MTLDrawPoly");
             mtlr.drawPoly(sg2d, xPoints, yPoints, nPoints, isClosed);
         }
+        @Override
         public void fillRect(SunGraphics2D sg2d, int x, int y, int w, int h) {
             GraphicsPrimitive.tracePrimitive("MTLFillRect");
             mtlr.fillRect(sg2d, x, y, w, h);
         }
+        @Override
         protected void drawPath(SunGraphics2D sg2d,
                                 Path2D.Float p2df, int transx, int transy)
         {
             GraphicsPrimitive.tracePrimitive("MTLDrawPath");
             mtlr.drawPath(sg2d, p2df, transx, transy);
         }
+        @Override
         protected void fillPath(SunGraphics2D sg2d,
                                 Path2D.Float p2df, int transx, int transy)
         {
             GraphicsPrimitive.tracePrimitive("MTLFillPath");
             mtlr.fillPath(sg2d, p2df, transx, transy);
         }
+        @Override
         protected void fillSpans(SunGraphics2D sg2d, SpanIterator si,
                                  int transx, int transy)
         {
             GraphicsPrimitive.tracePrimitive("MTLFillSpans");
             mtlr.fillSpans(sg2d, si, transx, transy);
         }
+        @Override
         public void fillParallelogram(SunGraphics2D sg2d,
                                       double ux1, double uy1,
                                       double ux2, double uy2,
@@ -201,6 +199,7 @@ class MTLRenderer extends BufferedRenderPipe {
                     ux1, uy1, ux2, uy2,
                     x, y, dx1, dy1, dx2, dy2);
         }
+        @Override
         public void drawParallelogram(SunGraphics2D sg2d,
                                       double ux1, double uy1,
                                       double ux2, double uy2,
@@ -214,6 +213,7 @@ class MTLRenderer extends BufferedRenderPipe {
                     ux1, uy1, ux2, uy2,
                     x, y, dx1, dy1, dx2, dy2, lw1, lw2);
         }
+        @Override
         public void copyArea(SunGraphics2D sg2d,
                              int x, int y, int w, int h, int dx, int dy)
         {

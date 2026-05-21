@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,7 @@ import static java.util.stream.Collectors.*;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.lang.module.FindException;
 import java.lang.module.ResolutionException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -63,6 +64,7 @@ class JdepsTask {
             return this;
         }
         final String key;
+        @SuppressWarnings("serial") // Array component type is not Serializable
         final Object[] args;
         boolean showUsage;
 
@@ -105,7 +107,7 @@ class JdepsTask {
         }
     }
 
-    static abstract class Option {
+    abstract static class Option {
         Option(boolean hasArg, String... aliases) {
             this.hasArg = hasArg;
             this.aliases = aliases;
@@ -138,7 +140,7 @@ class JdepsTask {
         final String[] aliases;
     }
 
-    static abstract class HiddenOption extends Option {
+    abstract static class HiddenOption extends Option {
         HiddenOption(boolean hasArg, String... aliases) {
             super(hasArg, aliases);
         }
@@ -419,12 +421,6 @@ class JdepsTask {
             }
         },
 
-        new Option(false, "-P", "-profile") {
-            void process(JdepsTask task, String opt, String arg) throws BadArgs {
-                task.options.showProfile = true;
-            }
-        },
-
         new Option(false, "-R", "-recursive", "--recursive") {
             void process(JdepsTask task, String opt, String arg) throws BadArgs {
                 task.options.recursive = Options.RECURSIVE;
@@ -539,8 +535,9 @@ class JdepsTask {
                 log.println(getMessage("main.usage.summary", PROGNAME));
             }
             return EXIT_CMDERR;
-        } catch (ResolutionException e) {
-            reportError("err.exception.message", e.getMessage());
+        } catch (ResolutionException | FindException e) {
+            Throwable cause = e.getCause();
+            reportError("err.exception.message", cause != null ? cause.getMessage() : e.getMessage());
             return EXIT_CMDERR;
         } catch (IOException e) {
             e.printStackTrace();
@@ -749,7 +746,6 @@ class JdepsTask {
             // default to package-level verbose
             JdepsWriter writer = new SimpleWriter(log,
                                                   type,
-                                                  options.showProfile,
                                                   options.showModule);
 
             return run(config, writer, type);
@@ -771,7 +767,7 @@ class JdepsTask {
             if (!options.nowarning) {
                 analyzer.archives()
                     .forEach(archive -> archive.reader()
-                        .skippedEntries().stream()
+                        .skippedEntries()
                         .forEach(name -> warning("warn.skipped.entry", name)));
             }
 
@@ -794,9 +790,9 @@ class JdepsTask {
                     String replacementApiTitle = getMessage("public.api.replacement.column.header");
                     log.format("%-40s %s%n", internalApiTitle, replacementApiTitle);
                     log.format("%-40s %s%n",
-                               internalApiTitle.replaceAll(".", "-"),
-                               replacementApiTitle.replaceAll(".", "-"));
-                    jdkInternals.entrySet().stream()
+                               "-".repeat(internalApiTitle.codePointCount(0, internalApiTitle.length())),
+                               "-".repeat(replacementApiTitle.codePointCount(0, replacementApiTitle.length())));
+                    jdkInternals.entrySet()
                         .forEach(e -> {
                             String key = e.getKey();
                             String[] lines = e.getValue().split("\\n");
@@ -1075,7 +1071,6 @@ class JdepsTask {
             Type type = getAnalyzerType();
             JdepsWriter writer = new DotFileWriter(dotOutputDir,
                                                    type,
-                                                   options.showProfile,
                                                    options.showModule,
                                                    options.showLabel);
             return run(config, writer, type);
@@ -1111,7 +1106,7 @@ class JdepsTask {
 
         // --require
         if (!options.requires.isEmpty()) {
-            options.requires.stream()
+            options.requires
                 .forEach(mn -> {
                     Module m = config.findModule(mn).get();
                     builder.requires(mn, m.packages());
@@ -1221,7 +1216,6 @@ class JdepsTask {
         boolean help;
         boolean version;
         boolean fullVersion;
-        boolean showProfile;
         boolean showModule = true;
         boolean showSummary;
         boolean apiOnly;

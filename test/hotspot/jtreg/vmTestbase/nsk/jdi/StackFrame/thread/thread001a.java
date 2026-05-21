@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,6 @@
 
 package nsk.jdi.StackFrame.thread;
 
-import nsk.share.*;
 import nsk.share.jpda.*;
 import nsk.share.jdi.*;
 
@@ -59,6 +58,9 @@ public class thread001a {
     }
 
     //====================================================== test program
+
+    static Thread test_thread = null;
+
     //----------------------------------------------------   main method
 
     public static void main (String argv[]) {
@@ -94,8 +96,8 @@ public class thread001a {
     //------------------------------------------------------  section tested
 
                 case 0:
-                         Threadthread001a test_thread =
-                             new Threadthread001a("testedThread");
+                         test_thread =
+                             JDIThreadFactory.newThread(new Threadthread001a("testedThread"));
                          log1("       thread2 is created");
 
                          label:
@@ -147,7 +149,7 @@ public class thread001a {
 
 
 
-class Threadthread001a extends Thread {
+class Threadthread001a extends NamedTask {
 
     public Threadthread001a(String threadName) {
         super(threadName);

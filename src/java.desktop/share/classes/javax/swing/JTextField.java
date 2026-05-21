@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -242,7 +242,7 @@ public class JTextField extends JTextComponent implements SwingConstants {
      *   the preferred width &gt;= 0; if <code>columns</code>
      *   is set to zero, the preferred width will be whatever
      *   naturally results from the component implementation
-     * @exception IllegalArgumentException if <code>columns</code> &lt; 0
+     * @throws IllegalArgumentException if <code>columns</code> &lt; 0
      */
     public JTextField(Document doc, String text, int columns) {
         if (columns < 0) {
@@ -343,7 +343,7 @@ public class JTextField extends JTextComponent implements SwingConstants {
      * and a <code>PropertyChange</code> event ("horizontalAlignment") is fired.
      *
      * @param alignment the alignment
-     * @exception IllegalArgumentException if <code>alignment</code>
+     * @throws IllegalArgumentException if <code>alignment</code>
      *  is not a valid key
      */
      @BeanProperty(preferred = true, enumerationValues = {
@@ -393,7 +393,7 @@ public class JTextField extends JTextComponent implements SwingConstants {
      * and then invalidate the layout.
      *
      * @param columns the number of columns &gt;= 0
-     * @exception IllegalArgumentException if <code>columns</code>
+     * @throws IllegalArgumentException if <code>columns</code>
      *          is less than 0
      */
     @BeanProperty(bound = false, description
@@ -579,15 +579,15 @@ public class JTextField extends JTextComponent implements SwingConstants {
             = "the Action instance connected with this ActionEvent source")
     public void setAction(Action a) {
         Action oldValue = getAction();
-        if (action==null || !action.equals(a)) {
+        if (action == null || !action.equals(a)) {
             action = a;
-            if (oldValue!=null) {
+            if (oldValue != null) {
                 removeActionListener(oldValue);
                 oldValue.removePropertyChangeListener(actionPropertyChangeListener);
                 actionPropertyChangeListener = null;
             }
             configurePropertiesFromAction(action);
-            if (action!=null) {
+            if (action != null) {
                 // Don't add if it is already a listener
                 if (!isListener(ActionListener.class, action)) {
                     addActionListener(action);

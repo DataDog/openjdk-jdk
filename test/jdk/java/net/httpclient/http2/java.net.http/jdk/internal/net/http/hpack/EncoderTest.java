@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,6 @@
  */
 package jdk.internal.net.http.hpack;
 
-import org.testng.annotations.Test;
 
 import java.io.IOException;
 import java.nio.Buffer;
@@ -40,15 +39,16 @@ import static jdk.internal.net.http.hpack.BuffersTestingKit.forEachSplit;
 import static jdk.internal.net.http.hpack.SpecHelper.toHexdump;
 import static jdk.internal.net.http.hpack.TestHelper.assertVoidThrows;
 import static java.util.Arrays.asList;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
 
 // TODO: map textual representation of commands from the spec to actual
 // calls to encoder (actually, this is a good idea for decoder as well)
 public final class EncoderTest {
 
     //
-    // http://tools.ietf.org/html/rfc7541#appendix-C.2.1
+    // https://tools.ietf.org/html/rfc7541#appendix-C.2.1
     //
     @Test
     public void example1() {
@@ -69,7 +69,7 @@ public final class EncoderTest {
     }
 
     //
-    // http://tools.ietf.org/html/rfc7541#appendix-C.2.2
+    // https://tools.ietf.org/html/rfc7541#appendix-C.2.2
     //
     @Test
     public void example2() {
@@ -88,7 +88,7 @@ public final class EncoderTest {
     }
 
     //
-    // http://tools.ietf.org/html/rfc7541#appendix-C.2.3
+    // https://tools.ietf.org/html/rfc7541#appendix-C.2.3
     //
     @Test
     public void example3() {
@@ -108,7 +108,7 @@ public final class EncoderTest {
     }
 
     //
-    // http://tools.ietf.org/html/rfc7541#appendix-C.2.4
+    // https://tools.ietf.org/html/rfc7541#appendix-C.2.4
     //
     @Test
     public void example4() {
@@ -127,7 +127,7 @@ public final class EncoderTest {
     }
 
     //
-    // http://tools.ietf.org/html/rfc7541#appendix-C.3
+    // https://tools.ietf.org/html/rfc7541#appendix-C.3
     //
     @Test
     public void example5() {
@@ -261,7 +261,7 @@ public final class EncoderTest {
     }
 
     //
-    // http://tools.ietf.org/html/rfc7541#appendix-C.4
+    // https://tools.ietf.org/html/rfc7541#appendix-C.4
     //
     @Test
     public void example6() {
@@ -340,7 +340,7 @@ public final class EncoderTest {
     }
 
     //
-    // http://tools.ietf.org/html/rfc7541#appendix-C.5
+    // https://tools.ietf.org/html/rfc7541#appendix-C.5
     //
     @Test
     public void example7() {
@@ -432,7 +432,7 @@ public final class EncoderTest {
     }
 
     //
-    // http://tools.ietf.org/html/rfc7541#appendix-C.6
+    // https://tools.ietf.org/html/rfc7541#appendix-C.6
     //
     @Test
     public void example8() {
@@ -627,10 +627,10 @@ public final class EncoderTest {
                              String expectedTableState) {
 
         String actualTableState = encoder.getHeaderTable().getStateString();
-        assertEquals(actualTableState, expectedTableState);
+        assertEquals(expectedTableState, actualTableState);
 
         String actualHexdump = toHexdump(output);
-        assertEquals(actualHexdump, expectedHexdump.replaceAll("\\n", " "));
+        assertEquals(expectedHexdump.replaceAll("\\n", " "), actualHexdump);
     }
 
     // initial size - the size encoder is constructed with
@@ -657,7 +657,7 @@ public final class EncoderTest {
                 actual.add(capacity);
             }
         });
-        assertEquals(actual, expected);
+        assertEquals(expected, actual);
     }
 
     //

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,12 +36,18 @@
 #include <sys/utsname.h>
 
 #ifdef AIX
-#include "porting_aix.h" /* For the 'dladdr' function. */
+#define dladdr JVM_dladdr
 #endif
 
 #ifdef DEBUG
 #define VERBOSE_AWT_DEBUG
 #endif
+
+#define CHECK_EXCEPTION_FATAL(env, message) \
+    if ((*env)->ExceptionCheck(env)) { \
+        (*env)->ExceptionDescribe(env); \
+        (*env)->FatalError(env, message); \
+    }
 
 static void *awtHandle = NULL;
 
@@ -61,16 +67,13 @@ JNIEXPORT jboolean JNICALL AWTIsHeadless() {
         env = (JNIEnv *)JNU_GetEnv(jvm, JNI_VERSION_1_2);
         graphicsEnvClass = (*env)->FindClass(env,
                                              "java/awt/GraphicsEnvironment");
-        if (graphicsEnvClass == NULL) {
-            return JNI_TRUE;
-        }
+        CHECK_EXCEPTION_FATAL(env, "FindClass java/awt/GraphicsEnvironment failed");
         headlessFn = (*env)->GetStaticMethodID(env,
                                                graphicsEnvClass, "isHeadless", "()Z");
-        if (headlessFn == NULL) {
-            return JNI_TRUE;
-        }
+        CHECK_EXCEPTION_FATAL(env, "GetStaticMethodID isHeadless failed");
         isHeadless = (*env)->CallStaticBooleanMethod(env, graphicsEnvClass,
                                                      headlessFn);
+        // If an exception occurred, we assume headless mode and carry on.
         if ((*env)->ExceptionCheck(env)) {
             (*env)->ExceptionClear(env);
             return JNI_TRUE;
@@ -78,12 +81,6 @@ JNIEXPORT jboolean JNICALL AWTIsHeadless() {
     }
     return isHeadless;
 }
-
-#define CHECK_EXCEPTION_FATAL(env, message) \
-    if ((*env)->ExceptionCheck(env)) { \
-        (*env)->ExceptionClear(env); \
-        (*env)->FatalError(env, message); \
-    }
 
 /*
  * Pathnames to the various awt toolkits
@@ -109,8 +106,6 @@ AWT_OnLoad(JavaVM *vm, void *reserved)
     struct utsname name;
     JNIEnv *env = (JNIEnv *)JNU_GetEnv(vm, JNI_VERSION_1_2);
     void *v;
-    jstring fmanager = NULL;
-    jstring fmProp = NULL;
 
     if (awtHandle != NULL) {
         /* Avoid several loading attempts */
@@ -118,66 +113,45 @@ AWT_OnLoad(JavaVM *vm, void *reserved)
     }
 
     jvm = vm;
-#ifndef STATIC_BUILD
-    /* Get address of this library and the directory containing it. */
-    dladdr((void *)AWT_OnLoad, &dlinfo);
-    realpath((char *)dlinfo.dli_fname, buf);
-    len = strlen(buf);
-    p = strrchr(buf, '/');
-#endif
+
     /*
-     * The code below is responsible for:
-     * 1. Loading appropriate awt library, i.e. libawt_xawt or libawt_headless
-     * 2. Set the "sun.font.fontmanager" system property.
+     * The code below is responsible for
+     * loading appropriate awt library, i.e. libawt_xawt or libawt_headless
      */
 
-    fmProp = (*env)->NewStringUTF(env, "sun.font.fontmanager");
-    CHECK_EXCEPTION_FATAL(env, "Could not allocate font manager property");
-
 #ifdef MACOSX
-        fmanager = (*env)->NewStringUTF(env, "sun.font.CFontManager");
-        tk = LWAWT_PATH;
+    tk = LWAWT_PATH;
 #else
-        fmanager = (*env)->NewStringUTF(env, "sun.awt.X11FontManager");
-        tk = XAWT_PATH;
-#endif
-    CHECK_EXCEPTION_FATAL(env, "Could not allocate font manager name");
+    tk = XAWT_PATH;
 
-    if (fmanager && fmProp) {
-        JNU_CallStaticMethodByName(env, NULL, "java/lang/System", "setProperty",
-                                   "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-                                   fmProp, fmanager);
-        CHECK_EXCEPTION_FATAL(env, "Could not allocate set properties");
-    }
-
-#ifndef MACOSX
     if (AWTIsHeadless()) {
         tk = HEADLESS_PATH;
     }
 #endif
 
-#ifndef STATIC_BUILD
-    /* Calculate library name to load */
-    strncpy(p, tk, MAXPATHLEN-len-1);
-#endif
+    if (JVM_IsStaticallyLinked()) {
+        awtHandle = dlopen(NULL, RTLD_LAZY);
+    } else {
+        /* Get address of this library and the directory containing it. */
+        dladdr((void *)AWT_OnLoad, &dlinfo);
+        if (realpath((char *)dlinfo.dli_fname, buf) == NULL) {
+            perror((char *)dlinfo.dli_fname);
+        }
+        len = strlen(buf);
+        p = strrchr(buf, '/');
 
-    if (fmProp) {
-        (*env)->DeleteLocalRef(env, fmProp);
+        /* Calculate library name to load */
+        strncpy(p, tk, MAXPATHLEN-len-1);
+
+        jstring jbuf = JNU_NewStringPlatform(env, buf);
+        CHECK_EXCEPTION_FATAL(env, "Could not allocate library name");
+        JNU_CallStaticMethodByName(env, NULL, "java/lang/System", "load",
+                                   "(Ljava/lang/String;)V",
+                                   jbuf);
+
+        awtHandle = dlopen(buf, RTLD_LAZY | RTLD_GLOBAL);
     }
-    if (fmanager) {
-        (*env)->DeleteLocalRef(env, fmanager);
-    }
 
-
-#ifndef STATIC_BUILD
-    jstring jbuf = JNU_NewStringPlatform(env, buf);
-    CHECK_EXCEPTION_FATAL(env, "Could not allocate library name");
-    JNU_CallStaticMethodByName(env, NULL, "java/lang/System", "load",
-                               "(Ljava/lang/String;)V",
-                               jbuf);
-
-    awtHandle = dlopen(buf, RTLD_LAZY | RTLD_GLOBAL);
-#endif
     return JNI_VERSION_1_2;
 }
 

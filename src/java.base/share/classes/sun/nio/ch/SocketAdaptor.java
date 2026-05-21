@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,13 +35,14 @@ import java.net.SocketAddress;
 import java.net.SocketException;
 import java.net.SocketOption;
 import java.net.StandardSocketOptions;
+import java.net.UnknownHostException;
 import java.nio.channels.SocketChannel;
-import java.security.AccessController;
-import java.security.PrivilegedActionException;
-import java.security.PrivilegedExceptionAction;
 import java.util.Set;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static jdk.internal.util.Exceptions.filterNonSocketInfo;
+import static jdk.internal.util.Exceptions.formatMsg;
+
 
 // Make a socket channel look like a socket.
 //
@@ -63,13 +64,11 @@ class SocketAdaptor
         this.sc = sc;
     }
 
-    @SuppressWarnings("removal")
     static Socket create(SocketChannelImpl sc) {
-        PrivilegedExceptionAction<Socket> pa = () -> new SocketAdaptor(sc);
         try {
-            return AccessController.doPrivileged(pa);
-        } catch (PrivilegedActionException pae) {
-            throw new InternalError("Should not reach here", pae);
+            return new SocketAdaptor(sc);
+        } catch (SocketException e) {
+            throw new InternalError(e);
         }
     }
 
@@ -90,6 +89,15 @@ class SocketAdaptor
     public void connect(SocketAddress remote, int timeout) throws IOException {
         if (remote == null)
             throw new IllegalArgumentException("connect: The address can't be null");
+        if (remote instanceof InetSocketAddress isa && isa.isUnresolved()) {
+            if (!sc.isOpen())
+                throw new SocketException("Socket is closed");
+            if (sc.isConnected())
+                throw new SocketException("Already connected");
+            close();
+            throw new UnknownHostException(
+                formatMsg(filterNonSocketInfo(remote.toString())));
+        }
         if (timeout < 0)
             throw new IllegalArgumentException("connect: timeout can't be negative");
         try {
@@ -100,7 +108,7 @@ class SocketAdaptor
                 sc.blockingConnect(remote, Long.MAX_VALUE);
             }
         } catch (Exception e) {
-            Net.translateException(e, true);
+            Net.translateException(e);
         }
     }
 
@@ -128,7 +136,7 @@ class SocketAdaptor
         if (sc.isOpen()) {
             InetSocketAddress local = localAddress();
             if (local != null) {
-                return Net.getRevealedLocalAddress(local).getAddress();
+                return local.getAddress();
             }
         }
         return new InetSocketAddress(0).getAddress();
@@ -161,7 +169,7 @@ class SocketAdaptor
 
     @Override
     public SocketAddress getLocalSocketAddress() {
-        return Net.getRevealedLocalAddress(sc.localAddress());
+        return sc.localAddress();
     }
 
     @Override
@@ -177,32 +185,7 @@ class SocketAdaptor
             throw new SocketException("Socket is not connected");
         if (!sc.isInputOpen())
             throw new SocketException("Socket input is shutdown");
-        return new InputStream() {
-            @Override
-            public int read() throws IOException {
-                byte[] a = new byte[1];
-                int n = read(a, 0, 1);
-                return (n > 0) ? (a[0] & 0xff) : -1;
-            }
-            @Override
-            public int read(byte[] b, int off, int len) throws IOException {
-                int timeout = SocketAdaptor.this.timeout;
-                if (timeout > 0) {
-                    long nanos = MILLISECONDS.toNanos(timeout);
-                    return sc.blockingRead(b, off, len, nanos);
-                } else {
-                    return sc.blockingRead(b, off, len, 0);
-                }
-            }
-            @Override
-            public int available() throws IOException {
-                return sc.available();
-            }
-            @Override
-            public void close() throws IOException {
-                sc.close();
-            }
-        };
+        return new SocketInputStream(sc, () -> timeout);
     }
 
     @Override
@@ -213,21 +196,7 @@ class SocketAdaptor
             throw new SocketException("Socket is not connected");
         if (!sc.isOutputOpen())
             throw new SocketException("Socket output is shutdown");
-        return new OutputStream() {
-            @Override
-            public void write(int b) throws IOException {
-                byte[] a = new byte[]{(byte) b};
-                write(a, 0, 1);
-            }
-            @Override
-            public void write(byte[] b, int off, int len) throws IOException {
-                sc.blockingWriteFully(b, off, len);
-            }
-            @Override
-            public void close() throws IOException {
-                sc.close();
-            }
-        };
+        return new SocketOutputStream(sc);
     }
 
     private void setBooleanOption(SocketOption<Boolean> name, boolean value)

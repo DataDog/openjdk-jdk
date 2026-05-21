@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -71,14 +71,8 @@ final class P11KeyAgreement extends KeyAgreementSpi {
 
     private static class AllowKDF {
 
-        private static final boolean VALUE = getValue();
-
-        @SuppressWarnings("removal")
-        private static boolean getValue() {
-            return AccessController.doPrivileged(
-                (PrivilegedAction<Boolean>)
-                () -> Boolean.getBoolean("jdk.crypto.KeyAgreement.legacyKDF"));
-        }
+        private static final boolean VALUE =
+            Boolean.getBoolean("jdk.crypto.KeyAgreement.legacyKDF");
     }
 
     P11KeyAgreement(Token token, String algorithm, long mechanism) {
@@ -91,7 +85,7 @@ final class P11KeyAgreement extends KeyAgreementSpi {
     // see JCE spec
     protected void engineInit(Key key, SecureRandom random)
             throws InvalidKeyException {
-        if (key instanceof PrivateKey == false) {
+        if (!(key instanceof PrivateKey)) {
             throw new InvalidKeyException
                         ("Key must be instance of PrivateKey");
         }
@@ -126,7 +120,7 @@ final class P11KeyAgreement extends KeyAgreementSpi {
         // NOTE that we initialize using the P11Key, which will fail if it
         // is sensitive/unextractable. However, this is not an issue in the
         // compatibility configuration, which is all we are targeting here.
-        if ((multiPartyAgreement != null) || (lastPhase == false)) {
+        if ((multiPartyAgreement != null) || (!lastPhase)) {
             if (multiPartyAgreement == null) {
                 try {
                     multiPartyAgreement = KeyAgreement.getInstance
@@ -139,14 +133,13 @@ final class P11KeyAgreement extends KeyAgreementSpi {
             }
             return multiPartyAgreement.doPhase(key, lastPhase);
         }
-        if ((key instanceof PublicKey == false)
-                || (key.getAlgorithm().equals(algorithm) == false)) {
+        if ((!(key instanceof PublicKey))
+                || (!key.getAlgorithm().equals(algorithm))) {
             throw new InvalidKeyException
                 ("Key must be a PublicKey with algorithm DH");
         }
         BigInteger p, g, y;
-        if (key instanceof DHPublicKey) {
-            DHPublicKey dhKey = (DHPublicKey)key;
+        if (key instanceof DHPublicKey dhKey) {
 
             // validate the Diffie-Hellman public key
             KeyUtil.validate(dhKey);
@@ -176,11 +169,10 @@ final class P11KeyAgreement extends KeyAgreementSpi {
         // if parameters of private key are accessible, verify that
         // they match parameters of public key
         // XXX p and g should always be readable, even if the key is sensitive
-        if (privateKey instanceof DHPrivateKey) {
-            DHPrivateKey dhKey = (DHPrivateKey)privateKey;
+        if (privateKey instanceof DHPrivateKey dhKey) {
             DHParameterSpec params = dhKey.getParams();
-            if ((p.equals(params.getP()) == false)
-                                || (g.equals(params.getG()) == false)) {
+            if ((!p.equals(params.getP()))
+                                || (!g.equals(params.getG()))) {
                 throw new InvalidKeyException
                 ("PublicKey DH parameters must match PrivateKey DH parameters");
             }
@@ -208,6 +200,7 @@ final class P11KeyAgreement extends KeyAgreementSpi {
             CK_ATTRIBUTE[] attributes = new CK_ATTRIBUTE[] {
                 new CK_ATTRIBUTE(CKA_CLASS, CKO_SECRET_KEY),
                 new CK_ATTRIBUTE(CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+                new CK_ATTRIBUTE(CKA_VALUE_LEN, secretLen),
             };
             attributes = token.getAttributes
                 (O_GENERATE, CKO_SECRET_KEY, CKK_GENERIC_SECRET, attributes);
@@ -221,22 +214,11 @@ final class P11KeyAgreement extends KeyAgreementSpi {
             token.p11.C_GetAttributeValue(session.id(), keyID, attributes);
             byte[] secret = attributes[0].getByteArray();
             token.p11.C_DestroyObject(session.id(), keyID);
-            // Some vendors, e.g. NSS, trim off the leading 0x00 byte(s) from
-            // the generated secret. Thus, we need to check the secret length
-            // and trim/pad it so the returned value has the same length as
-            // the modulus size
-            if (secret.length == secretLen) {
-                return secret;
-            } else {
-                if (secret.length > secretLen) {
-                    // Shouldn't happen; but check just in case
-                    throw new ProviderException("generated secret is out-of-range");
-                }
-                byte[] newSecret = new byte[secretLen];
-                System.arraycopy(secret, 0, newSecret, secretLen - secret.length,
-                    secret.length);
-                return newSecret;
+            if (secret.length != secretLen) {
+                // Shouldn't happen; but check just in case
+                throw new ProviderException("generated secret is out-of-range");
             }
+            return secret;
         } catch (PKCS11Exception e) {
             throw new ProviderException("Could not derive key", e);
         } finally {
@@ -276,20 +258,19 @@ final class P11KeyAgreement extends KeyAgreementSpi {
             throw new NoSuchAlgorithmException("Algorithm must not be null");
         }
 
-        if (algorithm.equals("TlsPremasterSecret")) {
+        if (KeyUtil.isSupportedKeyAgreementOutputAlgorithm(algorithm)) {
             // For now, only perform native derivation for TlsPremasterSecret
-            // as that is required for FIPS compliance.
+            // and Generic algorithms. TlsPremasterSecret is required for
+            // FIPS compliance and Generic is required for input to KDF.
             // For other algorithms, there are unresolved issues regarding
             // how this should work in JCE plus a Solaris truncation bug.
             // (bug not yet filed).
             return nativeGenerateSecret(algorithm);
         }
 
-        if (!algorithm.equalsIgnoreCase("TlsPremasterSecret") &&
-            !AllowKDF.VALUE) {
-
-            throw new NoSuchAlgorithmException("Unsupported secret key "
-                                               + "algorithm: " + algorithm);
+        if (!AllowKDF.VALUE) {
+            throw new NoSuchAlgorithmException(
+                    "Unsupported secret key algorithm: " + algorithm);
         }
 
         byte[] secret = engineGenerateSecret();
@@ -303,8 +284,6 @@ final class P11KeyAgreement extends KeyAgreementSpi {
             keyLen = 24;
         } else if (algorithm.equalsIgnoreCase("Blowfish")) {
             keyLen = Math.min(56, secret.length);
-        } else if (algorithm.equalsIgnoreCase("TlsPremasterSecret")) {
-            keyLen = secret.length;
         } else {
             throw new NoSuchAlgorithmException
                 ("Unknown algorithm " + algorithm);
@@ -332,10 +311,20 @@ final class P11KeyAgreement extends KeyAgreementSpi {
         long privKeyID = privateKey.getKeyID();
         try {
             session = token.getObjSession();
-            CK_ATTRIBUTE[] attributes = new CK_ATTRIBUTE[] {
-                new CK_ATTRIBUTE(CKA_CLASS, CKO_SECRET_KEY),
-                new CK_ATTRIBUTE(CKA_KEY_TYPE, keyType),
-            };
+            CK_ATTRIBUTE[] attributes;
+            if ("TlsPremasterSecret".equalsIgnoreCase(algorithm)) {
+                attributes = new CK_ATTRIBUTE[]{
+                        new CK_ATTRIBUTE(CKA_CLASS, CKO_SECRET_KEY),
+                        new CK_ATTRIBUTE(CKA_KEY_TYPE, keyType),
+                };
+            } else {
+                // keep the leading zeroes
+                attributes = new CK_ATTRIBUTE[]{
+                        new CK_ATTRIBUTE(CKA_CLASS, CKO_SECRET_KEY),
+                        new CK_ATTRIBUTE(CKA_KEY_TYPE, keyType),
+                        new CK_ATTRIBUTE(CKA_VALUE_LEN, secretLen),
+                };
+            }
             attributes = token.getAttributes
                 (O_GENERATE, CKO_SECRET_KEY, keyType, attributes);
             long keyID = token.p11.C_DeriveKey(session.id(),
@@ -348,18 +337,6 @@ final class P11KeyAgreement extends KeyAgreementSpi {
             int keyLen = (int)lenAttributes[0].getLong();
             SecretKey key = P11Key.secretKey
                         (session, keyID, algorithm, keyLen << 3, attributes);
-            if ("RAW".equals(key.getFormat())) {
-                // Workaround for Solaris bug 6318543.
-                // Strip leading zeroes ourselves if possible (key not sensitive).
-                // This should be removed once the Solaris fix is available
-                // as here we always retrieve the CKA_VALUE even for tokens
-                // that do not have that bug.
-                byte[] keyBytes = key.getEncoded();
-                byte[] newBytes = KeyUtil.trimZeroes(keyBytes);
-                if (keyBytes != newBytes) {
-                    key = new SecretKeySpec(newBytes, algorithm);
-                }
-            }
             return key;
         } catch (PKCS11Exception e) {
             throw new InvalidKeyException("Could not derive key", e);

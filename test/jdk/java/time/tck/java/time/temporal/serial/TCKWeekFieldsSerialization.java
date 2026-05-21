@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -56,13 +54,11 @@
  */
 package tck.java.time.temporal.serial;
 
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 import tck.java.time.AbstractTCKTest;
 
 import java.io.IOException;
@@ -72,21 +68,26 @@ import java.time.DayOfWeek;
 import java.time.temporal.WeekFields;
 import java.util.Arrays;
 
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+
 /**
  * Test serialization of WeekFields.
  */
-@Test
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class TCKWeekFieldsSerialization extends AbstractTCKTest {
 
     //-----------------------------------------------------------------------
-    @Test(dataProvider="weekFields")
+    @ParameterizedTest
+    @MethodSource("data_weekFields")
     public void test_serializable_singleton(DayOfWeek firstDayOfWeek, int minDays) throws IOException, ClassNotFoundException {
         WeekFields weekDef = WeekFields.of(firstDayOfWeek, minDays);
         assertSerializableSame(weekDef);  // spec state singleton
     }
 
     //-----------------------------------------------------------------------
-    @DataProvider(name="weekFields")
     Object[][] data_weekFields() {
         Object[][] objects = new Object[49][];
         int i = 0;
@@ -112,7 +113,7 @@ public class TCKWeekFieldsSerialization extends AbstractTCKTest {
         System.arraycopy(good1, 0, val, 105, good1.length);
         try (ObjectInputStream in = new ObjectInputStream(new ByteArrayInputStream(val))) {
             Object o = in.readObject();
-            assertEquals(o, WeekFields.of(DayOfWeek.MONDAY, 5), "Should be MONDAY, min = 5");
+            assertEquals(WeekFields.of(DayOfWeek.MONDAY, 5), o, "Should be MONDAY, min = 5");
         } catch (Exception ioe) {
             fail("Unexpected exception " + ioe);
         }

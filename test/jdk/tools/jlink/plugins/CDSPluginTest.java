@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,8 +26,11 @@ import java.io.File;
 import jdk.test.lib.JDKToolFinder;
 import jdk.test.lib.Platform;
 import jdk.test.lib.process.*;
+import jdk.test.whitebox.WhiteBox;
 
 import tests.Helper;
+
+import jtreg.SkippedException;
 
 /* @test
  * @bug 8264322
@@ -36,18 +39,21 @@ import tests.Helper;
  * @library ../../lib
  * @library /test/lib
  * @modules java.base/jdk.internal.jimage
- *          jdk.jdeps/com.sun.tools.classfile
  *          jdk.jlink/jdk.tools.jlink.internal
  *          jdk.jlink/jdk.tools.jmod
  *          jdk.jlink/jdk.tools.jimage
  *          jdk.compiler
  * @build tests.*
- * @run main CDSPluginTest
+ * @build jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
+ * @run main/othervm -XX:+UnlockDiagnosticVMOptions -XX:+WhiteBoxAPI -Xbootclasspath/a:. CDSPluginTest
  */
 
 public class CDSPluginTest {
-
     public static void main(String[] args) throws Throwable {
+
+        if (!Platform.isDefaultCDSArchiveSupported())
+            throw new SkippedException("not a supported platform");
 
         Helper helper = Helper.newHelper();
         if (helper == null) {
@@ -69,26 +75,18 @@ public class CDSPluginTest {
             subDir = "lib" + sep;
         }
         subDir += "server" + sep;
-        helper.checkImage(image, module, null, null,
-                          new String[] { subDir + "classes.jsa", subDir + "classes_nocoops.jsa" });
 
-       // Simulate different platforms between current runtime and target image.
-       if (Platform.isLinux()) {
-           System.out.println("---- Test different platforms scenario ----");
-           String jlinkPath = JDKToolFinder.getJDKTool("jlink");
-           String[] cmd = {jlinkPath, "--add-modules", "java.base,java.logging",
-                           "-J-Dos.name=windows", "--generate-cds-archive",
-                           "--output", System.getProperty("test.classes") + sep + module + "-tmp"};
-           StringBuilder cmdLine = new StringBuilder();
-           for (String s : cmd) {
-               cmdLine.append(s).append(' ');
-           }
-           System.out.println("Command line: [" + cmdLine.toString() + "]");
-           ProcessBuilder pb = new ProcessBuilder(cmd);
-           OutputAnalyzer out = new OutputAnalyzer(pb.start());
-           System.out.println("    stdout: " + out.getStdout());
-           out.shouldMatch("Error: Cannot generate CDS archives: target image platform linux-.*is different from runtime platform windows-.*");
-           out.shouldHaveExitValue(1);
-       }
+        WhiteBox wb = WhiteBox.getWhiteBox();
+        boolean NOCOMPACT_HEADERS = Platform.is64bit() &&
+                                  !wb.getBooleanVMFlag("UseCompactObjectHeaders");
+        String suffix = NOCOMPACT_HEADERS ? "_nocoh.jsa" : ".jsa";
+
+        if (Platform.isAArch64() || Platform.isX64()) {
+            helper.checkImage(image, module, null, null,
+                      new String[] { subDir + "classes" + suffix, subDir + "classes_nocoops" + suffix});
+        } else {
+            helper.checkImage(image, module, null, null,
+                      new String[] { subDir + "classes" + suffix });
+        }
     }
 }

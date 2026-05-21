@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -255,6 +255,7 @@ public class HashAttributeSet implements AttributeSet, Serializable {
      *         {@link Class Class} that implements interface
      *         {@link Attribute Attribute}
      */
+    @Override
     public Attribute get(Class<?> category) {
         return attrMap.get(AttributeSetUtilities.
                            verifyAttributeCategory(category,
@@ -274,6 +275,7 @@ public class HashAttributeSet implements AttributeSet, Serializable {
      * @throws UnmodifiableSetException if this attribute set does not support
      *         the {@code add()} operation
      */
+    @Override
     public boolean add(Attribute attribute) {
         Object oldAttribute =
             attrMap.put(attribute.getCategory(),
@@ -294,6 +296,7 @@ public class HashAttributeSet implements AttributeSet, Serializable {
      * @throws UnmodifiableSetException if this attribute set does not support
      *         the {@code remove()} operation
      */
+    @Override
     public boolean remove(Class<?> category) {
         return
             category != null &&
@@ -314,6 +317,7 @@ public class HashAttributeSet implements AttributeSet, Serializable {
      * @throws UnmodifiableSetException if this attribute set does not support
      *         the {@code remove()} operation
      */
+    @Override
     public boolean remove(Attribute attribute) {
         return
             attribute != null &&
@@ -328,6 +332,7 @@ public class HashAttributeSet implements AttributeSet, Serializable {
      * @return {@code true} if this attribute set contains an attribute value
      *         for the specified category
      */
+    @Override
     public boolean containsKey(Class<?> category) {
         return
             category != null &&
@@ -344,11 +349,10 @@ public class HashAttributeSet implements AttributeSet, Serializable {
      * @return {@code true} if this attribute set contains the given attribute
      *         value
      */
+    @Override
     public boolean containsValue(Attribute attribute) {
-        return
-           attribute != null &&
-           attribute instanceof Attribute &&
-           attribute.equals(attrMap.get(attribute.getCategory()));
+        return attribute != null &&
+                attribute.equals(attrMap.get(attribute.getCategory()));
     }
 
     /**
@@ -373,6 +377,7 @@ public class HashAttributeSet implements AttributeSet, Serializable {
      *         {@code null}, or the set is {@code null}
      * @see #add(Attribute)
      */
+    @Override
     public boolean addAll(AttributeSet attributes) {
 
         Attribute []attrs = attributes.toArray();
@@ -394,6 +399,7 @@ public class HashAttributeSet implements AttributeSet, Serializable {
      *
      * @return the number of attributes in this attribute set
      */
+    @Override
     public int size() {
         return attrMap.size();
     }
@@ -404,6 +410,7 @@ public class HashAttributeSet implements AttributeSet, Serializable {
      * @return the attributes contained in this set as an array, zero length if
      *         the {@code AttributeSet} is empty
      */
+    @Override
     public Attribute[] toArray() {
         Attribute []attrs = new Attribute[size()];
         attrMap.values().toArray(attrs);
@@ -416,6 +423,7 @@ public class HashAttributeSet implements AttributeSet, Serializable {
      * @throws UnmodifiableSetException if this attribute set does not support
      *         the {@code clear()} operation
      */
+    @Override
     public void clear() {
         attrMap.clear();
     }
@@ -425,6 +433,7 @@ public class HashAttributeSet implements AttributeSet, Serializable {
      *
      * @return {@code true} if this attribute set contains no attributes
      */
+    @Override
     public boolean isEmpty() {
         return attrMap.isEmpty();
     }
@@ -440,12 +449,12 @@ public class HashAttributeSet implements AttributeSet, Serializable {
      * @return {@code true} if the specified object is equal to this attribute
      *         set
      */
+    @Override
     public boolean equals(Object object) {
-        if (object == null || !(object instanceof AttributeSet)) {
+        if (!(object instanceof AttributeSet aset)) {
             return false;
         }
 
-        AttributeSet aset = (AttributeSet)object;
         if (aset.size() != size()) {
             return false;
         }
@@ -469,6 +478,7 @@ public class HashAttributeSet implements AttributeSet, Serializable {
      *
      * @return the hash code value for this attribute set
      */
+    @Override
     public int hashCode() {
         int hcode = 0;
         Attribute[] attrs = toArray();

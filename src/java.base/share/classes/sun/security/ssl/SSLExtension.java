@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,6 @@ import java.nio.ByteBuffer;
 import java.text.MessageFormat;
 import java.util.*;
 
-import sun.security.action.GetPropertyAction;
 import sun.security.ssl.SSLHandshake.HandshakeMessage;
 import sun.security.util.HexDumpEncoder;
 
@@ -143,7 +142,7 @@ enum SSLExtension implements SSLStringizer {
                                 SupportedGroupsExtension.chOnLoadConsumer,
                                 null,
                                 null,
-                                SupportedGroupsExtension.chOnTradAbsence,
+                                SupportedGroupsExtension.chOnTradeAbsence,
                                 SupportedGroupsExtension.sgsStringizer),
     EE_SUPPORTED_GROUPS     (0x000A, "supported_groups",
                                 SSLHandshake.ENCRYPTED_EXTENSIONS,
@@ -181,7 +180,7 @@ enum SSLExtension implements SSLStringizer {
     USE_SRTP                (0x000E, "use_srtp"),
 
     // Extensions defined in RFC 6520 (TLS and DTLS Heartbeat Extension)
-    HEARTBEAT               (0x000E, "heartbeat"),
+    HEARTBEAT               (0x000F, "heartbeat"),
 
     // Extensions defined in RFC 7301 (TLS Application-Layer Protocol Negotiation Extension)
     CH_ALPN                 (0x0010, "application_layer_protocol_negotiation",
@@ -271,6 +270,27 @@ enum SSLExtension implements SSLStringizer {
     // Extensions defined in RFC 7924 (TLS Cached Information Extension)
     CACHED_INFO             (0x0019, "cached_info"),
 
+    // Extensions defined in RFC 8879 (TLS Certificate Compression)
+    CH_COMPRESS_CERTIFICATE (0x001B, "compress_certificate",
+                             SSLHandshake.CLIENT_HELLO,
+                             ProtocolVersion.PROTOCOLS_OF_13,
+                             CompressCertExtension.chNetworkProducer,
+                             CompressCertExtension.chOnLoadConsumer,
+                             null,
+                             null,
+                             null,
+                             CompressCertExtension.ccStringizer),
+
+    CR_COMPRESS_CERTIFICATE (0x001B, "compress_certificate",
+                             SSLHandshake.CERTIFICATE_REQUEST,
+                             ProtocolVersion.PROTOCOLS_OF_13,
+                             CompressCertExtension.crNetworkProducer,
+                             CompressCertExtension.crOnLoadConsumer,
+                             null,
+                             null,
+                             null,
+                             CompressCertExtension.ccStringizer),
+
     // Extensions defined in RFC 5077 (TLS Session Resumption without Server-Side State)
     CH_SESSION_TICKET       (0x0023, "session_ticket",
             SSLHandshake.CLIENT_HELLO,
@@ -287,7 +307,7 @@ enum SSLExtension implements SSLStringizer {
             ProtocolVersion.PROTOCOLS_10_12,
             SessionTicketExtension.shNetworkProducer,
             SessionTicketExtension.shOnLoadConsumer,
-            null,
+            SessionTicketExtension.shOnLoadAbsence,
             null,
             null,
             SessionTicketExtension.steStringizer),
@@ -406,7 +426,7 @@ enum SSLExtension implements SSLStringizer {
                                 CertificateAuthoritiesExtension.ssStringizer),
 
     OID_FILTERS             (0x0030, "oid_filters"),
-    POST_HANDSHAKE_AUTH     (0x0030, "post_handshake_auth"),
+    POST_HANDSHAKE_AUTH     (0x0031, "post_handshake_auth"),
 
     CH_SIGNATURE_ALGORITHMS_CERT (0x0032, "signature_algorithms_cert",
                                 SSLHandshake.CLIENT_HELLO,
@@ -434,7 +454,7 @@ enum SSLExtension implements SSLStringizer {
                                 KeyShareExtension.chOnLoadConsumer,
                                 null,
                                 null,
-                                KeyShareExtension.chOnTradAbsence,
+                                KeyShareExtension.chOnTradeAbsence,
                                 KeyShareExtension.chStringizer),
     SH_KEY_SHARE            (0x0033, "key_share",
                                 SSLHandshake.SERVER_HELLO,
@@ -458,6 +478,28 @@ enum SSLExtension implements SSLStringizer {
                                 KeyShareExtension.hrrNetworkReproducer,
                                 null, null, null, null,
                                 KeyShareExtension.hrrStringizer),
+
+    // Extension defined in RFC 9001
+    CH_QUIC_TRANSPORT_PARAMETERS     (0x0039, "quic_transport_parameters",
+            SSLHandshake.CLIENT_HELLO,
+            ProtocolVersion.PROTOCOLS_OF_13,
+            QuicTransportParametersExtension.chNetworkProducer,
+            QuicTransportParametersExtension.chOnLoadConsumer,
+            QuicTransportParametersExtension.chOnLoadAbsence,
+            null,
+            null,
+            // TODO properly stringize, rather than hex output.
+            null),
+    EE_QUIC_TRANSPORT_PARAMETERS     (0x0039, "quic_transport_parameters",
+            SSLHandshake.ENCRYPTED_EXTENSIONS,
+            ProtocolVersion.PROTOCOLS_OF_13,
+            QuicTransportParametersExtension.eeNetworkProducer,
+            QuicTransportParametersExtension.eeOnLoadConsumer,
+            QuicTransportParametersExtension.eeOnLoadAbsence,
+            null,
+            null,
+            // TODO properly stringize, rather than hex output
+            null),
 
     // Extensions defined in RFC 5746 (TLS Renegotiation Indication Extension)
     CH_RENEGOTIATION_INFO   (0xff01, "renegotiation_info",
@@ -487,7 +529,7 @@ enum SSLExtension implements SSLStringizer {
                                 PreSharedKeyExtension.chOnLoadConsumer,
                                 PreSharedKeyExtension.chOnLoadAbsence,
                                 PreSharedKeyExtension.chOnTradeConsumer,
-                                PreSharedKeyExtension.chOnTradAbsence,
+                                PreSharedKeyExtension.chOnTradeAbsence,
                                 PreSharedKeyExtension.chStringizer),
     SH_PRE_SHARED_KEY       (0x0029, "pre_shared_key",
                                 SSLHandshake.SERVER_HELLO,
@@ -507,7 +549,7 @@ enum SSLExtension implements SSLStringizer {
      * networkProducer: produces outbound handshake data.
      *
      * onLoadConsumer:  parses inbound data.  It may not be appropriate
-     *                  to act until all of the message inputs have
+     *                  to act until all the message inputs have
      *                  been parsed.  (e.g. parsing keyShares and choosing
      *                  a local value without having seen the SupportedGroups
      *                  extension.)
@@ -529,7 +571,7 @@ enum SSLExtension implements SSLStringizer {
     final SSLStringizer stringizer;
 
     // known but unsupported extension
-    private SSLExtension(int id, String name) {
+    SSLExtension(int id, String name) {
         this.id = id;
         this.handshakeType = SSLHandshake.NOT_APPLICABLE;
         this.name = name;
@@ -543,7 +585,7 @@ enum SSLExtension implements SSLStringizer {
     }
 
     // supported extension
-    private SSLExtension(int id, String name, SSLHandshake handshakeType,
+    SSLExtension(int id, String name, SSLHandshake handshakeType,
             ProtocolVersion[] supportedProtocols,
             HandshakeProducer producer,
             ExtensionConsumer onLoadConsumer, HandshakeAbsence onLoadAbsence,
@@ -662,9 +704,10 @@ enum SSLExtension implements SSLStringizer {
     public String toString(
             HandshakeContext handshakeContext, ByteBuffer byteBuffer) {
         MessageFormat messageFormat = new MessageFormat(
-            "\"{0} ({1})\": '{'\n" +
-            "{2}\n" +
-            "'}'",
+                """
+                        "{0} ({1})": '{'
+                        {2}
+                        '}'""",
             Locale.ENGLISH);
 
         String extData;
@@ -687,7 +730,7 @@ enum SSLExtension implements SSLStringizer {
     //////////////////////////////////////////////////////
     // Nested extension, consumer and producer interfaces.
 
-    static interface ExtensionConsumer {
+    interface ExtensionConsumer {
         void consume(ConnectionContext context,
                 HandshakeMessage message, ByteBuffer buffer) throws IOException;
     }
@@ -700,7 +743,7 @@ enum SSLExtension implements SSLStringizer {
      * interface if the data is expected to handle in the following handshake
      * processes.
      */
-    static interface SSLExtensionSpec {
+    interface SSLExtensionSpec {
         // blank
     }
 
@@ -768,7 +811,7 @@ enum SSLExtension implements SSLStringizer {
             // of the certificate_authorities extension is 2^16 bytes.  The
             // maximum TLS record size is 2^14 bytes.  If the handshake
             // message is bigger than maximum TLS record size, it should be
-            // splitted into several records.  In fact, some server
+            // split into several records.  In fact, some server
             // implementations do not allow ClientHello messages bigger than
             // the maximum TLS record size and will immediately abort the
             // connection with a fatal alert.  Therefore, if the client trusts
@@ -819,8 +862,11 @@ enum SSLExtension implements SSLStringizer {
     // Get disabled extensions, which could be customized with System Properties.
     private static Collection<String> getDisabledExtensions(
                 String propertyName) {
-        String property = GetPropertyAction.privilegedGetProperty(propertyName);
-        if (SSLLogger.isOn && SSLLogger.isOn("ssl,sslctx")) {
+        String property = System.getProperty(propertyName);
+        // this method is called from class initializer; logging here
+        // will occasionally pin threads and deadlock if called from a virtual thread
+        if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.SSLCTX)
+                && !Thread.currentThread().isVirtual()) {
             SSLLogger.fine(
                     "System property " + propertyName + " is set to '" +
                             property + "'");

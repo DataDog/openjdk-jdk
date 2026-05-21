@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
 
 /*
  * @test
- * @bug 8178070 8196201 8184205 8246429 8198705
+ * @bug 8178070 8196201 8184205 8246429 8198705 8373526
  * @summary Test packages table in module summary pages
  * @library /tools/lib ../../lib
  * @modules jdk.compiler/com.sun.tools.javac.api
@@ -47,8 +47,8 @@ public class TestModulePackages extends JavadocTester {
     enum ColKind { EXPORTED_TO, OPENED_TO };
 
     public static void main(String... args) throws Exception {
-        TestModulePackages tester = new TestModulePackages();
-        tester.runTests(m -> new Object[] { Paths.get(m.getName()) });
+        var tester = new TestModulePackages();
+        tester.runTests();
     }
 
     private final ToolBox tb;
@@ -57,7 +57,7 @@ public class TestModulePackages extends JavadocTester {
         tb = new ToolBox();
     }
 
-    // @Test: See: https://bugs.openjdk.java.net/browse/JDK-8193107
+    // @Test: See: https://bugs.openjdk.org/browse/JDK-8193107
     public void empty(Path base) throws Exception {
         Path src = base.resolve("src");
         new ModuleBuilder(tb, "m")
@@ -151,30 +151,42 @@ public class TestModulePackages extends JavadocTester {
         checkPackageRow("o", "p", 0, "package-summary-table package-summary-table-tab1", null, null, "&nbsp;");
         checkOutput("m/p/package-summary.html", true,
                 """
-                    <div class="sub-title"><span class="module-label-in-package">Module</span>&nbsp;<a href="../module-summary.html">m</a></div>
+                    <ol class="sub-nav-list">
+                    <li><a href="../module-summary.html" title="Module m">m</a></li>
+                    <li><a href="package-summary.html" title="Package p" class="current-selection">p</a></li>
+                    </ol>
                     """);
         checkOutput("o/p/package-summary.html", true,
                 """
-                    <div class="sub-title"><span class="module-label-in-package">Module</span>&nbsp;<a href="../module-summary.html">o</a></div>
+                    <ol class="sub-nav-list">
+                    <li><a href="../module-summary.html" title="Module o">o</a></li>
+                    <li><a href="package-summary.html" title="Package p" class="current-selection">p</a></li>
+                    </ol>
                     """);
         checkOutput("m/p/C.html", true,
                 """
-                    <div class="sub-title"><span class="module-label-in-type">Module</span>&nbsp;<a href="../module-summary.html">m</a></div>
-                    <div class="sub-title"><span class="package-label-in-type">Package</span>&nbsp;<a href="package-summary.html">p</a></div>
+                    <ol class="sub-nav-list">
+                    <li><a href="../module-summary.html" title="Module m">m</a></li>
+                    <li><a href="package-summary.html" title="Package p">p</a></li>
+                    <li><a href="C.html" title="Class C" class="current-selection">C</a></li>
+                    </ol>
                     """);
         checkOutput("o/p/C.html", true,
                 """
-                    <div class="sub-title"><span class="module-label-in-type">Module</span>&nbsp;<a href="../module-summary.html">o</a></div>
-                    <div class="sub-title"><span class="package-label-in-type">Package</span>&nbsp;<a href="package-summary.html">p</a></div>
+                    <ol class="sub-nav-list">
+                    <li><a href="../module-summary.html" title="Module o">o</a></li>
+                    <li><a href="package-summary.html" title="Package p">p</a></li>
+                    <li><a href="C.html" title="Class C" class="current-selection">C</a></li>
+                    </ol>
                     """);
         checkOutput("type-search-index.js", true,
                 """
                      {"p":"p","m":"m","l":"C"},{"p":"p","m":"o","l":"C"}""");
         checkOutput("member-search-index.js", true,
                 """
-                     {"m":"m","p":"p","c":"C","l":"C()","u":"%3Cinit%3E()"}""",
+                     {"m":"m","p":"p","c":"C","l":"C()","u":"%3Cinit%3E()","k":"3"}""",
                 """
-                     {"m":"o","p":"p","c":"C","l":"C()","u":"%3Cinit%3E()"}""");
+                     {"m":"o","p":"p","c":"C","l":"C()","u":"%3Cinit%3E()","k":"3"}""");
     }
 
     @Test

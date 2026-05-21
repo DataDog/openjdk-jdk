@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,12 +27,13 @@
  * @summary Checking ACC_SYNTHETIC flag is generated for "this$0" field.
  * @modules jdk.compiler/com.sun.tools.javac.api
  *          jdk.compiler/com.sun.tools.javac.main
- *          jdk.jdeps/com.sun.tools.classfile
  * @library /tools/lib /tools/javac/lib ../lib
  * @build toolbox.ToolBox InMemoryFileManager TestResult TestBase
  * @build ThisFieldTest SyntheticTestDriver ExpectedClass ExpectedClasses
  * @run main SyntheticTestDriver ThisFieldTest
  */
+
+import java.util.Objects;
 
 /**
  * Synthetic members:
@@ -49,9 +50,17 @@
 public class ThisFieldTest {
     {
         class Local {
+            {
+                // access enclosing instance so this$0 field is generated
+                Objects.requireNonNull(ThisFieldTest.this);
+            }
         }
 
         new Local() {
+            {
+                // access enclosing instance so this$0 field is generated
+                Objects.requireNonNull(ThisFieldTest.this);
+            }
         };
     }
 }

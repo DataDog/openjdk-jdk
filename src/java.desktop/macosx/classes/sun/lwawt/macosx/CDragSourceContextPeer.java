@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -59,8 +59,7 @@ public final class CDragSourceContextPeer extends SunDragSourceContextPeer {
     private static double fMaxImageSize = 128.0;
 
     static {
-        @SuppressWarnings("removal")
-        String propValue = java.security.AccessController.doPrivileged(new sun.security.action.GetPropertyAction("apple.awt.dnd.defaultDragImageSize"));
+        String propValue = System.getProperty("apple.awt.dnd.defaultDragImageSize");
         if (propValue != null) {
             try {
                 double value = Double.parseDouble(propValue);
@@ -82,6 +81,7 @@ public final class CDragSourceContextPeer extends SunDragSourceContextPeer {
     }
 
     // We have to overload this method just to be able to grab the drag image and its offset as shared code doesn't store it:
+    @Override
     public void startDrag(DragSourceContext dsc, Cursor cursor, Image dragImage, Point dragImageOffset) throws InvalidDnDOperationException {
         fDragImage = dragImage;
         fDragImageOffset = dragImageOffset;
@@ -89,6 +89,7 @@ public final class CDragSourceContextPeer extends SunDragSourceContextPeer {
         super.startDrag(dsc, cursor, dragImage, dragImageOffset);
     }
 
+    @Override
     protected void startDrag(Transferable transferable, long[] formats, Map<Long, DataFlavor> formatMap) {
         DragGestureEvent trigger = getTrigger();
         InputEvent         triggerEvent = trigger.getTriggerEvent();
@@ -314,7 +315,7 @@ public final class CDragSourceContextPeer extends SunDragSourceContextPeer {
     private void setDefaultDragImage(JList<?> component) {
         Rectangle selectedOutline = null;
 
-        // This code actually works, even under the (non-existant) multiple-selections, because we only draw a union outline
+        // This code actually works, even under the (non-existent) multiple-selections, because we only draw a union outline
         int[] selectedIndices = component.getSelectedIndices();
         if (selectedIndices.length > 0)
             selectedOutline = component.getCellBounds(selectedIndices[0], selectedIndices[selectedIndices.length-1]);

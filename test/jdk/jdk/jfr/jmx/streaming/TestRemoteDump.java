@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,29 +26,33 @@ import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
+import java.util.function.Consumer;
+import javax.management.MBeanServerConnection;
 
 import jdk.jfr.Event;
 import jdk.jfr.Name;
+import jdk.jfr.Recording;
 import jdk.jfr.consumer.RecordedEvent;
 import jdk.jfr.consumer.RecordingFile;
-import jdk.jfr.consumer.RecordingStream;
 import jdk.management.jfr.RemoteRecordingStream;
 
 /**
  * @test
- * @summary Tests RecordingStream::dump(Path)
- * @key jfr
+ * @summary Tests RemoteRecordingStream::dump(Path)
+ * @requires vm.flagless
  * @requires vm.hasJFR
  * @library /test/lib
  * @run main/othervm jdk.jfr.jmx.streaming.TestRemoteDump
  */
 public class TestRemoteDump {
+
+    private static final MBeanServerConnection CONNECTION = ManagementFactory.getPlatformMBeanServer();
 
     @Name("RemoteDumpTest")
     static class DumpEvent extends Event {
@@ -64,7 +68,7 @@ public class TestRemoteDump {
 
     private static void testUnstarted() throws Exception {
         Path path = Path.of("recording.jfr");
-        var rs = new RecordingStream();
+        var rs = new RemoteRecordingStream(CONNECTION);
         rs.setMaxAge(Duration.ofHours(1));
         try {
             rs.dump(path);
@@ -76,7 +80,7 @@ public class TestRemoteDump {
 
     private static void testClosed() throws Exception {
         Path path = Path.of("recording.jfr");
-        var rs = new RecordingStream();
+        var rs = new RemoteRecordingStream(CONNECTION);
         rs.setMaxAge(Duration.ofHours(1));
         rs.startAsync();
         rs.close();
@@ -90,8 +94,7 @@ public class TestRemoteDump {
 
     private static void testMultipleDumps() throws Exception {
         CountDownLatch latch = new CountDownLatch(1);
-        var conn = ManagementFactory.getPlatformMBeanServer();
-        try (var rs = new RemoteRecordingStream(conn)) {
+        try (var rs = new RemoteRecordingStream(CONNECTION)) {
             rs.setMaxAge(Duration.ofHours(1));
             rs.onEvent(e -> {
                 latch.countDown();
@@ -119,7 +122,7 @@ public class TestRemoteDump {
             var f1 = service.submit(f);
             var f2 = service.submit(f);
             var f3 = service.submit(f);
-            if (!f1.get() && !f1.get() && !f3.get()) {
+            if (!f1.get() || !f2.get() || !f3.get()) {
                 throw new Exception("Failed to dump multiple recordings simultanously");
             }
             service.shutdown();
@@ -128,8 +131,7 @@ public class TestRemoteDump {
 
     private static void testOneDump() throws Exception {
         CountDownLatch latch = new CountDownLatch(1);
-        var conn = ManagementFactory.getPlatformMBeanServer();
-        try (var rs = new RemoteRecordingStream(conn)) {
+        try (var rs = new RemoteRecordingStream(CONNECTION)) {
             rs.setMaxSize(5_000_000);
             rs.onEvent(e -> {
                 latch.countDown();
@@ -150,7 +152,7 @@ public class TestRemoteDump {
 
     private static void testEventAfterDump() throws Exception {
         CountDownLatch latch = new CountDownLatch(1);
-        try (var rs = new RecordingStream()) {
+        try (var rs = new RemoteRecordingStream(CONNECTION)) {
             rs.setMaxAge(Duration.ofHours(1));
             rs.onEvent(e -> {
                 latch.countDown();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -76,10 +76,10 @@ class CESU_8 extends Unicode
         dst.position(dp - dst.arrayOffset());
     }
 
+    private static final JavaLangAccess JLA = SharedSecrets.getJavaLangAccess();
+
     private static class Decoder extends CharsetDecoder
                                  implements ArrayDecoder {
-
-        private static final JavaLangAccess JLA = SharedSecrets.getJavaLangAccess();
 
         private Decoder(Charset cs) {
             super(cs, 1.0f, 1.0f);
@@ -394,8 +394,7 @@ class CESU_8 extends Unicode
         }
     }
 
-    private static class Encoder extends CharsetEncoder
-                                 implements ArrayEncoder {
+    private static class Encoder extends CharsetEncoder {
 
         private Encoder(Charset cs) {
             super(cs, 1.1f, 3.0f);
@@ -434,7 +433,6 @@ class CESU_8 extends Unicode
         }
 
         private Surrogate.Parser sgp;
-        private char[] c2;
         private CoderResult encodeArrayLoop(CharBuffer src,
                                             ByteBuffer dst)
         {
@@ -445,11 +443,12 @@ class CESU_8 extends Unicode
             byte[] da = dst.array();
             int dp = dst.arrayOffset() + dst.position();
             int dl = dst.arrayOffset() + dst.limit();
-            int dlASCII = dp + Math.min(sl - sp, dl - dp);
 
-            // ASCII only loop
-            while (dp < dlASCII && sa[sp] < '\u0080')
-                da[dp++] = (byte) sa[sp++];
+            // Handle ASCII-only prefix
+            int n = JLA.encodeASCII(sa, sp, da, dp, Math.min(sl - sp, dl - dp));
+            sp += n;
+            dp += n;
+
             while (sp < sl) {
                 char c = sa[sp];
                 if (c < 0x80) {
@@ -544,48 +543,6 @@ class CESU_8 extends Unicode
                 return encodeBufferLoop(src, dst);
         }
 
-        // returns -1 if there is malformed char(s) and the
-        // "action" for malformed input is not REPLACE.
-        public int encode(char[] sa, int sp, int len, byte[] da) {
-            int sl = sp + len;
-            int dp = 0;
-            int dlASCII = dp + Math.min(len, da.length);
-
-            // ASCII only optimized loop
-            while (dp < dlASCII && sa[sp] < '\u0080')
-                da[dp++] = (byte) sa[sp++];
-
-            while (sp < sl) {
-                char c = sa[sp++];
-                if (c < 0x80) {
-                    // Have at most seven bits
-                    da[dp++] = (byte)c;
-                } else if (c < 0x800) {
-                    // 2 bytes, 11 bits
-                    da[dp++] = (byte)(0xc0 | (c >> 6));
-                    da[dp++] = (byte)(0x80 | (c & 0x3f));
-                } else if (Character.isSurrogate(c)) {
-                    if (sgp == null)
-                        sgp = new Surrogate.Parser();
-                    int uc = sgp.parse(c, sa, sp - 1, sl);
-                    if (uc < 0) {
-                        if (malformedInputAction() != CodingErrorAction.REPLACE)
-                            return -1;
-                        da[dp++] = replacement()[0];
-                    } else {
-                        to3Bytes(da, dp, Character.highSurrogate(uc));
-                        dp += 3;
-                        to3Bytes(da, dp, Character.lowSurrogate(uc));
-                        dp += 3;
-                        sp++;  // 2 chars
-                    }
-                } else {
-                    // 3 bytes, 16 bits
-                    to3Bytes(da, dp, c);
-                    dp += 3;
-                }
-            }
-            return dp;
-        }
     }
+
 }

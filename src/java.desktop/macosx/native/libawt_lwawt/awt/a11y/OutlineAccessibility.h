@@ -1,11 +1,13 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2021, JetBrains s.r.o.. All rights reserved.
+ * Copyright (c) 2021, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2024, JetBrains s.r.o.. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -27,7 +29,12 @@
 // This is a tree representation. See: https://developer.apple.com/documentation/appkit/nsoutlineview
 
 @interface OutlineAccessibility : ListAccessibility <NSAccessibilityOutline>
-
+{
+    NSMutableArray<id<NSAccessibilityRow>> *rowCache;
+    BOOL rowCacheValid;
+    NSMutableArray<id<NSAccessibilityRow>> *selectedRowCache;
+    BOOL selectedRowCacheValid;
+}
 @property(readonly) BOOL isTreeRootVisible;
 
 @end

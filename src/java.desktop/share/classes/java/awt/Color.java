@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -261,26 +261,6 @@ public class Color implements Paint, java.io.Serializable {
      private static final long serialVersionUID = 118526816881161077L;
 
     /**
-     * Initialize JNI field and method IDs
-     */
-    private static native void initIDs();
-
-    static {
-        /** 4112352 - Calling getDefaultToolkit()
-         ** here can cause this class to be accessed before it is fully
-         ** initialized. DON'T DO IT!!!
-         **
-         ** Toolkit.getDefaultToolkit();
-         **/
-
-        /* ensure that the necessary native libraries are loaded */
-        Toolkit.loadLibraries();
-        if (!GraphicsEnvironment.isHeadless()) {
-            initIDs();
-        }
-    }
-
-    /**
      * Checks the color integer components supplied for validity.
      * Throws an {@link IllegalArgumentException} if the value is out of
      * range.
@@ -354,7 +334,7 @@ public class Color implements Paint, java.io.Serializable {
      * The actual color used in rendering depends
      * on finding the best match given the color space
      * available for a given output device.
-     * Alpha is defaulted to 255.
+     * Alpha defaults to 255.
      *
      * @throws IllegalArgumentException if {@code r}, {@code g}
      *        or {@code b} are outside of the range
@@ -398,12 +378,15 @@ public class Color implements Paint, java.io.Serializable {
     }
 
     /**
-     * Creates an opaque sRGB color with the specified combined RGB value
-     * consisting of the red component in bits 16-23, the green component
-     * in bits 8-15, and the blue component in bits 0-7.  The actual color
-     * used in rendering depends on finding the best match given the
-     * color space available for a particular output device.  Alpha is
-     * defaulted to 255.
+     * Creates an opaque sRGB color with the specified RGB value consisting of
+     * <ul>
+     *   <li>the red component in bits 16-23,
+     *   <li>the green component in bits 8-15, and
+     *   <li>the blue component in bits 0-7.
+     * </ul>
+     * The actual color used in rendering depends on finding the best match
+     * given the color space available for a particular output device. Alpha
+     * defaults to 255.
      *
      * @param rgb the combined RGB components
      * @see java.awt.image.ColorModel#getRGBdefault
@@ -417,14 +400,17 @@ public class Color implements Paint, java.io.Serializable {
     }
 
     /**
-     * Creates an sRGB color with the specified combined RGBA value consisting
-     * of the alpha component in bits 24-31, the red component in bits 16-23,
-     * the green component in bits 8-15, and the blue component in bits 0-7.
-     * If the {@code hasalpha} argument is {@code false}, alpha
-     * is defaulted to 255.
+     * Creates an sRGB color with the specified ARGB value consisting of
+     * <ul>
+     *   <li>the alpha component in bits 24-31,
+     *   <li>the red component in bits 16-23,
+     *   <li>the green component in bits 8-15, and
+     *   <li>the blue component in bits 0-7.
+     * </ul>
+     * If the {@code hasAlpha} argument is {@code false}, alpha defaults to 255.
      *
-     * @param rgba the combined RGBA components
-     * @param hasalpha {@code true} if the alpha bits are valid;
+     * @param argb the combined ARGB components
+     * @param hasAlpha {@code true} if the alpha bits are valid;
      *        {@code false} otherwise
      * @see java.awt.image.ColorModel#getRGBdefault
      * @see #getRed
@@ -433,17 +419,17 @@ public class Color implements Paint, java.io.Serializable {
      * @see #getAlpha
      * @see #getRGB
      */
-    public Color(int rgba, boolean hasalpha) {
-        if (hasalpha) {
-            value = rgba;
+    public Color(int argb, boolean hasAlpha) {
+        if (hasAlpha) {
+            value = argb;
         } else {
-            value = 0xff000000 | rgba;
+            value = 0xff000000 | argb;
         }
     }
 
     /**
      * Creates an opaque sRGB color with the specified red, green, and blue
-     * values in the range (0.0 - 1.0).  Alpha is defaulted to 1.0.  The
+     * values in the range (0.0 - 1.0).  Alpha defaults to 1.0.  The
      * actual color used in rendering depends on finding the best
      * match given the color space available for a particular output
      * device.
@@ -590,9 +576,14 @@ public class Color implements Paint, java.io.Serializable {
 
     /**
      * Returns the RGB value representing the color in the default sRGB
-     * {@link ColorModel}.
-     * (Bits 24-31 are alpha, 16-23 are red, 8-15 are green, 0-7 are
-     * blue).
+     * {@link ColorModel}, consisting of
+     * <ul>
+     *   <li>the alpha component in bits 24-31,
+     *   <li>the red component in bits 16-23,
+     *   <li>the green component in bits 8-15, and
+     *   <li>the blue component in bits 0-7.
+     * </ul>
+     *
      * @return the RGB value of the color in the default sRGB
      *         {@code ColorModel}.
      * @see java.awt.image.ColorModel#getRGBdefault
@@ -722,7 +713,7 @@ public class Color implements Paint, java.io.Serializable {
      *                            an opaque color as a 24-bit integer
      * @return     the new {@code Color} object.
      * @see        java.lang.Integer#decode
-     * @exception  NumberFormatException  if the specified string cannot
+     * @throws  NumberFormatException  if the specified string cannot
      *                      be interpreted as a decimal,
      *                      octal, or hexadecimal integer.
      * @since      1.1
@@ -1215,11 +1206,10 @@ public class Color implements Paint, java.io.Serializable {
      * @see AffineTransform
      * @see RenderingHints
      */
-    public synchronized PaintContext createContext(ColorModel cm, Rectangle r,
-                                                   Rectangle2D r2d,
-                                                   AffineTransform xform,
-                                                   RenderingHints hints) {
-        return new ColorPaintContext(getRGB(), cm);
+    public PaintContext createContext(ColorModel cm, Rectangle r,
+                                      Rectangle2D r2d, AffineTransform xform,
+                                      RenderingHints hints) {
+        return new ColorPaintContext(getRGB());
     }
 
     /**

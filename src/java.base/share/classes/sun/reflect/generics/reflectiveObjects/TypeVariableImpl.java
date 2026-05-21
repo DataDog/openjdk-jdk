@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,23 +27,21 @@ package sun.reflect.generics.reflectiveObjects;
 
 import java.lang.annotation.*;
 import java.lang.reflect.AnnotatedType;
-import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.GenericDeclaration;
-import java.lang.reflect.Member;
 import java.lang.reflect.Method;
 import java.lang.reflect.Type;
 import java.lang.reflect.TypeVariable;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+
+import jdk.internal.reflect.ReflectionFactory;
 import sun.reflect.annotation.AnnotationSupport;
 import sun.reflect.annotation.TypeAnnotationParser;
 import sun.reflect.annotation.AnnotationType;
 import sun.reflect.generics.factory.GenericsFactory;
 import sun.reflect.generics.tree.FieldTypeSignature;
-import sun.reflect.generics.visitor.Reifier;
-import sun.reflect.misc.ReflectUtil;
 
 /**
  * Implementation of {@code java.lang.reflect.TypeVariable} interface
@@ -94,7 +92,7 @@ public class TypeVariableImpl<D extends GenericDeclaration>
             throw new AssertionError("Unexpected kind of GenericDeclaration" +
                     decl.getClass().toString());
         }
-        return new TypeVariableImpl<T>(decl, name, bs, f);
+        return new TypeVariableImpl<>(decl, name, bs, f);
     }
 
 
@@ -121,30 +119,32 @@ public class TypeVariableImpl<D extends GenericDeclaration>
      */
     public Type[] getBounds() {
         Object[] value = bounds;
-        if (value instanceof FieldTypeSignature[]) {
-            value = reifyBounds((FieldTypeSignature[])value);
+        if (value instanceof FieldTypeSignature[] sigs) {
+            value = reifyBounds(sigs);
             bounds = value;
         }
         return (Type[])value.clone();
     }
 
     /**
-     * Returns the {@code GenericDeclaration} object representing the
+     * Returns a {@code GenericDeclaration} object representing the
      * generic declaration that declared this type variable.
      *
-     * @return the generic declaration that declared this type variable.
+     * @return a generic declaration that declared this type variable.
      *
      * @since 1.5
      */
+    @SuppressWarnings("unchecked")
     public D getGenericDeclaration() {
-        if (genericDeclaration instanceof Class)
-            ReflectUtil.checkPackageAccess((Class)genericDeclaration);
-        else if ((genericDeclaration instanceof Method) ||
-                (genericDeclaration instanceof Constructor))
-            ReflectUtil.conservativeCheckMemberAccess((Member)genericDeclaration);
-        else
-            throw new AssertionError("Unexpected kind of GenericDeclaration");
-        return genericDeclaration;
+        assert genericDeclaration instanceof Class<?> ||
+                genericDeclaration instanceof Method ||
+                genericDeclaration instanceof Constructor : "Unexpected kind of GenericDeclaration";
+        // If the `genericDeclaration` instance is mutable, we need to make a copy.
+        return switch (genericDeclaration) {
+            case Method method       -> (D) ReflectionFactory.getReflectionFactory().copyMethod(method);
+            case Constructor<?> ctor -> (D) ReflectionFactory.getReflectionFactory().copyConstructor(ctor);
+            default -> genericDeclaration;
+        };
     }
 
 
@@ -159,18 +159,10 @@ public class TypeVariableImpl<D extends GenericDeclaration>
 
     @Override
     public boolean equals(Object o) {
-        if (o instanceof TypeVariable &&
-                o.getClass() == TypeVariableImpl.class) {
-            TypeVariable<?> that = (TypeVariable<?>) o;
-
-            GenericDeclaration thatDecl = that.getGenericDeclaration();
-            String thatName = that.getName();
-
-            return Objects.equals(genericDeclaration, thatDecl) &&
-                Objects.equals(name, thatName);
-
-        } else
-            return false;
+        return o instanceof TypeVariable<?> that &&
+                o.getClass() == TypeVariableImpl.class &&
+                Objects.equals(genericDeclaration, that.getGenericDeclaration()) &&
+                Objects.equals(name, that.getName());
     }
 
     @Override
@@ -219,8 +211,6 @@ public class TypeVariableImpl<D extends GenericDeclaration>
                                                          getGenericDeclaration(),
                                                          typeVarIndex());
     }
-
-    private static final Annotation[] EMPTY_ANNOTATION_ARRAY = new Annotation[0];
 
     // Helpers for annotation methods
     private int typeVarIndex() {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,17 +25,9 @@
  * @test
  * @bug 8196389
  * @summary Should HttpClient support SETTINGS_MAX_CONCURRENT_STREAMS from the server
- *
- * @modules java.base/sun.net.www.http
- *          java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- *          java.logging
- *          jdk.httpserver
- * @library /test/lib http2/server
- * @build Http2TestServer
- * @build jdk.test.lib.net.SimpleSSLContext
- * @run testng/othervm -ea -esa MaxStreams
+ * @library /test/lib /test/jdk/java/net/httpclient/lib
+ * @build jdk.httpclient.test.lib.http2.Http2TestServer jdk.test.lib.net.SimpleSSLContext
+ * @run junit/othervm ${test.main.class}
  */
 
 import java.io.IOException;
@@ -49,39 +41,36 @@ import java.util.LinkedList;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Semaphore;
 import javax.net.ssl.SSLContext;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.net.http.HttpResponse.BodyHandler;
 import java.net.http.HttpResponse.BodyHandlers;
+import jdk.httpclient.test.lib.http2.Http2TestServer;
+import jdk.httpclient.test.lib.http2.Http2TestExchange;
+import jdk.httpclient.test.lib.http2.Http2Handler;
 import jdk.test.lib.net.SimpleSSLContext;
-import org.testng.annotations.AfterTest;
-import org.testng.annotations.BeforeTest;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
-import static java.nio.charset.StandardCharsets.UTF_8;
-import static java.net.http.HttpResponse.BodyHandlers.discarding;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertFalse;
-import static org.testng.Assert.fail;
+
+import org.junit.jupiter.api.AfterAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.fail;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 public class MaxStreams {
 
-    Http2TestServer http2TestServer;   // HTTP/2 ( h2c )
-    Http2TestServer https2TestServer;   // HTTP/2 ( h2 )
-    final Http2FixedHandler handler = new Http2FixedHandler();
-    SSLContext ctx;
-    String http2FixedURI;
-    String https2FixedURI;
-    volatile CountDownLatch latch;
-    ExecutorService exec;
-    final Semaphore canStartTestRun = new Semaphore(1);
+    private static Http2TestServer http2TestServer;   // HTTP/2 ( h2c )
+    private static Http2TestServer https2TestServer;   // HTTP/2 ( h2 )
+    private static final Http2FixedHandler handler = new Http2FixedHandler();
+    private static final SSLContext ctx = SimpleSSLContext.findSSLContext();
+    private static String http2FixedURI;
+    private static String https2FixedURI;
+    private static ExecutorService exec;
 
     // we send an initial warm up request, then MAX_STREAMS+1 requests
     // in parallel. The last of them should hit the limit.
@@ -92,8 +81,7 @@ public class MaxStreams {
     static final int MAX_STREAMS = 10;
     static final String RESPONSE = "Hello world";
 
-    @DataProvider(name = "uris")
-    public Object[][] variants() {
+    public static Object[][] variants() {
         return new Object[][]{
                 {http2FixedURI},
                 {https2FixedURI},
@@ -103,11 +91,10 @@ public class MaxStreams {
     }
 
 
-    @Test(dataProvider = "uris", timeOut=20000)
+    @ParameterizedTest
+    @MethodSource("variants")
     void testAsString(String uri) throws Exception {
-        System.err.println("Semaphore acquire");
-        canStartTestRun.acquire();
-        latch = new CountDownLatch(1);
+        CountDownLatch latch = new CountDownLatch(1);
         handler.setLatch(latch);
         HttpClient client = HttpClient.newBuilder().sslContext(ctx).build();
         List<CompletableFuture<HttpResponse<String>>> responses = new LinkedList<>();
@@ -174,9 +161,8 @@ public class MaxStreams {
         System.err.println("Test OK");
     }
 
-    @BeforeTest
-    public void setup() throws Exception {
-        ctx = (new SimpleSSLContext()).get();
+    @BeforeAll
+    public static void setup() throws Exception {
         exec = Executors.newCachedThreadPool();
 
         InetSocketAddress sa = new InetSocketAddress(InetAddress.getLoopbackAddress(), 0);
@@ -194,13 +180,13 @@ public class MaxStreams {
         https2TestServer.start();
     }
 
-    @AfterTest
-    public void teardown() throws Exception {
+    @AfterAll
+    public static void teardown() throws Exception {
         System.err.println("Stopping test server now");
         http2TestServer.stop();
     }
 
-    class Http2FixedHandler implements Http2Handler {
+    static class Http2FixedHandler implements Http2Handler {
         final AtomicInteger counter = new AtomicInteger(0);
         volatile CountDownLatch latch;
 
@@ -214,12 +200,11 @@ public class MaxStreams {
 
         @Override
         public void handle(Http2TestExchange t) throws IOException {
-            int c = -1;
             try (InputStream is = t.getRequestBody();
                  OutputStream os = t.getResponseBody()) {
 
                 is.readAllBytes();
-                c = counter.getAndIncrement();
+                int c = counter.getAndIncrement();
                 if (c > 0 && c <= MAX_STREAMS) {
                     // Wait for latch.
                     try {
@@ -228,18 +213,15 @@ public class MaxStreams {
                         getLatch().await();
                         System.err.println("Latch resume");
                     } catch (InterruptedException ee) {}
+                } else if (c == MAX_STREAMS + 1) {
+                    // client issues MAX_STREAMS + 3 requests in total
+                    // but server should only see MAX_STREAMS + 2 in total. One is rejected by client
+                    // counter c captured before increment so final value is MAX_STREAMS + 1
+                    System.err.println("Counter reset");
+                    counter.set(0);
                 }
                 t.sendResponseHeaders(200, RESPONSE.length());
                 os.write(RESPONSE.getBytes());
-            } finally {
-                // client issues MAX_STREAMS + 3 requests in total
-                // but server should only see MAX_STREAMS + 2 in total. One is rejected by client
-                // counter c captured before increment so final value is MAX_STREAMS + 1
-                if (c == MAX_STREAMS + 1) {
-                    System.err.println("Semaphore release");
-                    counter.set(0);
-                    canStartTestRun.release();
-                }
             }
         }
     }

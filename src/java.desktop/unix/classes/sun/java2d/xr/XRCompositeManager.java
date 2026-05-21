@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,15 +25,16 @@
 
 package sun.java2d.xr;
 
-import java.awt.*;
-import java.awt.geom.*;
+import java.awt.AlphaComposite;
+import java.awt.Composite;
+import java.awt.Paint;
+import java.awt.geom.AffineTransform;
+import java.awt.geom.NoninvertibleTransformException;
 
-import java.security.AccessController;
-import java.security.PrivilegedAction;
-
-import sun.font.*;
-import sun.java2d.*;
-import sun.java2d.loops.*;
+import sun.awt.image.PixelConverter;
+import sun.font.XRTextRenderer;
+import sun.java2d.SunGraphics2D;
+import sun.java2d.loops.XORComposite;
 
 /**
  * Manages per-application resources, e.g. the 1x1 pixmap used for solid color
@@ -43,7 +44,7 @@ import sun.java2d.loops.*;
  * @author Clemens Eisserer
  */
 
-public class XRCompositeManager {
+public final class XRCompositeManager {
     private static boolean enableGradCache = true;
     private static XRCompositeManager instance;
 
@@ -68,6 +69,7 @@ public class XRCompositeManager {
     int gradCachePicture;
 
     boolean xorEnabled = false;
+    int eargb;
     int validatedPixel = 0;
     Composite validatedComp;
     Paint validatedPaint;
@@ -89,13 +91,7 @@ public class XRCompositeManager {
     private XRCompositeManager(XRSurfaceData surface) {
         con = new XRBackendNative();
 
-        @SuppressWarnings("removal")
-        String gradProp =
-            AccessController.doPrivileged(new PrivilegedAction<String>() {
-                public String run() {
-                    return System.getProperty("sun.java2d.xrgradcache");
-                }
-            });
+        String gradProp = System.getProperty("sun.java2d.xrgradcache");
 
         enableGradCache = gradProp == null ||
                           !(gradProp.equalsIgnoreCase("false") ||
@@ -170,8 +166,10 @@ public class XRCompositeManager {
             validatedComp = comp;
         }
 
-        if (sg2d != null && (validatedPixel != sg2d.pixel  || updatePaint)) {
-            validatedPixel = sg2d.pixel;
+        if (sg2d != null && (eargb != sg2d.eargb || updatePaint)) {
+            eargb = sg2d.eargb;
+            validatedPixel = PixelConverter.ArgbPre.instance
+                                           .rgbToPixel(eargb, null);
             setForeground(validatedPixel);
         }
 
@@ -222,7 +220,7 @@ public class XRCompositeManager {
             xorEnabled = true;
         } else {
             throw new InternalError(
-                    "Composite accaleration not implemented for: "
+                    "Composite acceleration not implemented for: "
                             + comp.getClass().getName());
         }
     }

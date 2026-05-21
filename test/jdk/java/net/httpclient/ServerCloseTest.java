@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,22 +25,14 @@
  * @test
  * @summary Tests that our client deals correctly with servers that
  *          close the connection right after sending the last byte.
- * @library /test/lib http2/server
- * @build jdk.test.lib.net.SimpleSSLContext HttpServerAdapters EncodedCharsInURI
- * @modules java.base/sun.net.www.http
- *          java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- * @run testng/othervm -Djdk.tls.acknowledgeCloseNotify=true ServerCloseTest
+ * @library /test/lib /test/jdk/java/net/httpclient/lib
+ * @build jdk.test.lib.net.SimpleSSLContext
+ *        jdk.httpclient.test.lib.common.HttpServerAdapters
+ * @run junit/othervm -Djdk.tls.acknowledgeCloseNotify=true ${test.main.class}
  */
 //*        -Djdk.internal.httpclient.debug=true
 
 import jdk.test.lib.net.SimpleSSLContext;
-import org.testng.annotations.AfterClass;
-import org.testng.annotations.AfterTest;
-import org.testng.annotations.BeforeTest;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 
 import javax.net.ServerSocketFactory;
 import javax.net.ssl.SSLContext;
@@ -72,17 +64,23 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
+import jdk.httpclient.test.lib.common.HttpServerAdapters;
 
 import static java.lang.System.out;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+
 public class ServerCloseTest implements HttpServerAdapters {
 
-    SSLContext sslContext;
-    DummyServer    httpDummyServer;    // HTTP/1.1    [ 2 servers ]
-    DummyServer    httpsDummyServer;   // HTTPS/1.1
-    String httpDummy;
-    String httpsDummy;
+    private static final SSLContext sslContext = SimpleSSLContext.findSSLContext();
+    private static DummyServer    httpDummyServer;    // HTTP/1.1    [ 2 servers ]
+    private static DummyServer    httpsDummyServer;   // HTTPS/1.1
+    private static String httpDummy;
+    private static String httpsDummy;
 
     static final int ITERATION_COUNT = 3;
     // a shared executor helps reduce the amount of threads created by the test
@@ -100,7 +98,7 @@ public class ServerCloseTest implements HttpServerAdapters {
         return String.format("[%d s, %d ms, %d ns] ", secs, mill, nan);
     }
 
-    private volatile HttpClient sharedClient;
+    private static volatile HttpClient sharedClient;
 
     static class TestExecutor implements Executor {
         final AtomicLong tasks = new AtomicLong();
@@ -126,8 +124,8 @@ public class ServerCloseTest implements HttpServerAdapters {
         }
     }
 
-    @AfterClass
-    static final void printFailedTests() {
+    @AfterAll
+    static void printFailedTests() {
         out.println("\n=========================");
         try {
             out.printf("%n%sCreated %d servers and %d clients%n",
@@ -146,15 +144,14 @@ public class ServerCloseTest implements HttpServerAdapters {
         }
     }
 
-    private String[] uris() {
+    private static String[] uris() {
         return new String[] {
                 httpDummy,
                 httpsDummy,
         };
     }
 
-    @DataProvider(name = "servers")
-    public Object[][] noThrows() {
+    public static Object[][] noThrows() {
         String[] uris = uris();
         Object[][] result = new Object[uris.length * 2][];
         //Object[][] result = new Object[uris.length][];
@@ -193,7 +190,8 @@ public class ServerCloseTest implements HttpServerAdapters {
 
     final String ENCODED = "/01%252F03/";
 
-    @Test(dataProvider = "servers")
+    @ParameterizedTest
+    @MethodSource("noThrows")
     public void testServerClose(String uri, boolean sameClient) {
         HttpClient client = null;
         out.printf("%n%s testServerClose(%s, %b)%n", now(), uri, sameClient);
@@ -225,12 +223,8 @@ public class ServerCloseTest implements HttpServerAdapters {
         }
     }
 
-    @BeforeTest
-    public void setup() throws Exception {
-        sslContext = new SimpleSSLContext().get();
-        if (sslContext == null)
-            throw new AssertionError("Unexpected null sslContext");
-
+    @BeforeAll
+    public static void setup() throws Exception {
         InetSocketAddress sa = new InetSocketAddress(InetAddress.getLoopbackAddress(), 0);
 
         // DummyServer
@@ -245,8 +239,8 @@ public class ServerCloseTest implements HttpServerAdapters {
         httpsDummyServer.start();
     }
 
-    @AfterTest
-    public void teardown() throws Exception {
+    @AfterAll
+    public static void teardown() throws Exception {
         sharedClient = null;
         httpDummyServer.stopServer();
         httpsDummyServer.stopServer();
@@ -287,14 +281,12 @@ public class ServerCloseTest implements HttpServerAdapters {
             try {
                 while(!stopped) {
                     Socket clientConnection = ss.accept();
-                    connections.add(clientConnection);
                     System.out.println(now() + getName() + ": Client accepted");
                     StringBuilder headers = new StringBuilder();
-                    Socket targetConnection = null;
                     InputStream  ccis = clientConnection.getInputStream();
                     OutputStream ccos = clientConnection.getOutputStream();
                     Writer w = new OutputStreamWriter(
-                            clientConnection.getOutputStream(), "UTF-8");
+                            clientConnection.getOutputStream(), UTF_8);
                     PrintWriter pw = new PrintWriter(w);
                     System.out.println(now() + getName() + ": Reading request line");
                     String requestLine = readLine(ccis);
@@ -302,24 +294,36 @@ public class ServerCloseTest implements HttpServerAdapters {
 
                     StringTokenizer tokenizer = new StringTokenizer(requestLine);
                     String method = tokenizer.nextToken();
-                    assert method.equalsIgnoreCase("POST")
-                            || method.equalsIgnoreCase("GET");
+                    if (!method.equals("GET") && !method.equals("POST")) {
+                        System.err.println(now() + getName() + ": Unexpected request method. Method: " + method);
+                        clientConnection.close();
+                        continue;
+                    }
+
                     String path = tokenizer.nextToken();
+                    if (!path.contains("/dummy/x")) {
+                        System.err.println(now() + getName() + ": Unexpected request path. Path: " + path);
+                        clientConnection.close();
+                        continue;
+                    }
+
                     URI uri;
                     try {
                         String hostport = serverAuthority();
-                        uri = new URI((secure ? "https" : "http") +"://" + hostport + path);
+                        uri = new URI((secure ? "https" : "http") + "://" + hostport + path);
                     } catch (Throwable x) {
-                        System.err.printf("Bad target address: \"%s\" in \"%s\"%n",
+                        System.err.printf(now() + getName() + ": Bad target address: \"%s\" in \"%s\"%n",
                                 path, requestLine);
                         clientConnection.close();
                         continue;
                     }
 
+                    // Method, path and URI are valid. Add to connections list
+                    connections.add(clientConnection);
                     // Read all headers until we find the empty line that
                     // signals the end of all headers.
                     String line = requestLine;
-                    while (!line.equals("")) {
+                    while (!line.isEmpty()) {
                         System.out.println(now() + getName() + ": Reading header: "
                                 + (line = readLine(ccis)));
                         headers.append(line).append("\r\n");
@@ -333,7 +337,7 @@ public class ServerCloseTest implements HttpServerAdapters {
                     byte[] b = uri.toString().getBytes(UTF_8);
                     if (index >= 0) {
                         index = index + "content-length: ".length();
-                        String cl = headers.toString().substring(index);
+                        String cl = headers.substring(index);
                         StringTokenizer tk = new StringTokenizer(cl);
                         int len = Integer.parseInt(tk.nextToken());
                         assert len < b.length * 2;

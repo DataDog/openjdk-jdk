@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,65 +26,74 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
+import java.lang.StackWalker.StackFrame;
 import java.net.URI;
+import java.net.http.HttpClient.Builder;
+import java.net.http.HttpClient.Version;
+import java.net.http.HttpOption.Http3DiscoveryMode;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
+import java.util.Optional;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
 import java.util.concurrent.Flow.Subscriber;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpHandler;
-import com.sun.net.httpserver.HttpServer;
-import com.sun.net.httpserver.HttpsConfigurator;
-import com.sun.net.httpserver.HttpsServer;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.net.http.HttpResponse.BodySubscribers;
+
+import jdk.httpclient.test.lib.common.HttpServerAdapters;
 import jdk.test.lib.net.SimpleSSLContext;
-import org.testng.annotations.AfterTest;
-import org.testng.annotations.BeforeTest;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 import javax.net.ssl.SSLContext;
+
+import static java.net.http.HttpOption.H3_DISCOVERY;
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertThrows;
-import static org.testng.Assert.assertTrue;
+
+import org.junit.jupiter.api.AfterAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /*
  * @test
+ * @bug 8193365 8317295
  * @summary Basic tests for Flow adapter Subscribers
- * @modules java.base/sun.net.www.http
- *          java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- *          java.logging
- *          jdk.httpserver
- * @library /test/lib http2/server
- * @build Http2TestServer
- * @build jdk.test.lib.net.SimpleSSLContext
- * @run testng/othervm -Djdk.internal.httpclient.debug=true FlowAdapterSubscriberTest
+ * @library /test/lib /test/jdk/java/net/httpclient/lib
+ * @build jdk.httpclient.test.lib.common.HttpServerAdapters
+ *        jdk.test.lib.net.SimpleSSLContext
+ * @run junit/othervm -Djdk.internal.httpclient.debug=true ${test.main.class}
  */
 
-public class FlowAdapterSubscriberTest {
+public class FlowAdapterSubscriberTest implements HttpServerAdapters {
 
-    SSLContext sslContext;
-    HttpServer httpTestServer;         // HTTP/1.1    [ 4 servers ]
-    HttpsServer httpsTestServer;       // HTTPS/1.1
-    Http2TestServer http2TestServer;   // HTTP/2 ( h2c )
-    Http2TestServer https2TestServer;  // HTTP/2 ( h2  )
-    String httpURI;
-    String httpsURI;
-    String http2URI;
-    String https2URI;
+    private static final SSLContext sslContext = SimpleSSLContext.findSSLContext();
+    private static HttpTestServer httpTestServer;     // HTTP/1.1    [ 5 servers ]
+    private static HttpTestServer httpsTestServer;    // HTTPS/1.1
+    private static HttpTestServer http2TestServer;    // HTTP/2 ( h2c )
+    private static HttpTestServer https2TestServer;   // HTTP/2 ( h2  )
+    private static HttpTestServer http3TestServer;    // HTTP/3 ( h3  )
+    private static String httpURI;
+    private static String httpsURI;
+    private static String http2URI;
+    private static String https2URI;
+    private static String http3URI;
+
+    static final StackWalker WALKER =
+            StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
+
     static final long start = System.nanoTime();
     public static String now() {
         long now = System.nanoTime() - start;
@@ -94,17 +103,44 @@ public class FlowAdapterSubscriberTest {
         return String.format("[%d s, %d ms, %d ns] ", secs, mill, nan);
     }
 
-    @DataProvider(name = "uris")
-    public Object[][] variants() {
+    public static Object[][] variants() {
         return new Object[][]{
                 { httpURI   },
                 { httpsURI  },
                 { http2URI  },
                 { https2URI },
+                { http3URI  },
         };
     }
 
     static final Class<NullPointerException> NPE = NullPointerException.class;
+
+    private static Version version(String uri) {
+        if (uri.contains("/http1/")) return Version.HTTP_1_1;
+        if (uri.contains("/https1/")) return Version.HTTP_1_1;
+        if (uri.contains("/http2/")) return Version.HTTP_2;
+        if (uri.contains("/https2/")) return Version.HTTP_2;
+        if (uri.contains("/http3/")) return Version.HTTP_3;
+        return null;
+    }
+
+    private HttpClient newHttpClient(String uri) {
+        var version = Optional.ofNullable(version(uri));
+        var builder = version.isEmpty() || version.get() != Version.HTTP_3
+                ? HttpClient.newBuilder()
+                : HttpServerAdapters.createClientBuilderForH3().version(Version.HTTP_3);
+        return builder.sslContext(sslContext).proxy(Builder.NO_PROXY).build();
+    }
+
+    private HttpRequest.Builder newRequestBuilder(String uri) {
+        var version = Optional.ofNullable(version(uri));
+        var builder = version.isEmpty() || version.get() != Version.HTTP_3
+                ? HttpRequest.newBuilder(URI.create(uri))
+                : HttpRequest.newBuilder(URI.create(uri))
+                .version(Version.HTTP_3)
+                .setOption(H3_DISCOVERY, http3TestServer.h3DiscoveryConfig());
+        return builder;
+    }
 
     @Test
     public void testNull() {
@@ -119,7 +155,7 @@ public class FlowAdapterSubscriberTest {
         assertThrows(NPE, () -> BodySubscribers.fromSubscriber(new ListSubscriber(), null));
         assertThrows(NPE, () -> BodySubscribers.fromSubscriber(null, null));
 
-        Subscriber subscriber = BodySubscribers.fromSubscriber(new ListSubscriber());
+        Subscriber<?> subscriber = BodySubscribers.fromSubscriber(new ListSubscriber());
         assertThrows(NPE, () -> subscriber.onSubscribe(null));
         assertThrows(NPE, () -> subscriber.onNext(null));
         assertThrows(NPE, () -> subscriber.onError(null));
@@ -127,301 +163,405 @@ public class FlowAdapterSubscriberTest {
 
     // List<ByteBuffer>
 
-    @Test(dataProvider = "uris")
-    void testListWithFinisher(String url) {
-        System.out.printf(now() + "testListWithFinisher(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("May the luck of the Irish be with you!")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testListWithFinisher(String uri) {
+        System.out.printf(now() + "testListWithFinisher(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("May the luck of the Irish be with you!")).build();
 
-        ListSubscriber subscriber = new ListSubscriber();
-        HttpResponse<String> response = client.sendAsync(request,
-                BodyHandlers.fromSubscriber(subscriber, Supplier::get)).join();
-        String text = response.body();
-        System.out.println(text);
-        assertEquals(response.statusCode(), 200);
-        assertEquals(text, "May the luck of the Irish be with you!");
+            ListSubscriber subscriber = new ListSubscriber();
+            HttpResponse<String> response = client.sendAsync(request,
+                    BodyHandlers.fromSubscriber(subscriber, Supplier::get)).join();
+            String text = response.body();
+            System.out.println(text);
+            assertEquals(200, response.statusCode());
+            assertEquals(version(uri), response.version());
+            assertEquals("May the luck of the Irish be with you!", text);
+        }
     }
 
-    @Test(dataProvider = "uris")
-    void testListWithoutFinisher(String url) {
-        System.out.printf(now() + "testListWithoutFinisher(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("May the luck of the Irish be with you!")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testListWithoutFinisher(String uri) {
+        System.out.printf(now() + "testListWithoutFinisher(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("May the luck of the Irish be with you!")).build();
 
-        ListSubscriber subscriber = new ListSubscriber();
-        HttpResponse<Void> response = client.sendAsync(request,
-                BodyHandlers.fromSubscriber(subscriber)).join();
-        String text = subscriber.get();
-        System.out.println(text);
-        assertEquals(response.statusCode(), 200);
-        assertEquals(text, "May the luck of the Irish be with you!");
+            ListSubscriber subscriber = new ListSubscriber();
+            HttpResponse<Void> response = client.sendAsync(request,
+                    BodyHandlers.fromSubscriber(subscriber)).join();
+            String text = subscriber.get();
+            System.out.println(text);
+            assertEquals(200, response.statusCode());
+            assertEquals(version(uri), response.version());
+            assertEquals("May the luck of the Irish be with you!", text);
+        }
     }
 
-    @Test(dataProvider = "uris")
-    void testListWithFinisherBlocking(String url) throws Exception {
-        System.out.printf(now() + "testListWithFinisherBlocking(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("May the luck of the Irish be with you!")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testListWithFinisherBlocking(String uri) throws Exception {
+        System.out.printf(now() + "testListWithFinisherBlocking(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("May the luck of the Irish be with you!")).build();
 
-        ListSubscriber subscriber = new ListSubscriber();
-        HttpResponse<String> response = client.send(request,
-                BodyHandlers.fromSubscriber(subscriber, Supplier::get));
-        String text = response.body();
-        System.out.println(text);
-        assertEquals(response.statusCode(), 200);
-        assertEquals(text, "May the luck of the Irish be with you!");
+            ListSubscriber subscriber = new ListSubscriber();
+            HttpResponse<String> response = client.send(request,
+                    BodyHandlers.fromSubscriber(subscriber, Supplier::get));
+            String text = response.body();
+            System.out.println(text);
+            assertEquals(200, response.statusCode());
+            assertEquals(version(uri), response.version());
+            assertEquals("May the luck of the Irish be with you!", text);
+        }
     }
 
-    @Test(dataProvider = "uris")
-    void testListWithoutFinisherBlocking(String url) throws Exception {
-        System.out.printf(now() + "testListWithoutFinisherBlocking(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("May the luck of the Irish be with you!")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testListWithoutFinisherBlocking(String uri) throws Exception {
+        System.out.printf(now() + "testListWithoutFinisherBlocking(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("May the luck of the Irish be with you!")).build();
 
-        ListSubscriber subscriber = new ListSubscriber();
-        HttpResponse<Void> response = client.send(request,
-                BodyHandlers.fromSubscriber(subscriber));
-        String text = subscriber.get();
-        System.out.println(text);
-        assertEquals(response.statusCode(), 200);
-        assertEquals(text, "May the luck of the Irish be with you!");
+            ListSubscriber subscriber = new ListSubscriber();
+            HttpResponse<Void> response = client.send(request,
+                    BodyHandlers.fromSubscriber(subscriber));
+            String text = subscriber.get();
+            System.out.println(text);
+            assertEquals(200, response.statusCode());
+            assertEquals(version(uri), response.version());
+            assertEquals("May the luck of the Irish be with you!", text);
+        }
     }
 
     // Collection<ByteBuffer>
 
-    @Test(dataProvider = "uris")
-    void testCollectionWithFinisher(String url) {
-        System.out.printf(now() + "testCollectionWithFinisher(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("What's the craic?")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testCollectionWithFinisher(String uri) {
+        System.out.printf(now() + "testCollectionWithFinisher(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("What's the craic?")).build();
 
-        CollectionSubscriber subscriber = new CollectionSubscriber();
-        HttpResponse<String> response = client.sendAsync(request,
-                BodyHandlers.fromSubscriber(subscriber, CollectionSubscriber::get)).join();
-        String text = response.body();
-        System.out.println(text);
-        assertEquals(response.statusCode(), 200);
-        assertEquals(text, "What's the craic?");
+            CollectionSubscriber subscriber = new CollectionSubscriber();
+            HttpResponse<String> response = client.sendAsync(request,
+                    BodyHandlers.fromSubscriber(subscriber, CollectionSubscriber::get)).join();
+            String text = response.body();
+            System.out.println(text);
+            assertEquals(200, response.statusCode());
+            assertEquals(version(uri), response.version());
+            assertEquals("What's the craic?", text);
+        }
     }
 
-    @Test(dataProvider = "uris")
-    void testCollectionWithoutFinisher(String url) {
-        System.out.printf(now() + "testCollectionWithoutFinisher(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("What's the craic?")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testCollectionWithoutFinisher(String uri) {
+        System.out.printf(now() + "testCollectionWithoutFinisher(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("What's the craic?")).build();
 
-        CollectionSubscriber subscriber = new CollectionSubscriber();
-        HttpResponse<Void> response = client.sendAsync(request,
-                BodyHandlers.fromSubscriber(subscriber)).join();
-        String text = subscriber.get();
-        System.out.println(text);
-        assertEquals(response.statusCode(), 200);
-        assertEquals(text, "What's the craic?");
+            CollectionSubscriber subscriber = new CollectionSubscriber();
+            HttpResponse<Void> response = client.sendAsync(request,
+                    BodyHandlers.fromSubscriber(subscriber)).join();
+            String text = subscriber.get();
+            System.out.println(text);
+            assertEquals(200, response.statusCode());
+            assertEquals(version(uri), response.version());
+            assertEquals("What's the craic?", text);
+        }
     }
 
-    @Test(dataProvider = "uris")
-    void testCollectionWithFinisherBlocking(String url) throws Exception {
-        System.out.printf(now() + "testCollectionWithFinisherBlocking(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("What's the craic?")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testCollectionWithFinisherBlocking(String uri) throws Exception {
+        System.out.printf(now() + "testCollectionWithFinisherBlocking(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("What's the craic?")).build();
 
-        CollectionSubscriber subscriber = new CollectionSubscriber();
-        HttpResponse<String> response = client.send(request,
-                BodyHandlers.fromSubscriber(subscriber, CollectionSubscriber::get));
-        String text = response.body();
-        System.out.println(text);
-        assertEquals(response.statusCode(), 200);
-        assertEquals(text, "What's the craic?");
+            CollectionSubscriber subscriber = new CollectionSubscriber();
+            HttpResponse<String> response = client.send(request,
+                    BodyHandlers.fromSubscriber(subscriber, CollectionSubscriber::get));
+            String text = response.body();
+            System.out.println(text);
+            assertEquals(200, response.statusCode());
+            assertEquals(version(uri), response.version());
+            assertEquals("What's the craic?", text);
+        }
     }
 
-    @Test(dataProvider = "uris")
-    void testCollectionWithoutFinisheBlocking(String url) throws Exception {
-        System.out.printf(now() + "testCollectionWithoutFinisheBlocking(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("What's the craic?")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testCollectionWithoutFinisherBlocking(String uri) throws Exception {
+        System.out.printf(now() + "testCollectionWithoutFinisherBlocking(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("What's the craic?")).build();
 
-        CollectionSubscriber subscriber = new CollectionSubscriber();
-        HttpResponse<Void> response = client.send(request,
-                BodyHandlers.fromSubscriber(subscriber));
-        String text = subscriber.get();
-        System.out.println(text);
-        assertEquals(response.statusCode(), 200);
-        assertEquals(text, "What's the craic?");
+            CollectionSubscriber subscriber = new CollectionSubscriber();
+            HttpResponse<Void> response = client.send(request,
+                    BodyHandlers.fromSubscriber(subscriber));
+            String text = subscriber.get();
+            System.out.println(text);
+            assertEquals(200, response.statusCode());
+            assertEquals(version(uri), response.version());
+            assertEquals("What's the craic?", text);
+        }
     }
 
     // Iterable<ByteBuffer>
 
-    @Test(dataProvider = "uris")
-    void testIterableWithFinisher(String url) {
-        System.out.printf(now() + "testIterableWithFinisher(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("We're sucking diesel now!")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testIterableWithFinisher(String uri) {
+        System.out.printf(now() + "testIterableWithFinisher(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("We're sucking diesel now!")).build();
 
-        IterableSubscriber subscriber = new IterableSubscriber();
-        HttpResponse<String> response = client.sendAsync(request,
-                BodyHandlers.fromSubscriber(subscriber, Supplier::get)).join();
-        String text = response.body();
-        System.out.println(text);
-        assertEquals(response.statusCode(), 200);
-        assertEquals(text, "We're sucking diesel now!");
+            IterableSubscriber subscriber = new IterableSubscriber();
+            HttpResponse<String> response = client.sendAsync(request,
+                    BodyHandlers.fromSubscriber(subscriber, Supplier::get)).join();
+            String text = response.body();
+            System.out.println(text);
+            assertEquals(200, response.statusCode());
+            assertEquals(version(uri), response.version());
+            assertEquals("We're sucking diesel now!", text);
+        }
     }
 
-    @Test(dataProvider = "uris")
-    void testIterableWithoutFinisher(String url) {
-        System.out.printf(now() + "testIterableWithoutFinisher(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("We're sucking diesel now!")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testIterableWithoutFinisher(String uri) {
+        System.out.printf(now() + "testIterableWithoutFinisher(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("We're sucking diesel now!")).build();
 
-        IterableSubscriber subscriber = new IterableSubscriber();
-        HttpResponse<Void> response = client.sendAsync(request,
-                BodyHandlers.fromSubscriber(subscriber)).join();
-        String text = subscriber.get();
-        System.out.println(text);
-        assertEquals(response.statusCode(), 200);
-        assertEquals(text, "We're sucking diesel now!");
+            IterableSubscriber subscriber = new IterableSubscriber();
+            HttpResponse<Void> response = client.sendAsync(request,
+                    BodyHandlers.fromSubscriber(subscriber)).join();
+            String text = subscriber.get();
+            System.out.println(text);
+            assertEquals(200, response.statusCode());
+            assertEquals(version(uri), response.version());
+            assertEquals("We're sucking diesel now!", text);
+        }
     }
 
-    @Test(dataProvider = "uris")
-    void testIterableWithFinisherBlocking(String url) throws Exception {
-        System.out.printf(now() + "testIterableWithFinisherBlocking(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("We're sucking diesel now!")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testIterableWithFinisherBlocking(String uri) throws Exception {
+        System.out.printf(now() + "testIterableWithFinisherBlocking(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("We're sucking diesel now!")).build();
 
-        IterableSubscriber subscriber = new IterableSubscriber();
-        HttpResponse<String> response = client.send(request,
-                BodyHandlers.fromSubscriber(subscriber, Supplier::get));
-        String text = response.body();
-        System.out.println(text);
-        assertEquals(response.statusCode(), 200);
-        assertEquals(text, "We're sucking diesel now!");
+            IterableSubscriber subscriber = new IterableSubscriber();
+            HttpResponse<String> response = client.send(request,
+                    BodyHandlers.fromSubscriber(subscriber, Supplier::get));
+            String text = response.body();
+            System.out.println(text);
+            assertEquals(200, response.statusCode());
+            assertEquals(version(uri), response.version());
+            assertEquals("We're sucking diesel now!", text);
+        }
     }
 
-    @Test(dataProvider = "uris")
-    void testIterableWithoutFinisherBlocking(String url) throws Exception {
-        System.out.printf(now() + "testIterableWithoutFinisherBlocking(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("We're sucking diesel now!")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testIterableWithoutFinisherBlocking(String uri) throws Exception {
+        System.out.printf(now() + "testIterableWithoutFinisherBlocking(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("We're sucking diesel now!")).build();
 
-        IterableSubscriber subscriber = new IterableSubscriber();
-        HttpResponse<Void> response = client.send(request,
-                BodyHandlers.fromSubscriber(subscriber));
-        String text = subscriber.get();
-        System.out.println(text);
-        assertEquals(response.statusCode(), 200);
-        assertEquals(text, "We're sucking diesel now!");
+            IterableSubscriber subscriber = new IterableSubscriber();
+            HttpResponse<Void> response = client.send(request,
+                    BodyHandlers.fromSubscriber(subscriber));
+            String text = subscriber.get();
+            System.out.println(text);
+            assertEquals(200, response.statusCode());
+            assertEquals(version(uri), response.version());
+            assertEquals("We're sucking diesel now!", text);
+        }
     }
 
     // Subscriber<Object>
 
-    @Test(dataProvider = "uris")
-    void testObjectWithFinisher(String url) {
-        System.out.printf(now() + "testObjectWithFinisher(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("May the wind always be at your back.")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testObjectWithFinisher(String uri) {
+        System.out.printf(now() + "testObjectWithFinisher(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("May the wind always be at your back.")).build();
 
-        ObjectSubscriber subscriber = new ObjectSubscriber();
-        HttpResponse<String> response = client.sendAsync(request,
-                BodyHandlers.fromSubscriber(subscriber, ObjectSubscriber::get)).join();
-        String text = response.body();
-        System.out.println(text);
-        assertEquals(response.statusCode(), 200);
-        assertTrue(text.length() != 0);  // what else can be asserted!
+            ObjectSubscriber subscriber = new ObjectSubscriber();
+            HttpResponse<String> response = client.sendAsync(request,
+                    BodyHandlers.fromSubscriber(subscriber, ObjectSubscriber::get)).join();
+            String text = response.body();
+            System.out.println(text);
+            assertEquals(200, response.statusCode());
+            assertEquals(version(uri), response.version());
+            assertTrue(text.length() != 0);  // what else can be asserted!
+        }
     }
 
-    @Test(dataProvider = "uris")
-    void testObjectWithoutFinisher(String url) {
-        System.out.printf(now() + "testObjectWithoutFinisher(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("May the wind always be at your back.")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testObjectWithoutFinisher(String uri) {
+        System.out.printf(now() + "testObjectWithoutFinisher(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("May the wind always be at your back.")).build();
 
-        ObjectSubscriber subscriber = new ObjectSubscriber();
-        HttpResponse<Void> response = client.sendAsync(request,
-                BodyHandlers.fromSubscriber(subscriber)).join();
-        String text = subscriber.get();
-        System.out.println(text);
-        assertEquals(response.statusCode(), 200);
-        assertTrue(text.length() != 0);  // what else can be asserted!
+            ObjectSubscriber subscriber = new ObjectSubscriber();
+            HttpResponse<Void> response = client.sendAsync(request,
+                    BodyHandlers.fromSubscriber(subscriber)).join();
+            String text = subscriber.get();
+            System.out.println(text);
+            assertEquals(200, response.statusCode());
+            assertEquals(version(uri), response.version());
+            assertTrue(text.length() != 0);  // what else can be asserted!
+        }
     }
 
-    @Test(dataProvider = "uris")
-    void testObjectWithFinisherBlocking(String url) throws Exception {
-        System.out.printf(now() + "testObjectWithFinisherBlocking(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("May the wind always be at your back.")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testObjectWithFinisherBlocking(String uri) throws Exception {
+        System.out.printf(now() + "testObjectWithFinisherBlocking(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("May the wind always be at your back.")).build();
 
-        ObjectSubscriber subscriber = new ObjectSubscriber();
-        HttpResponse<String> response = client.send(request,
-                BodyHandlers.fromSubscriber(subscriber, ObjectSubscriber::get));
-        String text = response.body();
-        System.out.println(text);
-        assertEquals(response.statusCode(), 200);
-        assertTrue(text.length() != 0);  // what else can be asserted!
+            ObjectSubscriber subscriber = new ObjectSubscriber();
+            HttpResponse<String> response = client.send(request,
+                    BodyHandlers.fromSubscriber(subscriber, ObjectSubscriber::get));
+            String text = response.body();
+            System.out.println(text);
+            assertEquals(200, response.statusCode());
+            assertEquals(version(uri), response.version());
+            assertTrue(text.length() != 0);  // what else can be asserted!
+        }
     }
 
-    @Test(dataProvider = "uris")
-    void testObjectWithoutFinisherBlocking(String url) throws Exception {
-        System.out.printf(now() + "testObjectWithoutFinisherBlocking(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("May the wind always be at your back.")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void testObjectWithoutFinisherBlocking(String uri) throws Exception {
+        System.out.printf(now() + "testObjectWithoutFinisherBlocking(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("May the wind always be at your back.")).build();
 
-        ObjectSubscriber subscriber = new ObjectSubscriber();
-        HttpResponse<Void> response = client.send(request,
-                BodyHandlers.fromSubscriber(subscriber));
-        String text = subscriber.get();
-        System.out.println(text);
-        assertEquals(response.statusCode(), 200);
-        assertTrue(text.length() != 0);  // what else can be asserted!
+            ObjectSubscriber subscriber = new ObjectSubscriber();
+            HttpResponse<Void> response = client.send(request,
+                    BodyHandlers.fromSubscriber(subscriber));
+            String text = subscriber.get();
+            System.out.println(text);
+            assertEquals(200, response.statusCode());
+            assertEquals(version(uri), response.version());
+            assertTrue(text.length() != 0);  // what else can be asserted!
+        }
     }
 
 
     // -- mapping using convenience handlers
 
-    @Test(dataProvider = "uris")
-    void mappingFromByteArray(String url) throws Exception {
-        System.out.printf(now() + "mappingFromByteArray(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("We're sucking diesel now!")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void mappingFromByteArray(String uri) throws Exception {
+        System.out.printf(now() + "mappingFromByteArray(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("We're sucking diesel now!")).build();
 
-        client.sendAsync(request, BodyHandlers.fromSubscriber(BodySubscribers.ofByteArray(),
-                    bas -> new String(bas.getBody().toCompletableFuture().join(), UTF_8)))
-                .thenApply(FlowAdapterSubscriberTest::assert200ResponseCode)
-                .thenApply(HttpResponse::body)
-                .thenAccept(body -> assertEquals(body, "We're sucking diesel now!"))
-                .join();
+            client.sendAsync(request, BodyHandlers.fromSubscriber(BodySubscribers.ofByteArray(),
+                            bas -> new String(bas.getBody().toCompletableFuture().join(), UTF_8)))
+                    .thenApply(FlowAdapterSubscriberTest::assert200ResponseCode)
+                    .thenApply(HttpResponse::body)
+                    .thenAccept(body -> assertEquals("We're sucking diesel now!", body))
+                    .join();
+        }
     }
 
-    @Test(dataProvider = "uris")
-    void mappingFromInputStream(String url) throws Exception {
-        System.out.printf(now() + "mappingFromInputStream(%s) starting%n", url);
-        HttpClient client = HttpClient.newBuilder().sslContext(sslContext).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .POST(BodyPublishers.ofString("May the wind always be at your back.")).build();
+    @ParameterizedTest
+    @MethodSource("variants")
+    void mappingFromInputStream(String uri) throws Exception {
+        System.out.printf(now() + "mappingFromInputStream(%s) starting%n", uri);
+        try (HttpClient client = newHttpClient(uri)) {
+            HttpRequest request = newRequestBuilder(uri)
+                    .POST(BodyPublishers.ofString("May the wind always be at your back.")).build();
 
-        client.sendAsync(request, BodyHandlers.fromSubscriber(BodySubscribers.ofInputStream(),
-                    ins -> {
-                        InputStream is = ins.getBody().toCompletableFuture().join();
-                        return new String(uncheckedReadAllBytes(is), UTF_8); } ))
-                .thenApply(FlowAdapterSubscriberTest::assert200ResponseCode)
-                .thenApply(HttpResponse::body)
-                .thenAccept(body -> assertEquals(body, "May the wind always be at your back."))
-                .join();
+            var adaptee = BodySubscribers.ofInputStream();
+            var exec = Executors.newSingleThreadExecutor();
+
+            // Use an executor to pull on the InputStream in order to reach the
+            // point where the Subscriber gets completed and the finisher function
+            // is called. If we didn't use an executor here, the finisher function
+            // may never get called.
+            var futureResult = exec.submit(() -> uncheckedReadAllBytes(
+                    adaptee.getBody().toCompletableFuture().join()));
+            Supplier<byte[]> bytes = () -> {
+                try {
+                    return futureResult.get();
+                } catch (InterruptedException e) {
+                    throw new CompletionException(e);
+                } catch (ExecutionException e) {
+                    throw new CompletionException(e.getCause());
+                }
+            };
+
+            AtomicReference<AssertionError> failed = new AtomicReference<>();
+            Function<? super Flow.Subscriber<List<ByteBuffer>>, String> finisher = (s) -> {
+                failed.set(checkThreadAndStack());
+                return new String(bytes.get(), UTF_8);
+            };
+
+            try {
+                var cf = client.sendAsync(request, BodyHandlers.fromSubscriber(adaptee,
+                                finisher))
+                        .thenApply(FlowAdapterSubscriberTest::assert200ResponseCode)
+                        .thenApply(HttpResponse::body)
+                        .thenAccept(body -> assertEquals("May the wind always be at your back.", body))
+                        .join();
+                var error = failed.get();
+                if (error != null) throw error;
+            } finally {
+                exec.close();
+            }
+        }
+    }
+
+    static final Predicate<StackFrame> DAT = sfe ->
+            sfe.getClassName().startsWith("FlowAdapterSubscriberTest");
+    static final Predicate<StackFrame> JUC = sfe ->
+            sfe.getClassName().startsWith("java.util.concurrent");
+    static final Predicate<StackFrame> JLT = sfe ->
+            sfe.getClassName().startsWith("java.lang.Thread");
+    static final Predicate<StackFrame> RSP = sfe ->
+            sfe.getClassName().startsWith("jdk.internal.net.http.ResponseSubscribers");
+    static final Predicate<StackFrame> NotDATorJUCorJLT = Predicate.not(DAT.or(JUC).or(JLT).or(RSP));
+
+
+    AssertionError checkThreadAndStack() {
+        System.out.println("Check stack trace");
+        List<StackFrame> otherFrames = WALKER.walk(s -> s.filter(NotDATorJUCorJLT).toList());
+        if (!otherFrames.isEmpty()) {
+            System.out.println("Found unexpected trace: ");
+            otherFrames.forEach(f -> System.out.printf("\t%s%n", f));
+            return new AssertionError("Dependant action has unexpected frame in " +
+                    Thread.currentThread() + ": " + otherFrames.get(0));
+        }
+        return null;
     }
 
     /** An abstract Subscriber that converts all received data into a String. */
@@ -505,68 +645,52 @@ public class FlowAdapterSubscriberTest {
     }
 
     static final <T> HttpResponse<T> assert200ResponseCode(HttpResponse<T> response) {
-        assertEquals(response.statusCode(), 200);
+        assertEquals(200, response.statusCode());
+        assertEquals(version(response.request().uri().toString()), response.version());
         return response;
     }
 
-    static String serverAuthority(HttpServer server) {
-        return InetAddress.getLoopbackAddress().getHostName() + ":"
-                + server.getAddress().getPort();
-    }
+    @BeforeAll
+    public static void setup() throws Exception {
+        httpTestServer = HttpTestServer.create(Version.HTTP_1_1);
+        httpTestServer.addHandler(new HttpEchoHandler(), "/http1/echo");
+        httpURI = "http://" + httpTestServer.serverAuthority() + "/http1/echo";
 
-    @BeforeTest
-    public void setup() throws Exception {
-        sslContext = new SimpleSSLContext().get();
-        if (sslContext == null)
-            throw new AssertionError("Unexpected null sslContext");
+        httpsTestServer = HttpTestServer.create(Version.HTTP_1_1, sslContext);
+        httpsTestServer.addHandler(new HttpEchoHandler(), "/https1/echo");
+        httpsURI = "https://" + httpsTestServer.serverAuthority() + "/https1/echo";
 
-        InetSocketAddress sa = new InetSocketAddress(InetAddress.getLoopbackAddress(), 0);
-        httpTestServer = HttpServer.create(sa, 0);
-        httpTestServer.createContext("/http1/echo", new Http1EchoHandler());
-        httpURI = "http://" + serverAuthority(httpTestServer) + "/http1/echo";
-
-        httpsTestServer = HttpsServer.create(sa, 0);
-        httpsTestServer.setHttpsConfigurator(new HttpsConfigurator(sslContext));
-        httpsTestServer.createContext("/https1/echo", new Http1EchoHandler());
-        httpsURI = "https://" + serverAuthority(httpsTestServer) + "/https1/echo";
-
-        http2TestServer = new Http2TestServer("localhost", false, 0);
-        http2TestServer.addHandler(new Http2EchoHandler(), "/http2/echo");
+        http2TestServer = HttpTestServer.create(Version.HTTP_2);
+        http2TestServer.addHandler(new HttpEchoHandler(), "/http2/echo");
         http2URI = "http://" + http2TestServer.serverAuthority() + "/http2/echo";
 
-        https2TestServer = new Http2TestServer("localhost", true, sslContext);
-        https2TestServer.addHandler(new Http2EchoHandler(), "/https2/echo");
+        https2TestServer = HttpTestServer.create(Version.HTTP_2, sslContext);
+        https2TestServer.addHandler(new HttpEchoHandler(), "/https2/echo");
         https2URI = "https://" + https2TestServer.serverAuthority() + "/https2/echo";
+
+        http3TestServer = HttpTestServer.create(Http3DiscoveryMode.HTTP_3_URI_ONLY, sslContext);
+        http3TestServer.addHandler(new HttpEchoHandler(), "/http3/echo");
+        http3URI = "https://" + http3TestServer.serverAuthority() + "/http3/echo";
 
         httpTestServer.start();
         httpsTestServer.start();
         http2TestServer.start();
         https2TestServer.start();
+        http3TestServer.start();
     }
 
-    @AfterTest
-    public void teardown() throws Exception {
-        httpTestServer.stop(0);
-        httpsTestServer.stop(0);
+    @AfterAll
+    public static void teardown() throws Exception {
+        httpTestServer.stop();
+        httpsTestServer.stop();
         http2TestServer.stop();
         https2TestServer.stop();
+        http3TestServer.stop();
     }
 
-    static class Http1EchoHandler implements HttpHandler {
+    static class HttpEchoHandler implements HttpTestHandler {
         @Override
-        public void handle(HttpExchange t) throws IOException {
-            try (InputStream is = t.getRequestBody();
-                 OutputStream os = t.getResponseBody()) {
-                byte[] bytes = is.readAllBytes();
-                t.sendResponseHeaders(200, bytes.length);
-                os.write(bytes);
-            }
-        }
-    }
-
-    static class Http2EchoHandler implements Http2Handler {
-        @Override
-        public void handle(Http2TestExchange t) throws IOException {
+        public void handle(HttpTestExchange t) throws IOException {
             try (InputStream is = t.getRequestBody();
                  OutputStream os = t.getResponseBody()) {
                 byte[] bytes = is.readAllBytes();

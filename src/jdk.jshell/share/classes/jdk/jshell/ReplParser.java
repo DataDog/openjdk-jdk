@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,6 @@ import com.sun.tools.javac.code.Source.Feature;
 import com.sun.tools.javac.code.TypeTag;
 import com.sun.tools.javac.parser.JavacParser;
 import com.sun.tools.javac.parser.Tokens.Comment;
-import com.sun.tools.javac.parser.Tokens.Comment.CommentStyle;
 import com.sun.tools.javac.parser.Tokens.Token;
 import com.sun.tools.javac.resources.CompilerProperties.Errors;
 import static com.sun.tools.javac.parser.Tokens.TokenKind.CLASS;
@@ -76,9 +75,8 @@ class ReplParser extends JavacParser {
             com.sun.tools.javac.parser.Lexer S,
             boolean keepDocComments,
             boolean keepLineMap,
-            boolean keepEndPositions,
             boolean forceExpression) {
-        super(fac, S, keepDocComments, keepLineMap, keepEndPositions);
+        super(fac, S, keepDocComments, keepLineMap);
         this.forceExpression = forceExpression;
         this.source = fac.source;
     }
@@ -104,7 +102,7 @@ class ReplParser extends JavacParser {
 
         boolean firstTypeDecl = true;
         while (token.kind != EOF) {
-            if (token.pos > 0 && token.pos <= endPosTable.errorEndPos) {
+            if (token.pos > 0 && token.pos <= errorEndPos) {
                 // error recovery
                 skip(true, false, false, false);
                 if (token.kind == EOF) {
@@ -115,9 +113,9 @@ class ReplParser extends JavacParser {
                 seenImport = true;
                 defs.append(importDeclaration());
             } else {
-                Comment docComment = token.comment(CommentStyle.JAVADOC);
+                Comment docComment = token.docComment();
                 if (firstTypeDecl && !seenImport && !seenPackage) {
-                    docComment = firstToken.comment(CommentStyle.JAVADOC);
+                    docComment = firstToken.docComment();
                 }
                 List<? extends JCTree> udefs = replUnit(mods, docComment);
                // if (def instanceof JCExpressionStatement)
@@ -142,8 +140,6 @@ class ReplParser extends JavacParser {
             storeEnd(toplevel, S.prevToken().endPos);
         }
         toplevel.lineMap = S.getLineMap();
-        this.endPosTable.setParser(null); // remove reference to parser
-        toplevel.endPositions = this.endPosTable;
         return toplevel;
     }
 
@@ -201,7 +197,6 @@ class ReplParser extends JavacParser {
                     List<JCAnnotation> annosAfterParams = annotationsOpt(Tag.ANNOTATION);
 
                     if (annosAfterParams.nonEmpty()) {
-                        checkSourceLevel(annosAfterParams.head.pos, Feature.ANNOTATIONS_AFTER_TYPE_PARAMS);
                         mods.annotations = mods.annotations.appendList(annosAfterParams);
                         if (mods.pos == Position.NOPOS) {
                             mods.pos = mods.annotations.head.pos;
@@ -230,7 +225,7 @@ class ReplParser extends JavacParser {
                     } else if ((isVoid || (lastmode & TYPE) != 0) && LAX_IDENTIFIER.test(token.kind)) {
                         // we have "Type Ident", so we can assume it is variable or method declaration
                         pos = token.pos;
-                        Name name = ident();
+                        Name name = identOrUnderscore();
                         if (token.kind == LPAREN) {
                         // method declaration
                             //mods.flags |= Flags.STATIC;

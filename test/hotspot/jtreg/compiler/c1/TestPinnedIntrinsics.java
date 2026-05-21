@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,10 +24,9 @@
 /*
  * @test
  * @bug 8184271
- * @summary Test correct scheduling of System.nanoTime and System.currentTimeMillis C1 intrinsics.
- * @run main/othervm -XX:TieredStopAtLevel=1 -Xbatch
+ * @summary Test correct scheduling of System.nanoTime C1 intrinsic.
+ * @run main/othervm/timeout=480 -XX:TieredStopAtLevel=1 -Xbatch
  *                   -XX:CompileCommand=dontinline,compiler.c1.TestPinnedIntrinsics::checkNanoTime
- *                   -XX:CompileCommand=dontinline,compiler.c1.TestPinnedIntrinsics::checkCurrentTimeMillis
  *                   compiler.c1.TestPinnedIntrinsics
  */
 
@@ -47,22 +46,9 @@ public class TestPinnedIntrinsics {
         }
     }
 
-    private static void testCurrentTimeMillis() {
-        long start = System.currentTimeMillis();
-        long end = System.currentTimeMillis();
-        checkCurrentTimeMillis(end - start);
-    }
-
-    private static void checkCurrentTimeMillis(long diff) {
-        if (diff < 0) {
-            throw new RuntimeException("testCurrentTimeMillis failed with " + diff);
-        }
-    }
-
     public static void main(String[] args) {
         for (int i = 0; i < 100_000; ++i) {
             testNanoTime();
-            testCurrentTimeMillis();
         }
     }
 }

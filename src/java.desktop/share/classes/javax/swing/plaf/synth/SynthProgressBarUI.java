@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -108,7 +108,7 @@ public class SynthProgressBarUI extends BasicProgressBarUI
                 "ProgressBar.rotateText", false);
         tileWhenIndeterminate = style.getBoolean(context, "ProgressBar.tileWhenIndeterminate", false);
         tileWidth = style.getInt(context, "ProgressBar.tileWidth", 15);
-        // handle scaling for sizeVarients for special case components. The
+        // handle scaling for sizeVariants for special case components. The
         // key "JComponent.sizeVariant" scales for large/small/mini
         // components are based on Apples LAF
         String scaleKey = (String)progressBar.getClientProperty(
@@ -215,9 +215,10 @@ public class SynthProgressBarUI extends BasicProgressBarUI
         SynthContext context = getContext(c);
 
         SynthLookAndFeel.update(context, g);
+
         context.getPainter().paintProgressBarBackground(context,
-                          g, 0, 0, c.getWidth(), c.getHeight(),
-                          progressBar.getOrientation());
+                g, 0, 0, c.getWidth(), c.getHeight(),
+                progressBar.getOrientation());
         paint(context, g);
     }
 
@@ -343,7 +344,7 @@ public class SynthProgressBarUI extends BasicProgressBarUI
 
             if (rotateText &&
                     progressBar.getOrientation() == JProgressBar.VERTICAL){
-                Graphics2D g2 = (Graphics2D)g;
+
                 // Calculate the position for the text.
                 Point textPos;
                 AffineTransform rotation;
@@ -366,8 +367,8 @@ public class SynthProgressBarUI extends BasicProgressBarUI
 
                 // Paint the text.
                 font = font.deriveFont(rotation);
-                g2.setFont(font);
-                g2.setColor(style.getColor(context, ColorType.TEXT_FOREGROUND));
+                g.setFont(font);
+                g.setColor(style.getColor(context, ColorType.TEXT_FOREGROUND));
                 style.getGraphicsUtils(context).paintText(context, g, title,
                                                      textPos.x, textPos.y, -1);
             } else {
@@ -456,7 +457,7 @@ public class SynthProgressBarUI extends BasicProgressBarUI
             }
         }
 
-        // handle scaling for sizeVarients for special case components. The
+        // handle scaling for sizeVariants for special case components. The
         // key "JComponent.sizeVariant" scales for large/small/mini
         // components are based on Apples LAF
         String scaleKey = (String)progressBar.getClientProperty(

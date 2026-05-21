@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,21 +22,20 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "logging/log.hpp"
-#include "runtime/atomic.hpp"
+#include "runtime/atomicAccess.hpp"
 #include "runtime/frame.inline.hpp"
+#include "runtime/javaThread.hpp"
 #include "runtime/osThread.hpp"
 #include "runtime/safepoint.hpp"
 #include "runtime/stackFrameStream.inline.hpp"
 #include "runtime/stackWatermark.inline.hpp"
-#include "runtime/thread.hpp"
 #include "utilities/debug.hpp"
 #include "utilities/globalDefinitions.hpp"
 #include "utilities/macros.hpp"
 #include "utilities/preserveException.hpp"
 
-class StackWatermarkFramesIterator : public CHeapObj<mtInternal> {
+class StackWatermarkFramesIterator : public CHeapObj<mtThread> {
   JavaThread* _jt;
   uintptr_t _caller;
   uintptr_t _callee;
@@ -59,6 +58,8 @@ public:
 };
 
 void StackWatermarkFramesIterator::set_watermark(uintptr_t sp) {
+  assert(sp != 0, "Sanity check");
+
   if (!has_next()) {
     return;
   }
@@ -161,12 +162,12 @@ void StackWatermarkFramesIterator::next() {
 StackWatermark::StackWatermark(JavaThread* jt, StackWatermarkKind kind, uint32_t epoch) :
     _state(StackWatermarkState::create(epoch, true /* is_done */)),
     _watermark(0),
-    _next(NULL),
+    _next(nullptr),
     _jt(jt),
-    _iterator(NULL),
-    _lock(Mutex::stackwatermark, "StackWatermark_lock", Mutex::_safepoint_check_never),
+    _iterator(nullptr),
+    _lock(Mutex::stackwatermark, "StackWatermark_lock"),
     _kind(kind),
-    _linked_watermark(NULL) {
+    _linked_watermarks() {
 }
 
 StackWatermark::~StackWatermark() {
@@ -185,7 +186,7 @@ void StackWatermark::assert_is_frame_safe(const frame& f) {
 // without going through any hooks.
 bool StackWatermark::is_frame_safe(const frame& f) {
   assert(_lock.owned_by_self(), "Must be locked");
-  uint32_t state = Atomic::load(&_state);
+  uint32_t state = AtomicAccess::load(&_state);
   if (!processing_started(state)) {
     return false;
   }
@@ -216,7 +217,7 @@ void StackWatermark::start_processing_impl(void* context) {
     _iterator->process_one(context);
     _iterator->process_one(context);
   } else {
-    _iterator = NULL;
+    _iterator = nullptr;
   }
   update_watermark();
 }
@@ -228,13 +229,13 @@ void StackWatermark::yield_processing() {
 
 void StackWatermark::update_watermark() {
   assert(_lock.owned_by_self(), "invariant");
-  if (_iterator != NULL && _iterator->has_next()) {
+  if (_iterator != nullptr && _iterator->has_next()) {
     assert(_iterator->callee() != 0, "sanity");
-    Atomic::release_store(&_watermark, _iterator->callee());
-    Atomic::release_store(&_state, StackWatermarkState::create(epoch_id(), false /* is_done */)); // release watermark w.r.t. epoch
+    AtomicAccess::release_store(&_watermark, _iterator->callee());
+    AtomicAccess::release_store(&_state, StackWatermarkState::create(epoch_id(), false /* is_done */)); // release watermark w.r.t. epoch
   } else {
-    Atomic::release_store(&_watermark, uintptr_t(0)); // Release stack data modifications w.r.t. watermark
-    Atomic::release_store(&_state, StackWatermarkState::create(epoch_id(), true /* is_done */)); // release watermark w.r.t. epoch
+    AtomicAccess::release_store(&_watermark, uintptr_t(0)); // Release stack data modifications w.r.t. watermark
+    AtomicAccess::release_store(&_state, StackWatermarkState::create(epoch_id(), true /* is_done */)); // release watermark w.r.t. epoch
     log_info(stackbarrier)("Finished stack processing iteration for tid %d",
                            _jt->osthread()->thread_id());
   }
@@ -243,20 +244,26 @@ void StackWatermark::update_watermark() {
 void StackWatermark::process_one() {
   MutexLocker ml(&_lock, Mutex::_no_safepoint_check_flag);
   if (!processing_started()) {
-    start_processing_impl(NULL /* context */);
+    start_processing_impl(nullptr /* context */);
   } else if (!processing_completed()) {
-    _iterator->process_one(NULL /* context */);
+    _iterator->process_one(nullptr /* context */);
     update_watermark();
   }
 }
 
-void StackWatermark::link_watermark(StackWatermark* watermark) {
-  assert(watermark == NULL || _linked_watermark == NULL, "nesting not supported");
-  _linked_watermark = watermark;
+void StackWatermark::push_linked_watermark(StackWatermark* watermark) {
+  assert(JavaThread::current() == _jt, "This code is not thread safe");
+  _linked_watermarks.push(watermark);
+}
+
+void StackWatermark::pop_linked_watermark() {
+  assert(JavaThread::current() == _jt, "This code is not thread safe");
+  assert(_linked_watermarks.length() > 0, "Mismatched push and pop?");
+  _linked_watermarks.pop();
 }
 
 uintptr_t StackWatermark::watermark() {
-  return Atomic::load_acquire(&_watermark);
+  return AtomicAccess::load_acquire(&_watermark);
 }
 
 uintptr_t StackWatermark::last_processed() {
@@ -272,35 +279,49 @@ uintptr_t StackWatermark::last_processed() {
   return _iterator->caller();
 }
 
+uintptr_t StackWatermark::last_processed_raw() {
+  return _iterator->caller();
+}
+
 bool StackWatermark::processing_started() const {
-  return processing_started(Atomic::load(&_state));
+  return processing_started(AtomicAccess::load(&_state));
 }
 
 bool StackWatermark::processing_started_acquire() const {
-  return processing_started(Atomic::load_acquire(&_state));
+  return processing_started(AtomicAccess::load_acquire(&_state));
 }
 
 bool StackWatermark::processing_completed() const {
-  return processing_completed(Atomic::load(&_state));
+  return processing_completed(AtomicAccess::load(&_state));
 }
 
 bool StackWatermark::processing_completed_acquire() const {
-  return processing_completed(Atomic::load_acquire(&_state));
+  return processing_completed(AtomicAccess::load_acquire(&_state));
+}
+
+void StackWatermark::process_linked_watermarks() {
+  assert(JavaThread::current() == _jt, "This code is not thread safe");
+
+  // Finish processing all linked stack watermarks
+  for (StackWatermark* watermark : _linked_watermarks) {
+    watermark->finish_processing(nullptr /* context */);
+  }
 }
 
 void StackWatermark::on_safepoint() {
   start_processing();
-  StackWatermark* linked_watermark = _linked_watermark;
-  if (linked_watermark != NULL) {
-    linked_watermark->finish_processing(NULL /* context */);
-  }
+
+  // If the thread waking up from a safepoint expected certain other
+  // stack watermarks (potentially from different threads) are processed,
+  // then we have to perform processing of said linked watermarks here.
+  process_linked_watermarks();
 }
 
 void StackWatermark::start_processing() {
   if (!processing_started_acquire()) {
     MutexLocker ml(&_lock, Mutex::_no_safepoint_check_flag);
     if (!processing_started()) {
-      start_processing_impl(NULL /* context */);
+      start_processing_impl(nullptr /* context */);
     }
   }
 }

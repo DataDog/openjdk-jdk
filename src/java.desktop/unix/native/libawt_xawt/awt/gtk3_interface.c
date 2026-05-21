@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,10 +37,15 @@
 #include "sizecalc.h"
 #include <jni_util.h>
 #include <stdio.h>
+#include <math.h>
 #include "awt.h"
+#include "debug_assert.h"
 
 static void *gtk3_libhandle = NULL;
-static void *gthread_libhandle = NULL;
+
+static void transform_detail_string (const gchar *detail,
+                                     GtkStyleContext *context);
+static void gtk3_init(GtkApi* gtk);
 
 static jmp_buf j;
 
@@ -58,26 +63,6 @@ static const char ENV_PREFIX[] = "GTK_MODULES=";
 
 static GtkWidget *gtk3_widgets[_GTK_WIDGET_TYPE_SIZE];
 
-static void throw_exception(JNIEnv *env, const char* name, const char* message)
-{
-    jclass class = (*env)->FindClass(env, name);
-
-    if (class != NULL)
-        (*env)->ThrowNew(env, class, message);
-
-    (*env)->DeleteLocalRef(env, class);
-}
-
-static void gtk3_add_state(GtkWidget *widget, GtkStateType state) {
-    GtkStateType old_state = fp_gtk_widget_get_state(widget);
-    fp_gtk_widget_set_state(widget, old_state | state);
-}
-
-static void gtk3_remove_state(GtkWidget *widget, GtkStateType state) {
-    GtkStateType old_state = fp_gtk_widget_get_state(widget);
-    fp_gtk_widget_set_state(widget, old_state & ~state);
-}
-
 /* This is a workaround for the bug:
  * http://sourceware.org/bugzilla/show_bug.cgi?id=1814
  * (dlsym/dlopen clears dlerror state)
@@ -87,15 +72,6 @@ static void gtk3_remove_state(GtkWidget *widget, GtkStateType state) {
 static void* dl_symbol(const char* name)
 {
     void* result = dlsym(gtk3_libhandle, name);
-    if (!result)
-        longjmp(j, NO_SYMBOL_EXCEPTION);
-
-    return result;
-}
-
-static void* dl_symbol_gthread(const char* name)
-{
-    void* result = dlsym(gthread_libhandle, name);
     if (!result)
         longjmp(j, NO_SYMBOL_EXCEPTION);
 
@@ -264,6 +240,7 @@ static void empty() {}
 static gboolean gtk3_version_3_10 = TRUE;
 static gboolean gtk3_version_3_14 = FALSE;
 static gboolean gtk3_version_3_20 = FALSE;
+gboolean glib_version_2_68 = FALSE;
 
 GtkApi* gtk3_load(JNIEnv *env, const char* lib_name)
 {
@@ -277,27 +254,20 @@ GtkApi* gtk3_load(JNIEnv *env, const char* lib_name)
         return FALSE;
     }
 
-    gthread_libhandle = dlopen(GTHREAD_LIB_VERSIONED, RTLD_LAZY | RTLD_LOCAL);
-    if (gthread_libhandle == NULL) {
-        gthread_libhandle = dlopen(GTHREAD_LIB, RTLD_LAZY | RTLD_LOCAL);
-        if (gthread_libhandle == NULL)
-            return FALSE;
-    }
-
     if (setjmp(j) == 0)
     {
         fp_gtk_check_version = dl_symbol("gtk_check_version");
 
         /* GLib */
-        fp_glib_check_version = dlsym(gtk3_libhandle, "glib_check_version");
-        if (!fp_glib_check_version) {
-            dlerror();
-        }
+        fp_glib_check_version = dl_symbol("glib_check_version");
         fp_g_free = dl_symbol("g_free");
         fp_g_object_unref = dl_symbol("g_object_unref");
 
         fp_g_main_context_iteration =
             dl_symbol("g_main_context_iteration");
+        fp_g_main_context_default = dl_symbol("g_main_context_default");
+        fp_g_main_context_is_owner = dl_symbol("g_main_context_is_owner");
+
 
         fp_g_value_init = dl_symbol("g_value_init");
         fp_g_type_is_a = dl_symbol("g_type_is_a");
@@ -332,6 +302,10 @@ GtkApi* gtk3_load(JNIEnv *env, const char* lib_name)
 
         /* Pixbuf */
         fp_gdk_pixbuf_new = dl_symbol("gdk_pixbuf_new");
+        fp_gdk_pixbuf_new_from_data = dl_symbol("gdk_pixbuf_new_from_data");
+        fp_gdk_pixbuf_scale_simple = dl_symbol("gdk_pixbuf_scale_simple");
+        fp_gdk_pixbuf_copy_area = dl_symbol("gdk_pixbuf_copy_area");
+
         fp_gdk_pixbuf_new_from_file =
                 dl_symbol("gdk_pixbuf_new_from_file");
         fp_gdk_pixbuf_get_from_drawable =
@@ -565,6 +539,7 @@ GtkApi* gtk3_load(JNIEnv *env, const char* lib_name)
         fp_g_signal_connect_data = dl_symbol("g_signal_connect_data");
         fp_gtk_widget_show = dl_symbol("gtk_widget_show");
         fp_gtk_main = dl_symbol("gtk_main");
+        fp_gtk_main_level = dl_symbol("gtk_main_level");
 
         fp_g_path_get_dirname = dl_symbol("g_path_get_dirname");
 
@@ -585,6 +560,57 @@ GtkApi* gtk3_load(JNIEnv *env, const char* lib_name)
         fp_g_list_append = dl_symbol("g_list_append");
         fp_g_list_free = dl_symbol("g_list_free");
         fp_g_list_free_full = dl_symbol("g_list_free_full");
+
+        /**
+         * other
+         */
+
+        fp_g_bus_get_sync = dl_symbol("g_bus_get_sync");
+        fp_g_dbus_proxy_call_sync = dl_symbol("g_dbus_proxy_call_sync");
+        fp_g_dbus_proxy_new_sync = dl_symbol("g_dbus_proxy_new_sync");
+        fp_g_dbus_connection_get_unique_name = dl_symbol("g_dbus_connection_get_unique_name");
+        fp_g_dbus_connection_call_sync = dl_symbol("g_dbus_connection_call_sync");
+        fp_g_dbus_connection_signal_subscribe = dl_symbol("g_dbus_connection_signal_subscribe");
+        fp_g_dbus_connection_signal_unsubscribe = dl_symbol("g_dbus_connection_signal_unsubscribe");
+        fp_g_dbus_proxy_call_with_unix_fd_list_sync = dl_symbol("g_dbus_proxy_call_with_unix_fd_list_sync");
+
+        fp_g_variant_builder_init = dl_symbol("g_variant_builder_init");
+        fp_g_variant_builder_add = dl_symbol("g_variant_builder_add");
+        fp_g_variant_new = dl_symbol("g_variant_new");
+        fp_g_variant_new_string = dl_symbol("g_variant_new_string");
+        fp_g_variant_new_uint32 = dl_symbol("g_variant_new_uint32");
+        fp_g_variant_new_boolean = dl_symbol("g_variant_new_boolean");
+        fp_g_variant_get = dl_symbol("g_variant_get");
+        fp_g_variant_get_string = dl_symbol("g_variant_get_string");
+        fp_g_variant_get_uint32 = dl_symbol("g_variant_get_uint32");
+        fp_g_variant_iter_loop = dl_symbol("g_variant_iter_loop");
+        fp_g_variant_unref = dl_symbol("g_variant_unref");
+        fp_g_variant_lookup = dl_symbol("g_variant_lookup");
+        fp_g_variant_lookup_value = dl_symbol("g_variant_lookup_value");
+        fp_g_variant_iter_init = dl_symbol("g_variant_iter_init");
+        fp_g_variant_iter_n_children = dl_symbol("g_variant_iter_n_children");
+
+        fp_g_string_new = dl_symbol("g_string_new");
+        fp_g_string_erase = dl_symbol("g_string_erase");
+        fp_g_string_set_size = dl_symbol("g_string_set_size");
+        fp_g_string_free = dl_symbol("g_string_free");
+
+        glib_version_2_68 = !fp_glib_check_version(2, 68, 0);
+        if (glib_version_2_68) {
+            // those function are called only by Screencast / Remote desktop
+            fp_g_string_replace = dl_symbol("g_string_replace"); //since: 2.68
+            fp_g_uuid_string_is_valid = //since: 2.52
+                    dl_symbol("g_uuid_string_is_valid");
+            fp_g_variant_print = dl_symbol("g_variant_print"); // since 2.24
+
+            fp_g_settings_new = dl_symbol("g_settings_new"); // since 2.26
+            fp_g_settings_get_string = dl_symbol("g_settings_get_string"); // since 2.26
+        }
+        fp_g_string_printf = dl_symbol("g_string_printf");
+        fp_g_strconcat = dl_symbol("g_strconcat");
+
+        fp_g_error_free = dl_symbol("g_error_free");
+        fp_g_unix_fd_list_get = dl_symbol("g_unix_fd_list_get");
     }
     /* Now we have only one kind of exceptions: NO_SYMBOL_EXCEPTION
      * Otherwise we can check the return value of setjmp method.
@@ -593,9 +619,6 @@ GtkApi* gtk3_load(JNIEnv *env, const char* lib_name)
     {
         dlclose(gtk3_libhandle);
         gtk3_libhandle = NULL;
-
-        dlclose(gthread_libhandle);
-        gthread_libhandle = NULL;
 
         return NULL;
     }
@@ -695,7 +718,6 @@ static int gtk3_unload()
 
     dlerror();
     dlclose(gtk3_libhandle);
-    dlclose(gthread_libhandle);
     if ((gtk3_error = dlerror()) != NULL)
     {
         return FALSE;
@@ -838,21 +860,6 @@ static void gtk3_set_direction(GtkWidget *widget, GtkTextDirection dir)
     }
 }
 
-/* GTK state_type filter */
-static GtkStateType get_gtk_state_type(WidgetType widget_type, gint synth_state)
-{
-    GtkStateType result = GTK_STATE_NORMAL;
-
-    if ((synth_state & DISABLED) != 0) {
-        result = GTK_STATE_INSENSITIVE;
-    } else if ((synth_state & PRESSED) != 0) {
-        result = GTK_STATE_ACTIVE;
-    } else if ((synth_state & MOUSE_OVER) != 0) {
-        result = GTK_STATE_PRELIGHT;
-    }
-    return result;
-}
-
 static GtkStateFlags get_gtk_state_flags(gint synth_state)
 {
     GtkStateFlags flags = 0;
@@ -896,19 +903,6 @@ static GtkStateFlags get_gtk_flags(GtkStateType state_type) {
     }
     return flags;
 }
-
-/* GTK shadow_type filter */
-static GtkShadowType get_gtk_shadow_type(WidgetType widget_type,
-                                                               gint synth_state)
-{
-    GtkShadowType result = GTK_SHADOW_OUT;
-
-    if ((synth_state & SELECTED) != 0) {
-        result = GTK_SHADOW_IN;
-    }
-    return result;
-}
-
 
 static GtkWidget* gtk3_get_arrow(GtkArrowType arrow_type,
                                                       GtkShadowType shadow_type)
@@ -1248,7 +1242,7 @@ static GtkWidget *gtk3_get_widget(WidgetType widget_type)
             if (init_result = (NULL == gtk3_widgets[_GTK_NOTEBOOK_TYPE]))
             {
                 gtk3_widgets[_GTK_NOTEBOOK_TYPE] =
-                    (*fp_gtk_notebook_new)(NULL);
+                    (*fp_gtk_notebook_new)();
             }
             result = gtk3_widgets[_GTK_NOTEBOOK_TYPE];
             break;
@@ -1256,7 +1250,7 @@ static GtkWidget *gtk3_get_widget(WidgetType widget_type)
             if (init_result = (NULL == gtk3_widgets[_GTK_TOGGLE_BUTTON_TYPE]))
             {
                 gtk3_widgets[_GTK_TOGGLE_BUTTON_TYPE] =
-                    (*fp_gtk_toggle_button_new)(NULL);
+                    (*fp_gtk_toggle_button_new)();
             }
             result = gtk3_widgets[_GTK_TOGGLE_BUTTON_TYPE];
             break;
@@ -1265,7 +1259,7 @@ static GtkWidget *gtk3_get_widget(WidgetType widget_type)
             if (init_result = (NULL == gtk3_widgets[_GTK_TOOLBAR_TYPE]))
             {
                 gtk3_widgets[_GTK_TOOLBAR_TYPE] =
-                    (*fp_gtk_toolbar_new)(NULL);
+                    (*fp_gtk_toolbar_new)();
             }
             result = gtk3_widgets[_GTK_TOOLBAR_TYPE];
             break;
@@ -1519,7 +1513,7 @@ static void gtk3_paint_arrow(WidgetType widget_type, GtkStateType state_type,
             break;
 
         case COMBO_BOX_ARROW_BUTTON:
-            s = (int)(0.3 * height + 0.5) + 1;
+            s = (int)(0.3 * MIN(height, width) + 0.5) + 1;
             a = G_PI;
             break;
 
@@ -2397,9 +2391,15 @@ static gint gtk3_get_color_for_state(JNIEnv *env, WidgetType widget_type,
     init_containers();
 
     if (gtk3_version_3_20) {
-        if ((widget_type == TEXT_FIELD || widget_type == PASSWORD_FIELD || widget_type == SPINNER_TEXT_FIELD ||
-            widget_type == FORMATTED_TEXT_FIELD) && state_type == GTK_STATE_SELECTED && color_type == TEXT_BACKGROUND) {
-            widget_type = TEXT_AREA;
+        if (widget_type == TEXT_FIELD || widget_type == PASSWORD_FIELD
+            || widget_type == SPINNER_TEXT_FIELD || widget_type == FORMATTED_TEXT_FIELD) {
+                if ((state_type == GTK_STATE_SELECTED && color_type == TEXT_BACKGROUND)
+                    || (state_type == GTK_STATE_INSENSITIVE && color_type == TEXT_FOREGROUND)) {
+                    widget_type = TEXT_AREA;
+                }
+        } else if (widget_type == MENU_BAR && state_type == GTK_STATE_INSENSITIVE
+            && color_type == FOREGROUND) {
+            widget_type = MENU;
         }
     }
 
@@ -2909,33 +2909,46 @@ static void transform_detail_string (const gchar *detail,
     }
 }
 
+inline static int scale_down_ceiling(int what, int scale) {
+    return (int)ceilf(what / (float)scale);
+}
+
+inline static int scale_down_floor(int what, int scale) {
+    return (int)floorf(what / (float)scale);
+}
+
 static gboolean gtk3_get_drawable_data(JNIEnv *env, jintArray pixelArray,
-     int x, jint y, jint width, jint height, jint jwidth, int dx, int dy,
-                                                                   jint scale) {
+     int x, jint y, jint width, jint height, jint jwidth, int dx, int dy) {
     GdkPixbuf *pixbuf;
     jint *ary;
 
+    int skip_left = 0;
+    int skip_top = 0;
     GdkWindow *root = (*fp_gdk_get_default_root_window)();
     if (gtk3_version_3_10) {
         int win_scale = (*fp_gdk_window_get_scale_factor)(root);
+
+        // Scale the coordinate and size carefully such that the captured area
+        // is at least as large as requested. We trim off excess later by
+        // using the skip_* variables.
+        const int x_scaled = scale_down_floor(x, win_scale);
+        const int y_scaled = scale_down_floor(y, win_scale);
+        skip_left = x - x_scaled*win_scale;
+        skip_top  = y - y_scaled*win_scale;
+        DASSERT(skip_left >= 0 && skip_top >= 0);
+
+        const int x_right_scaled = scale_down_ceiling(x + width, win_scale);
+        const int width_scaled = x_right_scaled - x_scaled;
+        DASSERT(width_scaled > 0);
+
+        const int y_bottom_scaled = scale_down_ceiling(y + height, win_scale);
+        const int height_scaled = y_bottom_scaled - y_scaled;
+        DASSERT(height_scaled > 0);
+
         pixbuf = (*fp_gdk_pixbuf_get_from_drawable)(
-            root, x, y, (int) (width / (float) win_scale + 0.5), (int) (height / (float) win_scale + 0.5));
+            root, x_scaled, y_scaled, width_scaled, height_scaled);
     } else {
         pixbuf = (*fp_gdk_pixbuf_get_from_drawable)(root, x, y, width, height);
-    }
-
-    if (pixbuf && scale != 1) {
-        GdkPixbuf *scaledPixbuf;
-        x /= scale;
-        y /= scale;
-        width /= scale;
-        height /= scale;
-        dx /= scale;
-        dy /= scale;
-        scaledPixbuf = (*fp_gdk_pixbuf_scale_simple)(pixbuf, width, height,
-                                                     GDK_INTERP_BILINEAR);
-        (*fp_g_object_unref)(pixbuf);
-        pixbuf = scaledPixbuf;
     }
 
     if (pixbuf) {
@@ -2954,7 +2967,8 @@ static gboolean gtk3_get_drawable_data(JNIEnv *env, jintArray pixelArray,
                 int index;
                 for (_y = 0; _y < height; _y++) {
                     for (_x = 0; _x < width; _x++) {
-                        p = pix + (intptr_t) _y * stride + _x * nchan;
+                        p = pix + (intptr_t) (_y + skip_top) * stride
+                                + (_x + skip_left) * nchan;
 
                         index = (_y + dy) * jwidth + (_x + dx);
                         ary[index] = 0xff000000
@@ -2976,6 +2990,37 @@ static GdkWindow* gtk3_get_window(void *widget) {
     return fp_gtk_widget_get_window((GtkWidget*)widget);
 }
 
+static gboolean apply_theme_if_needed() {
+    if (!glib_version_2_68) {
+        return FALSE;
+    }
+
+    GSettings *settings = fp_g_settings_new("org.gnome.desktop.interface");
+    if (!settings) {
+        return FALSE;
+    }
+
+    static gboolean wasDark = FALSE;
+
+    gchar *scheme = fp_g_settings_get_string(settings, "color-scheme");
+    const gboolean isDark = strcmp(scheme, "prefer-dark") == 0;
+
+    fp_g_free(scheme);
+    fp_g_object_unref(settings);
+
+    if (wasDark ^ isDark) {
+        GtkSettings* gtkSettings = fp_gtk_settings_get_default();
+        if (!gtkSettings) {
+            return FALSE;
+        }
+        fp_g_object_set(gtkSettings, "gtk-application-prefer-dark-theme", isDark, NULL);
+        wasDark = isDark;
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 static void gtk3_init(GtkApi* gtk) {
     gtk->version = GTK_3;
 
@@ -2984,6 +3029,8 @@ static void gtk3_init(GtkApi* gtk) {
     gtk->flush_event_loop = &flush_gtk_event_loop;
     gtk->gtk_check_version = fp_gtk_check_version;
     gtk->get_setting = &gtk3_get_setting;
+
+    gtk->apply_theme_if_needed = &apply_theme_if_needed;
 
     gtk->paint_arrow = &gtk3_paint_arrow;
     gtk->paint_box = &gtk3_paint_box;
@@ -3056,4 +3103,57 @@ static void gtk3_init(GtkApi* gtk) {
     gtk->g_list_append = fp_g_list_append;
     gtk->g_list_free = fp_g_list_free;
     gtk->g_list_free_full = fp_g_list_free_full;
+
+    gtk->g_bus_get_sync = fp_g_bus_get_sync;
+    gtk->g_dbus_proxy_call_sync = fp_g_dbus_proxy_call_sync;
+    gtk->g_dbus_proxy_new_sync = fp_g_dbus_proxy_new_sync;
+    gtk->g_dbus_connection_get_unique_name = fp_g_dbus_connection_get_unique_name;
+    gtk->g_dbus_connection_signal_subscribe = fp_g_dbus_connection_signal_subscribe;
+    gtk->g_dbus_connection_signal_unsubscribe = fp_g_dbus_connection_signal_unsubscribe;
+    gtk->g_dbus_proxy_call_with_unix_fd_list_sync = fp_g_dbus_proxy_call_with_unix_fd_list_sync;
+    gtk->g_dbus_connection_call_sync = fp_g_dbus_connection_call_sync;
+
+    gtk->g_variant_new = fp_g_variant_new;
+    gtk->g_variant_new_string = fp_g_variant_new_string;
+    gtk->g_variant_new_boolean = fp_g_variant_new_boolean;
+    gtk->g_variant_new_uint32 = fp_g_variant_new_uint32;
+    gtk->g_variant_print = fp_g_variant_print;
+
+    gtk->g_variant_get = fp_g_variant_get;
+    gtk->g_variant_get_string = fp_g_variant_get_string;
+    gtk->g_variant_get_uint32 = fp_g_variant_get_uint32;
+
+    gtk->g_variant_lookup = fp_g_variant_lookup;
+
+    gtk->g_variant_iter_loop = fp_g_variant_iter_loop;
+
+    gtk->g_variant_unref = fp_g_variant_unref;
+
+    gtk->g_variant_builder_init = fp_g_variant_builder_init;
+    gtk->g_variant_builder_add = fp_g_variant_builder_add;
+
+    gtk->g_variant_lookup_value = fp_g_variant_lookup_value;
+    gtk->g_variant_iter_init = fp_g_variant_iter_init;
+    gtk->g_variant_iter_n_children = fp_g_variant_iter_n_children;
+
+    gtk->g_string_new = fp_g_string_new;
+    gtk->g_string_erase = fp_g_string_erase;
+    gtk->g_string_set_size = fp_g_string_set_size;
+    gtk->g_string_free = fp_g_string_free;
+    gtk->g_string_replace = fp_g_string_replace;
+    gtk->g_string_printf = fp_g_string_printf;
+    gtk->g_strconcat = fp_g_strconcat;
+    gtk->g_uuid_string_is_valid = fp_g_uuid_string_is_valid;
+
+    gtk->g_main_context_iteration = fp_g_main_context_iteration;
+    gtk->g_main_context_default = fp_g_main_context_default;
+    gtk->g_main_context_is_owner = fp_g_main_context_is_owner;
+    gtk->g_error_free = fp_g_error_free;
+    gtk->g_unix_fd_list_get = fp_g_unix_fd_list_get;
+
+    gtk->gdk_pixbuf_new = fp_gdk_pixbuf_new;
+    gtk->gdk_pixbuf_new_from_data = fp_gdk_pixbuf_new_from_data;
+    gtk->gdk_pixbuf_scale_simple = fp_gdk_pixbuf_scale_simple;
+    gtk->gdk_pixbuf_get_pixels = fp_gdk_pixbuf_get_pixels;
+    gtk->gdk_pixbuf_copy_area = fp_gdk_pixbuf_copy_area;
 }

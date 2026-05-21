@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,10 +33,10 @@ import java.util.Map;
 import java.util.Arrays;
 import java.util.List;
 import java.util.logging.Level;
-import java.util.Random;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.InvalidKeyException;
+import java.security.SecureRandom;
 import java.security.spec.KeySpec;
 import java.security.spec.InvalidKeySpecException;
 import java.security.InvalidAlgorithmParameterException;
@@ -59,11 +59,12 @@ import javax.security.auth.callback.CallbackHandler;
 import javax.security.sasl.*;
 
 import com.sun.security.sasl.util.AbstractSaslImpl;
+import sun.security.jca.JCAUtil;
 
 /**
  * Utility class for DIGEST-MD5 mechanism. Provides utility methods
  * and contains two inner classes which implement the SecurityCtx
- * interface. The inner classes provide the funtionality to allow
+ * interface. The inner classes provide the functionality to allow
  * for quality-of-protection (QOP) with integrity checking and
  * privacy.
  *
@@ -132,6 +133,9 @@ abstract class DigestMD5Base extends AbstractSaslImpl {
 
     protected static final byte[] EMPTY_BYTE_ARRAY = new byte[0];
 
+    /* SecureRandom instance to generate nonce */
+    private static final SecureRandom SECURE_RANDOM = JCAUtil.getDefSecureRandom();
+
     /* ------------------- Variable Fields ----------------------- */
 
     /* Used to track progress of authentication; step numbers from RFC 2831 */
@@ -158,7 +162,7 @@ abstract class DigestMD5Base extends AbstractSaslImpl {
     protected String authzid;       // authzid or canonicalized authzid
 
     /**
-     * Constucts an instance of DigestMD5Base. Calls super constructor
+     * Constructs an instance of DigestMD5Base. Calls super constructor
      * to parse properties for mechanism.
      *
      * @param props A map of property/value pairs
@@ -172,7 +176,7 @@ abstract class DigestMD5Base extends AbstractSaslImpl {
     protected DigestMD5Base(Map<String, ?> props, String className,
         int firstStep, String digestUri, CallbackHandler cbh)
         throws SaslException {
-        super(props, className); // sets QOP, STENGTH and BUFFER_SIZE
+        super(props, className); // sets QOP, STRENGTH and BUFFER_SIZE
 
         step = firstStep;
         this.digestUri = digestUri;
@@ -269,7 +273,6 @@ abstract class DigestMD5Base extends AbstractSaslImpl {
      * is slightly faster and a more compact representation of the same info.
      * @return A non-null byte array containing the nonce value for the
      * digest challenge or response.
-     * Could use SecureRandom to be more secure but it is very slow.
      */
 
     /** This array maps the characters to their 6 bit values */
@@ -293,10 +296,8 @@ abstract class DigestMD5Base extends AbstractSaslImpl {
 
     protected static final byte[] generateNonce() {
 
-        // SecureRandom random = new SecureRandom();
-        Random random = new Random();
         byte[] randomData = new byte[RAW_NONCE_SIZE];
-        random.nextBytes(randomData);
+        SECURE_RANDOM.nextBytes(randomData);
 
         byte[] nonce = new byte[ENCODED_NONCE_SIZE];
 
@@ -433,9 +434,7 @@ abstract class DigestMD5Base extends AbstractSaslImpl {
 
                 logger.log(Level.FINE, "DIGEST01:Platform supports {0}", JCE_CIPHER_NAME[i]);
                 ciphers[i] |= CIPHER_MASKS[i];
-            } catch (NoSuchAlgorithmException e) {
-                // no implementation found for requested algorithm.
-            } catch (NoSuchPaddingException e) {
+            } catch (NoSuchAlgorithmException | NoSuchPaddingException e) {
                 // no implementation found for requested algorithm.
             }
         }
@@ -1253,7 +1252,7 @@ abstract class DigestMD5Base extends AbstractSaslImpl {
                     "specification used.", e);
             } catch (InvalidAlgorithmParameterException e) {
                 throw new SaslException("DIGEST-MD5: Invalid cipher " +
-                    "algorithem parameter used to create cipher instance", e);
+                    "algorithm parameter used to create cipher instance", e);
             } catch (NoSuchPaddingException e) {
                 throw new SaslException("DIGEST-MD5: Unsupported " +
                     "padding used for chosen cipher", e);

@@ -23,22 +23,18 @@
  */
 
 
-#include "precompiled.hpp"
 
 #include "gc/shenandoah/shenandoahClosures.inline.hpp"
 #include "gc/shenandoah/shenandoahCodeRoots.hpp"
-#include "gc/shenandoah/shenandoahEvacOOMHandler.hpp"
 #include "gc/shenandoah/shenandoahParallelCleaning.hpp"
 #include "runtime/safepoint.hpp"
 
 ShenandoahClassUnloadingTask::ShenandoahClassUnloadingTask(ShenandoahPhaseTimings::Phase phase,
-                                                           BoolObjectClosure* is_alive,
-                                                           uint num_workers,
                                                            bool unloading_occurred) :
-  AbstractGangTask("Shenandoah Class Unloading"),
+  WorkerTask("Shenandoah Class Unloading"),
   _phase(phase),
   _unloading_occurred(unloading_occurred),
-  _code_cache_task(num_workers, is_alive, unloading_occurred),
+  _code_cache_task(unloading_occurred),
   _klass_cleaning_task() {
   assert(SafepointSynchronize::is_at_safepoint(), "Must be at a safepoint");
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,9 +26,7 @@
 package sun.net.httpserver;
 
 import java.io.*;
-import java.net.*;
-import com.sun.net.httpserver.*;
-import com.sun.net.httpserver.spi.*;
+import java.util.Objects;
 
 /**
  * a class which allows the caller to write an indefinite
@@ -42,26 +40,30 @@ class UndefLengthOutputStream extends FilterOutputStream
     private boolean closed = false;
     ExchangeImpl t;
 
-    UndefLengthOutputStream (ExchangeImpl t, OutputStream src) {
-        super (src);
+    UndefLengthOutputStream(ExchangeImpl t, OutputStream src) {
+        super(src);
         this.t = t;
     }
 
-    public void write (int b) throws IOException {
+    public void write(int b) throws IOException {
         if (closed) {
-            throw new IOException ("stream closed");
+            throw new IOException("stream closed");
         }
         out.write(b);
     }
 
-    public void write (byte[]b, int off, int len) throws IOException {
+    public void write(byte[] b, int off, int len) throws IOException {
+        Objects.checkFromIndexSize(off, len, b.length);
+        if (len == 0) {
+            return;
+        }
         if (closed) {
-            throw new IOException ("stream closed");
+            throw new IOException("stream closed");
         }
         out.write(b, off, len);
     }
 
-    public void close () throws IOException {
+    public void close() throws IOException {
         if (closed) {
             return;
         }
@@ -73,8 +75,7 @@ class UndefLengthOutputStream extends FilterOutputStream
                 is.close();
             } catch (IOException e) {}
         }
-        WriteFinishedEvent e = new WriteFinishedEvent (t);
-        t.getHttpContext().getServerImpl().addEvent (e);
+        t.postExchangeFinished(true);
     }
 
     // flush is a pass-through

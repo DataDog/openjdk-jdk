@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,9 +35,11 @@ import java.io.Serial;
 import java.io.Serializable;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.Hashtable;
-import java.util.Vector;
+import java.util.Map;
+import java.util.Objects;
 
 import javax.swing.ImageIcon;
 import javax.swing.SizeRequirements;
@@ -126,6 +128,7 @@ import javax.swing.text.View;
  * unless noted, so that
  * p { margin-top: 10% } will be treated as if no margin-top was specified.</b>
  *
+ * @spec https://www.w3.org/TR/REC-CSS1 Cascading Style Sheets, level 1
  * @author  Timothy Prinzing
  * @author  Scott Violet
  * @see StyleSheet
@@ -210,7 +213,7 @@ public class CSS implements Serializable {
          * CSS attribute "background-position".
          */
         public static final Attribute BACKGROUND_POSITION =
-            new Attribute("background-position", null, false);
+            new Attribute("background-position", "0% 0%", false);
 
         /**
          * CSS attribute "background-repeat".
@@ -732,12 +735,8 @@ public class CSS implements Serializable {
         valueConvertor.put(CSS.Attribute.BACKGROUND_ATTACHMENT,
                            valueMapper);
         Object generic = new CssValue();
-        int n = CSS.Attribute.allAttributes.length;
-        for (int i = 0; i < n; i++) {
-            CSS.Attribute key = CSS.Attribute.allAttributes[i];
-            if (valueConvertor.get(key) == null) {
-                valueConvertor.put(key, generic);
-            }
+        for (CSS.Attribute key : CSS.Attribute.allAttributes) {
+            valueConvertor.putIfAbsent(key, generic);
         }
     }
 
@@ -763,13 +762,13 @@ public class CSS implements Serializable {
 
         if (size != null) {
             if (size.startsWith("+")) {
-                relSize = Integer.valueOf(size.substring(1)).intValue();
+                relSize = Integer.parseInt(size.substring(1));
                 setBaseFontSize(baseFontSize + relSize);
             } else if (size.startsWith("-")) {
-                relSize = -Integer.valueOf(size.substring(1)).intValue();
+                relSize = -Integer.parseInt(size.substring(1));
                 setBaseFontSize(baseFontSize + relSize);
             } else {
-                setBaseFontSize(Integer.valueOf(size).intValue());
+                setBaseFontSize(Integer.parseInt(size));
             }
         }
     }
@@ -841,6 +840,22 @@ public class CSS implements Serializable {
         return r != null ? r : conv.parseCssValue(key.getDefaultValue());
     }
 
+    static Object mergeTextDecoration(String value) {
+        if (value.startsWith("none")) {
+            return null;
+        }
+
+        boolean underline = value.contains("underline");
+        boolean strikeThrough = value.contains("line-through");
+        if (!underline && !strikeThrough) {
+            return null;
+        }
+        String newValue = underline && strikeThrough
+                          ? "underline,line-through"
+                          : (underline ? "underline" : "line-through");
+        return new StringValue().parseCssValue(newValue);
+    }
+
     /**
      * Maps from a StyleConstants to a CSS Attribute.
      */
@@ -890,8 +905,8 @@ public class CSS implements Serializable {
                               (CSS.Attribute.VERTICAL_ALIGN);
         if ((vAlignV != null)) {
             String vAlign = vAlignV.toString();
-            if ((vAlign.indexOf("sup") >= 0) ||
-                (vAlign.indexOf("sub") >= 0)) {
+            if ((vAlign.contains("sup")) ||
+                (vAlign.contains("sub"))) {
                 size -= 2;
             }
         }
@@ -907,7 +922,7 @@ public class CSS implements Serializable {
             style |= Font.BOLD;
         }
         Object fs = a.getAttribute(CSS.Attribute.FONT_STYLE);
-        if ((fs != null) && (fs.toString().indexOf("italic") >= 0)) {
+        if ((fs != null) && (fs.toString().contains("italic"))) {
             style |= Font.ITALIC;
         }
         if (family.equalsIgnoreCase("monospace")) {
@@ -961,13 +976,13 @@ public class CSS implements Serializable {
         ss = getStyleSheet(ss);
         if (size != null) {
             if (size.startsWith("+")) {
-                relSize = Integer.valueOf(size.substring(1)).intValue();
+                relSize = Integer.parseInt(size.substring(1));
                 return getPointSize(baseFontSize + relSize, ss);
             } else if (size.startsWith("-")) {
-                relSize = -Integer.valueOf(size.substring(1)).intValue();
+                relSize = -Integer.parseInt(size.substring(1));
                 return getPointSize(baseFontSize + relSize, ss);
             } else {
-                absSize = Integer.valueOf(size).intValue();
+                absSize = Integer.parseInt(size);
                 return getPointSize(absSize, ss);
             }
         }
@@ -1062,7 +1077,7 @@ public class CSS implements Serializable {
     private static final Hashtable<String, Value> valueMap = new Hashtable<String, Value>();
 
     /**
-     * The hashtable and the static initalization block below,
+     * The hashtable and the static initialization block below,
      * set up a mapping from well-known HTML attributes to
      * CSS attributes.  For the most part, there is a 1-1 mapping
      * between the two.  However in the case of certain HTML
@@ -1071,14 +1086,14 @@ public class CSS implements Serializable {
      * Therefore, the value associated with each HTML.Attribute.
      * key ends up being an array of CSS.Attribute.* objects.
      */
-    private static final Hashtable<HTML.Attribute, CSS.Attribute[]> htmlAttrToCssAttrMap = new Hashtable<HTML.Attribute, CSS.Attribute[]>(20);
+    private static final Map<HTML.Attribute, CSS.Attribute[]> htmlAttrToCssAttrMap;
 
     /**
      * The hashtable and static initialization that follows sets
      * up a translation from StyleConstants (i.e. the <em>well known</em>
      * attributes) to the associated CSS attributes.
      */
-    private static final Hashtable<Object, Attribute> styleConstantToCssMap = new Hashtable<Object, Attribute>(17);
+    private static final Map<Object, Attribute> styleConstantToCssMap;
     /** Maps from HTML value to a CSS value. Used in internal mapping. */
     private static final Hashtable<String, CSS.Value> htmlValueToCssValueMap = new Hashtable<String, CSS.Value>(8);
     /** Maps from CSS value (string) to internal value. */
@@ -1095,87 +1110,93 @@ public class CSS implements Serializable {
             valueMap.put(Value.allValues[i].toString(),
                              Value.allValues[i]);
         }
-
-        htmlAttrToCssAttrMap.put(HTML.Attribute.COLOR,
-                                 new CSS.Attribute[]{CSS.Attribute.COLOR});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.TEXT,
-                                 new CSS.Attribute[]{CSS.Attribute.COLOR});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.CLEAR,
-                                 new CSS.Attribute[]{CSS.Attribute.CLEAR});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.BACKGROUND,
-                                 new CSS.Attribute[]{CSS.Attribute.BACKGROUND_IMAGE});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.BGCOLOR,
-                                 new CSS.Attribute[]{CSS.Attribute.BACKGROUND_COLOR});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.WIDTH,
-                                 new CSS.Attribute[]{CSS.Attribute.WIDTH});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.HEIGHT,
-                                 new CSS.Attribute[]{CSS.Attribute.HEIGHT});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.BORDER,
-                                 new CSS.Attribute[]{CSS.Attribute.BORDER_TOP_WIDTH, CSS.Attribute.BORDER_RIGHT_WIDTH, CSS.Attribute.BORDER_BOTTOM_WIDTH, CSS.Attribute.BORDER_LEFT_WIDTH});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.CELLPADDING,
-                                 new CSS.Attribute[]{CSS.Attribute.PADDING});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.CELLSPACING,
-                                 new CSS.Attribute[]{CSS.Attribute.BORDER_SPACING});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.MARGINWIDTH,
-                                 new CSS.Attribute[]{CSS.Attribute.MARGIN_LEFT,
-                                                     CSS.Attribute.MARGIN_RIGHT});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.MARGINHEIGHT,
-                                 new CSS.Attribute[]{CSS.Attribute.MARGIN_TOP,
-                                                     CSS.Attribute.MARGIN_BOTTOM});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.HSPACE,
-                                 new CSS.Attribute[]{CSS.Attribute.PADDING_LEFT,
-                                                     CSS.Attribute.PADDING_RIGHT});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.VSPACE,
-                                 new CSS.Attribute[]{CSS.Attribute.PADDING_BOTTOM,
-                                                     CSS.Attribute.PADDING_TOP});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.FACE,
-                                 new CSS.Attribute[]{CSS.Attribute.FONT_FAMILY});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.SIZE,
-                                 new CSS.Attribute[]{CSS.Attribute.FONT_SIZE});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.VALIGN,
-                                 new CSS.Attribute[]{CSS.Attribute.VERTICAL_ALIGN});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.ALIGN,
-                                 new CSS.Attribute[]{CSS.Attribute.VERTICAL_ALIGN,
-                                                     CSS.Attribute.TEXT_ALIGN,
-                                                     CSS.Attribute.FLOAT});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.TYPE,
-                                 new CSS.Attribute[]{CSS.Attribute.LIST_STYLE_TYPE});
-        htmlAttrToCssAttrMap.put(HTML.Attribute.NOWRAP,
-                                 new CSS.Attribute[]{CSS.Attribute.WHITE_SPACE});
+        htmlAttrToCssAttrMap = Map.ofEntries(
+                Map.entry(HTML.Attribute.COLOR,
+                          new CSS.Attribute[]{CSS.Attribute.COLOR}),
+                Map.entry(HTML.Attribute.TEXT,
+                          new CSS.Attribute[]{CSS.Attribute.COLOR}),
+                Map.entry(HTML.Attribute.CLEAR,
+                          new CSS.Attribute[]{CSS.Attribute.CLEAR}),
+                Map.entry(HTML.Attribute.BACKGROUND,
+                          new CSS.Attribute[]{CSS.Attribute.BACKGROUND_IMAGE}),
+                Map.entry(HTML.Attribute.BGCOLOR,
+                          new CSS.Attribute[]{CSS.Attribute.BACKGROUND_COLOR}),
+                Map.entry(HTML.Attribute.WIDTH,
+                          new CSS.Attribute[]{CSS.Attribute.WIDTH}),
+                Map.entry(HTML.Attribute.HEIGHT,
+                          new CSS.Attribute[]{CSS.Attribute.HEIGHT}),
+                Map.entry(HTML.Attribute.BORDER,
+                          new CSS.Attribute[]{CSS.Attribute.BORDER_TOP_WIDTH,
+                                              CSS.Attribute.BORDER_RIGHT_WIDTH,
+                                              CSS.Attribute.BORDER_BOTTOM_WIDTH,
+                                              CSS.Attribute.BORDER_LEFT_WIDTH}),
+                Map.entry(HTML.Attribute.CELLPADDING,
+                          new CSS.Attribute[]{CSS.Attribute.PADDING}),
+                Map.entry(HTML.Attribute.CELLSPACING,
+                          new CSS.Attribute[]{CSS.Attribute.BORDER_SPACING}),
+                Map.entry(HTML.Attribute.MARGINWIDTH,
+                          new CSS.Attribute[]{CSS.Attribute.MARGIN_LEFT,
+                                              CSS.Attribute.MARGIN_RIGHT}),
+                Map.entry(HTML.Attribute.MARGINHEIGHT,
+                          new CSS.Attribute[]{CSS.Attribute.MARGIN_TOP,
+                                              CSS.Attribute.MARGIN_BOTTOM}),
+                Map.entry(HTML.Attribute.HSPACE,
+                          new CSS.Attribute[]{CSS.Attribute.PADDING_LEFT,
+                                              CSS.Attribute.PADDING_RIGHT}),
+                Map.entry(HTML.Attribute.VSPACE,
+                          new CSS.Attribute[]{CSS.Attribute.PADDING_BOTTOM,
+                                              CSS.Attribute.PADDING_TOP}),
+                Map.entry(HTML.Attribute.FACE,
+                          new CSS.Attribute[]{CSS.Attribute.FONT_FAMILY}),
+                Map.entry(HTML.Attribute.SIZE,
+                          new CSS.Attribute[]{CSS.Attribute.FONT_SIZE}),
+                Map.entry(HTML.Attribute.VALIGN,
+                          new CSS.Attribute[]{CSS.Attribute.VERTICAL_ALIGN}),
+                Map.entry(HTML.Attribute.ALIGN,
+                          new CSS.Attribute[]{CSS.Attribute.VERTICAL_ALIGN,
+                                              CSS.Attribute.TEXT_ALIGN,
+                                              CSS.Attribute.FLOAT}),
+                Map.entry(HTML.Attribute.TYPE,
+                          new CSS.Attribute[]{CSS.Attribute.LIST_STYLE_TYPE}),
+                Map.entry(HTML.Attribute.NOWRAP,
+                          new CSS.Attribute[]{CSS.Attribute.WHITE_SPACE})
+        );
 
         // initialize StyleConstants mapping
-        styleConstantToCssMap.put(StyleConstants.FontFamily,
-                                  CSS.Attribute.FONT_FAMILY);
-        styleConstantToCssMap.put(StyleConstants.FontSize,
-                                  CSS.Attribute.FONT_SIZE);
-        styleConstantToCssMap.put(StyleConstants.Bold,
-                                  CSS.Attribute.FONT_WEIGHT);
-        styleConstantToCssMap.put(StyleConstants.Italic,
-                                  CSS.Attribute.FONT_STYLE);
-        styleConstantToCssMap.put(StyleConstants.Underline,
-                                  CSS.Attribute.TEXT_DECORATION);
-        styleConstantToCssMap.put(StyleConstants.StrikeThrough,
-                                  CSS.Attribute.TEXT_DECORATION);
-        styleConstantToCssMap.put(StyleConstants.Superscript,
-                                  CSS.Attribute.VERTICAL_ALIGN);
-        styleConstantToCssMap.put(StyleConstants.Subscript,
-                                  CSS.Attribute.VERTICAL_ALIGN);
-        styleConstantToCssMap.put(StyleConstants.Foreground,
-                                  CSS.Attribute.COLOR);
-        styleConstantToCssMap.put(StyleConstants.Background,
-                                  CSS.Attribute.BACKGROUND_COLOR);
-        styleConstantToCssMap.put(StyleConstants.FirstLineIndent,
-                                  CSS.Attribute.TEXT_INDENT);
-        styleConstantToCssMap.put(StyleConstants.LeftIndent,
-                                  CSS.Attribute.MARGIN_LEFT);
-        styleConstantToCssMap.put(StyleConstants.RightIndent,
-                                  CSS.Attribute.MARGIN_RIGHT);
-        styleConstantToCssMap.put(StyleConstants.SpaceAbove,
-                                  CSS.Attribute.MARGIN_TOP);
-        styleConstantToCssMap.put(StyleConstants.SpaceBelow,
-                                  CSS.Attribute.MARGIN_BOTTOM);
-        styleConstantToCssMap.put(StyleConstants.Alignment,
-                                  CSS.Attribute.TEXT_ALIGN);
+        styleConstantToCssMap = Map.ofEntries(
+                Map.entry(StyleConstants.FontFamily,
+                          CSS.Attribute.FONT_FAMILY),
+                Map.entry(StyleConstants.FontSize,
+                          CSS.Attribute.FONT_SIZE),
+                Map.entry(StyleConstants.Bold,
+                          CSS.Attribute.FONT_WEIGHT),
+                Map.entry(StyleConstants.Italic,
+                          CSS.Attribute.FONT_STYLE),
+                Map.entry(StyleConstants.Underline,
+                          CSS.Attribute.TEXT_DECORATION),
+                Map.entry(StyleConstants.StrikeThrough,
+                          CSS.Attribute.TEXT_DECORATION),
+                Map.entry(StyleConstants.Superscript,
+                          CSS.Attribute.VERTICAL_ALIGN),
+                Map.entry(StyleConstants.Subscript,
+                          CSS.Attribute.VERTICAL_ALIGN),
+                Map.entry(StyleConstants.Foreground,
+                          CSS.Attribute.COLOR),
+                Map.entry(StyleConstants.Background,
+                          CSS.Attribute.BACKGROUND_COLOR),
+                Map.entry(StyleConstants.FirstLineIndent,
+                          CSS.Attribute.TEXT_INDENT),
+                Map.entry(StyleConstants.LeftIndent,
+                          CSS.Attribute.MARGIN_LEFT),
+                Map.entry(StyleConstants.RightIndent,
+                          CSS.Attribute.MARGIN_RIGHT),
+                Map.entry(StyleConstants.SpaceAbove,
+                          CSS.Attribute.MARGIN_TOP),
+                Map.entry(StyleConstants.SpaceBelow,
+                          CSS.Attribute.MARGIN_BOTTOM),
+                Map.entry(StyleConstants.Alignment,
+                          CSS.Attribute.TEXT_ALIGN)
+        );
 
         // HTML->CSS
         htmlValueToCssValueMap.put("disc", CSS.Value.DISC);
@@ -1293,6 +1314,7 @@ public class CSS implements Serializable {
         }
         // Absolute first
         try {
+            @SuppressWarnings("deprecation")
             URL url = new URL(cssString);
             if (url != null) {
                 return url;
@@ -1303,6 +1325,7 @@ public class CSS implements Serializable {
         if (base != null) {
             // Relative URL, try from base
             try {
+                @SuppressWarnings("deprecation")
                 URL url = new URL(base, cssString);
                 return url;
             }
@@ -1546,7 +1569,7 @@ public class CSS implements Serializable {
     static String[] parseStrings(String value) {
         int         current, last;
         int         length = (value == null) ? 0 : value.length();
-        Vector<String> temp = new Vector<String>(4);
+        ArrayList<String> temp = new ArrayList<String>(4);
 
         current = 0;
         while (current < length) {
@@ -1569,12 +1592,11 @@ public class CSS implements Serializable {
                 current++;
             }
             if (last != current) {
-                temp.addElement(value.substring(last, current));
+                temp.add(value.substring(last, current));
             }
             current++;
         }
-        String[] retValue = new String[temp.size()];
-        temp.copyInto(retValue);
+        String[] retValue = temp.toArray(new String[0]);
         return retValue;
     }
 
@@ -1609,8 +1631,8 @@ public class CSS implements Serializable {
             if (key instanceof HTML.Tag) {
                 HTML.Tag tag = (HTML.Tag)key;
                 Object o = htmlAttrSet.getAttribute(tag);
-                if (o != null && o instanceof AttributeSet) {
-                    translateAttributes(tag, (AttributeSet)o, cssAttrSet);
+                if (o instanceof AttributeSet as) {
+                    translateAttributes(tag, as, cssAttrSet);
                 }
             } else if (key instanceof CSS.Attribute) {
                 cssAttrSet.addAttribute(key, htmlAttrSet.getAttribute(key));
@@ -1773,13 +1795,13 @@ public class CSS implements Serializable {
 
     /**
      * Base class to CSS values in the attribute sets.  This
-     * is intended to act as a convertor to/from other attribute
+     * is intended to act as a converter to/from other attribute
      * formats.
      * <p>
      * The CSS parser uses the parseCssValue method to convert
-     * a string to whatever format is appropriate a given key
-     * (i.e. these convertors are stored in a map using the
-     * CSS.Attribute as a key and the CssValue as the value).
+     * a string to whatever format is appropriate for a given key
+     * (i.e. these converters are stored in a map using the
+     * CSS.Attribute as the key and the CssValue as the value).
      * <p>
      * The HTML to CSS conversion process first converts the
      * HTML.Attribute to a CSS.Attribute, and then calls
@@ -1965,12 +1987,12 @@ public class CSS implements Serializable {
          */
         Object toStyleConstants(StyleConstants key, View v) {
             if (key == StyleConstants.Italic) {
-                if (svalue.indexOf("italic") >= 0) {
+                if (svalue.contains("italic")) {
                     return Boolean.TRUE;
                 }
                 return Boolean.FALSE;
             } else if (key == StyleConstants.Underline) {
-                if (svalue.indexOf("underline") >= 0) {
+                if (svalue.contains("underline")) {
                     return Boolean.TRUE;
                 }
                 return Boolean.FALSE;
@@ -1984,17 +2006,17 @@ public class CSS implements Serializable {
                 }
                 return StyleConstants.ALIGN_LEFT;
             } else if (key == StyleConstants.StrikeThrough) {
-                if (svalue.indexOf("line-through") >= 0) {
+                if (svalue.contains("line-through")) {
                     return Boolean.TRUE;
                 }
                 return Boolean.FALSE;
             } else if (key == StyleConstants.Superscript) {
-                if (svalue.indexOf("super") >= 0) {
+                if (svalue.contains("super")) {
                     return Boolean.TRUE;
                 }
                 return Boolean.FALSE;
             } else if (key == StyleConstants.Subscript) {
-                if (svalue.indexOf("sub") >= 0) {
+                if (svalue.contains("sub")) {
                     return Boolean.TRUE;
                 }
                 return Boolean.FALSE;
@@ -2004,24 +2026,36 @@ public class CSS implements Serializable {
 
         // Used by ViewAttributeSet
         boolean isItalic() {
-            return (svalue.indexOf("italic") != -1);
+            return (svalue.contains("italic"));
         }
 
         boolean isStrike() {
-            return (svalue.indexOf("line-through") != -1);
+            return (svalue.contains("line-through"));
         }
 
         boolean isUnderline() {
-            return (svalue.indexOf("underline") != -1);
+            return (svalue.contains("underline"));
         }
 
         boolean isSub() {
-            return (svalue.indexOf("sub") != -1);
+            return (svalue.contains("sub"));
         }
 
         boolean isSup() {
-            return (svalue.indexOf("sup") != -1);
+            return (svalue.contains("sup"));
         }
+
+        @Override
+        public int hashCode() {
+            return (this.svalue != null) ? this.svalue.hashCode() : 0;
+        }
+
+        @Override
+        public boolean equals(Object val) {
+            return val instanceof CSS.StringValue strVal
+                   && Objects.equals(this.svalue, strVal.svalue);
+        }
+
     }
 
     /**
@@ -2137,11 +2171,11 @@ public class CSS implements Serializable {
                  */
                 int baseFontSize = getBaseFontSize();
                 if (value.charAt(0) == '+') {
-                    int relSize = Integer.valueOf(value.substring(1)).intValue();
+                    int relSize = Integer.parseInt(value.substring(1));
                     fs.value = baseFontSize + relSize;
                     fs.index = true;
                 } else if (value.charAt(0) == '-') {
-                    int relSize = -Integer.valueOf(value.substring(1)).intValue();
+                    int relSize = -Integer.parseInt(value.substring(1));
                     fs.value = baseFontSize + relSize;
                     fs.index = true;
                 } else {
@@ -2197,6 +2231,21 @@ public class CSS implements Serializable {
                 return Integer.valueOf(getValue(v.getAttributes(), null));
             }
             return Integer.valueOf(getValue(null, null));
+        }
+
+        @Override
+        public int hashCode() {
+            return Float.hashCode(value)
+                   | Boolean.hashCode(index)
+                   | Objects.hashCode(lu);
+        }
+
+        @Override
+        public boolean equals(Object val) {
+            return val instanceof CSS.FontSize size
+                   && value == size.value
+                   && index == size.index
+                   && Objects.equals(lu, size.lu);
         }
 
         float value;
@@ -2299,6 +2348,17 @@ public class CSS implements Serializable {
             return family;
         }
 
+        @Override
+        public int hashCode() {
+            return (family != null) ? family.hashCode() : 0;
+        }
+
+        @Override
+        public boolean equals(Object val) {
+            return val instanceof CSS.FontFamily font
+                   && Objects.equals(family, font.family);
+        }
+
         String family;
     }
 
@@ -2362,6 +2422,17 @@ public class CSS implements Serializable {
             return (weight > 500);
         }
 
+        @Override
+        public int hashCode() {
+            return Integer.hashCode(weight);
+        }
+
+        @Override
+        public boolean equals(Object val) {
+            return val instanceof CSS.FontWeight fontWeight
+                   && weight == fontWeight.weight;
+        }
+
         int weight;
     }
 
@@ -2422,6 +2493,16 @@ public class CSS implements Serializable {
             return c;
         }
 
+        @Override
+        public int hashCode() {
+            return (c != null) ? c.hashCode() : 0;
+        }
+
+        @Override
+        public boolean equals(Object val) {
+            return val instanceof CSS.ColorValue color && c.equals(color.c);
+        }
+
         Color c;
     }
 
@@ -2474,6 +2555,16 @@ public class CSS implements Serializable {
             if (value != null) {
                 style = CSS.getValue((String)value);
             }
+        }
+
+        @Override
+        public int hashCode() {
+            return (style != null) ? style.hashCode() : 0;
+        }
+
+        @Override
+        public boolean equals(Object val) {
+            return val instanceof CSS.BorderStyle border && style.equals(border.style);
         }
 
         // CSS.Values are static, don't archive it.
@@ -2533,7 +2624,7 @@ public class CSS implements Serializable {
             LengthValue lv;
             try {
                 // Assume pixels
-                float absolute = Float.valueOf(value).floatValue();
+                float absolute = Float.parseFloat(value);
                 lv = new LengthValue();
                 lv.span = absolute;
             } catch (NumberFormatException nfe) {
@@ -2555,7 +2646,7 @@ public class CSS implements Serializable {
                 case 1:
                     // %
                     lv = new LengthValue();
-                    lv.span = Math.max(0, Math.min(1, lu.value));
+                    lv.span = Math.max(0, lu.value);
                     lv.percentage = true;
                     break;
                 default:
@@ -2603,9 +2694,25 @@ public class CSS implements Serializable {
             return Float.valueOf(getValue(false));
         }
 
+        @Override
+        public int hashCode() {
+            return Float.hashCode(span)
+                   | Boolean.hashCode(percentage)
+                   | Objects.hashCode(units);
+        }
+
+        @Override
+        public boolean equals(Object val) {
+            return val instanceof CSS.LengthValue lu
+                   && percentage == lu.percentage
+                   && span == lu.span
+                   && Objects.equals(units, lu.units);
+        }
+
         /** If true, span is a percentage value, and that to determine
          * the length another value needs to be passed in. */
         boolean percentage;
+
         /** Either the absolute value (percentage == false) or
          * a percentage value. */
         float span;
@@ -2822,6 +2929,21 @@ public class CSS implements Serializable {
         float getVerticalPosition() {
             return verticalPosition;
         }
+
+        @Override
+        public int hashCode() {
+            return Float.hashCode(horizontalPosition)
+                   | Float.hashCode(verticalPosition)
+                   | Short.hashCode(relative);
+        }
+
+        @Override
+        public boolean equals(Object val) {
+            return val instanceof CSS.BackgroundPosition bp
+                    && horizontalPosition == bp.horizontalPosition
+                    && verticalPosition == bp.verticalPosition
+                    && relative == bp.relative;
+        }
     }
 
 
@@ -2830,8 +2952,8 @@ public class CSS implements Serializable {
      */
     @SuppressWarnings("serial") // Same-version serialization only
     static class BackgroundImage extends CssValue {
-        private boolean    loadedImage;
-        private ImageIcon  image;
+        private volatile boolean loadedImage;
+        private ImageIcon image;
 
         Object parseCssValue(String value) {
             BackgroundImage retValue = new BackgroundImage();
@@ -2849,7 +2971,6 @@ public class CSS implements Serializable {
                 synchronized(this) {
                     if (!loadedImage) {
                         URL url = CSS.getURL(base, svalue);
-                        loadedImage = true;
                         if (url != null) {
                             image = new ImageIcon();
                             Image tmpImg = Toolkit.getDefaultToolkit().createImage(url);
@@ -2857,10 +2978,22 @@ public class CSS implements Serializable {
                                 image.setImage(tmpImg);
                             }
                         }
+                        loadedImage = true;
                     }
                 }
             }
             return image;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(svalue);
+        }
+
+        @Override
+        public boolean equals(Object val) {
+            return val instanceof CSS.BackgroundImage img
+                   && Objects.equals(svalue, img.svalue);
         }
     }
 
@@ -2870,25 +3003,23 @@ public class CSS implements Serializable {
      */
     @SuppressWarnings("serial") // Same-version serialization only
     static class LengthUnit implements Serializable {
-        static Hashtable<String, Float> lengthMapping = new Hashtable<String, Float>(6);
-        static Hashtable<String, Float> w3cLengthMapping = new Hashtable<String, Float>(6);
-        static {
-            lengthMapping.put("pt", 1f);
-            // Not sure about 1.3, determined by experimentation.
-            lengthMapping.put("px", 1.3f);
-            lengthMapping.put("mm", 2.83464f);
-            lengthMapping.put("cm", 28.3464f);
-            lengthMapping.put("pc", 12f);
-            lengthMapping.put("in", 72f);
-            // Mapping according to the CSS2.2 spec
-            // https://www.w3.org/TR/CSS22/syndata.html#x39
-            w3cLengthMapping.put("pt", 96f / 72f);         // 1/72 of 1in
-            w3cLengthMapping.put("px", 1f);                // 1/96 of 1in
-            w3cLengthMapping.put("mm", 96f / 2.54f / 10f); // 1/10 of 1cm
-            w3cLengthMapping.put("cm", 96f / 2.54f);       // 96px/2.54
-            w3cLengthMapping.put("pc", 96f / 6f);          // 1/6 of 1in
-            w3cLengthMapping.put("in", 96f);               // 96px
-        }
+        private static final Map<String, Float> lengthMapping = Map.of(
+                "pt", 1f,
+                // Not sure about 1.3, determined by experimentation.
+                "px", 1.3f,
+                "mm", 2.83464f,
+                "cm", 28.3464f,
+                "pc", 12f,
+                "in", 72f);
+        // Mapping according to the CSS2.2 spec
+        // https://www.w3.org/TR/CSS22/syndata.html#x39
+        private static final Map<String, Float> w3cLengthMapping = Map.of(
+                "pt", 96f / 72f,         // 1/72 of 1in
+                "px", 1f,                // 1/96 of 1in
+                "mm", 96f / 2.54f / 10f, // 1/10 of 1cm
+                "cm", 96f / 2.54f,       // 96px/2.54
+                "pc", 96f / 6f,          // 1/6 of 1in
+                "in", 96f);              // 96px
 
         LengthUnit(String value, short defaultType, float defaultValue) {
             parse(value, defaultType, defaultValue);
@@ -2953,32 +3084,35 @@ public class CSS implements Serializable {
         }
 
         float getValue(boolean w3cLengthUnits) {
-            Hashtable<String, Float> mapping = (w3cLengthUnits) ? w3cLengthMapping : lengthMapping;
-            float scale = 1;
-            if (units != null) {
-                Float scaleFloat = mapping.get(units);
-                if (scaleFloat != null) {
-                    scale = scaleFloat.floatValue();
-                }
-            }
-            return this.value * scale;
-
+            return getValue(value, units, w3cLengthUnits);
         }
 
-        static float getValue(float value, String units, Boolean w3cLengthUnits) {
-            Hashtable<String, Float> mapping = (w3cLengthUnits) ? w3cLengthMapping : lengthMapping;
-            float scale = 1;
-            if (units != null) {
-                Float scaleFloat = mapping.get(units);
-                if (scaleFloat != null) {
-                    scale = scaleFloat.floatValue();
-                }
+        static float getValue(float value, String units, boolean w3cLengthUnits) {
+            if (units == null) {
+                return value;
             }
+            Map<String, Float> mapping = (w3cLengthUnits) ? w3cLengthMapping : lengthMapping;
+            float scale = mapping.getOrDefault(units, 1f);
             return value * scale;
         }
 
         public String toString() {
             return type + " " + value;
+        }
+
+        @Override
+        public int hashCode() {
+            return Float.hashCode(value)
+                   | Short.hashCode(type)
+                   | Objects.hashCode(units);
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            return obj instanceof LengthUnit lu
+                   && type == lu.type
+                   && value == lu.value
+                   && Objects.equals(units, lu.units);
         }
 
         // 0 - value indicates real value
@@ -3252,7 +3386,7 @@ public class CSS implements Serializable {
         /**
          * Parses the shorthand margin/padding/border string
          * <code>value</code>, placing the result in <code>attr</code>.
-         * <code>names</code> give the 4 instrinsic property names.
+         * <code>names</code> give the 4 intrinsic property names.
          */
         static void parseShorthandMargin(CSS css, String value,
                                          MutableAttributeSet attr,
@@ -3623,7 +3757,7 @@ public class CSS implements Serializable {
 
 
     /*
-     * we need StyleSheet for resolving lenght units. (see
+     * we need StyleSheet for resolving length units. (see
      * isW3CLengthUnits)
      * we can not pass stylesheet for handling relative sizes. (do not
      * think changing public API is necessary)

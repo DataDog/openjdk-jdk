@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
 
 /*
  * @test
- * @library /test/lib
+ * @library /test/lib /javax/net/ssl/templates
  * @summary Test that a New Session Ticket will be generated when a
  * SSLSessionBindingListener is set (boundValues)
  * @run main/othervm ResumptionUpdateBoundValues
@@ -45,9 +45,8 @@ import javax.net.ssl.SSLSocketFactory;
 
 import jdk.test.lib.process.OutputAnalyzer;
 import jdk.test.lib.process.ProcessTools;
-import jdk.test.lib.Utils;
 
-public class ResumptionUpdateBoundValues {
+public class ResumptionUpdateBoundValues extends SSLContextTemplate {
 
     static boolean separateServerThread = true;
 
@@ -67,7 +66,7 @@ public class ResumptionUpdateBoundValues {
     /*
      * Turn on SSL debugging?
      */
-    static boolean debug = false;
+    static boolean debug = Boolean.getBoolean("test.debug");
 
     /*
      * Define the server side of the test.
@@ -76,8 +75,7 @@ public class ResumptionUpdateBoundValues {
      * to avoid infinite hangs.
      */
     void doServerSide() throws Exception {
-        SSLServerSocketFactory sslssf =
-            (SSLServerSocketFactory) SSLServerSocketFactory.getDefault();
+        SSLServerSocketFactory sslssf = createServerSSLContext().getServerSocketFactory();
         SSLServerSocket sslServerSocket =
             (SSLServerSocket) sslssf.createServerSocket(serverPort);
         serverPort = sslServerSocket.getLocalPort();
@@ -122,8 +120,7 @@ public class ResumptionUpdateBoundValues {
             Thread.sleep(50);
         }
 
-        SSLSocketFactory sslsf =
-            (SSLSocketFactory) SSLSocketFactory.getDefault();
+        SSLSocketFactory sslsf = createClientSSLContext().getSocketFactory();
 
         try {
                 SSLSocket sslSocket = (SSLSocket)
@@ -181,16 +178,16 @@ public class ResumptionUpdateBoundValues {
     public static void main(String[] args) throws Exception {
 
         if (args.length == 0) {
-            System.setProperty("test.java.opts",
-                    "-Dtest.src=" + System.getProperty("test.src") +
+            System.setProperty("test.java.opts", System.getProperty("test.java.opts") +
+                    " -Dtest.src=" + System.getProperty("test.src") +
                             " -Dtest.jdk=" + System.getProperty("test.jdk") +
-                            " -Djavax.net.debug=ssl,handshake");
+                            " -Djavax.net.debug=ssl");
 
             System.out.println("test.java.opts: " +
                     System.getProperty("test.java.opts"));
 
-            ProcessBuilder pb = ProcessTools.createTestJvm(
-                    Utils.addTestJavaOpts("ResumptionUpdateBoundValues", "p"));
+            ProcessBuilder pb = ProcessTools.createTestJavaProcessBuilder(
+                    "ResumptionUpdateBoundValues", "p");
 
             OutputAnalyzer output = ProcessTools.executeProcess(pb);
             try {
@@ -209,17 +206,6 @@ public class ResumptionUpdateBoundValues {
             return;
         }
 
-        String keyFilename =
-            System.getProperty("test.src", "./") + "/" + pathToStores +
-                "/" + keyStoreFile;
-        String trustFilename =
-            System.getProperty("test.src", "./") + "/" + pathToStores +
-                "/" + trustStoreFile;
-        System.setProperty("javax.net.ssl.keyStore", keyFilename);
-        System.setProperty("javax.net.ssl.keyStorePassword", passwd);
-        System.setProperty("javax.net.ssl.trustStore", trustFilename);
-        System.setProperty("javax.net.ssl.trustStorePassword", passwd);
-
         if (debug)
             System.setProperty("javax.net.debug", "all");
 
@@ -227,19 +213,14 @@ public class ResumptionUpdateBoundValues {
          * Start the tests.
          */
 
-        new ResumptionUpdateBoundValues();
+        new ResumptionUpdateBoundValues().run();
     }
 
     ArrayBlockingQueue<Thread> threads = new ArrayBlockingQueue<Thread>(100);
 
     ArrayBlockingQueue<SBListener> sbListeners = new ArrayBlockingQueue<>(100);
 
-    /*
-     * Primary constructor, used to drive remainder of the test.
-     *
-     * Fork off the other side, then do your work.
-     */
-    ResumptionUpdateBoundValues() throws Exception {
+    private void run() throws Exception {
         final int count = 1;
         if (separateServerThread) {
             startServer(true);
@@ -255,7 +236,7 @@ public class ResumptionUpdateBoundValues {
         Thread t;
         while ((t = threads.take()) != Thread.currentThread()) {
             System.out.printf("  joining: %s%n", t);
-            t.join(1000L);
+            t.join(4000L);
         }
         serverReady = false;
         System.gc();

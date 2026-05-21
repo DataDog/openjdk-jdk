@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2018, SAP and/or its affiliates.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -22,11 +22,9 @@
  * questions.
  *
  */
-#include "precompiled.hpp"
 #include "memory/metaspace/printMetaspaceInfoKlassClosure.hpp"
 #include "memory/resourceArea.hpp"
 #include "oops/klass.hpp"
-#include "oops/reflectionAccessorImplKlassHelper.hpp"
 #include "utilities/globalDefinitions.hpp"
 #include "utilities/ostream.hpp"
 
@@ -38,21 +36,14 @@ PrintMetaspaceInfoKlassClosure::PrintMetaspaceInfoKlassClosure(outputStream* out
 
 void PrintMetaspaceInfoKlassClosure::do_klass(Klass* k) {
   _cnt++;
-  _out->cr_indent();
-  _out->print(UINTX_FORMAT_W(4) ": ", _cnt);
+  _out->cr();
+  _out->print("%4zu: ", _cnt);
 
-  // Print a 's' for shared classes
-  _out->put(k->is_shared() ? 's': ' ');
+  // Print a 's' for classes in the aot metaspace (used to be called shared classes)
+  _out->put(k->in_aot_cache() ? 's': ' ');
 
   ResourceMark rm;
   _out->print("  %s", k->external_name());
-
-  // Special treatment for generated core reflection accessor classes: print invocation target.
-  if (ReflectionAccessorImplKlassHelper::is_generated_accessor(k)) {
-    _out->print(" (invokes: ");
-    ReflectionAccessorImplKlassHelper::print_invocation_target(_out, k);
-    _out->print(")");
-  }
 }
 
 } // namespace metaspace

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -50,9 +50,7 @@
  * <p> The principal supporting class is {@link RandomGeneratorFactory}. This
  * can be used to generate multiple random number generators for a specific
  * algorithm. {@link RandomGeneratorFactory} also provides methods for
- * selecting random number generator algorithms. RandomGeneratorFactory
- * registers implementations of {@link RandomGenerator} interface using the
- * service provider API.
+ * selecting random number generator algorithms.
  *
  * <p> An important subsidiary interface is
  * {@link RandomGenerator.StreamableGenerator}, which provides methods for
@@ -83,8 +81,8 @@
  * <blockquote>{@code import java.util.random.*;}</blockquote>
  *
  * Then one can choose a specific implementation by giving the name of a generator
- * algorithm to the static method {@link RandomGenerator#of}, in which case the
- * no-arguments constructor for that implementation is used:
+ * algorithm to the static method {@link RandomGenerator#of}, in which case
+ * a {@link RandomGenerator} is constructed without any seed value:
  *
  * <blockquote>{@code RandomGenerator g = RandomGenerator.of("L64X128MixRandom");}</blockquote>
  *
@@ -127,8 +125,8 @@
  *
  * <h2>Choosing a Random Number Generator Algorithm</h2>
  *
- * <p> There are three groups of random number generator algorithm provided
- * in Java: the Legacy group, the LXM group, and the Xoroshiro/Xoshiro group.
+ * <p> Random number generator algorithms are organized in groups,
+ * as described {@linkplain java.util.random##algorithms below}.
  *
  * <p> The legacy group includes random number generators that existed
  * before JDK 17: Random, ThreadLocalRandom, SplittableRandom, and
@@ -223,7 +221,7 @@
  * lifetime of a particular Java SE release. Changing the deprecation status of
  * an algorithm is <em>not</em> a specification change.
  *
- * <table style="padding:0px 20px 0px 0px">
+ * <table class="striped">
  *  <caption>Available Algorithms</caption>
  *  <thead>
  *  <tr>
@@ -236,91 +234,98 @@
  *  </thead>
  *  <tbody>
  *  <tr>
- *      <td style="text-align:left">L128X1024MixRandom</td>
+ *      <th scope="row" style="text-align:left">L128X1024MixRandom</th>
  *      <td style="text-align:left">LXM</td>
  *      <td style="text-align:left">BigInteger.ONE.shiftLeft(1024).subtract(BigInteger.ONE).shiftLeft(128)</td>
  *      <td style="text-align:right">1152</td>
  *      <td style="text-align:right">1</td>
  *  </tr>
  *  <tr>
- *      <td style="text-align:left">L128X128MixRandom</td>
+ *      <th scope="row" style="text-align:left">L128X128MixRandom</th>
  *      <td style="text-align:left">LXM</td>
  *      <td style="text-align:left">BigInteger.ONE.shiftLeft(128).subtract(BigInteger.ONE).shiftLeft(128)</td>
  *      <td style="text-align:right">256</td>
  *      <td style="text-align:right">1</td>
  *  </tr>
  *  <tr>
- *      <td style="text-align:left">L128X256MixRandom</td>
+ *      <th scope="row" style="text-align:left">L128X256MixRandom</th>
  *      <td style="text-align:left">LXM</td>
  *      <td style="text-align:left">BigInteger.ONE.shiftLeft(256).subtract(BigInteger.ONE).shiftLeft(128)</td>
  *      <td style="text-align:right">384</td>
  *      <td style="text-align:right">1</td>
  *  </tr>
  *  <tr>
- *      <td style="text-align:left">L32X64MixRandom</td>
+ *      <th scope="row" style="text-align:left">L32X64MixRandom</th>
  *      <td style="text-align:left">LXM</td>
  *      <td style="text-align:left">BigInteger.ONE.shiftLeft(64).subtract(BigInteger.ONE).shiftLeft(32)</td>
  *      <td style="text-align:right">96</td>
  *      <td style="text-align:right">1</td>
  *  </tr>
  *  <tr>
- *      <td style="text-align:left">L64X1024MixRandom</td>
+ *      <th scope="row" style="text-align:left">L64X1024MixRandom</th>
  *      <td style="text-align:left">LXM</td>
  *      <td style="text-align:left">BigInteger.ONE.shiftLeft(1024).subtract(BigInteger.ONE).shiftLeft(64)</td>
  *      <td style="text-align:right">1088</td>
  *      <td style="text-align:right">16</td>
  *  </tr>
  *  <tr>
- *      <td style="text-align:left">L64X128MixRandom</td>
+ *      <th scope="row" style="text-align:left">L64X128MixRandom</th>
  *      <td style="text-align:left">LXM</td>
  *      <td style="text-align:left">BigInteger.ONE.shiftLeft(128).subtract(BigInteger.ONE).shiftLeft(64)</td>
  *      <td style="text-align:right">192</td>
  *      <td style="text-align:right">2</td>
  *  </tr>
  *  <tr>
- *      <td style="text-align:left">L64X128StarStarRandom</td>
+ *      <th scope="row" style="text-align:left">L64X128StarStarRandom</th>
  *      <td style="text-align:left">LXM</td>
  *      <td style="text-align:left">BigInteger.ONE.shiftLeft(128).subtract(BigInteger.ONE).shiftLeft(64)</td>
  *      <td style="text-align:right">192</td>
  *      <td style="text-align:right">2</td>
  *  </tr>
  *  <tr>
- *      <td style="text-align:left">L64X256MixRandom</td>
+ *      <th scope="row" style="text-align:left">L64X256MixRandom</th>
  *      <td style="text-align:left">LXM</td>
  *      <td style="text-align:left">BigInteger.ONE.shiftLeft(256).subtract(BigInteger.ONE).shiftLeft(64)</td>
  *      <td style="text-align:right">320</td>
  *      <td style="text-align:right">4</td>
  *  </tr>
  *  <tr>
- *      <td style="text-align:left">Random</td>
+ *      <th scope="row" style="text-align:left">Random</th>
  *      <td style="text-align:left">Legacy</td>
  *      <td style="text-align:left">BigInteger.ONE.shiftLeft(48)</td>
  *      <td style="text-align:right">48</td>
  *      <td style="text-align:right">0</td>
  *  </tr>
  *  <tr>
- *      <td style="text-align:left">SplittableRandom</td>
+ *      <th scope="row" style="text-align:left">SplittableRandom</th>
  *      <td style="text-align:left">Legacy</td>
  *      <td style="text-align:left">BigInteger.ONE.shiftLeft(64)</td>
  *      <td style="text-align:right">64</td>
  *      <td style="text-align:right">1</td>
  *  </tr>
  *  <tr>
- *      <td style="text-align:left">ThreadLocalRandom <sup>*</sup></td>
+ *      <th scope="row" style="text-align:left">SecureRandom</th>
+ *      <td style="text-align:left">Legacy</td>
+ *      <td style="text-align:left">BigInteger.ZERO</td>
+ *      <td style="text-align:right">Integer.MAX_VALUE</td>
+ *      <td style="text-align:right">Integer.MAX_VALUE</td>
+ *  </tr>
+ *  <tr>
+ *      <th scope="row" style="text-align:left">ThreadLocalRandom <sup>*</sup></th>
  *      <td style="text-align:left">Legacy</td>
  *      <td style="text-align:left">BigInteger.ONE.shiftLeft(64)</td>
  *      <td style="text-align:right">64</td>
  *      <td style="text-align:right">1</td>
  *  </tr>
  *  <tr>
- *      <td style="text-align:left">Xoroshiro128PlusPlus</td>
+ *      <th scope="row" style="text-align:left">Xoroshiro128PlusPlus</th>
  *      <td style="text-align:left">Xoroshiro</td>
  *      <td style="text-align:left">BigInteger.ONE.shiftLeft(128).subtract(BigInteger.ONE)</td>
  *      <td style="text-align:right">128</td>
  *      <td style="text-align:right">1</td>
  *  </tr>
  *  <tr>
- *      <td style="text-align:left">Xoshiro256PlusPlus</td>
+ *      <th scope="row" style="text-align:left">Xoshiro256PlusPlus</th>
  *      <td style="text-align:left">Xoshiro</td>
  *      <td style="text-align:left">BigInteger.ONE.shiftLeft(256).subtract(BigInteger.ONE)</td>
  *      <td style="text-align:right">256</td>
@@ -347,18 +352,18 @@
  * supported by the interface {@link RandomGenerator.JumpableGenerator}.
  * Sometimes it is desirable to support two levels of jumping (by long distances
  * and by <i>really</i> long distances); this strategy is supported by the
- * interface {@link RandomGenerator.LeapableGenerator}. There is also an interface
+ * interface {@link RandomGenerator.LeapableGenerator}. In this package,
+ * implementations of this interface include "Xoroshiro128PlusPlus" and
+ * "Xoshiro256PlusPlus". There is also an interface
  * {@link RandomGenerator.ArbitrarilyJumpableGenerator} for algorithms that allow
- * jumping along the state cycle by any user-specified distance. In this package,
- * implementations of these interfaces include
- * "Xoroshiro128PlusPlus", and
- * "Xoshiro256PlusPlus".
+ * jumping along the state cycle by any user-specified distance; there are currently
+ * no implementations of this interface in this package.
  *
  * <p> A more recent category of "splittable" pseudorandom generator algorithms
  * uses a large family of state cycles and makes some attempt to ensure that
  * distinct instances use different state cycles; but even if two instances
  * "accidentally" use the same state cycle, they are highly likely to traverse
- * different regions parts of that shared state cycle. This strategy is
+ * different regions of that shared state cycle. This strategy is
  * supported by the interface {@link RandomGenerator.SplittableGenerator}.
  * In this package, implementations of this interface include
  * "L32X64MixRandom",
@@ -382,13 +387,18 @@
  * equidistribution, scalability, and better quality.  Each of the
  * specific implementations here combines one of the best currently known
  * XBG algorithms (xoroshiro128 or xoshiro256, described by Blackman and
- * Vigna in "Scrambled Linear Pseudorandom Number Generators", ACM Transactions
- * on Mathematical Software, 2021) with an LCG that uses one of the best
+ * Vigna in "Scrambled Linear Pseudorandom Number Generators", <i>ACM Transactions
+ * on Mathematical Software</i>, 2021) with an LCG that uses one of the best
  * currently known multipliers (found by a search for better multipliers
- * in 2019 by Steele and Vigna), and then applies either a mixing function
- * identified by Doug Lea or a simple scrambler proposed by Blackman and Vigna.
- * Testing has confirmed that the LXM algorithm is far superior in quality to
- * the SplitMix algorithm (2014) used by {@code SplittableRandom}.
+ * in 2019 by Steele and Vigna, described in "Computationally Easy, Spectrally
+ * Good Multipliers for Congruential Pseudorandom Number Generators",
+ * <i>Software: Practice and Experience</i> (2021), doi:10.1002/spe.3030),
+ * and then applies either a mixing function identified by Doug Lea or
+ * or a simple scrambler proposed by Blackman and Vigna. Testing has
+ * confirmed that the LXM algorithm is far superior in quality to the
+ * SplitMix algorithm (2014) used by {@code SplittableRandom}
+ * (see Steele and Vigna, "LXM: Better Splittable Pseudorandom Number
+ * Generators (and Almost as Fast)", <i>Proc. 2021 ACM OOPSLA Conference</i>).
  *
  * Each class with a name of the form
  * {@code L}<i>p</i>{@code X}<i>q</i>{@code SomethingRandom}
@@ -466,7 +476,7 @@
  * 1-bit), and equidistribution property for each of the specific LXM algorithms
  * used in this package.
  *
- * <table style="padding:0px 20px 0px 0px">
+ * <table class="striped">
  * <caption>Algorithm Properties</caption>
  * <thead>
  *   <tr><th style="text-align:left">Implementation</th>
@@ -476,42 +486,42 @@
  *       <th style="text-align:left">{@link RandomGenerator#nextLong nextLong()} values are</th></tr>
  * </thead>
  * <tbody>
- *   <tr><td style="text-align:left">"L32X64MixRandom"</td>
+ *   <tr><th scope="row" style="text-align:left">"L32X64MixRandom"</th>
  *       <td style="text-align:right">2<sup>32</sup>(2<sup>64</sup>&minus;1)</td>
  *       <td style="text-align:right">96 bits</td>
  *       <td style="text-align:right">32 bits</td>
  *       <td style="text-align:left"></td></tr>
- *   <tr><td style="text-align:left">"L64X128StarStarRandom"</td>
+ *   <tr><th scope="row" style="text-align:left">"L64X128StarStarRandom"</th>
  *       <td style="text-align:right">2<sup>64</sup>(2<sup>128</sup>&minus;1)</td>
  *       <td style="text-align:right">192 bits</td>
  *       <td style="text-align:right">64 bits</td>
  *       <td style="text-align:left">2-equidistributed and exactly equidistributed</td></tr>
- *   <tr><td style="text-align:left">"L64X128MixRandom"</td>
+ *   <tr><th scope="row" style="text-align:left">"L64X128MixRandom"</th>
  *       <td style="text-align:right">2<sup>64</sup>(2<sup>128</sup>&minus;1)</td>
  *       <td style="text-align:right">192 bits</td>
  *       <td style="text-align:right">64 bits</td>
  *       <td style="text-align:left">2-equidistributed and exactly equidistributed</td></tr>
- *   <tr><td style="text-align:left">"L64X256MixRandom"</td>
+ *   <tr><th scope="row" style="text-align:left">"L64X256MixRandom"</th>
  *       <td style="text-align:right">2<sup>64</sup>(2<sup>256</sup>&minus;1)</td>
  *       <td style="text-align:right">320 bits</td>
  *       <td style="text-align:right">64 bits</td>
  *       <td style="text-align:left">4-equidistributed and exactly equidistributed</td></tr>
- *   <tr><td style="text-align:left">"L64X1024MixRandom"</td>
+ *   <tr><th scope="row" style="text-align:left">"L64X1024MixRandom"</th>
  *       <td style="text-align:right">2<sup>64</sup>(2<sup>1024</sup>&minus;1)</td>
  *       <td style="text-align:right">1088 bits</td>
  *       <td style="text-align:right">64 bits</td>
  *       <td style="text-align:left">16-equidistributed and exactly equidistributed</td></tr>
- *   <tr><td style="text-align:left">"L128X128MixRandom"</td>
+ *   <tr><th scope="row" style="text-align:left">"L128X128MixRandom"</th>
  *       <td style="text-align:right">2<sup>128</sup>(2<sup>128</sup>&minus;1)</td>
  *       <td style="text-align:right">256 bits</td>
  *       <td style="text-align:right">128 bits</td>
  *       <td style="text-align:left">exactly equidistributed</td></tr>
- *   <tr><td style="text-align:left">"L128X256MixRandom"</td>
+ *   <tr><th scope="row" style="text-align:left">"L128X256MixRandom"</th>
  *       <td style="text-align:right">2<sup>128</sup>(2<sup>256</sup>&minus;1)</td>
  *       <td style="text-align:right">384 bits</td>
  *       <td style="text-align:right">128 bits</td>
  *       <td style="text-align:left">exactly equidistributed</td></tr>
- *   <tr><td style="text-align:left">"L128X1024MixRandom"</td>
+ *   <tr><th scope="row" style="text-align:left">"L128X1024MixRandom"</th>
  *       <td style="text-align:right">2<sup>128</sup>(2<sup>1024</sup>&minus;1)</td>
  *       <td style="text-align:right">1152 bits</td>
  *       <td style="text-align:right">128 bits</td>
@@ -575,7 +585,7 @@
  * missing 1-bit is handled through special coding of the multiply-add algorithm
  * used in the LCG.)
  *
- * <table style="padding:0px 20px 0px 0px">
+ * <table class="striped">
  * <caption>LXM Multipliers</caption>
  * <thead>
  *   <tr><th style="text-align:left">Implementation</th>
@@ -585,42 +595,42 @@
  *       <th style="text-align:left">Mixing function</th></tr>
  * </thead>
  * <tbody>
- *   <tr><td style="text-align:left">"L32X64MixRandom"</td>
+ *   <tr><th scope="row" style="text-align:left">"L32X64MixRandom"</th>
  *       <td style="text-align:right">{@code 0xadb4a92d}</td>
  *       <td style="text-align:left">{@code xoroshiro64}, version 1.0</td>
  *       <td style="text-align:left">{@code (26, 9, 13)}</td>
  *       <td style="text-align:left">mixLea32{@code (s+x0)}</td></tr>
- *   <tr><td style="text-align:left">"L64X128StarStarRandom" </td>
+ *   <tr><th scope="row" style="text-align:left">"L64X128StarStarRandom" </th>
  *       <td style="text-align:right">{@code 0xd1342543de82ef95L}</td>
  *       <td style="text-align:left">{@code xoroshiro128}, version 1.0</td>
  *       <td style="text-align:left">{@code (24, 16, 37)}</td>
  *       <td style="text-align:left">{@code Long.rotateLeft((s+x0)* 5, 7) * 9}</td></tr>
- *   <tr><td style="text-align:left">"L64X128MixRandom"</td>
+ *   <tr><th scope="row" style="text-align:left">"L64X128MixRandom"</th>
  *       <td style="text-align:right">{@code 0xd1342543de82ef95L}</td>
  *       <td style="text-align:left">{@code xoroshiro128}, version 1.0</td>
  *       <td style="text-align:left">{@code (24, 16, 37)}</td>
  *       <td style="text-align:left">mixLea64{@code (s+x0)}</td></tr>
- *   <tr><td style="text-align:left">"L64X256MixRandom"</td>
+ *   <tr><th scope="row" style="text-align:left">"L64X256MixRandom"</th>
  *       <td style="text-align:right">{@code 0xd1342543de82ef95L}</td>
  *       <td style="text-align:left">{@code xoshiro256}, version 1.0</td>
  *       <td style="text-align:left">{@code (17, 45)}</td>
  *       <td style="text-align:left">mixLea64{@code (s+x0)}</td></tr>
- *   <tr><td style="text-align:left">"L64X1024MixRandom"</td>
+ *   <tr><th scope="row" style="text-align:left">"L64X1024MixRandom"</th>
  *       <td style="text-align:right">{@code 0xd1342543de82ef95L}</td>
  *       <td style="text-align:left">{@code xoroshiro1024}, version 1.0</td>
  *       <td style="text-align:left">{@code (25, 27, 36)}</td>
  *       <td style="text-align:left">mixLea64{@code (s+x0)}</td></tr>
- *   <tr><td style="text-align:left">"L128X128MixRandom"</td>
+ *   <tr><th scope="row" style="text-align:left">"L128X128MixRandom"</th>
  *       <td style="text-align:right">{@code 0x1d605bbb58c8abbfdL}</td>
  *       <td style="text-align:left">{@code xoroshiro128}, version 1.0</td>
  *       <td style="text-align:left">{@code (24, 16, 37)}</td>
  *       <td style="text-align:left">mixLea64{@code (sh+x0)}</td></tr>
- *   <tr><td style="text-align:left">"L128X256MixRandom"</td>
+ *   <tr><th scope="row" style="text-align:left">"L128X256MixRandom"</th>
  *       <td style="text-align:right">{@code 0x1d605bbb58c8abbfdL}</td>
  *       <td style="text-align:left">{@code xoshiro256}, version 1.0</td>
  *       <td style="text-align:left">{@code (17, 45)}</td>
  *       <td style="text-align:left">mixLea64{@code (sh+x0)}</td></tr>
- *   <tr><td style="text-align:left">"L128X1024MixRandom"</td>
+ *   <tr><th scope="row" style="text-align:left">"L128X1024MixRandom"</th>
  *       <td style="text-align:right">{@code 0x1d605bbb58c8abbfdL}</td>
  *       <td style="text-align:left">{@code xoroshiro1024}, version 1.0</td>
  *       <td style="text-align:left">{@code (25, 27, 36)}</td>
@@ -631,4 +641,3 @@
  * @since   17
  */
 package java.util.random;
-

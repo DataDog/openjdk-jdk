@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,25 +22,23 @@
  *
  */
 
-#include "precompiled.hpp"
 
 #include "gc/g1/g1ParallelCleaning.hpp"
-#include "runtime/atomic.hpp"
 #if INCLUDE_JVMCI
 #include "jvmci/jvmci.hpp"
 #endif
 
 #if INCLUDE_JVMCI
 JVMCICleaningTask::JVMCICleaningTask() :
-  _cleaning_claimed(0) {
+  _cleaning_claimed(false) {
 }
 
 bool JVMCICleaningTask::claim_cleaning_task() {
-  if (_cleaning_claimed) {
+  if (_cleaning_claimed.load_relaxed()) {
     return false;
   }
 
-  return Atomic::cmpxchg(&_cleaning_claimed, 0, 1) == 0;
+  return _cleaning_claimed.compare_set(false, true);
 }
 
 void JVMCICleaningTask::work(bool unloading_occurred) {
@@ -51,12 +49,10 @@ void JVMCICleaningTask::work(bool unloading_occurred) {
 }
 #endif // INCLUDE_JVMCI
 
-G1ParallelCleaningTask::G1ParallelCleaningTask(BoolObjectClosure* is_alive,
-                                               uint num_workers,
-                                               bool unloading_occurred) :
-  AbstractGangTask("G1 Parallel Cleaning"),
+G1ParallelCleaningTask::G1ParallelCleaningTask(bool unloading_occurred) :
+  WorkerTask("G1 Parallel Cleaning"),
   _unloading_occurred(unloading_occurred),
-  _code_cache_task(num_workers, is_alive, unloading_occurred),
+  _code_cache_task(unloading_occurred),
   JVMCI_ONLY(_jvmci_cleaning_task() COMMA)
   _klass_cleaning_task() {
 }

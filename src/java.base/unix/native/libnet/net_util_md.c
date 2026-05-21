@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,7 +28,6 @@
 #include <netinet/tcp.h> // defines TCP_NODELAY
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <sys/time.h>
 
 #if defined(__linux__)
@@ -51,16 +50,13 @@
 #define IPV6_FLOWINFO_SEND      33
 #endif
 
-#define RESTARTABLE(_cmd, _result) do { \
-    do { \
-        _result = _cmd; \
-    } while((_result == -1) && (errno == EINTR)); \
-} while(0)
-
-int NET_SocketAvailable(int s, int *pbytes) {
-    int result;
-    RESTARTABLE(ioctl(s, FIONREAD, pbytes), result);
-    return result;
+/* Perform platform specific initialization.
+ * Returns 0 on success, non-0 on failure */
+int
+NET_PlatformInit()
+{
+    // Not needed on unix
+    return 0;
 }
 
 void
@@ -70,38 +66,22 @@ NET_ThrowByNameWithLastError(JNIEnv *env, const char *name,
 }
 
 void
-NET_ThrowCurrent(JNIEnv *env, char *msg) {
-    NET_ThrowNew(env, errno, msg);
-}
-
-void
 NET_ThrowNew(JNIEnv *env, int errorNumber, char *msg) {
     char fullMsg[512];
-    if (!msg) {
-        msg = "no further information";
-    }
     switch(errorNumber) {
     case EBADF:
-        jio_snprintf(fullMsg, sizeof(fullMsg), "socket closed: %s", msg);
-        JNU_ThrowByName(env, JNU_JAVANETPKG "SocketException", fullMsg);
-        break;
-    case EINTR:
-        JNU_ThrowByName(env, JNU_JAVAIOPKG "InterruptedIOException", msg);
+        if (msg == NULL) {
+            JNU_ThrowByName(env, JNU_JAVANETPKG "SocketException", "socket closed");
+        } else {
+            jio_snprintf(fullMsg, sizeof(fullMsg), "socket closed: %s", msg);
+            JNU_ThrowByName(env, JNU_JAVANETPKG "SocketException", fullMsg);
+        }
         break;
     default:
         errno = errorNumber;
         JNU_ThrowByNameWithLastError(env, JNU_JAVANETPKG "SocketException", msg);
         break;
     }
-}
-
-
-jfieldID
-NET_GetFileDescriptorID(JNIEnv *env)
-{
-    jclass cls = (*env)->FindClass(env, "java/io/FileDescriptor");
-    CHECK_NULL_RETURN(cls, NULL);
-    return (*env)->GetFieldID(env, cls, "fd", "I");
 }
 
 jint  IPv4_supported()
@@ -132,23 +112,12 @@ jint  IPv6_supported()
     fd = socket(AF_INET6, SOCK_STREAM, 0) ;
     if (fd < 0) {
         /*
-         *  TODO: We really cant tell since it may be an unrelated error
+         *  TODO: We really can't tell since it may be an unrelated error
          *  for now we will assume that AF_INET6 is not available
          */
         return JNI_FALSE;
     }
-
-    /*
-     * If fd 0 is a socket it means we may have been launched from inetd or
-     * xinetd. If it's a socket then check the family - if it's an
-     * IPv4 socket then we need to disable IPv6.
-     */
-    if (getsockname(0, &sa.sa, &sa_len) == 0) {
-        if (sa.sa.sa_family == AF_INET) {
-            close(fd);
-            return JNI_FALSE;
-        }
-    }
+    close(fd);
 
     /**
      * Linux - check if any interface has an IPv6 address.
@@ -161,13 +130,11 @@ jint  IPv6_supported()
         char *bufP;
 
         if (fP == NULL) {
-            close(fd);
             return JNI_FALSE;
         }
         bufP = fgets(buf, sizeof(buf), fP);
         fclose(fP);
         if (bufP == NULL) {
-            close(fd);
             return JNI_FALSE;
         }
     }
@@ -178,7 +145,6 @@ jint  IPv6_supported()
      *  we should also check if the APIs are available.
      */
     ipv6_fn = JVM_FindLibraryEntry(RTLD_DEFAULT, "inet_pton");
-    close(fd);
     if (ipv6_fn == NULL ) {
         return JNI_FALSE;
     } else {
@@ -187,12 +153,16 @@ jint  IPv6_supported()
 }
 #endif /* DONT_ENABLE_IPV6 */
 
-jint reuseport_supported()
+jint reuseport_supported(int ipv6_available)
 {
     /* Do a simple dummy call, and try to figure out from that */
     int one = 1;
     int rv, s;
-    s = socket(PF_INET, SOCK_STREAM, 0);
+    if (ipv6_available) {
+        s = socket(PF_INET6, SOCK_STREAM, 0);
+    } else {
+        s = socket(PF_INET, SOCK_STREAM, 0);
+    }
     if (s < 0) {
         return JNI_FALSE;
     }
@@ -208,46 +178,72 @@ jint reuseport_supported()
 
 void NET_ThrowUnknownHostExceptionWithGaiError(JNIEnv *env,
                                                const char* hostname,
-                                               int gai_error)
+                                               int gai_error,
+                                               int sys_errno)
 {
     int size;
     char *buf;
-    const char *format = "%s: %s";
+    const char *sys_errno_string = NULL;
     const char *error_string = gai_strerror(gai_error);
-    if (error_string == NULL)
+    if (error_string == NULL) {
         error_string = "unknown error";
+    }
+    if (gai_error == EAI_SYSTEM) {
+        // EAI_SYSTEM implies that the actual error is stored in the system errno.
+        // Here we get the string representation of that errno.
+        sys_errno_string = strerror(sys_errno);
+    }
+    int enhancedExceptions = getEnhancedExceptionsAllowed(env);
+    if (enhancedExceptions == ENH_INIT_ERROR && (*env)->ExceptionCheck(env)) {
+        return;
+    }
 
-    size = strlen(format) + strlen(hostname) + strlen(error_string) + 2;
+    if (enhancedExceptions == ENH_ENABLED) {
+        size = strlen(hostname);
+    } else {
+        size = 0;
+    }
+    if (sys_errno_string == NULL) {
+        // the 3 is for the additional 3 characters - colon, space and
+        // the NULL termination character, that we will include in the
+        // message of the Exception that we construct
+        size += strlen(error_string) + 3;
+    } else {
+        // the 5 is for the additional 5 characters - 2 colons, 2 spaces and
+        // the NULL termination character, that we will include in the
+        // message of the Exception that we construct
+        size += strlen(error_string) + strlen(sys_errno_string) + 5;
+    }
     buf = (char *) malloc(size);
     if (buf) {
         jstring s;
-        sprintf(buf, format, hostname, error_string);
-        s = JNU_NewStringPlatform(env, buf);
-        if (s != NULL) {
-            jobject x = JNU_NewObjectByName(env,
+        int n;
+        if (enhancedExceptions == ENH_ENABLED) {
+            if (sys_errno_string == NULL) {
+                n = snprintf(buf, size, "%s: %s", hostname, error_string);
+            } else {
+                n = snprintf(buf, size, "%s: %s: %s", hostname, error_string, sys_errno_string);
+            }
+        } else {
+            if (sys_errno_string == NULL) {
+                n = snprintf(buf, size, " %s", error_string);
+            } else {
+                n = snprintf(buf, size, " %s: %s", error_string, sys_errno_string);
+            }
+        }
+        if (n >= 0) {
+            s = JNU_NewStringPlatform(env, buf);
+            if (s != NULL) {
+                jobject x = JNU_NewObjectByName(env,
                                             "java/net/UnknownHostException",
                                             "(Ljava/lang/String;)V", s);
-            if (x != NULL)
-                (*env)->Throw(env, x);
+                if (x != NULL)
+                    (*env)->Throw(env, x);
+            }
         }
         free(buf);
     }
 }
-
-#if defined(_AIX)
-
-/* Initialize stubs for blocking I/O workarounds (see src/solaris/native/java/net/linux_close.c) */
-extern void aix_close_init();
-
-void platformInit () {
-    aix_close_init();
-}
-
-#else
-
-void platformInit () {}
-
-#endif
 
 JNIEXPORT jint JNICALL
 NET_EnableFastTcpLoopback(int fd) {
@@ -309,7 +305,7 @@ NET_InetAddressToSockaddr(JNIEnv *env, jobject iaObj, int port,
     } else {
         jint address;
         if (family != java_net_InetAddress_IPv4) {
-            JNU_ThrowByName(env, JNU_JAVANETPKG "SocketException", "Protocol family unavailable");
+            JNU_ThrowByName(env, JNU_JAVANETPKG "SocketException", "IPv6 protocol family unavailable");
             return -1;
         }
         address = getInetAddress_addr(env, iaObj);
@@ -322,13 +318,6 @@ NET_InetAddressToSockaddr(JNIEnv *env, jobject iaObj, int port,
         }
     }
     return 0;
-}
-
-void
-NET_SetTrafficClass(SOCKETADDRESS *sa, int trafficClass) {
-    if (sa->sa.sa_family == AF_INET6) {
-        sa->sa6.sin6_flowinfo = htonl((trafficClass & 0xff) << 20);
-    }
 }
 
 int
@@ -371,72 +360,6 @@ int NET_IsZeroAddr(jbyte* caddr) {
         }
     }
     return 1;
-}
-
-/*
- * Map the Java level socket option to the platform specific
- * level and option name.
- */
-int
-NET_MapSocketOption(jint cmd, int *level, int *optname) {
-    static struct {
-        jint cmd;
-        int level;
-        int optname;
-    } const opts[] = {
-        { java_net_SocketOptions_TCP_NODELAY,           IPPROTO_TCP,    TCP_NODELAY },
-        { java_net_SocketOptions_SO_OOBINLINE,          SOL_SOCKET,     SO_OOBINLINE },
-        { java_net_SocketOptions_SO_LINGER,             SOL_SOCKET,     SO_LINGER },
-        { java_net_SocketOptions_SO_SNDBUF,             SOL_SOCKET,     SO_SNDBUF },
-        { java_net_SocketOptions_SO_RCVBUF,             SOL_SOCKET,     SO_RCVBUF },
-        { java_net_SocketOptions_SO_KEEPALIVE,          SOL_SOCKET,     SO_KEEPALIVE },
-        { java_net_SocketOptions_SO_REUSEADDR,          SOL_SOCKET,     SO_REUSEADDR },
-        { java_net_SocketOptions_SO_REUSEPORT,          SOL_SOCKET,     SO_REUSEPORT },
-        { java_net_SocketOptions_SO_BROADCAST,          SOL_SOCKET,     SO_BROADCAST },
-        { java_net_SocketOptions_IP_TOS,                IPPROTO_IP,     IP_TOS },
-        { java_net_SocketOptions_IP_MULTICAST_IF,       IPPROTO_IP,     IP_MULTICAST_IF },
-        { java_net_SocketOptions_IP_MULTICAST_IF2,      IPPROTO_IP,     IP_MULTICAST_IF },
-        { java_net_SocketOptions_IP_MULTICAST_LOOP,     IPPROTO_IP,     IP_MULTICAST_LOOP },
-    };
-
-    int i;
-
-    if (ipv6_available()) {
-        switch (cmd) {
-            // Different multicast options if IPv6 is enabled
-            case java_net_SocketOptions_IP_MULTICAST_IF:
-            case java_net_SocketOptions_IP_MULTICAST_IF2:
-                *level = IPPROTO_IPV6;
-                *optname = IPV6_MULTICAST_IF;
-                return 0;
-
-            case java_net_SocketOptions_IP_MULTICAST_LOOP:
-                *level = IPPROTO_IPV6;
-                *optname = IPV6_MULTICAST_LOOP;
-                return 0;
-#if defined(MACOSX)
-            // Map IP_TOS request to IPV6_TCLASS
-            case java_net_SocketOptions_IP_TOS:
-                *level = IPPROTO_IPV6;
-                *optname = IPV6_TCLASS;
-                return 0;
-#endif
-        }
-    }
-
-    /*
-     * Map the Java level option to the native level
-     */
-    for (i=0; i<(int)(sizeof(opts) / sizeof(opts[0])); i++) {
-        if (cmd == opts[i].cmd) {
-            *level = opts[i].level;
-            *optname = opts[i].optname;
-            return 0;
-        }
-    }
-
-    /* not found */
-    return -1;
 }
 
 /*
@@ -661,7 +584,9 @@ NET_SetSockOpt(int fd, int level, int  opt, const void *arg,
         }
 
         if (sotype == SOCK_DGRAM) {
-            setsockopt(fd, level, SO_REUSEPORT, arg, len);
+            if (setsockopt(fd, level, SO_REUSEPORT, arg, len) < 0) {
+                return -1;
+            }
         }
     }
 #endif
@@ -680,7 +605,6 @@ int
 NET_Bind(int fd, SOCKETADDRESS *sa, int len)
 {
     int rv;
-    int arg, alen;
 
 #ifdef __linux__
     /*
@@ -726,25 +650,25 @@ NET_Wait(JNIEnv *env, jint fd, jint flags, jint timeout)
         pfd.fd = fd;
         pfd.events = 0;
         if (flags & NET_WAIT_READ)
-          pfd.events |= POLLIN;
+            pfd.events |= POLLIN;
         if (flags & NET_WAIT_WRITE)
-          pfd.events |= POLLOUT;
+            pfd.events |= POLLOUT;
         if (flags & NET_WAIT_CONNECT)
-          pfd.events |= POLLOUT;
+            pfd.events |= POLLOUT;
 
         errno = 0;
-        read_rv = NET_Poll(&pfd, 1, nanoTimeout / NET_NSEC_PER_MSEC);
+        read_rv = poll(&pfd, 1, nanoTimeout / NET_NSEC_PER_MSEC);
 
         newNanoTime = JVM_NanoTime(env, 0);
         nanoTimeout -= (newNanoTime - prevNanoTime);
         if (nanoTimeout < NET_NSEC_PER_MSEC) {
-          return read_rv > 0 ? 0 : -1;
+            return read_rv > 0 ? 0 : -1;
         }
         prevNanoTime = newNanoTime;
 
         if (read_rv > 0) {
-          break;
+            break;
         }
-      } /* while */
+    } /* while */
     return (nanoTimeout / NET_NSEC_PER_MSEC);
 }

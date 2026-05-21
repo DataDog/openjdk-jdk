@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,16 +23,12 @@
 
 /*
  * @test
- * @library /test/lib server
- * @build jdk.test.lib.net.SimpleSSLContext
- * @modules java.base/sun.net.www.http
- *          java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- * @run testng/othervm
+ * @library /test/lib /test/jdk/java/net/httpclient/lib
+ * @build jdk.test.lib.net.SimpleSSLContext jdk.httpclient.test.lib.http2.Http2TestServer
+ * @run junit/othervm
  *       -Djdk.internal.httpclient.debug=true
  *       -Djdk.httpclient.HttpClient.log=errors,requests,responses
- *       ServerPushWithDiffTypes
+ *       ${test.main.class}
  */
 
 import java.io.*;
@@ -47,10 +43,14 @@ import java.net.http.HttpResponse.BodySubscribers;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.BiPredicate;
+import jdk.httpclient.test.lib.http2.Http2TestServer;
+import jdk.httpclient.test.lib.http2.Http2TestExchange;
+import jdk.httpclient.test.lib.http2.Http2Handler;
 
-import org.testng.annotations.Test;
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.testng.Assert.assertEquals;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class ServerPushWithDiffTypes {
 
@@ -67,7 +67,7 @@ public class ServerPushWithDiffTypes {
     );
 
     @Test
-    public static void test() throws Exception {
+    public void test() throws Exception {
         Http2TestServer server = null;
         try {
             server = new Http2TestServer(false, 0);
@@ -94,7 +94,7 @@ public class ServerPushWithDiffTypes {
             results.put(request, cf);
             cf.join();
 
-            assertEquals(results.size(), PUSH_PROMISES.size() + 1);
+            assertEquals(PUSH_PROMISES.size() + 1, results.size());
 
             for (HttpRequest r : results.keySet()) {
                 URI u = r.uri();
@@ -117,7 +117,7 @@ public class ServerPushWithDiffTypes {
                 String expected = PUSH_PROMISES.get(r.uri().getPath());
                 if (expected == null)
                     expected = "the main response body";
-                assertEquals(result, expected);
+                assertEquals(expected, result);
             }
         } finally {
             server.stop();

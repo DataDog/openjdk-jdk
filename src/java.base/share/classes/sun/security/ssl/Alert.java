@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,9 +34,9 @@ import javax.net.ssl.SSLHandshakeException;
 import javax.net.ssl.SSLProtocolException;
 
 /**
- * SSL/(D)TLS Alter description
+ * SSL/(D)TLS Alert description
  */
-enum Alert {
+public enum Alert {
     // Please refer to TLS Alert Registry for the latest (D)TLS Alert values:
     //     https://www.iana.org/assignments/tls-parameters/
     CLOSE_NOTIFY            ((byte)0,   "close_notify", false),
@@ -81,13 +81,13 @@ enum Alert {
     // description of the Alert
     final String description;
 
-    // Does tha alert happen during handshake only?
+    // Does the alert happen during handshake only?
     final boolean handshakeOnly;
 
     // Alert message consumer
     static final SSLConsumer alertConsumer = new AlertConsumer();
 
-    private Alert(byte id, String description, boolean handshakeOnly) {
+    Alert(byte id, String description, boolean handshakeOnly) {
         this.id = id;
         this.description = description;
         this.handshakeOnly = handshakeOnly;
@@ -103,7 +103,7 @@ enum Alert {
         return null;
     }
 
-    static String nameOf(byte id) {
+    public static String nameOf(byte id) {
         for (Alert al : Alert.values()) {
             if (al.id == id) {
                 return al.description;
@@ -122,22 +122,15 @@ enum Alert {
             reason = (cause != null) ? cause.getMessage() : "";
         }
 
-        SSLException ssle;
         if (cause instanceof IOException) {
-            ssle = new SSLException(reason);
+            return new SSLException("(" + description + ") " + reason, cause);
         } else if ((this == UNEXPECTED_MESSAGE)) {
-            ssle = new SSLProtocolException(reason);
+            return new SSLProtocolException("(" + description + ") " + reason, cause);
         } else if (handshakeOnly) {
-            ssle = new SSLHandshakeException(reason);
+            return new SSLHandshakeException("(" + description + ") " + reason, cause);
         } else {
-            ssle = new SSLException(reason);
+            return new SSLException("(" + description + ") " + reason, cause);
         }
-
-        if (cause != null) {
-            ssle.initCause(cause);
-        }
-
-        return ssle;
     }
 
     /**
@@ -153,7 +146,7 @@ enum Alert {
         // description of the Alert level
         final String description;
 
-        private Level(byte level, String description) {
+        Level(byte level, String description) {
             this.level = level;
             this.description = description;
         }
@@ -188,6 +181,16 @@ enum Alert {
 
         AlertMessage(TransportContext context,
                 ByteBuffer m) throws IOException {
+            // From RFC 8446 "Implementations
+            // MUST NOT send Handshake and Alert records that have a zero-length
+            // TLSInnerPlaintext.content; if such a message is received, the
+            // receiving implementation MUST terminate the connection with an
+            // "unexpected_message" alert."
+            if (m.remaining() == 0) {
+                throw context.fatal(Alert.UNEXPECTED_MESSAGE,
+                        "Alert fragments must not be zero length.");
+            }
+
             //  struct {
             //      AlertLevel level;
             //      AlertDescription description;
@@ -204,10 +207,11 @@ enum Alert {
         @Override
         public String toString() {
             MessageFormat messageFormat = new MessageFormat(
-                    "\"Alert\": '{'\n" +
-                    "  \"level\"      : \"{0}\",\n" +
-                    "  \"description\": \"{1}\"\n" +
-                    "'}'",
+                    """
+                            "Alert": '{'
+                              "level"      : "{0}",
+                              "description": "{1}"
+                            '}'""",
                     Locale.ENGLISH);
 
             Object[] messageFields = {
@@ -234,7 +238,7 @@ enum Alert {
             TransportContext tc = (TransportContext)context;
 
             AlertMessage am = new AlertMessage(tc, m);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.SSL)) {
                 SSLLogger.fine("Received alert message", am);
             }
 
@@ -272,11 +276,13 @@ enum Alert {
                         throw tc.fatal(Alert.HANDSHAKE_FAILURE,
                             "received handshake warning: " + alert.description);
                     } else {
-                        // Otherwise ignore the warning but remove the
+                        // Otherwise, ignore the warning but remove the
                         // Certificate and CertificateVerify handshake
                         // consumer so the state machine doesn't expect it.
                         tc.handshakeContext.handshakeConsumers.remove(
                                 SSLHandshake.CERTIFICATE.id);
+                        tc.handshakeContext.handshakeConsumers.remove(
+                                SSLHandshake.COMPRESSED_CERTIFICATE.id);
                         tc.handshakeContext.handshakeConsumers.remove(
                                 SSLHandshake.CERTIFICATE_VERIFY.id);
                     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -101,7 +101,9 @@ public class nextevent001 extends JDIBase {
 
         int result = run(argv, System.out);
 
-        System.exit(result + PASS_BASE);
+        if (result != 0) {
+            throw new RuntimeException("TEST FAILED with result " + result);
+        }
     }
 
     public static int run (String argv[], PrintStream out) {
@@ -111,7 +113,7 @@ public class nextevent001 extends JDIBase {
         if (exitCode != PASSED) {
             System.out.println("TEST FAILED");
         }
-        return testExitCode;
+        return exitCode;
     }
 
     //  ************************************************    test parameters
@@ -304,25 +306,17 @@ public class nextevent001 extends JDIBase {
 
         log2("......setting up ClassPrepareEvent");
 
-        String bPointMethod = "methodForCommunication";
-        String lineForComm  = "lineForComm";
-        BreakpointRequest bpRequest;
-
-        ThreadReference mainThread = debuggee.threadByNameOrThrow("main");
-
-        bpRequest = settingBreakpoint(mainThread,
-                                      debuggeeClass,
-                                      bPointMethod, lineForComm, "zero");
-        bpRequest.enable();
+        setupBreakpointForCommunication(debuggeeClass);
 
     //------------------------------------------------------  testing section
 
         log1("     TESTING BEGINS");
 
         {
+            final String testThreadName = "thread2";
+
             log2("......setting up ThreadStartRequest");
             ThreadStartRequest tsr = eventRManager.createThreadStartRequest();
-            tsr.addCountFilter(1);
             tsr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
             tsr.putProperty("number", "ThreadStartRequest");
             tsr.enable();
@@ -331,7 +325,6 @@ public class nextevent001 extends JDIBase {
 
             log2("......setting up ThreadDeathRequest");
             ThreadDeathRequest tdr = eventRManager.createThreadDeathRequest();
-            tdr.addCountFilter(1);
             tdr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
             tsr.putProperty("number", "ThreadDeathRequest");
             tdr.enable();
@@ -342,7 +335,7 @@ public class nextevent001 extends JDIBase {
             vm.resume();
 
             log2("......waiting for ThreadStartEvent");
-            getEventSet();
+            getEventSetForThreadStartDeath(testThreadName);
             eventSets[10] = eventSet;
 
             Event receivedEvent = eventIterator.nextEvent();
@@ -357,7 +350,7 @@ public class nextevent001 extends JDIBase {
             vm.resume();
 
             log2("......waiting for ThreadDeathEvent");
-            getEventSet();
+            getEventSetForThreadStartDeath(testThreadName);
             eventSets[9] = eventSet;
             receivedEvent = eventIterator.nextEvent();
             if ( !(receivedEvent instanceof ThreadDeathEvent) ) {
@@ -514,18 +507,15 @@ public class nextevent001 extends JDIBase {
             log2(":::::::::vm.resume();");
             vm.resume();
 
-            Event  event1     = null;
-            int    flagsCopy  = flags;
-            String eName      = null;
-            int    index      = 0;
+            int flagsCopy = flags;
 
             log2("......getting and checking up on Events");
             for (int n4 = 0; n4 < namesRef.length(); n4++) {
-                int flag;
 
                 getEventSet();
-                event1 = eventIterator.nextEvent();
+                Event event1 = eventIterator.nextEvent();
 
+                int index;
                 if (event1 instanceof AccessWatchpointEvent) {
                     index = 0;
                 } else if (event1 instanceof ModificationWatchpointEvent ) {
@@ -543,11 +533,15 @@ public class nextevent001 extends JDIBase {
                 } else {
                     log3("ERROR: else clause in detecting type of event1");
                     testExitCode = FAILED;
+                    throw new JDITestRuntimeException("** unexpected event ** " + event1);
                 }
+                log2("--------> got: " + event1 + " index: " + index);
 
-                flag = 1 << index;
+                int flag = 1 << index;
                 if ((flagsCopy & flag) == 0) {
-                    log3("ERROR: event duplication: " + eName);
+                    log3("ERROR: event duplication. event " + event1
+                            + " flagsCopy = " + Integer.toBinaryString(flagsCopy)
+                            + " flag = " + Integer.toBinaryString(flag));
                     testExitCode = FAILED;
                 } else {
                     flagsCopy ^= flag;

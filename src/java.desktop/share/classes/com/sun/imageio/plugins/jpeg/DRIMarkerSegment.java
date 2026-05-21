@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -55,6 +55,7 @@ class DRIMarkerSegment extends MarkerSegment {
         updateFromNativeNode(node, true);
     }
 
+    @Override
     IIOMetadataNode getNativeNode() {
         IIOMetadataNode node = new IIOMetadataNode("dri");
         node.setAttribute("interval", Integer.toString(restartInterval));
@@ -71,13 +72,14 @@ class DRIMarkerSegment extends MarkerSegment {
      * Writes the data for this segment to the stream in
      * valid JPEG format.
      */
+    @Override
     void write(ImageOutputStream ios) throws IOException {
         // We don't write DRI segments; the IJG library does.
     }
 
+    @Override
     void print() {
         printTag("DRI");
-        System.out.println("Interval: "
-                           + Integer.toString(restartInterval));
+        System.out.println("Interval: " + restartInterval);
     }
 }

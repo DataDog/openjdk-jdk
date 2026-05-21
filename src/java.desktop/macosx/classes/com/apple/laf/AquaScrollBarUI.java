@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,23 +25,50 @@
 
 package com.apple.laf;
 
-import java.awt.*;
-import java.awt.event.*;
-import java.beans.*;
-import java.util.*;
+import java.awt.Adjustable;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Dimension;
+import java.awt.Graphics;
+import java.awt.Insets;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseMotionListener;
 
-import javax.swing.*;
+import java.beans.PropertyChangeEvent;
+import java.beans.PropertyChangeListener;
+import java.util.HashMap;
+import java.util.Map;
+
+import javax.swing.BoundedRangeModel;
+import javax.swing.JComponent;
+import javax.swing.JFrame;
+import javax.swing.JScrollBar;
+import javax.swing.LookAndFeel;
 import javax.swing.Timer;
-import javax.swing.event.*;
-import javax.swing.plaf.*;
+import javax.swing.event.ChangeEvent;
+import javax.swing.event.ChangeListener;
+import javax.swing.plaf.ComponentUI;
+import javax.swing.plaf.ScrollBarUI;
 
-import apple.laf.*;
-import apple.laf.JRSUIConstants.*;
+import apple.laf.JRSUIStateFactory;
+import apple.laf.JRSUIConstants.Hit;
+import apple.laf.JRSUIConstants.NothingToScroll;
+import apple.laf.JRSUIConstants.Orientation;
+import apple.laf.JRSUIConstants.ScrollBarHit;
+import apple.laf.JRSUIConstants.ScrollBarPart;
+import apple.laf.JRSUIConstants.ShowArrows;
+import apple.laf.JRSUIConstants.State;
 import apple.laf.JRSUIState.ScrollBarState;
+import apple.laf.JRSUIUtils;
 
 import com.apple.laf.AquaUtils.RecyclableSingleton;
 
-public class AquaScrollBarUI extends ScrollBarUI {
+public final class AquaScrollBarUI extends ScrollBarUI {
     private static final int kInitialDelay = 300;
     private static final int kNormalDelay = 100;
 
@@ -69,12 +96,14 @@ public class AquaScrollBarUI extends ScrollBarUI {
 
     public AquaScrollBarUI() { }
 
+    @Override
     public void installUI(final JComponent c) {
         fScrollBar = (JScrollBar)c;
         installListeners();
         configureScrollBarColors();
     }
 
+    @Override
     public void uninstallUI(final JComponent c) {
         uninstallListeners();
         fScrollBar = null;
@@ -142,9 +171,11 @@ public class AquaScrollBarUI extends ScrollBarUI {
         scrollBarState.set(shouldShowArrows() ? ShowArrows.YES : ShowArrows.NO);
     }
 
+    @Override
     public void paint(final Graphics g, final JComponent c) {
         syncState(c);
-        painter.paint(g, c, 0, 0, fScrollBar.getWidth(), fScrollBar.getHeight());
+        Rectangle trackBounds = getTrackBounds();
+        painter.paint(g, c, trackBounds.x, trackBounds.y, trackBounds.width, trackBounds.height);
     }
 
     protected State getState(final JComponent c, final ScrollBarPart pressedPart) {
@@ -188,11 +219,17 @@ public class AquaScrollBarUI extends ScrollBarUI {
     }
 
     protected Rectangle getTrackBounds() {
-        return new Rectangle(0, 0, fScrollBar.getWidth(), fScrollBar.getHeight());
+        Insets insets = fScrollBar.getInsets();
+        return new Rectangle(insets.left, insets.top,
+                fScrollBar.getWidth() - (insets.left + insets.right),
+                fScrollBar.getHeight() - (insets.top + insets.bottom));
     }
 
     protected Rectangle getDragBounds() {
-        return new Rectangle(0, 0, fScrollBar.getWidth(), fScrollBar.getHeight());
+        Insets insets = fScrollBar.getInsets();
+        return new Rectangle(insets.left, insets.top,
+            fScrollBar.getWidth() - (insets.left + insets.right),
+            fScrollBar.getHeight() - (insets.top + insets.bottom));
     }
 
     protected void startTimer(final boolean initial) {
@@ -228,10 +265,14 @@ public class AquaScrollBarUI extends ScrollBarUI {
 
     protected Hit getPartHit(final int x, final int y) {
         syncState(fScrollBar);
-        return JRSUIUtils.HitDetection.getHitForPoint(painter.getControl(), 0, 0, fScrollBar.getWidth(), fScrollBar.getHeight(), x, y);
+        Insets insets = fScrollBar.getInsets();
+        return JRSUIUtils.HitDetection.getHitForPoint(painter.getControl(), insets.left, insets.top,
+                fScrollBar.getWidth() - (insets.left + insets.right),
+                fScrollBar.getHeight() - (insets.top + insets.bottom), x, y);
     }
 
-    protected class PropertyChangeHandler implements PropertyChangeListener {
+    protected final class PropertyChangeHandler implements PropertyChangeListener {
+        @Override
         public void propertyChange(final PropertyChangeEvent e) {
             final String propertyName = e.getPropertyName();
 
@@ -248,20 +289,22 @@ public class AquaScrollBarUI extends ScrollBarUI {
         }
     }
 
-    protected class ModelListener implements ChangeListener {
+    protected final class ModelListener implements ChangeListener {
+        @Override
         public void stateChanged(final ChangeEvent e) {
             layoutContainer(fScrollBar);
         }
     }
 
     // Track mouse drags.
-    protected class TrackListener extends MouseAdapter implements MouseMotionListener {
+    protected final class TrackListener extends MouseAdapter implements MouseMotionListener {
         protected transient int fCurrentMouseX, fCurrentMouseY;
         protected transient boolean fInArrows; // are we currently tracking arrows?
         protected transient boolean fStillInArrow = false; // Whether mouse is in an arrow during arrow tracking
         protected transient boolean fStillInTrack = false; // Whether mouse is in the track during pageup/down tracking
         protected transient int fFirstMouseX, fFirstMouseY, fFirstValue; // Values for getValueFromOffset
 
+        @Override
         public void mouseReleased(final MouseEvent e) {
             if (!fScrollBar.isEnabled()) return;
             if (fInArrows) {
@@ -278,6 +321,7 @@ public class AquaScrollBarUI extends ScrollBarUI {
             fScrollBar.revalidate();
         }
 
+        @Override
         public void mousePressed(final MouseEvent e) {
             if (!fScrollBar.isEnabled()) return;
 
@@ -294,6 +338,7 @@ public class AquaScrollBarUI extends ScrollBarUI {
             }
         }
 
+        @Override
         public void mouseDragged(final MouseEvent e) {
             if (!fScrollBar.isEnabled()) return;
 
@@ -344,7 +389,9 @@ public class AquaScrollBarUI extends ScrollBarUI {
             // scroller goes 0-100 with a visible area of 20 we are getting a ratio of the
             // remaining 80.
             syncState(fScrollBar);
-            final double offsetChange = JRSUIUtils.ScrollBar.getNativeOffsetChange(painter.getControl(), 0, 0, fScrollBar.getWidth(), fScrollBar.getHeight(), offsetWeCareAbout, visibleAmt, extent);
+            final Rectangle limitRect = getDragBounds(); // GetThemeTrackDragRect
+            final double offsetChange = JRSUIUtils.ScrollBar.getNativeOffsetChange(painter.getControl(),
+                    limitRect.x, limitRect.y, limitRect.width, limitRect.height, offsetWeCareAbout, visibleAmt, extent);
 
             // the scrollable area is the extent - visible amount;
             final int scrollableArea = extent - visibleAmt;
@@ -502,7 +549,7 @@ public class AquaScrollBarUI extends ScrollBarUI {
     /**
      * Listener for scrolling events initiated in the ScrollPane.
      */
-    protected class ScrollListener implements ActionListener {
+    protected final class ScrollListener implements ActionListener {
         boolean fUseBlockIncrement;
         int fDirection = 1;
 
@@ -514,7 +561,23 @@ public class AquaScrollBarUI extends ScrollBarUI {
             this.fUseBlockIncrement = block;
         }
 
+        @Override
         public void actionPerformed(final ActionEvent e) {
+            Component parent = fScrollBar.getParent();
+            do {
+                if (parent instanceof JFrame par) {
+                    if (!par.isEnabled()) {
+                        ((Timer)e.getSource()).stop();
+                        fScrollBar.setValueIsAdjusting(false);
+                        return;
+                    }
+                    break;
+                } else {
+                    if (parent != null) {
+                        parent = parent.getParent();
+                    }
+                }
+            } while (parent != null);
             if (fUseBlockIncrement) {
                 Hit newPart = getPartHit(fTrackListener.fCurrentMouseX, fTrackListener.fCurrentMouseY);
 
@@ -571,14 +634,17 @@ public class AquaScrollBarUI extends ScrollBarUI {
      * @see #getMaximumSize
      * @see #getMinimumSize
      */
+    @Override
     public Dimension getPreferredSize(final JComponent c) {
         return isHorizontal() ? new Dimension(96, 15) : new Dimension(15, 96);
     }
 
+    @Override
     public Dimension getMinimumSize(final JComponent c) {
         return isHorizontal() ? new Dimension(54, 15) : new Dimension(15, 54);
     }
 
+    @Override
     public Dimension getMaximumSize(final JComponent c) {
         return new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE);
     }
@@ -597,7 +663,7 @@ public class AquaScrollBarUI extends ScrollBarUI {
         // determine the bounding rectangle for our thumb region
         syncState(fScrollBar);
         double[] rect = new double[4];
-        JRSUIUtils.ScrollBar.getPartBounds(rect, painter.getControl(), 0, 0, fScrollBar.getWidth(), fScrollBar.getHeight(), ScrollBarPart.THUMB);
+        JRSUIUtils.ScrollBar.getPartBounds(rect, painter.getControl(), limitRect.x, limitRect.y, limitRect.width, limitRect.height, ScrollBarPart.THUMB);
         final Rectangle r = new Rectangle((int)rect[0], (int)rect[1], (int)rect[2], (int)rect[3]);
 
         // figure out the scroll-to-here start location based on our orientation, the
@@ -645,7 +711,7 @@ public class AquaScrollBarUI extends ScrollBarUI {
         return startPoint;
     }
 
-    static class HitUtil {
+    static final class HitUtil {
         static boolean isIncrement(final Hit hit) {
             return (hit == ScrollBarHit.ARROW_MAX) || (hit == ScrollBarHit.ARROW_MAX_INSIDE);
         }

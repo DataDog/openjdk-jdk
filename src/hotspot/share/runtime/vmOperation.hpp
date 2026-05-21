@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,38 +35,40 @@
 
 // Note: When new VM_XXX comes up, add 'XXX' to the template table.
 #define VM_OPS_DO(template)                       \
-  template(None)                                  \
-  template(Cleanup)                               \
+  template(Halt)                                  \
+  template(SafepointALot)                         \
   template(ThreadDump)                            \
   template(PrintThreads)                          \
   template(FindDeadlocks)                         \
   template(ClearICs)                              \
   template(ForceSafepoint)                        \
-  template(ForceAsyncSafepoint)                   \
   template(DeoptimizeFrame)                       \
   template(DeoptimizeAll)                         \
   template(ZombieAll)                             \
   template(Verify)                                \
   template(HeapDumper)                            \
-  template(DeoptimizeTheWorld)                    \
   template(CollectForMetadataAllocation)          \
   template(GC_HeapInspection)                     \
-  template(GenCollectFull)                        \
-  template(GenCollectFullConcurrent)              \
-  template(GenCollectForAllocation)               \
-  template(ParallelGCFailedAllocation)            \
-  template(ParallelGCSystemGC)                    \
+  template(SerialCollectForAllocation)            \
+  template(SerialGCCollect)                       \
+  template(ParallelCollectForAllocation)          \
+  template(ParallelGCCollect)                     \
   template(G1CollectForAllocation)                \
   template(G1CollectFull)                         \
-  template(G1Concurrent)                          \
+  template(G1PauseRemark)                         \
+  template(G1PauseCleanup)                        \
   template(G1TryInitiateConcMark)                 \
-  template(ZMarkStart)                            \
-  template(ZMarkEnd)                              \
-  template(ZRelocateStart)                        \
-  template(ZVerify)                               \
-  template(HandshakeOneThread)                    \
+  template(G1RendezvousGCThreads)                 \
+  template(ZMarkEndOld)                           \
+  template(ZMarkEndYoung)                         \
+  template(ZMarkFlushOperation)                   \
+  template(ZMarkStartYoung)                       \
+  template(ZMarkStartYoungAndOld)                 \
+  template(ZRelocateStartOld)                     \
+  template(ZRelocateStartYoung)                   \
+  template(ZRendezvousGCThreads)                  \
+  template(ZVerifyOld)                            \
   template(HandshakeAllThreads)                   \
-  template(HandshakeFallback)                     \
   template(PopulateDumpSharedSpace)               \
   template(JNIFunctionTableCopier)                \
   template(RedefineClasses)                       \
@@ -75,38 +77,42 @@
   template(GetThreadListStackTraces)              \
   template(ChangeBreakpoints)                     \
   template(GetOrSetLocal)                         \
+  template(VirtualThreadGetOrSetLocal)            \
   template(ChangeSingleStep)                      \
+  template(SetNotifyJvmtiEventsMode)              \
   template(HeapWalkOperation)                     \
   template(HeapIterateOperation)                  \
   template(ReportJavaOutOfMemory)                 \
-  template(JFRCheckpoint)                         \
+  template(JFRSafepointClear)                     \
+  template(JFRSafepointWrite)                     \
   template(ShenandoahFullGC)                      \
   template(ShenandoahInitMark)                    \
   template(ShenandoahFinalMarkStartEvac)          \
   template(ShenandoahInitUpdateRefs)              \
   template(ShenandoahFinalUpdateRefs)             \
-  template(ShenandoahFinalRoots)                  \
+  template(ShenandoahFinalVerify)                 \
   template(ShenandoahDegeneratedGC)               \
   template(Exit)                                  \
   template(LinuxDllLoad)                          \
-  template(RotateGCLog)                           \
   template(WhiteBoxOperation)                     \
   template(JVMCIResizeCounters)                   \
   template(ClassLoaderStatsOperation)             \
   template(ClassLoaderHierarchyOperation)         \
   template(DumpHashtable)                         \
-  template(DumpTouchedMethods)                    \
   template(CleanClassLoaderDataMetaspaces)        \
+  template(RehashStringTable)                     \
+  template(RehashSymbolTable)                     \
   template(PrintCompileQueue)                     \
   template(PrintClassHierarchy)                   \
-  template(ThreadSuspend)                         \
-  template(ThreadsSuspendJVMTI)                   \
-  template(ICBufferFull)                          \
-  template(ScavengeMonitors)                      \
+  template(PrintClasses)                          \
   template(PrintMetadata)                         \
   template(GTestExecuteAtSafepoint)               \
+  template(GTestStopSafepoint)                    \
   template(JFROldObject)                          \
-  template(JvmtiPostObjectFree)
+  template(RendezvousGCThreads)                   \
+  template(JFRInitializeCPUTimeSampler)       \
+  template(JFRTerminateCPUTimeSampler)        \
+  template(ReinitializeMDO)
 
 class Thread;
 class outputStream;
@@ -125,7 +131,7 @@ class VM_Operation : public StackObj {
   static const char* _names[];
 
  public:
-  VM_Operation() : _calling_thread(NULL) {}
+  VM_Operation() : _calling_thread(nullptr) {}
 
   // VM operation support (used by VM thread)
   Thread* calling_thread() const                 { return _calling_thread; }
@@ -149,6 +155,10 @@ class VM_Operation : public StackObj {
   virtual VMOp_Type type() const = 0;
   virtual bool allow_nested_vm_operations() const { return false; }
 
+  // VMOp_Type may belong to a category of the operation.
+  // Override is_XX_operation() appropriately in subclasses.
+  virtual bool is_gc_operation() const { return false; }
+
   // You may override skip_thread_oop_barriers to return true if the operation
   // does not access thread-private oops (including frames).
   virtual bool skip_thread_oop_barriers() const { return false; }
@@ -164,6 +174,8 @@ class VM_Operation : public StackObj {
     assert(type >= 0 && type < VMOp_Terminating, "invalid VM operation type");
     return _names[type];
   }
+  // Extra information about what triggered this operation.
+  virtual const char* cause() const { return nullptr; }
 #ifndef PRODUCT
   void print_on(outputStream* st) const { print_on_error(st); }
 #endif

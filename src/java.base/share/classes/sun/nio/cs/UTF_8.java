@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,7 +35,6 @@ import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CharsetEncoder;
 import java.nio.charset.CoderResult;
-import java.nio.charset.CodingErrorAction;
 
 /* Legal UTF-8 Byte Sequences
  *
@@ -83,9 +82,9 @@ public final class UTF_8 extends Unicode {
         dst.position(dp - dst.arrayOffset());
     }
 
-    private static class Decoder extends CharsetDecoder {
+    private static final JavaLangAccess JLA = SharedSecrets.getJavaLangAccess();
 
-        private static final JavaLangAccess JLA = SharedSecrets.getJavaLangAccess();
+    private static class Decoder extends CharsetDecoder {
 
         private Decoder(Charset cs) {
             super(cs, 1.0f, 1.0f);
@@ -425,6 +424,10 @@ public final class UTF_8 extends Unicode {
             return !Character.isSurrogate(c);
         }
 
+        public boolean canEncode(CharSequence cs) {
+            return Unicode.isValidUnicode(cs);
+        }
+
         public boolean isLegalReplacement(byte[] repl) {
             return ((repl.length == 1 && repl[0] >= 0) ||
                     super.isLegalReplacement(repl));
@@ -443,8 +446,7 @@ public final class UTF_8 extends Unicode {
 
         private Surrogate.Parser sgp;
         private CoderResult encodeArrayLoop(CharBuffer src,
-                                            ByteBuffer dst)
-        {
+                                            ByteBuffer dst) {
             char[] sa = src.array();
             int sp = src.arrayOffset() + src.position();
             int sl = src.arrayOffset() + src.limit();
@@ -452,11 +454,22 @@ public final class UTF_8 extends Unicode {
             byte[] da = dst.array();
             int dp = dst.arrayOffset() + dst.position();
             int dl = dst.arrayOffset() + dst.limit();
-            int dlASCII = dp + Math.min(sl - sp, dl - dp);
 
-            // ASCII only loop
-            while (dp < dlASCII && sa[sp] < '\u0080')
-                da[dp++] = (byte) sa[sp++];
+            // Handle ASCII-only prefix
+            int n = JLA.encodeASCII(sa, sp, da, dp, Math.min(sl - sp, dl - dp));
+            sp += n;
+            dp += n;
+
+            if (sp < sl) {
+                return encodeArrayLoopSlow(src, sa, sp, sl, dst, da, dp, dl);
+            } else {
+                updatePositions(src, sp, dst, dp);
+                return CoderResult.UNDERFLOW;
+            }
+        }
+
+        private CoderResult encodeArrayLoopSlow(CharBuffer src, char[] sa, int sp, int sl,
+                                                ByteBuffer dst, byte[] da, int dp, int dl) {
             while (sp < sl) {
                 char c = sa[sp];
                 if (c < 0x80) {

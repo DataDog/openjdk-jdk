@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2017, Red Hat, Inc. and/or its affiliates.
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -60,7 +60,7 @@ final class ExtendedMasterSecretExtension {
      * The "extended_master_secret" extension.
      */
     static final class ExtendedMasterSecretSpec implements SSLExtensionSpec {
-        // A nominal object that does not holding any real renegotiation info.
+        // A nominal object that does not hold any real renegotiation info.
         static final ExtendedMasterSecretSpec NOMINAL =
                 new ExtendedMasterSecretSpec();
 
@@ -99,7 +99,7 @@ final class ExtendedMasterSecretExtension {
     }
 
     /**
-     * Network data producer of a "extended_master_secret" extension in
+     * Network data producer of an "extended_master_secret" extension in
      * the ClientHello handshake message.
      */
     private static final
@@ -119,7 +119,8 @@ final class ExtendedMasterSecretExtension {
             if (!chc.sslConfig.isAvailable(CH_EXTENDED_MASTER_SECRET) ||
                     !SSLConfiguration.useExtendedMasterSecret ||
                     !chc.conContext.protocolVersion.useTLS10PlusSpec()) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                         "Ignore unavailable extended_master_secret extension");
                 }
@@ -141,7 +142,7 @@ final class ExtendedMasterSecretExtension {
     }
 
     /**
-     * Network data producer of a "extended_master_secret" extension in
+     * Network data producer of an "extended_master_secret" extension in
      * the ServerHello handshake message.
      */
     private static final
@@ -162,7 +163,8 @@ final class ExtendedMasterSecretExtension {
             if (!shc.sslConfig.isAvailable(CH_EXTENDED_MASTER_SECRET) ||
                     !SSLConfiguration.useExtendedMasterSecret ||
                     !shc.negotiatedProtocol.useTLS10PlusSpec()) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine("Ignore unavailable extension: " +
                             CH_EXTENDED_MASTER_SECRET.name);
                 }
@@ -182,7 +184,8 @@ final class ExtendedMasterSecretExtension {
                 // with a full handshake.
                 shc.isResumption = false;
                 shc.resumingSession = null;
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                         "abort session resumption which did not use " +
                         "Extended Master Secret extension");
@@ -199,7 +202,7 @@ final class ExtendedMasterSecretExtension {
     }
 
     /**
-     * The absence processing if a "extended_master_secret" extension is
+     * The absence processing if an "extended_master_secret" extension is
      * not present in the ClientHello handshake message.
      */
     private static final
@@ -213,7 +216,8 @@ final class ExtendedMasterSecretExtension {
             // Is it a supported and enabled extension?
             if (!shc.sslConfig.isAvailable(CH_EXTENDED_MASTER_SECRET) ||
                     !SSLConfiguration.useExtendedMasterSecret) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine("Ignore unavailable extension: " +
                             CH_EXTENDED_MASTER_SECRET.name);
                 }
@@ -252,7 +256,8 @@ final class ExtendedMasterSecretExtension {
                     } else {  // Otherwise, continue with a full handshake.
                         shc.isResumption = false;
                         shc.resumingSession = null;
-                        if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                        if (SSLLogger.isOn() &&
+                                SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                             SSLLogger.fine(
                                 "abort session resumption, " +
                                 "missing Extended Master Secret extension");
@@ -264,7 +269,7 @@ final class ExtendedMasterSecretExtension {
     }
 
     /**
-     * Network data producer of a "extended_master_secret" extension in
+     * Network data producer of an "extended_master_secret" extension in
      * the ServerHello handshake message.
      */
     private static final
@@ -293,7 +298,7 @@ final class ExtendedMasterSecretExtension {
     }
 
     /**
-     * Network data consumer of a "extended_master_secret" extension in
+     * Network data consumer of an "extended_master_secret" extension in
      * the ServerHello handshake message.
      */
     private static final
@@ -338,7 +343,7 @@ final class ExtendedMasterSecretExtension {
     }
 
     /**
-     * The absence processing if a "extended_master_secret" extension is
+     * The absence processing if an "extended_master_secret" extension is
      * not present in the ServerHello handshake message.
      */
     private static final

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,7 +31,7 @@
  * @requires vm.opt.final.ClassUnloading
  * @library /vmTestbase /test/lib
  * @build metaspace.shrink_grow.ShrinkGrowMultiJVM.ShrinkGrowMultiJVM
- * @run driver metaspace.shrink_grow.ShrinkGrowMultiJVM.ShrinkGrowMultiJVM
+ * @run driver/timeout=480 metaspace.shrink_grow.ShrinkGrowMultiJVM.ShrinkGrowMultiJVM
  */
 
 package metaspace.shrink_grow.ShrinkGrowMultiJVM;
@@ -58,7 +58,7 @@ public class ShrinkGrowMultiJVM {
                  .resolve("java")
                  .toAbsolutePath()
                  .toString(),
-            "-Xlog:gc:gc_$i.log", // LOG_GC_ARG_INDEX
+            "UNSET_LOG_GC_ARG", // LOG_GC_ARG_INDEX
             "-XX:MetaspaceSize=10m",
             "-XX:MaxMetaspaceSize=20m",
             "-cp",
@@ -81,7 +81,7 @@ public class ShrinkGrowMultiJVM {
         for (int i = 0; i < 5; i++) {
             // will be used as jvm id
             args[args.length - 1] = "jvm#" + i;
-            args[LOG_GC_ARG_INDEX] = "-Xlog:gc:gc_" + i + ".log";
+            args[LOG_GC_ARG_INDEX] = "-Xlog:gc*:gc_" + i + ".log::filecount=0";
             ProcessBuilder pb = new ProcessBuilder(args);
             try {
                 Process p = pb.start();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,6 +35,7 @@ import javax.imageio.stream.ImageInputStream;
 import javax.imageio.plugins.jpeg.JPEGImageReadParam;
 import javax.imageio.plugins.jpeg.JPEGQTable;
 import javax.imageio.plugins.jpeg.JPEGHuffmanTable;
+import com.sun.imageio.plugins.common.SimpleCMYKColorSpace;
 
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -89,16 +90,9 @@ public class JPEGImageReader extends ImageReader {
         initStatic();
     }
 
-    @SuppressWarnings("removal")
+    @SuppressWarnings("restricted")
     private static void initStatic() {
-        java.security.AccessController.doPrivileged(
-            new java.security.PrivilegedAction<Void>() {
-                @Override
-                public Void run() {
-                    System.loadLibrary("javajpeg");
-                    return null;
-                }
-            });
+        System.loadLibrary("javajpeg");
         initReaderIDs(ImageInputStream.class,
                       JPEGQTable.class,
                       JPEGHuffmanTable.class);
@@ -163,6 +157,12 @@ public class JPEGImageReader extends ImageReader {
 
     /** If we need to post-convert in Java, convert with this op */
     private ColorConvertOp convert = null;
+
+    /** If reading CMYK as an Image, flip the bytes */
+    private boolean invertCMYK = false;
+
+    /** Whether to read as a raster */
+    private boolean readAsRaster = false;
 
     /** The image we are going to fill */
     private BufferedImage image = null;
@@ -391,6 +391,12 @@ public class JPEGImageReader extends ImageReader {
         tablesOnlyChecked = true;
     }
 
+    private void verifyImageIndex(int imageIndex) {
+        if (imageIndex < minIndex) {
+            throw new IndexOutOfBoundsException("imageIndex < " + minIndex);
+        }
+    }
+
     @Override
     public int getNumImages(boolean allowSearch) throws IOException {
         setThreadLock();
@@ -487,9 +493,9 @@ public class JPEGImageReader extends ImageReader {
     /**
      * Sets the input stream to the start of the requested image.
      * <pre>
-     * @exception IllegalStateException if the input source has not been
+     * @throws IllegalStateException if the input source has not been
      * set.
-     * @exception IndexOutOfBoundsException if the supplied index is
+     * @throws IndexOutOfBoundsException if the supplied index is
      * out of bounds.
      * </pre>
      */
@@ -497,9 +503,7 @@ public class JPEGImageReader extends ImageReader {
         if (iis == null) {
             throw new IllegalStateException("Input not set");
         }
-        if (imageIndex < minIndex) {
-            throw new IndexOutOfBoundsException();
-        }
+        verifyImageIndex(imageIndex);
         if (!tablesOnlyChecked) {
             checkTablesOnly();
         }
@@ -842,6 +846,7 @@ public class JPEGImageReader extends ImageReader {
     public int getWidth(int imageIndex) throws IOException {
         setThreadLock();
         try {
+            verifyImageIndex(imageIndex);
             if (currentImage != imageIndex) {
                 cbLock.check();
                 readHeader(imageIndex, true);
@@ -856,6 +861,7 @@ public class JPEGImageReader extends ImageReader {
     public int getHeight(int imageIndex) throws IOException {
         setThreadLock();
         try {
+            verifyImageIndex(imageIndex);
             if (currentImage != imageIndex) {
                 cbLock.check();
                 readHeader(imageIndex, true);
@@ -886,6 +892,7 @@ public class JPEGImageReader extends ImageReader {
         throws IOException {
         setThreadLock();
         try {
+            verifyImageIndex(imageIndex);
             if (currentImage != imageIndex) {
                 cbLock.check();
 
@@ -904,6 +911,7 @@ public class JPEGImageReader extends ImageReader {
         throws IOException {
         setThreadLock();
         try {
+            verifyImageIndex(imageIndex);
             return getImageTypesOnThread(imageIndex);
         } finally {
             clearThreadLock();
@@ -938,6 +946,32 @@ public class JPEGImageReader extends ImageReader {
         ArrayList<ImageTypeProducer> list = new ArrayList<ImageTypeProducer>(1);
 
         switch (colorSpaceCode) {
+        case JPEG.JCS_YCCK:
+        case JPEG.JCS_CMYK:
+            // There's no standard CMYK ColorSpace in JDK so raw.getType()
+            // will return null so skip that.
+            // And we can't add RGB because the number of bands is different.
+            // So need to create our own special that is 4 channels and uses
+            // the iccCS ColorSpace based on profile data in the image, and
+            // if there is none, on the internal CMYKColorSpace class
+            if (iccCS == null) {
+                iccCS = SimpleCMYKColorSpace.getInstance();
+            }
+            if (iccCS != null) {
+                list.add(new ImageTypeProducer(colorSpaceCode) {
+                    @Override
+                    protected ImageTypeSpecifier produce() {
+                        int [] bands = {0, 1, 2, 3};
+                        return ImageTypeSpecifier.createInterleaved
+                         (iccCS,
+                          bands,
+                          DataBuffer.TYPE_BYTE,
+                          false,
+                          false);
+                    }
+                });
+            }
+            break;
         case JPEG.JCS_GRAYSCALE:
             list.add(raw);
             list.add(getImageType(JPEG.JCS_RGB));
@@ -1019,6 +1053,8 @@ public class JPEGImageReader extends ImageReader {
         int csType = cs.getType();
         convert = null;
         switch (outColorSpaceCode) {
+        case JPEG.JCS_CMYK:  // Its CMYK in the file
+            break;
         case JPEG.JCS_GRAYSCALE:  // Its gray in the file
             if  (csType == ColorSpace.TYPE_RGB) { // We want RGB
                 // IJG can do this for us more efficiently
@@ -1125,10 +1161,7 @@ public class JPEGImageReader extends ImageReader {
             cbLock.check();
             try {
                 readInternal(imageIndex, param, false);
-            } catch (RuntimeException e) {
-                resetLibraryState(structPointer);
-                throw e;
-            } catch (IOException e) {
+            } catch (RuntimeException | IOException e) {
                 resetLibraryState(structPointer);
                 throw e;
             }
@@ -1144,6 +1177,8 @@ public class JPEGImageReader extends ImageReader {
     private Raster readInternal(int imageIndex,
                                 ImageReadParam param,
                                 boolean wantRaster) throws IOException {
+
+        readAsRaster = wantRaster;
         readHeader(imageIndex, false);
 
         WritableRaster imRas = null;
@@ -1154,6 +1189,13 @@ public class JPEGImageReader extends ImageReader {
             Iterator<ImageTypeSpecifier> imageTypes = getImageTypes(imageIndex);
             if (imageTypes.hasNext() == false) {
                 throw new IIOException("Unsupported Image Type");
+            }
+
+            if ((long)width * height > Integer.MAX_VALUE - 2) {
+                // We are not able to properly decode image that has number
+                // of pixels greater than Integer.MAX_VALUE - 2
+                throw new IIOException("Can not read image of the size "
+                        + width + " by " + height);
             }
 
             image = getDestination(param, imageTypes, width, height);
@@ -1178,6 +1220,16 @@ public class JPEGImageReader extends ImageReader {
             setOutColorSpace(structPointer, colorSpaceCode);
             image = null;
         }
+
+         // Adobe seems to have decided that the bytes in CMYK JPEGs
+         // should be stored inverted. So we need some extra logic to
+         // flip them in that case. Don't flip for the raster case
+         // so code that is reading these as rasters today won't
+         // see a change in behaviour.
+         invertCMYK =
+             (!wantRaster &&
+              ((colorSpaceCode == JPEG.JCS_YCCK) ||
+               (colorSpaceCode == JPEG.JCS_CMYK)));
 
         // Create an intermediate 1-line Raster that will hold the decoded,
         // subsampled, clipped, band-selected image data in a single
@@ -1275,9 +1327,8 @@ public class JPEGImageReader extends ImageReader {
         // and set knownPassCount
         if (imageIndex == imageMetadataIndex) { // We have metadata
             knownPassCount = 0;
-            for (Iterator<MarkerSegment> iter =
-                    imageMetadata.markerSequence.iterator(); iter.hasNext();) {
-                if (iter.next() instanceof SOSMarkerSegment) {
+            for (MarkerSegment markerSegment : imageMetadata.markerSequence) {
+                if (markerSegment instanceof SOSMarkerSegment) {
                     knownPassCount++;
                 }
             }
@@ -1357,6 +1408,21 @@ public class JPEGImageReader extends ImageReader {
      * After the copy, we notify update listeners.
      */
     private void acceptPixels(int y, boolean progressive) {
+
+        /*
+         * CMYK JPEGs seems to be universally inverted at the byte level.
+         * Fix this here before storing.
+         * For "compatibility" don't do this if the target is a raster.
+         * Need to do this here in case the application is listening
+         * for line-by-line updates to the image.
+         */
+        if (invertCMYK) {
+            byte[] data = ((DataBufferByte)raster.getDataBuffer()).getData();
+            for (int i = 0, len = data.length; i < len; i++) {
+                data[i] = (byte)(0x0ff - (data[i] & 0xff));
+            }
+        }
+
         if (convert != null) {
             convert.filter(raster, raster);
         }
@@ -1564,10 +1630,7 @@ public class JPEGImageReader extends ImageReader {
                 target = target.createWritableTranslatedChild(saveDestOffset.x,
                                                               saveDestOffset.y);
             }
-        } catch (RuntimeException e) {
-            resetLibraryState(structPointer);
-            throw e;
-        } catch (IOException e) {
+        } catch (RuntimeException | IOException e) {
             resetLibraryState(structPointer);
             throw e;
         } finally {
@@ -1581,6 +1644,13 @@ public class JPEGImageReader extends ImageReader {
         return true;
     }
 
+    private int getNumJFIFThumbnails(JFIFMarkerSegment jfif) throws IOException {
+        if (jfif == null) {
+            return 0;
+        }
+        return ((jfif.thumb == null) ? 0 : 1) + jfif.extSegments.size();
+    }
+
     @Override
     public int getNumThumbnails(int imageIndex) throws IOException {
         setThreadLock();
@@ -1588,16 +1658,22 @@ public class JPEGImageReader extends ImageReader {
             cbLock.check();
 
             getImageMetadata(imageIndex);  // checks iis state for us
-            // Now check the jfif segments
+
+            // Check the jfif segments
             JFIFMarkerSegment jfif =
-                (JFIFMarkerSegment) imageMetadata.findMarkerSegment
-                (JFIFMarkerSegment.class, true);
-            int retval = 0;
-            if (jfif != null) {
-                retval = (jfif.thumb == null) ? 0 : 1;
-                retval += jfif.extSegments.size();
+                    (JFIFMarkerSegment) imageMetadata.findMarkerSegment
+                            (JFIFMarkerSegment.class, true);
+            int numThumbnails = getNumJFIFThumbnails(jfif);
+
+            // Check the Exif segment
+            ExifMarkerSegment exifMarkerSegment =
+                    (ExifMarkerSegment) imageMetadata.findMarkerSegment
+                            (ExifMarkerSegment.class, true);
+            if (exifMarkerSegment != null) {
+                numThumbnails += exifMarkerSegment.getNumThumbnails();
             }
-            return retval;
+
+            return numThumbnails;
         } finally {
             clearThreadLock();
         }
@@ -1614,11 +1690,22 @@ public class JPEGImageReader extends ImageReader {
                 || (thumbnailIndex >= getNumThumbnails(imageIndex))) {
                 throw new IndexOutOfBoundsException("No such thumbnail");
             }
-            // Now we know that there is a jfif segment
+
+            // Check the JFIF segment
             JFIFMarkerSegment jfif =
                 (JFIFMarkerSegment) imageMetadata.findMarkerSegment
                 (JFIFMarkerSegment.class, true);
-            return  jfif.getThumbnailWidth(thumbnailIndex);
+
+            int numJFIFThumbnails = getNumJFIFThumbnails(jfif);
+            if (thumbnailIndex < numJFIFThumbnails) {
+                return jfif.getThumbnailWidth(thumbnailIndex);
+            }
+
+            // Check the Exif segment
+            ExifMarkerSegment exifMarkerSegment =
+                    (ExifMarkerSegment) imageMetadata.findMarkerSegment
+                            (ExifMarkerSegment.class, true);
+            return exifMarkerSegment.getThumbnailWidth();
         } finally {
             clearThreadLock();
         }
@@ -1635,11 +1722,22 @@ public class JPEGImageReader extends ImageReader {
                 || (thumbnailIndex >= getNumThumbnails(imageIndex))) {
                 throw new IndexOutOfBoundsException("No such thumbnail");
             }
-            // Now we know that there is a jfif segment
+
+            // Check the JFIF segment
             JFIFMarkerSegment jfif =
-                (JFIFMarkerSegment) imageMetadata.findMarkerSegment
-                (JFIFMarkerSegment.class, true);
-            return  jfif.getThumbnailHeight(thumbnailIndex);
+                    (JFIFMarkerSegment) imageMetadata.findMarkerSegment
+                            (JFIFMarkerSegment.class, true);
+
+            int numJFIFThumbnails = getNumJFIFThumbnails(jfif);
+            if (thumbnailIndex < numJFIFThumbnails) {
+                return jfif.getThumbnailHeight(thumbnailIndex);
+            }
+
+            // Check the Exif segment
+            ExifMarkerSegment exifMarkerSegment =
+                    (ExifMarkerSegment) imageMetadata.findMarkerSegment
+                            (ExifMarkerSegment.class, true);
+            return exifMarkerSegment.getThumbnailHeight();
         } finally {
             clearThreadLock();
         }
@@ -1657,11 +1755,21 @@ public class JPEGImageReader extends ImageReader {
                 || (thumbnailIndex >= getNumThumbnails(imageIndex))) {
                 throw new IndexOutOfBoundsException("No such thumbnail");
             }
-            // Now we know that there is a jfif segment and that iis is good
+
+            // Check the JFIF segment
             JFIFMarkerSegment jfif =
-                (JFIFMarkerSegment) imageMetadata.findMarkerSegment
-                (JFIFMarkerSegment.class, true);
-            return  jfif.getThumbnail(iis, thumbnailIndex, this);
+                    (JFIFMarkerSegment) imageMetadata.findMarkerSegment
+                            (JFIFMarkerSegment.class, true);
+            int numJFIFThumbnails = getNumJFIFThumbnails(jfif);
+            if (thumbnailIndex < numJFIFThumbnails) {
+                return jfif.getThumbnail(iis, thumbnailIndex, this);
+            }
+
+            // Check the Exif segment
+            ExifMarkerSegment exifMarkerSegment =
+                    (ExifMarkerSegment) imageMetadata.findMarkerSegment
+                            (ExifMarkerSegment.class, true);
+            return exifMarkerSegment.getThumbnail(this);
         } finally {
             clearThreadLock();
         }
@@ -1762,7 +1870,7 @@ public class JPEGImageReader extends ImageReader {
         Thread currThread = Thread.currentThread();
         if (theThread == null || theThread != currThread) {
             throw new IllegalStateException("Attempt to clear thread lock " +
-                                            " form wrong thread." +
+                                            " from wrong thread." +
                                             " Locked thread: " + theThread +
                                             "; current thread: " + currThread);
         }

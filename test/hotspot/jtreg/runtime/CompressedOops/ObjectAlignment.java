@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,8 @@
  * @bug 8022865
  * @summary Tests for the -XX:ObjectAlignmentInBytes command line option
  * @requires vm.flagless
+ * @comment With larger ObjectAlignmentInBytes, the VM heap and shadow memory of ASan overlap
+ * @requires !vm.asan
  * @library /test/lib
  * @modules java.base/jdk.internal.misc
  *          java.management
@@ -74,8 +76,8 @@ public class ObjectAlignment {
     }
 
     private static OutputAnalyzer testObjectAlignment(int alignment) throws Exception {
-        ProcessBuilder pb = ProcessTools.createJavaProcessBuilder("-XX:ObjectAlignmentInBytes=" + alignment,
-                                                                  "-version");
+        ProcessBuilder pb = ProcessTools.createLimitedTestJavaProcessBuilder("-XX:ObjectAlignmentInBytes=" + alignment,
+                                                                             "-version");
         return new OutputAnalyzer(pb.start());
     }
 }

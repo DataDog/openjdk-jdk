@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,15 +32,13 @@ import static gc.testlibrary.Allocation.blackHole;
  * @summary This short test check RFE 6186200 changes. One thread locked
  * @summary completely in JNI CS, while other is trying to allocate memory
  * @summary provoking GC. OOM means FAIL, deadlock means PASS.
+ *
  * @run main/native/othervm -Xmx256m gc.cslocker.TestCSLocker
  */
 
 public class TestCSLocker extends Thread
 {
-    static int timeout = 5000;
     public static void main(String args[]) throws Exception {
-        long startTime = System.currentTimeMillis();
-
         // start garbage producer thread
         GarbageProducer garbageProducer = new GarbageProducer(1000000, 10);
         garbageProducer.start();
@@ -49,13 +47,8 @@ public class TestCSLocker extends Thread
         CSLocker csLocker = new CSLocker();
         csLocker.start();
 
-        // check timeout to success deadlocking
-        while(System.currentTimeMillis() < startTime + timeout) {
-            System.out.println("sleeping...");
-            sleep(1000);
-        }
-
-        csLocker.unlock();
+        // Wait for the csLocker thread to finish its critical section
+        csLocker.join();
         garbageProducer.interrupt();
     }
 }
@@ -91,11 +84,10 @@ class CSLocker extends Thread
     public void run() {
         int[] a = new int[10];
         a[0] = 1;
-        if (!lock(a)) {
+        if (!criticalSection(a)) {
             throw new RuntimeException("failed to acquire CSLock");
         }
     }
 
-    native boolean lock(int[] array);
-    native void unlock();
+    native boolean criticalSection(int[] array);
 }

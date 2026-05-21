@@ -22,11 +22,11 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "gc/epsilon/epsilonArguments.hpp"
 #include "gc/epsilon/epsilonHeap.hpp"
 #include "gc/shared/gcArguments.hpp"
 #include "gc/shared/tlab_globals.hpp"
+#include "logging/log.hpp"
 #include "runtime/globals.hpp"
 #include "runtime/globals_extension.hpp"
 
@@ -45,7 +45,7 @@ void EpsilonArguments::initialize() {
   }
 
   if (EpsilonMaxTLABSize < MinTLABSize) {
-    log_warning(gc)("EpsilonMaxTLABSize < MinTLABSize, adjusting it to " SIZE_FORMAT, MinTLABSize);
+    log_warning(gc)("EpsilonMaxTLABSize < MinTLABSize, adjusting it to %zu", MinTLABSize);
     EpsilonMaxTLABSize = MinTLABSize;
   }
 
@@ -67,7 +67,7 @@ void EpsilonArguments::initialize() {
 
 void EpsilonArguments::initialize_alignments() {
   size_t page_size = UseLargePages ? os::large_page_size() : os::vm_page_size();
-  size_t align = MAX2((size_t)os::vm_allocation_granularity(), page_size);
+  size_t align = MAX2(os::vm_allocation_granularity(), page_size);
   SpaceAlignment = align;
   HeapAlignment  = align;
 }

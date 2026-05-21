@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -49,50 +49,50 @@ public class AnnoTest {
 
         expect(out,
                 "RuntimeVisibleAnnotations:\n" +
-                "  0: #21(#22=B#23)\n" +
+                "  0: #24(#25=B#26)\n" +
                 "    AnnoTest$ByteAnno(\n" +
                 "      value=(byte) 42\n" +
                 "    )\n" +
-                "  1: #24(#22=S#25)\n" +
+                "  1: #27(#25=S#28)\n" +
                 "    AnnoTest$ShortAnno(\n" +
                 "      value=(short) 3\n" +
                 "    )");
         expect(out,
                 "RuntimeInvisibleAnnotations:\n" +
-                "  0: #27(#22=[J#28,J#30,J#32,J#34,J#36])\n" +
+                "  0: #30(#25=[J#31,J#33,J#35,J#37,J#39])\n" +
                 "    AnnoTest$ArrayAnno(\n" +
                 "      value=[1l,2l,3l,4l,5l]\n" +
                 "    )\n" +
-                "  1: #38(#22=Z#39)\n" +
+                "  1: #41(#25=Z#42)\n" +
                 "    AnnoTest$BooleanAnno(\n" +
                 "      value=false\n" +
                 "    )\n" +
-                "  2: #40(#41=c#42)\n" +
+                "  2: #43(#44=c#45)\n" +
                 "    AnnoTest$ClassAnno(\n" +
                 "      type=class Ljava/lang/Object;\n" +
                 "    )\n" +
-                "  3: #43(#44=e#45.#46)\n" +
+                "  3: #46(#47=e#48.#49)\n" +
                 "    AnnoTest$EnumAnno(\n" +
                 "      kind=Ljavax/lang/model/element/ElementKind;.PACKAGE\n" +
                 "    )\n" +
-                "  4: #47(#22=I#48)\n" +
+                "  4: #50(#25=I#51)\n" +
                 "    AnnoTest$IntAnno(\n" +
                 "      value=2\n" +
                 "    )\n" +
-                "  5: #49()\n" +
+                "  5: #52()\n" +
                 "    AnnoTest$IntDefaultAnno\n" +
-                "  6: #50(#51=s#52)\n" +
+                "  6: #53(#54=s#55)\n" +
                 "    AnnoTest$NameAnno(\n" +
                 "      name=\"NAME\"\n" +
                 "    )\n" +
-                "  7: #53(#54=D#55,#57=F#58)\n" +
+                "  7: #56(#57=D#58,#60=F#61)\n" +
                 "    AnnoTest$MultiAnno(\n" +
                 "      d=3.14159d\n" +
                 "      f=2.71828f\n" +
                 "    )\n" +
-                "  8: #59()\n" +
+                "  8: #62()\n" +
                 "    AnnoTest$SimpleAnno\n" +
-                "  9: #60(#22=@#47(#22=I#61))\n" +
+                "  9: #63(#25=@#50(#25=I#64))\n" +
                 "    AnnoTest$AnnoAnno(\n" +
                 "      value=@AnnoTest$IntAnno(\n" +
                 "        value=5\n" +
@@ -100,7 +100,7 @@ public class AnnoTest {
                 "    )");
         expect(out,
                 "RuntimeInvisibleTypeAnnotations:\n" +
-                "  0: #63(): CLASS_EXTENDS, type_index=0\n" +
+                "  0: #66(): CLASS_EXTENDS, type_index=0\n" +
                 "    AnnoTest$TypeAnno");
 
         if (errors > 0)

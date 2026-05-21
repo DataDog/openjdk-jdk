@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,36 +29,27 @@
 // Standard include file for ADLC parser
 //
 
+#include <ctype.h>
 // standard library constants
 #include <iostream>
-
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-#include <stdarg.h>
 #include <sys/types.h>
 
 /* Make sure that we have the intptr_t and uintptr_t definitions */
 #ifdef _WIN32
 
-#if _MSC_VER >= 1300
 using namespace std;
-#endif
 
-#if _MSC_VER >= 1400
 #define strdup _strdup
-#endif
-
-#if _MSC_VER < 1900
-#define snprintf _snprintf
-#endif
 
 #ifndef _INTPTR_T_DEFINED
 #ifdef _WIN64
 typedef __int64 intptr_t;
 #else
-typedef int intptr_t;
+#error "Unsupported platform"
 #endif
 #define _INTPTR_T_DEFINED
 #endif
@@ -67,7 +58,7 @@ typedef int intptr_t;
 #ifdef _WIN64
 typedef unsigned __int64 uintptr_t;
 #else
-typedef unsigned int uintptr_t;
+#error "Unsupported platform"
 #endif
 #define _UINTPTR_T_DEFINED
 #endif
@@ -93,19 +84,17 @@ typedef unsigned int uintptr_t;
 #define max(a, b)   (((a)>(b)) ? (a) : (b))
 
 // ADLC components
-#include "arena.hpp"
-#include "opto/adlcVMDeps.hpp"
-#include "filebuff.hpp"
-#include "dict2.hpp"
-#include "forms.hpp"
-#include "formsopt.hpp"
-#include "formssel.hpp"
-#include "archDesc.hpp"
+#include "adlArena.hpp"
 #include "adlparse.hpp"
+#include "archDesc.hpp"
 
 // globally define ArchDesc for convenience.  Alternatively every form
 // could have a backpointer to the AD but it's too complicated to pass
 // it everywhere it needs to be available.
 extern ArchDesc* globalAD;
+
+// Performs snprintf and asserts the result is non-negative (so there was not
+// an encoding error) and that the output was not truncated.
+extern int snprintf_checked(char* buf, size_t len, const char* fmt, ...);
 
 #endif // SHARE_ADLC_ADLC_HPP

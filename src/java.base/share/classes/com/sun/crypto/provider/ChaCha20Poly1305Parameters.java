@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -147,7 +147,7 @@ public final class ChaCha20Poly1305Parameters extends AlgorithmParametersSpi {
             T engineGetParameterSpec(Class<T> paramSpec)
         throws InvalidParameterSpecException {
 
-        if (IvParameterSpec.class.isAssignableFrom(paramSpec)) {
+        if (paramSpec.isAssignableFrom(IvParameterSpec.class)) {
             return paramSpec.cast(new IvParameterSpec(nonce));
         } else {
             throw new InvalidParameterSpecException
@@ -206,8 +206,7 @@ public final class ChaCha20Poly1305Parameters extends AlgorithmParametersSpi {
     protected String engineToString() {
         String LINE_SEP = System.lineSeparator();
         HexDumpEncoder encoder = new HexDumpEncoder();
-        StringBuilder sb = new StringBuilder(LINE_SEP + "nonce:" +
-                LINE_SEP + "[" + encoder.encodeBuffer(nonce) + "]");
-        return sb.toString();
+        return LINE_SEP + "nonce:" +
+                LINE_SEP + "[" + encoder.encodeBuffer(nonce) + "]";
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 
 package java.awt.geom;
 
+import java.awt.Rectangle;
 import java.io.IOException;
 import java.io.Serial;
 import java.io.Serializable;
@@ -777,7 +778,7 @@ public abstract class Arc2D extends RectangularShape {
      * elliptical boundary of the arc.
      *
      * @return A {@code Point2D} object representing the
-     * x,y coordinates  of the ending point of the arc.
+     * x,y coordinates of the ending point of the arc.
      * @since 1.2
      */
     public Point2D getEndPoint() {
@@ -1052,19 +1053,7 @@ public abstract class Arc2D extends RectangularShape {
     }
 
     /**
-     * Returns the high-precision framing rectangle of the arc.  The framing
-     * rectangle contains only the part of this {@code Arc2D} that is
-     * in between the starting and ending angles and contains the pie
-     * wedge, if this {@code Arc2D} has a {@code PIE} closure type.
-     * <p>
-     * This method differs from the
-     * {@link RectangularShape#getBounds() getBounds} in that the
-     * {@code getBounds} method only returns the bounds of the
-     * enclosing ellipse of this {@code Arc2D} without considering
-     * the starting and ending angles of this {@code Arc2D}.
-     *
-     * @return the {@code Rectangle2D} that represents the arc's
-     * framing rectangle.
+     * {@inheritDoc java.awt.Shape}
      * @since 1.2
      */
     public Rectangle2D getBounds2D() {
@@ -1108,6 +1097,15 @@ public abstract class Arc2D extends RectangularShape {
         x1 = getX() + (x1 * 0.5 + 0.5) * w;
         y1 = getY() + (y1 * 0.5 + 0.5) * h;
         return makeBounds(x1, y1, x2, y2);
+    }
+
+    /**
+     * {@inheritDoc java.awt.Shape}
+     * @since 1.2
+     */
+    @Override
+    public Rectangle getBounds() {
+        return getBounds2D().getBounds();
     }
 
     /**
@@ -1303,7 +1301,7 @@ public abstract class Arc2D extends RectangularShape {
          * outside of rectagle with left top corner coordinates
          * (min(center x, start point x, end point x),
          *  min(center y, start point y, end point y))
-         * and rigth bottom corner coordinates
+         * and right bottom corner coordinates
          * (max(center x, start point x, end point x),
          *  max(center y, start point y, end point y)).
          * So we'll check axis segments outside of rectangle above.

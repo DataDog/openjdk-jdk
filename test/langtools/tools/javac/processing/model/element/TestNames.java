@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
  * @test
  * @bug 6380016
  * @summary Test that the constraints guaranteed by the Filer and maintained
- * @author  Joseph D. Darcy
  * @library /tools/javac/lib
  * @modules java.compiler
  *          jdk.compiler
@@ -35,13 +34,7 @@
 
 import java.util.Set;
 import javax.annotation.processing.*;
-import javax.lang.model.SourceVersion;
-import static javax.lang.model.SourceVersion.*;
 import javax.lang.model.element.*;
-import javax.lang.model.util.*;
-import static javax.lang.model.util.ElementFilter.*;
-import static javax.tools.Diagnostic.Kind.*;
-import static javax.tools.StandardLocation.*;
 
 import java.io.*;
 
@@ -76,11 +69,9 @@ public class TestNames extends JavacTestingAbstractProcessor {
                 failed = true;
 
 
-            try {
-                // Force another round with a new context
-                PrintWriter pw = new PrintWriter(filer.createSourceFile("Foo").openWriter());
+            // Force another round with a new context
+            try (PrintWriter pw = new PrintWriter(filer.createSourceFile("Foo").openWriter())) {
                 pw.println("public class Foo {}");
-                pw.close();
             } catch (IOException ioe) {
                 throw new RuntimeException();
             }

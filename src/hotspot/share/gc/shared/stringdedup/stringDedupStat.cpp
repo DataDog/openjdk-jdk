@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "gc/shared/stringdedup/stringDedupStat.hpp"
+#include "jfr/jfrEvents.hpp"
 #include "logging/log.hpp"
 #include "utilities/globalDefinitions.hpp"
 
@@ -40,21 +40,19 @@ StringDedup::Stat::Stat() :
   _skipped_dead(0),
   _skipped_incomplete(0),
   _skipped_shared(0),
-  _concurrent(0),
+  _active(0),
   _idle(0),
   _process(0),
   _resize_table(0),
   _cleanup_table(0),
-  _block(0),
-  _concurrent_start(),
-  _concurrent_elapsed(),
+  _active_start(),
+  _active_elapsed(),
   _phase_start(),
   _idle_elapsed(),
   _process_elapsed(),
   _resize_table_elapsed(),
-  _cleanup_table_elapsed(),
-  _block_elapsed() {
-}
+  _cleanup_table_elapsed()
+{}
 
 void StringDedup::Stat::add(const Stat* const stat) {
   _inspected           += stat->_inspected;
@@ -69,21 +67,19 @@ void StringDedup::Stat::add(const Stat* const stat) {
   _skipped_dead        += stat->_skipped_dead;
   _skipped_incomplete  += stat->_skipped_incomplete;
   _skipped_shared      += stat->_skipped_shared;
-  _concurrent          += stat->_concurrent;
+  _active              += stat->_active;
   _idle                += stat->_idle;
   _process             += stat->_process;
   _resize_table        += stat->_resize_table;
   _cleanup_table       += stat->_cleanup_table;
-  _block               += stat->_block;
-  _concurrent_elapsed  += stat->_concurrent_elapsed;
+  _active_elapsed      += stat->_active_elapsed;
   _idle_elapsed        += stat->_idle_elapsed;
   _process_elapsed     += stat->_process_elapsed;
   _resize_table_elapsed += stat->_resize_table_elapsed;
   _cleanup_table_elapsed += stat->_cleanup_table_elapsed;
-  _block_elapsed       += stat->_block_elapsed;
 }
 
-// Support for log output formating
+// Support for log output formatting
 #define STRDEDUP_PERCENT_FORMAT         "%5.1f%%"
 #define STRDEDUP_PERCENT_FORMAT_NS      "%.1f%%"
 #define STRDEDUP_BYTES_FORMAT           "%8.1f%s"
@@ -96,36 +92,33 @@ static double strdedup_elapsed_param_ms(Tickspan t) {
 }
 
 void StringDedup::Stat::log_summary(const Stat* last_stat, const Stat* total_stat) {
-  double total_deduped_bytes_percent = 0.0;
-
-  if (total_stat->_new_bytes > 0) {
-    // Avoid division by zero
-    total_deduped_bytes_percent = percent_of(total_stat->_deduped_bytes, total_stat->_new_bytes);
-  }
-
   log_info(stringdedup)(
     "Concurrent String Deduplication "
-    "%zu/" STRDEDUP_BYTES_FORMAT_NS " (new), "
+    "%zu (inspected), "
+    "%zu/" STRDEDUP_BYTES_FORMAT_NS " (new unknown), "
     "%zu/" STRDEDUP_BYTES_FORMAT_NS " (deduped), "
-    "avg " STRDEDUP_PERCENT_FORMAT_NS ", "
+    "total avg deduped/new unknown bytes " STRDEDUP_PERCENT_FORMAT_NS ", "
+    STRDEDUP_BYTES_FORMAT_NS " (total deduped)," STRDEDUP_BYTES_FORMAT_NS " (total new unknown), "
     STRDEDUP_ELAPSED_FORMAT_MS " of " STRDEDUP_ELAPSED_FORMAT_MS,
+    last_stat->_inspected,
     last_stat->_new, STRDEDUP_BYTES_PARAM(last_stat->_new_bytes),
     last_stat->_deduped, STRDEDUP_BYTES_PARAM(last_stat->_deduped_bytes),
-    total_deduped_bytes_percent,
+    percent_of(total_stat->_deduped_bytes, total_stat->_new_bytes),
+    STRDEDUP_BYTES_PARAM(total_stat->_deduped_bytes), STRDEDUP_BYTES_PARAM(total_stat->_new_bytes),
     strdedup_elapsed_param_ms(last_stat->_process_elapsed),
-    strdedup_elapsed_param_ms(last_stat->_concurrent_elapsed));
+    strdedup_elapsed_param_ms(last_stat->_active_elapsed));
 }
 
-void StringDedup::Stat::report_concurrent_start() {
-  log_debug(stringdedup, phases, start)("Concurrent start");
-  _concurrent_start = Ticks::now();
-  _concurrent++;
+void StringDedup::Stat::report_active_start() {
+  log_debug(stringdedup, phases, start)("Active start");
+  _active_start = Ticks::now();
+  _active++;
 }
 
-void StringDedup::Stat::report_concurrent_end() {
-  _concurrent_elapsed += (Ticks::now() - _concurrent_start);
-  log_debug(stringdedup, phases)("Concurrent end: " STRDEDUP_ELAPSED_FORMAT_MS,
-                                 strdedup_elapsed_param_ms(_concurrent_elapsed));
+void StringDedup::Stat::report_active_end() {
+  _active_elapsed += (Ticks::now() - _active_start);
+  log_debug(stringdedup, phases)("Active end: " STRDEDUP_ELAPSED_FORMAT_MS,
+                                 strdedup_elapsed_param_ms(_active_elapsed));
 }
 
 void StringDedup::Stat::report_phase_start(const char* phase) {
@@ -194,38 +187,13 @@ void StringDedup::Stat::report_cleanup_table_end() {
   report_phase_end("Cleanup Table", &_cleanup_table_elapsed);
 }
 
-Tickspan* StringDedup::Stat::elapsed_for_phase(Phase phase) {
-  switch (phase) {
-  case Phase::process: return &_process_elapsed;
-  case Phase::resize_table: return &_resize_table_elapsed;
-  case Phase::cleanup_table: return &_cleanup_table_elapsed;
-  }
-  ShouldNotReachHere();
-  return nullptr;
-}
-
-void StringDedup::Stat::block_phase(Phase phase) {
-  Ticks now = Ticks::now();
-  *elapsed_for_phase(phase) += now - _phase_start;
-  _phase_start = now;
-  _block++;
-}
-
-void StringDedup::Stat::unblock_phase() {
-  Ticks now = Ticks::now();
-  _block_elapsed += now - _phase_start;
-  _phase_start = now;
-}
-
 void StringDedup::Stat::log_times(const char* prefix) const {
   log_debug(stringdedup)(
     "  %s Process: %zu/" STRDEDUP_ELAPSED_FORMAT_MS
-    ", Idle: %zu/" STRDEDUP_ELAPSED_FORMAT_MS
-    ", Blocked: %zu/" STRDEDUP_ELAPSED_FORMAT_MS,
+    ", Idle: %zu/" STRDEDUP_ELAPSED_FORMAT_MS,
     prefix,
     _process, strdedup_elapsed_param_ms(_process_elapsed),
-    _idle, strdedup_elapsed_param_ms(_idle_elapsed),
-    _block, strdedup_elapsed_param_ms(_block_elapsed));
+    _idle, strdedup_elapsed_param_ms(_idle_elapsed));
   if (_resize_table > 0) {
     log_debug(stringdedup)(
       "  %s Resize Table: %zu/" STRDEDUP_ELAPSED_FORMAT_MS,
@@ -238,7 +206,7 @@ void StringDedup::Stat::log_times(const char* prefix) const {
   }
 }
 
-void StringDedup::Stat::log_statistics(bool total) const {
+void StringDedup::Stat::log_statistics() const {
   double known_percent               = percent_of(_known, _inspected);
   double known_shared_percent        = percent_of(_known_shared, _inspected);
   double new_percent                 = percent_of(_new, _inspected);
@@ -246,16 +214,52 @@ void StringDedup::Stat::log_statistics(bool total) const {
   double deduped_bytes_percent       = percent_of(_deduped_bytes, _new_bytes);
   double replaced_percent            = percent_of(_replaced, _new);
   double deleted_percent             = percent_of(_deleted, _new);
-  log_times(total ? "Total" : "Last");
-  log_debug(stringdedup)("    Inspected:    %12zu", _inspected);
-  log_debug(stringdedup)("      Known:      %12zu(%5.1f%%)", _known, known_percent);
-  log_debug(stringdedup)("      Shared:     %12zu(%5.1f%%)", _known_shared, known_shared_percent);
-  log_debug(stringdedup)("      New:        %12zu(%5.1f%%)" STRDEDUP_BYTES_FORMAT,
+  log_debug(stringdedup)("    Inspected:     %12zu", _inspected);
+  log_debug(stringdedup)("      Known:       %12zu(%5.1f%%)", _known, known_percent);
+  log_debug(stringdedup)("      Shared:      %12zu(%5.1f%%)", _known_shared, known_shared_percent);
+  log_debug(stringdedup)("      New unknown: %12zu(%5.1f%%)" STRDEDUP_BYTES_FORMAT,
                          _new, new_percent, STRDEDUP_BYTES_PARAM(_new_bytes));
-  log_debug(stringdedup)("      Replaced:   %12zu(%5.1f%%)", _replaced, replaced_percent);
-  log_debug(stringdedup)("      Deleted:    %12zu(%5.1f%%)", _deleted, deleted_percent);
-  log_debug(stringdedup)("    Deduplicated: %12zu(%5.1f%%)" STRDEDUP_BYTES_FORMAT "(%5.1f%%)",
+  log_debug(stringdedup)("      Replaced:    %12zu(%5.1f%%)", _replaced, replaced_percent);
+  log_debug(stringdedup)("      Deleted:     %12zu(%5.1f%%)", _deleted, deleted_percent);
+  log_debug(stringdedup)("    Deduplicated:  %12zu(%5.1f%%)" STRDEDUP_BYTES_FORMAT "(%5.1f%%)",
                          _deduped, deduped_percent, STRDEDUP_BYTES_PARAM(_deduped_bytes), deduped_bytes_percent);
   log_debug(stringdedup)("    Skipped: %zu (dead), %zu (incomplete), %zu (shared)",
                          _skipped_dead, _skipped_incomplete, _skipped_shared);
+}
+
+void StringDedup::Stat::emit_statistics(bool total) const {
+  if (log_is_enabled(Debug, stringdedup)) {
+    log_times(total ? "Total" : "Last");
+    log_statistics();
+  }
+
+  if (total) {
+    // Send only JFR events about the last stats
+    return;
+  }
+
+  EventStringDeduplication e;
+  if (e.should_commit()) {
+    e.set_starttime(_active_start);
+    Ticks active_end = _active_start;
+    active_end += _active_elapsed;
+    e.set_endtime(active_end);
+
+    e.set_inspected(_inspected);
+    e.set_known(_known);
+    e.set_shared(_known_shared);
+    e.set_newStrings(_new);
+    e.set_newSize(_new_bytes);
+    e.set_replaced(_replaced);
+    e.set_deleted(_deleted);
+    e.set_deduplicated(_deduped);
+    e.set_deduplicatedSize(_deduped_bytes);
+    e.set_skippedDead(_skipped_dead);
+    e.set_skippedIncomplete(_skipped_incomplete);
+    e.set_skippedShared(_skipped_shared);
+    e.set_processing(_process_elapsed);
+    e.set_tableResize(_resize_table_elapsed);
+    e.set_tableCleanup(_cleanup_table_elapsed);
+    e.commit();
+  }
 }

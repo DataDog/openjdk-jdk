@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,8 +29,6 @@ import java.util.*;
 import java.awt.*;
 import java.awt.event.*;
 import javax.accessibility.*;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 
 /**
  * The {@code EventQueueMonitor} class provides key core functionality for Assistive
@@ -86,7 +84,7 @@ public class EventQueueMonitor
     /**
      * Class that tells us what the component event dispatch thread is.
      */
-    static private ComponentEvtDispatchThread cedt = null;
+    private static ComponentEvtDispatchThread cedt = null;
 
     /**
      * Handle the synchronization between the thing that populates the
@@ -142,24 +140,16 @@ public class EventQueueMonitor
     /**
      * Tell the {@code EventQueueMonitor} to start listening for events.
      */
-    @SuppressWarnings("removal")
     public static void maybeInitialize() {
         if (cedt == null) {
-            java.security.AccessController.doPrivileged(
-                new java.security.PrivilegedAction<Void>() {
-                    public Void run() {
-                        try {
-                            long eventMask = AWTEvent.WINDOW_EVENT_MASK |
-                                AWTEvent.FOCUS_EVENT_MASK |
-                                AWTEvent.MOUSE_MOTION_EVENT_MASK;
+            try {
+                long eventMask = AWTEvent.WINDOW_EVENT_MASK |
+                        AWTEvent.FOCUS_EVENT_MASK |
+                        AWTEvent.MOUSE_MOTION_EVENT_MASK;
 
-                            Toolkit.getDefaultToolkit().addAWTEventListener(new EventQueueMonitor(), eventMask);
-                        } catch (Exception e) {
-                        }
-                        return null;
-                    }
-                }
-            );
+                Toolkit.getDefaultToolkit().addAWTEventListener(new EventQueueMonitor(), eventMask);
+            } catch (Exception e) {
+            }
         }
     }
 
@@ -397,7 +387,7 @@ public class EventQueueMonitor
      * @param p the point to be accessed
      * @return the {@code Accessible} at the specified point
      */
-    static public Accessible getAccessibleAt(Point p) {
+    public static Accessible getAccessibleAt(Point p) {
         Window w = getTopLevelWindowWithFocus();
         Window[] wins = getTopLevelWindows();
         Component c = null;
@@ -464,7 +454,7 @@ public class EventQueueMonitor
      * @return true if the GUI subsystem has been initialized
      * @see #addGUIInitializedListener
      */
-    static public boolean isGUIInitialized() {
+    public static boolean isGUIInitialized() {
         maybeInitialize();
         return guiInitialized;
     }
@@ -478,7 +468,7 @@ public class EventQueueMonitor
      * @see #isGUIInitialized
      * @see #removeTopLevelWindowListener
      */
-    static public void addGUIInitializedListener(GUIInitializedListener l) {
+    public static void addGUIInitializedListener(GUIInitializedListener l) {
         maybeInitialize();
         guiInitializedListener =
             GUIInitializedMulticaster.add(guiInitializedListener,l);
@@ -491,7 +481,7 @@ public class EventQueueMonitor
      * @param l the listener to remove
      * @see #addGUIInitializedListener
      */
-    static public void removeGUIInitializedListener(GUIInitializedListener l) {
+    public static void removeGUIInitializedListener(GUIInitializedListener l) {
         guiInitializedListener =
             GUIInitializedMulticaster.remove(guiInitializedListener,l);
     }
@@ -503,7 +493,7 @@ public class EventQueueMonitor
      * @param l the listener to add
      * @see #removeTopLevelWindowListener
      */
-    static public void addTopLevelWindowListener(TopLevelWindowListener l) {
+    public static void addTopLevelWindowListener(TopLevelWindowListener l) {
         topLevelWindowListener =
             TopLevelWindowMulticaster.add(topLevelWindowListener,l);
     }
@@ -515,7 +505,7 @@ public class EventQueueMonitor
      * @param l the listener to remove
      * @see #addTopLevelWindowListener
      */
-    static public void removeTopLevelWindowListener(TopLevelWindowListener l) {
+    public static void removeTopLevelWindowListener(TopLevelWindowListener l) {
         topLevelWindowListener =
             TopLevelWindowMulticaster.remove(topLevelWindowListener,l);
     }
@@ -525,7 +515,7 @@ public class EventQueueMonitor
      *
      * @return the last recorded position of the mouse in screen coordinates
      */
-    static public Point getCurrentMousePosition() {
+    public static Point getCurrentMousePosition() {
         return currentMousePosition;
     }
 
@@ -534,7 +524,7 @@ public class EventQueueMonitor
      *
      * @return an array of top level {@code Window}s in use in the Java Virtual Machine
      */
-    static public Window[] getTopLevelWindows() {
+    public static Window[] getTopLevelWindows() {
 
         // Because this method is static, do not make it synchronized because
         // it can lock the whole class.  Instead, just lock what needs to be
@@ -559,7 +549,7 @@ public class EventQueueMonitor
      *
      * @return the top level {@code Window} that currently has keyboard focus
      */
-    static public Window getTopLevelWindowWithFocus() {
+    public static Window getTopLevelWindowWithFocus() {
         return topLevelWindowWithFocus;
     }
 }

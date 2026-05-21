@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,9 +36,8 @@ import javax.lang.model.type.DeclaredType;
  * method.  There is no guarantee that any particular annotation will
  * always be represented by the same object.
  *
- * @author Joseph D. Darcy
- * @author Scott Seligman
- * @author Peter von der Ah&eacute;
+ * @jls 9.6 Annotation Interfaces
+ * @jls 9.7 Annotations
  * @since 1.6
  */
 public interface AnnotationMirror {
@@ -50,7 +49,7 @@ public interface AnnotationMirror {
 
     /**
      * Returns the values of this annotation's elements.
-     * This is returned in the form of a map that associates elements
+     * These are returned in the form of a map that associates elements
      * with their corresponding values.
      * Only those elements with values explicitly present in the
      * annotation are included, not those that are implicitly assuming
@@ -58,7 +57,8 @@ public interface AnnotationMirror {
      * The order of the map matches the order in which the
      * values appear in the annotation's source.
      *
-     * <p>Note that an annotation mirror of a marker annotation type
+     * @apiNote
+     * An annotation mirror of a marker annotation interface
      * will by definition have an empty map.
      *
      * <p>To fill in default values, use {@link

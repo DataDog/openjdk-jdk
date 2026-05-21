@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,7 +36,7 @@ import javadoc.tester.JavadocTester;
 public class TestTitleInHref extends JavadocTester {
 
     public static void main(String... args) throws Exception {
-        TestTitleInHref tester = new TestTitleInHref();
+        var tester = new TestTitleInHref();
         tester.runTests();
     }
 
@@ -59,7 +59,7 @@ public class TestTitleInHref extends JavadocTester {
                     <a href="Interface.html" title="interface in pkg">""",
                 //Test to make sure that the title shows up in cross link shows up
                 "<a href=\"" + uri + """
-                    /java/io/File.html" title="class or interface in java.io" class="external-link">\
+                    /java/io/File.html" title="class in java.io" class="external-link">\
                     <code>This is a cross link to class File</code></a>""");
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,29 +24,27 @@
 /*
  *
  * @test
- * @bug 8215181 8230284 8231273
+ * @bug 8215181 8230284 8231273 8284840
  * @summary Tests the "u-cf" extension
  * @modules jdk.localedata
- * @run testng/othervm -Djava.locale.providers=CLDR CurrencyFormatTests
+ * @run junit CurrencyFormatTests
  */
 
-import static org.testng.Assert.assertEquals;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.text.NumberFormat;
 import java.util.Locale;
 
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Test NumberFormat with BCP47 u-cf extensions. Note that this test depends
  * on the particular CLDR release. Results may vary on other CLDR releases.
  */
-@Test
 public class CurrencyFormatTests {
 
-    @DataProvider(name="getInstanceData")
-    Object[][] getInstanceData() {
+    static Object[][] getInstanceData() {
         return new Object[][] {
             // Locale, amount, expected
             // US dollar
@@ -90,15 +88,16 @@ public class CurrencyFormatTests {
             {Locale.forLanguageTag("zh-CN-u-cf-standard"), -100, "-\u00a5100.00"},
             {Locale.forLanguageTag("zh-CN-u-cf-account"), -100, "(\u00a5100.00)"},
             {Locale.forLanguageTag("zh-CN-u-cf-bogus"), -100, "-\u00a5100.00"},
-            {Locale.forLanguageTag("ar-SA"), -100, "\u061c-\u0661\u0660\u0660\u066b\u0660\u0660\u00a0\u0631.\u0633.\u200f"},
-            {Locale.forLanguageTag("ar-SA-u-cf-standard"), -100, "\u061c-\u0661\u0660\u0660\u066b\u0660\u0660\u00a0\u0631.\u0633.\u200f"},
-            {Locale.forLanguageTag("ar-SA-u-cf-account"), -100, "\u061c-\u0661\u0660\u0660\u066b\u0660\u0660\u00a0\u0631.\u0633.\u200f"},
-            {Locale.forLanguageTag("ar-SA-u-cf-bogus"), -100, "\u061c-\u0661\u0660\u0660\u066b\u0660\u0660\u00a0\u0631.\u0633.\u200f"},
+            {Locale.forLanguageTag("ar-SA"), -100, "\u061c-\u200f\u0661\u0660\u0660\u066b\u0660\u0660\u00a0\u0631.\u0633.\u200f"},
+            {Locale.forLanguageTag("ar-SA-u-cf-standard"), -100, "\u061c-\u200f\u0661\u0660\u0660\u066b\u0660\u0660\u00a0\u0631.\u0633.\u200f"},
+            {Locale.forLanguageTag("ar-SA-u-cf-account"), -100, "\u061c-\u200f\u0661\u0660\u0660\u066b\u0660\u0660\u00a0\u0631.\u0633.\u200f"},
+            {Locale.forLanguageTag("ar-SA-u-cf-bogus"), -100, "\u061c-\u200f\u0661\u0660\u0660\u066b\u0660\u0660\u00a0\u0631.\u0633.\u200f"},
         };
     }
 
-    @Test(dataProvider="getInstanceData")
-    public void test_getInstance(Locale locale, int amount, String expected) {
-        assertEquals(NumberFormat.getCurrencyInstance(locale).format(amount), expected);
+    @MethodSource("getInstanceData")
+    @ParameterizedTest
+    void test_getInstance(Locale locale, int amount, String expected) {
+        assertEquals(expected, NumberFormat.getCurrencyInstance(locale).format(amount));
     }
 }
