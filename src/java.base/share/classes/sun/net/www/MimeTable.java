@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1994, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,67 +24,38 @@
  */
 
 package sun.net.www;
-import jdk.internal.util.StaticProperty;
 
-import java.io.*;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.InputStream;
+import java.io.IOException;
 import java.net.FileNameMap;
-import java.util.Hashtable;
 import java.util.Enumeration;
+import java.util.Locale;
+import java.util.Hashtable;
 import java.util.Properties;
 import java.util.StringTokenizer;
 
-public class MimeTable implements FileNameMap {
-    /** Keyed by content type, returns MimeEntries */
-    private Hashtable<String, MimeEntry> entries
-        = new Hashtable<String, MimeEntry>();
+public final class MimeTable implements FileNameMap {
+
+    /** Hash mark introducing a URI fragment */
+    private static final int HASH_MARK = '#';
 
     /** Keyed by file extension (with the .), returns MimeEntries */
-    private Hashtable<String, MimeEntry> extensionMap
-        = new Hashtable<String, MimeEntry>();
+    private final Hashtable<String, MimeEntry> extensionMap = new Hashtable<>();
 
-    // Will be reset if in the platform-specific data file
-    private static String tempFileTemplate;
-
-    static {
-        java.security.AccessController.doPrivileged(
-            new java.security.PrivilegedAction<Void>() {
-                public Void run() {
-                tempFileTemplate =
-                    System.getProperty("content.types.temp.file.template",
-                                       "/tmp/%s");
-
-                mailcapLocations = new String[] {
-                    System.getProperty("user.mailcap"),
-                    StaticProperty.userHome() + "/.mailcap",
-                    "/etc/mailcap",
-                    "/usr/etc/mailcap",
-                    "/usr/local/etc/mailcap",
-                };
-                return null;
-            }
-        });
-    }
-
-
-    private static final String filePreamble = "sun.net.www MIME content-types table";
-    private static final String fileMagic = "#" + filePreamble;
-
-    MimeTable() {
+    private MimeTable() {
         load();
     }
 
-    private static class DefaultInstanceHolder {
-        static final MimeTable defaultInstance = getDefaultInstance();
+    private static final class DefaultInstanceHolder {
+        private static final MimeTable defaultInstance = getDefaultInstance();
 
-        static MimeTable getDefaultInstance() {
-            return java.security.AccessController.doPrivileged(
-                new java.security.PrivilegedAction<MimeTable>() {
-                public MimeTable run() {
-                    MimeTable instance = new MimeTable();
-                    URLConnection.setFileNameMap(instance);
-                    return instance;
-                }
-            });
+        private static MimeTable getDefaultInstance() {
+            final MimeTable instance = new MimeTable();
+            URLConnection.setFileNameMap(instance);
+            return instance;
         }
     }
 
@@ -96,18 +67,6 @@ public class MimeTable implements FileNameMap {
         return DefaultInstanceHolder.defaultInstance;
     }
 
-    /**
-     *
-     */
-    public static FileNameMap loadTable() {
-        MimeTable mt = getDefaultTable();
-        return (FileNameMap)mt;
-    }
-
-    public synchronized int getSize() {
-        return entries.size();
-    }
-
     public synchronized String getContentTypeFor(String fileName) {
         MimeEntry entry = findByFileName(fileName);
         if (entry != null) {
@@ -117,113 +76,64 @@ public class MimeTable implements FileNameMap {
         }
     }
 
-    public synchronized void add(MimeEntry m) {
-        entries.put(m.getType(), m);
-
-        String exts[] = m.getExtensions();
+    private void add(MimeEntry m) {
+        String[] exts = m.getExtensions();
         if (exts == null) {
             return;
         }
 
-        for (int i = 0; i < exts.length; i++) {
-            extensionMap.put(exts[i], m);
+        for (String ext : exts) {
+            extensionMap.put(ext, m);
         }
-    }
-
-    public synchronized MimeEntry remove(String type) {
-        MimeEntry entry = entries.get(type);
-        return remove(entry);
-    }
-
-    public synchronized MimeEntry remove(MimeEntry entry) {
-        String[] extensionKeys = entry.getExtensions();
-        if (extensionKeys != null) {
-            for (int i = 0; i < extensionKeys.length; i++) {
-                extensionMap.remove(extensionKeys[i]);
-            }
-        }
-
-        return entries.remove(entry.getType());
-    }
-
-    public synchronized MimeEntry find(String type) {
-        MimeEntry entry = entries.get(type);
-        if (entry == null) {
-            // try a wildcard lookup
-            Enumeration<MimeEntry> e = entries.elements();
-            while (e.hasMoreElements()) {
-                MimeEntry wild = e.nextElement();
-                if (wild.matches(type)) {
-                    return wild;
-                }
-            }
-        }
-
-        return entry;
     }
 
     /**
-     * Locate a MimeEntry by the file extension that has been associated
-     * with it. Parses general file names, and URLs.
+     * Extracts the file extension and uses it to look up the entry.
      */
-    public MimeEntry findByFileName(String fname) {
-        String ext = "";
-
-        int i = fname.lastIndexOf('#');
-
-        if (i > 0) {
-            fname = fname.substring(0, i - 1);
-        }
-
-        i = fname.lastIndexOf('.');
-        // REMIND: OS specific delimters appear here
+    private MimeEntry findByFileExtension(String fname) {
+        int i = fname.lastIndexOf('.');
+        // REMIND: OS specific delimiters appear here
         i = Math.max(i, fname.lastIndexOf('/'));
         i = Math.max(i, fname.lastIndexOf('?'));
 
+        String ext = "";
         if (i != -1 && fname.charAt(i) == '.') {
-            ext = fname.substring(i).toLowerCase();
+            ext = fname.substring(i).toLowerCase(Locale.ROOT);
         }
 
-        return findByExt(ext);
+        return extensionMap.get(ext);
+
     }
 
     /**
-     * Locate a MimeEntry by the file extension that has been associated
-     * with it.
+     * Locate a MimeEntry by its associated file extension.
+     * Parses general file names, and URLs.
+     *
+     * @param fname the file name
+     *
+     * @return the MIME entry associated with the file name or {@code null}
      */
-    public synchronized MimeEntry findByExt(String fileExtension) {
-        return extensionMap.get(fileExtension);
-    }
+    private MimeEntry findByFileName(String fname) {
 
-    public synchronized MimeEntry findByDescription(String description) {
-        Enumeration<MimeEntry> e = elements();
-        while (e.hasMoreElements()) {
-            MimeEntry entry = e.nextElement();
-            if (description.equals(entry.getDescription())) {
+        // If an optional fragment introduced by a hash mark is
+        // present, then strip it and use the prefix
+        int hashIndex = fname.lastIndexOf(HASH_MARK);
+        if (hashIndex > 0) {
+            MimeEntry entry = findByFileExtension(fname.substring(0, hashIndex));
+            if (entry != null) {
                 return entry;
             }
         }
 
-        // We failed, now try treating description as type
-        return find(description);
+        // If either no optional fragment was present, or the entry was not
+        // found with the fragment stripped, then try again with the full name
+        return findByFileExtension(fname);
+
     }
 
-    String getTempFileTemplate() {
-        return tempFileTemplate;
-    }
-
-    public synchronized Enumeration<MimeEntry> elements() {
-        return entries.elements();
-    }
-
-    // For backward compatibility -- mailcap format files
-    // This is not currently used, but may in the future when we add ability
-    // to read BOTH the properties format and the mailcap format.
-    protected static String[] mailcapLocations;
-
-    public synchronized void load() {
+    private synchronized void load() {
         Properties entries = new Properties();
-        File file = null;
+        File file;
         InputStream in;
 
         // First try to load the user-specific table, if it exists
@@ -242,20 +152,19 @@ public class MimeTable implements FileNameMap {
                 throw new InternalError("default mime table not found");
         }
 
-        try (BufferedInputStream bin = new BufferedInputStream(in)) {
-            entries.load(bin);
+        try (in) {
+            entries.load(in);
         } catch (IOException e) {
             System.err.println("Warning: " + e.getMessage());
         }
         parse(entries);
     }
 
-    void parse(Properties entries) {
+    private void parse(Properties entries) {
         // first, strip out the platform-specific temp file template
         String tempFileTemplate = (String)entries.get("temp.file.template");
         if (tempFileTemplate != null) {
             entries.remove("temp.file.template");
-            MimeTable.tempFileTemplate = tempFileTemplate;
         }
 
         // now, parse the mime-type spec's
@@ -294,7 +203,7 @@ public class MimeTable implements FileNameMap {
     // associated with.
     //
 
-    void parse(String type, String attrs) {
+    private void parse(String type, String attrs) {
         MimeEntry newEntry = new MimeEntry(type);
 
         // REMIND handle embedded ';' and '|' and literal '"'
@@ -307,7 +216,7 @@ public class MimeTable implements FileNameMap {
         add(newEntry);
     }
 
-    void parse(String pair, MimeEntry entry) {
+    private static void parse(String pair, MimeEntry entry) {
         // REMIND add exception handling...
         String name = null;
         String value = null;
@@ -327,7 +236,7 @@ public class MimeTable implements FileNameMap {
         fill(entry, name, value);
     }
 
-    void fill(MimeEntry entry, String name, String value) {
+    private static void fill(MimeEntry entry, String name, String value) {
         if ("description".equalsIgnoreCase(name)) {
             entry.setDescription(value);
         }
@@ -347,18 +256,7 @@ public class MimeTable implements FileNameMap {
         // else illegal name exception
     }
 
-    String[] getExtensions(String list) {
-        StringTokenizer tokenizer = new StringTokenizer(list, ",");
-        int n = tokenizer.countTokens();
-        String[] extensions = new String[n];
-        for (int i = 0; i < n; i++) {
-            extensions[i] = tokenizer.nextToken();
-        }
-
-        return extensions;
-    }
-
-    int getActionCode(String action) {
+    private static int getActionCode(String action) {
         for (int i = 0; i < MimeEntry.actionKeywords.length; i++) {
             if (action.equalsIgnoreCase(MimeEntry.actionKeywords[i])) {
                 return i;
@@ -368,73 +266,4 @@ public class MimeTable implements FileNameMap {
         return MimeEntry.UNKNOWN;
     }
 
-    public Properties getAsProperties() {
-        Properties properties = new Properties();
-        Enumeration<MimeEntry> e = elements();
-        while (e.hasMoreElements()) {
-            MimeEntry entry = e.nextElement();
-            properties.put(entry.getType(), entry.toProperty());
-        }
-
-        return properties;
-    }
-
-    protected boolean saveAsProperties(File file) {
-        FileOutputStream os = null;
-        try {
-            os = new FileOutputStream(file);
-            Properties properties = getAsProperties();
-            properties.put("temp.file.template", tempFileTemplate);
-            String tag;
-            // Perform the property security check for user.name
-            SecurityManager sm = System.getSecurityManager();
-            if (sm != null) {
-                sm.checkPropertyAccess("user.name");
-            }
-            String user = StaticProperty.userName();
-            if (user != null) {
-                tag = "; customized for " + user;
-                properties.store(os, filePreamble + tag);
-            }
-            else {
-                properties.store(os, filePreamble);
-            }
-        }
-        catch (IOException e) {
-            e.printStackTrace();
-            return false;
-        }
-        finally {
-            if (os != null) {
-                try { os.close(); } catch (IOException e) {}
-            }
-        }
-
-        return true;
-    }
-    /*
-     * Debugging utilities
-     *
-    public void list(PrintStream out) {
-        Enumeration keys = entries.keys();
-        while (keys.hasMoreElements()) {
-            String key = (String)keys.nextElement();
-            MimeEntry entry = (MimeEntry)entries.get(key);
-            out.println(key + ": " + entry);
-        }
-    }
-
-    public static void main(String[] args) {
-        MimeTable testTable = MimeTable.getDefaultTable();
-
-        Enumeration e = testTable.elements();
-        while (e.hasMoreElements()) {
-            MimeEntry entry = (MimeEntry)e.nextElement();
-            System.out.println(entry);
-        }
-
-        testTable.save(File.separator + "tmp" +
-                       File.separator + "mime_table.save");
-    }
-    */
 }

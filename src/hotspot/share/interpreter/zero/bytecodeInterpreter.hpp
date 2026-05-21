@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -79,7 +79,6 @@ friend class AbstractInterpreterGenerator;
 friend class ZeroInterpreterGenerator;
 friend class InterpreterMacroAssembler;
 friend class frame;
-friend class VMStructs;
 
 public:
     enum messages {
@@ -503,7 +502,7 @@ static void dup2_x1(intptr_t *tos);   /* insert top 2 slots three down */
 static void dup2_x2(intptr_t *tos);   /* insert top 2 slots four down */
 static void swap(intptr_t *tos);      /* swap top two elements */
 
-template<bool JVMTI_ENABLED>
+template<bool JVMTI_ENABLED, bool REWRITE_BYTECODES>
 static void run(interpreterState istate);
 
 static void astore(intptr_t* topOfStack, int stack_offset,

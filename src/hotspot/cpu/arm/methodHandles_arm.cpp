@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,11 +26,11 @@
 // cross platform development for JSR292.
 // Last synchronization: changeset f8c9417e3571
 
-#include "precompiled.hpp"
-#include "jvm.h"
 #include "classfile/javaClasses.inline.hpp"
+#include "classfile/vmClasses.hpp"
 #include "interpreter/interpreter.hpp"
 #include "interpreter/interpreterRuntime.hpp"
+#include "jvm.h"
 #include "logging/log.hpp"
 #include "logging/logStream.hpp"
 #include "memory/allocation.inline.hpp"
@@ -38,6 +38,7 @@
 #include "prims/jvmtiExport.hpp"
 #include "prims/methodHandles.hpp"
 #include "runtime/frame.inline.hpp"
+#include "runtime/sharedRuntime.hpp"
 #include "runtime/stubRoutines.hpp"
 #include "utilities/preserveException.hpp"
 
@@ -53,7 +54,7 @@
 
 void MethodHandles::load_klass_from_Class(MacroAssembler* _masm, Register klass_reg, Register temp1, Register temp2) {
   if (VerifyMethodHandles) {
-    verify_klass(_masm, klass_reg, temp1, temp2, SystemDictionary::WK_KLASS_ENUM_NAME(java_lang_Class),
+    verify_klass(_masm, klass_reg, temp1, temp2, VM_CLASS_ID(java_lang_Class),
                  "MH argument is a Class");
   }
   __ ldr(klass_reg, Address(klass_reg, java_lang_Class::klass_offset()));
@@ -71,10 +72,10 @@ static int check_nonzero(const char* xname, int x) {
 
 #ifdef ASSERT
 void MethodHandles::verify_klass(MacroAssembler* _masm,
-                                 Register obj, Register temp1, Register temp2, SystemDictionary::WKID klass_id,
+                                 Register obj, Register temp1, Register temp2, vmClassID klass_id,
                                  const char* error_message) {
-  InstanceKlass** klass_addr = SystemDictionary::well_known_klass_addr(klass_id);
-  Klass* klass = SystemDictionary::well_known_klass(klass_id);
+  InstanceKlass** klass_addr = vmClasses::klass_addr_at(klass_id);
+  Klass* klass = vmClasses::klass_at(klass_id);
   Label L_ok, L_bad;
   BLOCK_COMMENT("verify_klass {");
   __ verify_oop(obj);
@@ -103,14 +104,13 @@ void MethodHandles::verify_ref_kind(MacroAssembler* _masm, int ref_kind, Registe
   __ andr(temp, temp, (unsigned)java_lang_invoke_MemberName::MN_REFERENCE_KIND_MASK);
   __ cmp(temp, ref_kind);
   __ b(L, eq);
-  { char* buf = NEW_C_HEAP_ARRAY(char, 100, mtInternal);
-  jio_snprintf(buf, 100, "verify_ref_kind expected %x", ref_kind);
+  const char* msg = ref_kind_to_verify_msg(ref_kind);
   if (ref_kind == JVM_REF_invokeVirtual ||
-      ref_kind == JVM_REF_invokeSpecial)
+      ref_kind == JVM_REF_invokeSpecial) {
     // could do this for all ref_kinds, but would explode assembly code size
-    trace_method_handle(_masm, buf);
-  __ stop(buf);
+    trace_method_handle(_masm, msg);
   }
+  __ stop(msg);
   BLOCK_COMMENT("} verify_ref_kind");
   __ bind(L);
 }
@@ -139,7 +139,7 @@ void MethodHandles::jump_from_method_handle(MacroAssembler* _masm, bool for_comp
 
   __ bind(L_no_such_method);
   // throw exception
-  __ jump(StubRoutines::throw_AbstractMethodError_entry(), relocInfo::runtime_call_type, Rtemp);
+  __ jump(SharedRuntime::throw_AbstractMethodError_entry(), relocInfo::runtime_call_type, Rtemp);
 }
 
 void MethodHandles::jump_to_lambda_form(MacroAssembler* _masm,
@@ -193,7 +193,7 @@ address MethodHandles::generate_method_handle_interpreter_entry(MacroAssembler* 
     // They are linked to Java-generated adapters via MethodHandleNatives.linkMethod.
     // They all require an extra argument.
     __ should_not_reach_here();           // empty stubs make SG sick
-    return NULL;
+    return nullptr;
   }
 
   // Rmethod: Method*
@@ -217,7 +217,7 @@ address MethodHandles::generate_method_handle_interpreter_entry(MacroAssembler* 
   if (VerifyMethodHandles) {
     Label L;
     BLOCK_COMMENT("verify_intrinsic_id {");
-    __ ldrh(rdi_temp, Address(rbx_method, Method::intrinsic_id_offset_in_bytes()));
+    __ ldrh(rdi_temp, Address(rbx_method, Method::intrinsic_id_offset()));
     __ sub_slow(rdi_temp, rdi_temp, (int) iid);
     __ cbz(rdi_temp, L);
     if (iid == vmIntrinsics::_linkToVirtual ||
@@ -272,6 +272,12 @@ address MethodHandles::generate_method_handle_interpreter_entry(MacroAssembler* 
   return entry_point;
 }
 
+void MethodHandles::jump_to_native_invoker(MacroAssembler* _masm, Register nep_reg, Register temp_target) {
+  BLOCK_COMMENT("jump_to_native_invoker {");
+  __ stop("Should not reach here");
+  BLOCK_COMMENT("} jump_to_native_invoker");
+}
+
 void MethodHandles::generate_method_handle_dispatch(MacroAssembler* _masm,
                                                     vmIntrinsics::ID iid,
                                                     Register receiver_reg,
@@ -301,11 +307,14 @@ void MethodHandles::generate_method_handle_dispatch(MacroAssembler* _masm,
     // indirect through MH.form.exactInvoker.vmtarget
     jump_to_lambda_form(_masm, receiver_reg, temp3, for_compiler_entry);
 
+  } else if (iid == vmIntrinsics::_linkToNative) {
+    assert(for_compiler_entry, "only compiler entry is supported");
+    jump_to_native_invoker(_masm, member_reg, temp1);
   } else {
     // The method is a member invoker used by direct method handles.
     if (VerifyMethodHandles) {
       // make sure the trailing argument really is a MemberName (caller responsibility)
-      verify_klass(_masm, member_reg, temp2, temp3, SystemDictionary::WK_KLASS_ENUM_NAME(java_lang_invoke_MemberName),
+      verify_klass(_masm, member_reg, temp2, temp3, VM_CLASS_ID(java_lang_invoke_MemberName),
                    "MemberName required for invokeVirtual etc.");
     }
 
@@ -321,7 +330,6 @@ void MethodHandles::generate_method_handle_dispatch(MacroAssembler* _masm,
         __ null_check(receiver_reg, temp3);
       } else {
         // load receiver klass itself
-        __ null_check(receiver_reg, temp3, oopDesc::klass_offset_in_bytes());
         __ load_klass(temp1_recv_klass, receiver_reg);
         __ verify_klass_ptr(temp1_recv_klass);
       }
@@ -452,7 +460,7 @@ void MethodHandles::generate_method_handle_dispatch(MacroAssembler* _masm,
 
     if (iid == vmIntrinsics::_linkToInterface) {
       __ bind(L_incompatible_class_change_error);
-      __ jump(StubRoutines::throw_IncompatibleClassChangeError_entry(), relocInfo::runtime_call_type, Rtemp);
+      __ jump(SharedRuntime::throw_IncompatibleClassChangeError_entry(), relocInfo::runtime_call_type, Rtemp);
     }
   }
 }
@@ -475,8 +483,8 @@ void trace_method_handle_stub(const char* adaptername,
                               intptr_t* saved_bp,
                               oop mh) {
   // called as a leaf from native code: do not block the JVM!
-  bool has_mh = (strstr(adaptername, "/static") == NULL &&
-                 strstr(adaptername, "linkTo") == NULL);    // static linkers don't have MH
+  bool has_mh = (strstr(adaptername, "/static") == nullptr &&
+                 strstr(adaptername, "linkTo") == nullptr);    // static linkers don't have MH
   intptr_t* entry_sp = (intptr_t*) &saved_regs[trace_mh_nregs]; // just after the saved regs
   intptr_t* saved_sp = (intptr_t*)  saved_regs[Rsender_sp->encoding()]; // save of Rsender_sp
   intptr_t* last_sp  = (intptr_t*)  saved_bp[frame::interpreter_frame_last_sp_offset];
@@ -487,11 +495,11 @@ void trace_method_handle_stub(const char* adaptername,
   if (!has_mh) {
     mh_reg_name = "R5";
   }
-  log_info(methodhandles)("MH %s %s=" PTR_FORMAT " sp=(" PTR_FORMAT "+" INTX_FORMAT ") stack_size=" INTX_FORMAT " bp=" PTR_FORMAT,
+  log_info(methodhandles)("MH %s %s=" PTR_FORMAT " sp=(" PTR_FORMAT "+%zd) stack_size=%zd bp=" PTR_FORMAT,
                           adaptername, mh_reg_name, mh_reg,
                           (intptr_t)entry_sp, (intptr_t)saved_sp - (intptr_t)entry_sp, (intptr_t)(base_sp - last_sp), (intptr_t)saved_bp);
 
-  if (last_sp != saved_sp && last_sp != NULL) {
+  if (last_sp != saved_sp && last_sp != nullptr) {
     log_info(methodhandles)("*** last_sp=" INTPTR_FORMAT, p2i(last_sp));
   }
   LogTarget(Trace, methodhandles) lt;
@@ -511,14 +519,15 @@ void trace_method_handle_stub(const char* adaptername,
     {
       // dump last frame (from JavaThread::print_frame_layout)
 
-      // Note: code is robust but the dumped informationm may not be
+      // Note: code is robust but the dumped information may not be
       // 100% correct, particularly with respect to the dumped
       // "unextended_sp". Getting it right for all trace_method_handle
       // call paths is not worth the complexity/risk. The correct slot
       // will be identified by *Rsender_sp anyway in the dump.
       JavaThread* p = JavaThread::active();
 
-      PRESERVE_EXCEPTION_MARK;
+      // may not be needed by safer and unexpensive here
+      PreserveExceptionMark pem(Thread::current());
       FrameValues values;
 
       intptr_t* dump_fp = (intptr_t *) saved_bp;

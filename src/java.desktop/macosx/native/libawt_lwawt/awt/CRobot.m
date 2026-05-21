@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,9 +23,8 @@
  * questions.
  */
 
-#import "jni_util.h"
+#import "JNIUtilities.h"
 
-#import <JavaNativeFoundation/JavaNativeFoundation.h>
 #import <ApplicationServices/ApplicationServices.h>
 
 #import "CRobotKeyCode.h"
@@ -47,10 +46,6 @@
 #define ROBOT_EVENT_NUMBER_START 32000
 
 #define k_JAVA_ROBOT_WHEEL_COUNT 1
-
-#if !defined(kCGBitmapByteOrder32Host)
-#define kCGBitmapByteOrder32Host 0
-#endif
 
 // In OS X, left and right mouse button share the same click count.
 // That is, if one starts clicking the left button rapidly and then
@@ -168,7 +163,7 @@ Java_sun_lwawt_macosx_CRobot_mouseEvent
 (JNIEnv *env, jobject peer, jint mouseLastX, jint mouseLastY, jint buttonsState,
  jboolean isButtonsDownState, jboolean isMouseMove)
 {
-    JNF_COCOA_ENTER(env);
+    JNI_COCOA_ENTER(env);
     autoDelay(isMouseMove);
 
     // This is the native method called when Robot mouse events occur.
@@ -254,7 +249,7 @@ Java_sun_lwawt_macosx_CRobot_mouseEvent
 
     PostMouseEvent(point, button, type, clickCount, eventNumber);
 
-    JNF_COCOA_EXIT(env);
+    JNI_COCOA_EXIT(env);
 }
 
 /*
@@ -297,6 +292,11 @@ Java_sun_lwawt_macosx_CRobot_keyEvent
         CGKeyCode keyCode = GetCGKeyCode(javaKeyCode);
         CGEventRef event = CGEventCreateKeyboardEvent(source, keyCode, keyPressed);
         if (event != NULL) {
+            CGEventFlags flags = CGEventSourceFlagsState(kCGEventSourceStateHIDSystemState);
+            if ((flags & kCGEventFlagMaskSecondaryFn) != 0) {
+                flags ^= kCGEventFlagMaskSecondaryFn;
+                CGEventSetFlags(event, flags);
+            }
             CGEventPost(kCGHIDEventTap, event);
             CFRelease(event);
         }
@@ -316,12 +316,17 @@ Java_sun_lwawt_macosx_CRobot_nativeGetScreenPixels
 (JNIEnv *env, jobject peer,
  jint x, jint y, jint width, jint height, jdouble scale, jintArray pixels)
 {
-    JNF_COCOA_ENTER(env);
+    JNI_COCOA_ENTER(env);
 
     jint picX = x;
     jint picY = y;
     jint picWidth = width;
     jint picHeight = height;
+    jsize size = (*env)->GetArrayLength(env, pixels);
+    if (size < (long) picWidth * picHeight || picWidth < 0 || picHeight < 0) {
+        JNU_ThrowInternalError(env, "Invalid arguments to get screen pixels");
+        return;
+    }
 
     CGRect screenRect = CGRectMake(picX / scale, picY / scale,
                                 picWidth / scale, picHeight / scale);
@@ -346,7 +351,7 @@ Java_sun_lwawt_macosx_CRobot_nativeGetScreenPixels
                                             8, picWidth * sizeof(jint),
                                             picColorSpace,
                                             kCGBitmapByteOrder32Host |
-                                            kCGImageAlphaPremultipliedFirst);
+                                            kCGImageAlphaNoneSkipFirst);
 
     CGColorSpaceRelease(picColorSpace);
 
@@ -362,7 +367,7 @@ Java_sun_lwawt_macosx_CRobot_nativeGetScreenPixels
     // release the Java int array back up to the JVM
     (*env)->ReleasePrimitiveArrayCritical(env, pixels, jPixelData, 0);
 
-    JNF_COCOA_EXIT(env);
+    JNI_COCOA_EXIT(env);
 }
 
 /****************************************************

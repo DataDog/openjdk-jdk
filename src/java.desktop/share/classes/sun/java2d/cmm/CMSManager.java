@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,30 +26,23 @@
 package sun.java2d.cmm;
 
 import java.awt.color.CMMException;
-import java.awt.color.ColorSpace;
 import java.awt.color.ICC_Profile;
-import java.security.AccessController;
 
-import sun.security.action.GetPropertyAction;
+public final class CMSManager {
 
-public class CMSManager {
-    public static ColorSpace GRAYspace;       // These two fields allow access
-    public static ColorSpace LINEAR_RGBspace; // to java.awt.color.ColorSpace
-                                              // private fields from other
-                                              // packages.  The fields are set
-                                              // by java.awt.color.ColorSpace
-                                              // and read by
-                                              // java.awt.image.ColorModel.
+    private static volatile PCMM cmmImpl;
 
-    private static PCMM cmmImpl = null;
+    public static PCMM getModule() {
+        PCMM loc = cmmImpl;
+        return loc != null ? loc : createModule();
+    }
 
-    public static synchronized PCMM getModule() {
+    private static synchronized PCMM createModule() {
         if (cmmImpl != null) {
             return cmmImpl;
         }
 
-        GetPropertyAction gpa = new GetPropertyAction("sun.java2d.cmm");
-        String cmmProviderClass = AccessController.doPrivileged(gpa);
+        String cmmProviderClass = System.getProperty("sun.java2d.cmm");
         CMMServiceProvider provider = null;
         if (cmmProviderClass != null) {
             try {
@@ -69,8 +62,7 @@ public class CMSManager {
                                    "No CM module found");
         }
 
-        gpa = new GetPropertyAction("sun.java2d.cmm.trace");
-        String cmmTrace = AccessController.doPrivileged(gpa);
+        String cmmTrace = System.getProperty("sun.java2d.cmm.trace");
         if (cmmTrace != null) {
             cmmImpl = new CMMTracer(cmmImpl);
         }
@@ -100,33 +92,19 @@ public class CMSManager {
             return p;
         }
 
-        public int getProfileSize(Profile p) {
-            System.err.print(cName + ".getProfileSize(ID=" + p + ")");
-            int size = tcmm.getProfileSize(p);
-            System.err.println("=" + size);
-            return size;
-        }
-
-        public void getProfileData(Profile p, byte[] data) {
+        public byte[] getProfileData(Profile p) {
             System.err.print(cName + ".getProfileData(ID=" + p + ") ");
+            byte[] data = tcmm.getProfileData(p);
             System.err.println("requested " + data.length + " byte(s)");
-            tcmm.getProfileData(p, data);
+            return data;
         }
 
-        public int getTagSize(Profile p, int tagSignature) {
-            System.err.printf(cName + ".getTagSize(ID=%x, TagSig=%s)",
-                              p, signatureToString(tagSignature));
-            int size = tcmm.getTagSize(p, tagSignature);
-            System.err.println("=" + size);
-            return size;
-        }
-
-        public void getTagData(Profile p, int tagSignature,
-                               byte[] data) {
+        public byte[] getTagData(Profile p, int tagSignature) {
             System.err.printf(cName + ".getTagData(ID=%x, TagSig=%s)",
                               p, signatureToString(tagSignature));
+            byte[] data = tcmm.getTagData(p, tagSignature);
             System.err.println(" requested " + data.length + " byte(s)");
-            tcmm.getTagData(p, tagSignature, data);
+            return data;
         }
 
         public void setTagData(Profile p, int tagSignature,
@@ -138,16 +116,11 @@ public class CMSManager {
         }
 
         /* methods for creating ColorTransforms */
-        public ColorTransform createTransform(ICC_Profile profile,
-                                              int renderType,
-                                              int transformType) {
-            System.err.println(cName + ".createTransform(ICC_Profile,int,int)");
-            return tcmm.createTransform(profile, renderType, transformType);
-        }
-
-        public ColorTransform createTransform(ColorTransform[] transforms) {
-            System.err.println(cName + ".createTransform(ColorTransform[])");
-            return tcmm.createTransform(transforms);
+        public ColorTransform createTransform(int renderingIntent,
+                                              ICC_Profile... profiles)
+        {
+            System.err.println(cName + ".createTransform(int, ICC_Profile...)");
+            return tcmm.createTransform(renderingIntent, profiles);
         }
 
         private static String signatureToString(int sig) {

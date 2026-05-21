@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,6 +33,7 @@ import java.net.ProxySelector;
 import java.net.Socket;
 import java.net.SocketAddress;
 import java.net.SocketOption;
+import java.net.URI;
 import java.net.http.HttpHeaders;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
@@ -47,8 +48,8 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Flow;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.IntStream;
-import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
@@ -56,13 +57,15 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import jdk.internal.net.http.common.FlowTube;
+import jdk.internal.net.http.common.TimeSource;
+import jdk.internal.net.http.common.TimeLine;
+import jdk.internal.net.http.common.Deadline;
 
 /**
  * @summary Verifies that the ConnectionPool correctly handle
  *          connection deadlines and purges the right connections
  *          from the cache.
  * @bug 8187044 8187111 8221395
- * @author danielfuchs
  */
 public class ConnectionPoolTest {
 
@@ -94,14 +97,15 @@ public class ConnectionPoolTest {
     }
 
     public static void testCacheCleaners() throws Exception {
-        ConnectionPool pool = new ConnectionPool(666);
+        final TimeLine timeLine = TimeSource.source();
+        ConnectionPool pool = new ConnectionPool(666, timeLine);
         HttpClient client = new HttpClientStub(pool);
         InetSocketAddress proxy = InetSocketAddress.createUnresolved("bar", 80);
         System.out.println("Adding 20 connections to pool");
         Random random = new Random();
 
         final int count = 20;
-        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        Deadline now = timeLine.instant().truncatedTo(ChronoUnit.SECONDS);
         int[] keepAlives = new int[count];
         HttpConnectionStub[] connections = new HttpConnectionStub[count];
         long purge = pool.purgeExpiredConnectionsAndReturnNextDeadline(now);
@@ -143,7 +147,7 @@ public class ConnectionPoolTest {
         }
         purge = mean * 1000;
         System.out.println("start purging at " + purge + " ms");
-        Instant next = now;
+        Deadline next = now;
         do {
            System.out.println("next purge is in " + purge + " ms");
            next = next.plus(purge, ChronoUnit.MILLIS);
@@ -180,7 +184,7 @@ public class ConnectionPoolTest {
         Random random = new Random();
 
         final int count = 20;
-        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        Deadline now = TimeSource.now().truncatedTo(ChronoUnit.SECONDS);
         int[] keepAlives = new int[count];
         HttpConnectionStub[] connections = new HttpConnectionStub[count];
         long purge = pool.purgeExpiredConnectionsAndReturnNextDeadline(now);
@@ -402,7 +406,7 @@ public class ConnectionPoolTest {
         }
         @Override
         public int read(ByteBuffer dst) throws IOException {
-            return error();
+            return isConnected() ? 0 : -1;
         }
         @Override
         public long read(ByteBuffer[] dsts, int offset, int length) throws IOException {
@@ -441,6 +445,8 @@ public class ConnectionPoolTest {
     // Emulates an HttpConnection that has a strong reference to its HttpClient.
     static class HttpConnectionStub extends HttpConnection {
 
+        static final AtomicLong IDS = new AtomicLong();
+
         public HttpConnectionStub(
                 HttpClient client,
                 InetSocketAddress address,
@@ -454,8 +460,10 @@ public class ConnectionPoolTest {
                 InetSocketAddress address,
                 InetSocketAddress proxy,
                 boolean secured) {
-            super(address, impl);
-            this.key = ConnectionPool.cacheKey(address, proxy);
+            final Origin originServer = Origin.from(
+                    URI.create("http://"+ address.getHostString() + ":" + address.getPort()));
+            super(originServer, address, impl, "testConn-" + IDS.incrementAndGet());
+            this.key = ConnectionPool.cacheKey(secured, address, proxy);
             this.address = address;
             this.proxy = proxy;
             this.secured = secured;
@@ -473,6 +481,12 @@ public class ConnectionPoolTest {
         final SocketChannel channel;
         volatile boolean closed, finished;
 
+        // Called from within super constructor
+        @Override
+        long newConnectionId(HttpClientImpl client) {
+            return IDS.incrementAndGet();
+        }
+
         // Used for testing closeOrReturnToPool.
         void finish(boolean finished) { this.finished = finished; }
         void reopen() { closed = finished = false;}
@@ -487,9 +501,15 @@ public class ConnectionPoolTest {
         @Override SocketChannel channel() {return channel;}
         @Override
         public void close() {
-            closed=finished=true;
-            System.out.println("closed: " + this);
+            this.close(null);
         }
+
+        @Override
+        void close(final Throwable cause) {
+            closed=finished=true;
+            System.out.println("closed: " + this + " cause: " + cause);
+        }
+
         @Override
         public String toString() {
             return "HttpConnectionStub: " + address + " proxy: " + proxy;

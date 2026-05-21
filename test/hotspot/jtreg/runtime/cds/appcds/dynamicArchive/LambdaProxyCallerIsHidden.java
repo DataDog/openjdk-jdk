@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,15 +32,18 @@
  * @modules java.base/jdk.internal.misc
  * @compile test-classes/LambdaProxyCallerIsHiddenApp.java
  *          ../../../../../../lib/jdk/test/lib/compiler/InMemoryJavaCompiler.java
- * @build sun.hotspot.WhiteBox
- * @run driver ClassFileInstaller -jar callerishidden.jar LambdaProxyCallerIsHiddenApp
+ * @build jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller -jar callerishidden.jar LambdaProxyCallerIsHiddenApp
  *                 jdk/test/lib/compiler/InMemoryJavaCompiler
  *                 jdk/test/lib/compiler/InMemoryJavaCompiler$FileManagerWrapper$1
  *                 jdk/test/lib/compiler/InMemoryJavaCompiler$FileManagerWrapper
- *                 jdk/test/lib/compiler/InMemoryJavaCompiler$MemoryJavaFileObject
- * @run driver ClassFileInstaller sun.hotspot.WhiteBox
+ *                 jdk/test/lib/compiler/InMemoryJavaCompiler$SourceFile
+ *                 jdk/test/lib/compiler/InMemoryJavaCompiler$ClassFile
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run main/othervm -XX:+UnlockDiagnosticVMOptions -XX:+WhiteBoxAPI -Xbootclasspath/a:. LambdaProxyCallerIsHidden
  */
+
+import jdk.test.lib.helpers.ClassFileInstaller;
 
 public class LambdaProxyCallerIsHidden extends DynamicArchiveTestBase {
     public static void main(String[] args) throws Exception {
@@ -56,8 +59,8 @@ public class LambdaProxyCallerIsHidden extends DynamicArchiveTestBase {
             "-Xlog:class+load,cds+dynamic,cds=debug",
             "-cp", appJar, mainClass)
             .assertNormalExit(output -> {
-                output.shouldMatch("Skipping.LambdaHello_0x.*[$][$]Lambda[$].*:.Hidden.class")
-                      .shouldMatch("Skipping.LambdaHello.0x.*:.Hidden.class")
+                output.shouldMatch("Skipping.LambdaHello_0x.*[$][$]Lambda.*:.Unreferenced.hidden.class")
+                      .shouldMatch("Skipping.LambdaHello.0x.*:.Unreferenced.hidden.class")
                       .shouldHaveExitValue(0);
             });
 
@@ -66,7 +69,7 @@ public class LambdaProxyCallerIsHidden extends DynamicArchiveTestBase {
             "-cp", appJar, mainClass)
             .assertNormalExit(output -> {
                 output.shouldMatch("class.load.*LambdaHello/0x.*source.*LambdaProxyCallerIsHiddenApp")
-                      .shouldMatch("class.load.*LambdaHello_0x.*[$][$]Lambda[$].*source.*LambdaProxyCallerIsHiddenApp")
+                      .shouldMatch("class.load.*LambdaHello_0x.*[$][$]Lambda.*source.*LambdaProxyCallerIsHiddenApp")
                       .shouldHaveExitValue(0);
             });
     }

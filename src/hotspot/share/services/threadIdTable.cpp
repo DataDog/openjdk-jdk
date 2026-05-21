@@ -1,6 +1,5 @@
-
 /*
-* Copyright (c) 2019, 2020, Oracle and/or its affiliates. All rights reserved.
+* Copyright (c) 2019, 2026, Oracle and/or its affiliates. All rights reserved.
 * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 *
 * This code is free software; you can redistribute it and/or modify it
@@ -23,11 +22,10 @@
 *
 */
 
-#include "precompiled.hpp"
-#include "classfile/javaClasses.hpp"
-#include "runtime/atomic.hpp"
+#include "classfile/javaClasses.inline.hpp"
+#include "runtime/handles.hpp"
 #include "runtime/interfaceSupport.inline.hpp"
-#include "runtime/thread.hpp"
+#include "runtime/javaThread.inline.hpp"
 #include "runtime/threadSMR.hpp"
 #include "runtime/timerTrace.hpp"
 #include "services/threadIdTable.hpp"
@@ -42,11 +40,11 @@ static const size_t END_SIZE = 24;
 static const size_t DEFAULT_TABLE_SIZE_LOG = 8;
 // Prefer short chains of avg 2
 static const double PREF_AVG_LIST_LEN = 2.0;
-static ThreadIdTableHash* volatile _local_table = NULL;
+static ThreadIdTableHash* volatile _local_table = nullptr;
 static volatile size_t _current_size = 0;
 static volatile size_t _items_count = 0;
 
-volatile bool ThreadIdTable::_is_initialized = false;
+Atomic<bool> ThreadIdTable::_is_initialized {false};
 volatile bool ThreadIdTable::_has_work = false;
 
 class ThreadIdTableEntry : public CHeapObj<mtInternal> {
@@ -69,46 +67,41 @@ class ThreadIdTableConfig : public AllStatic {
       jlong tid = value->tid();
       return primitive_hash(tid);
     }
-    static void* allocate_node(size_t size, Value const& value) {
+    static void* allocate_node(void* context, size_t size, Value const& value) {
       ThreadIdTable::item_added();
       return AllocateHeap(size, mtInternal);
     }
-    static void free_node(void* memory, Value const& value) {
+    static void free_node(void* context, void* memory, Value const& value) {
       delete value;
       FreeHeap(memory);
       ThreadIdTable::item_removed();
     }
 };
 
-static size_t ceil_log2(size_t val) {
-  size_t ret;
-  for (ret = 1; ((size_t)1 << ret) < val; ++ret);
-  return ret;
-}
-
 // Lazily creates the table and populates it with the given
 // thread list
 void ThreadIdTable::lazy_initialize(const ThreadsList *threads) {
-  if (!_is_initialized) {
+  if (!_is_initialized.load_acquire()) {
     {
-      // There is no obvious benefits in allowing the thread table
-      // to be concurently populated during the initalization.
+      // There is no obvious benefit in allowing the thread table
+      // to be concurrently populated during initialization.
       MutexLocker ml(ThreadIdTableCreate_lock);
-      if (_is_initialized) {
+      if (_is_initialized.load_relaxed()) {
         return;
       }
       create_table(threads->length());
-      _is_initialized = true;
+      _is_initialized.release_store(true);
     }
+
     for (uint i = 0; i < threads->length(); i++) {
       JavaThread* thread = threads->thread_at(i);
-      oop tobj = thread->threadObj();
-      if (tobj != NULL) {
-        jlong java_tid = java_lang_Thread::thread_id(tobj);
+      Handle tobj = Handle(JavaThread::current(), thread->threadObj());
+      if (tobj != nullptr) {
         MutexLocker ml(Threads_lock);
         if (!thread->is_exiting()) {
+          jlong java_tid = java_lang_Thread::thread_id(tobj());
           // Must be inside the lock to ensure that we don't add a thread to the table
-          // that has just passed the removal point in ThreadsSMRSupport::remove_thread()
+          // that has just passed the removal point in Threads::remove().
           add_thread(java_tid, thread);
         }
       }
@@ -117,26 +110,27 @@ void ThreadIdTable::lazy_initialize(const ThreadsList *threads) {
 }
 
 void ThreadIdTable::create_table(size_t size) {
-  assert(_local_table == NULL, "Thread table is already created");
-  size_t size_log = ceil_log2(size);
+  assert(_local_table == nullptr, "Thread table is already created");
+  size_t size_log = log2i_ceil(size);
   size_t start_size_log =
       size_log > DEFAULT_TABLE_SIZE_LOG ? size_log : DEFAULT_TABLE_SIZE_LOG;
   _current_size = (size_t)1 << start_size_log;
-  _local_table = new ThreadIdTableHash(start_size_log, END_SIZE);
+  _local_table =
+      new ThreadIdTableHash(start_size_log, END_SIZE, ThreadIdTableHash::DEFAULT_GROW_HINT);
 }
 
 void ThreadIdTable::item_added() {
-  Atomic::inc(&_items_count);
+  AtomicAccess::inc(&_items_count);
   log_trace(thread, table) ("Thread entry added");
 }
 
 void ThreadIdTable::item_removed() {
-  Atomic::dec(&_items_count);
+  AtomicAccess::dec(&_items_count);
   log_trace(thread, table) ("Thread entry removed");
 }
 
 double ThreadIdTable::get_load_factor() {
-  return ((double)_items_count) / _current_size;
+  return ((double)_items_count) / (double)_current_size;
 }
 
 size_t ThreadIdTable::table_size() {
@@ -179,7 +173,7 @@ void ThreadIdTable::grow(JavaThread* jt) {
   }
   gt.done(jt);
   _current_size = table_size();
-  log_info(thread, table)("Grown to size:" SIZE_FORMAT, _current_size);
+  log_info(thread, table)("Grown to size:%zu", _current_size);
 }
 
 class ThreadIdTableLookup : public StackObj {
@@ -192,12 +186,15 @@ public:
   uintx get_hash() const {
     return _hash;
   }
-  bool equals(ThreadIdTableEntry** value, bool* is_dead) {
+  bool equals(ThreadIdTableEntry** value) {
     bool equals = primitive_equals(_tid, (*value)->tid());
     if (!equals) {
       return false;
     }
     return true;
+  }
+  bool is_dead(ThreadIdTableEntry** value) {
+    return false;
   }
 };
 
@@ -205,7 +202,7 @@ class ThreadGet : public StackObj {
 private:
   JavaThread* _return;
 public:
-  ThreadGet(): _return(NULL) {}
+  ThreadGet(): _return(nullptr) {}
   void operator()(ThreadIdTableEntry** val) {
     _return = (*val)->thread();
   }
@@ -215,7 +212,7 @@ public:
 };
 
 void ThreadIdTable::do_concurrent_work(JavaThread* jt) {
-  assert(_is_initialized, "Thread table is not initialized");
+  assert(_is_initialized.load_relaxed(), "Thread table is not initialized");
   _has_work = false;
   double load_factor = get_load_factor();
   log_debug(thread, table)("Concurrent work, load factor: %g", load_factor);
@@ -225,7 +222,8 @@ void ThreadIdTable::do_concurrent_work(JavaThread* jt) {
 }
 
 JavaThread* ThreadIdTable::add_thread(jlong tid, JavaThread* java_thread) {
-  assert(_is_initialized, "Thread table is not initialized");
+  assert(Threads_lock->owned_by_self(), "Must hold Threads_lock");
+  assert(_is_initialized.load_relaxed(), "Thread table is not initialized");
   Thread* thread = Thread::current();
   ThreadIdTableLookup lookup(tid);
   ThreadGet tg;
@@ -244,7 +242,7 @@ JavaThread* ThreadIdTable::add_thread(jlong tid, JavaThread* java_thread) {
 }
 
 JavaThread* ThreadIdTable::find_thread_by_tid(jlong tid) {
-  assert(_is_initialized, "Thread table is not initialized");
+  assert(_is_initialized.load_relaxed(), "Thread table is not initialized");
   Thread* thread = Thread::current();
   ThreadIdTableLookup lookup(tid);
   ThreadGet tg;
@@ -253,7 +251,8 @@ JavaThread* ThreadIdTable::find_thread_by_tid(jlong tid) {
 }
 
 bool ThreadIdTable::remove_thread(jlong tid) {
-  assert(_is_initialized, "Thread table is not initialized");
+  assert(Threads_lock->owned_by_self(), "Must hold Threads_lock");
+  assert(_is_initialized.load_relaxed(), "Thread table is not initialized");
   Thread* thread = Thread::current();
   ThreadIdTableLookup lookup(tid);
   return _local_table->remove(thread, lookup);

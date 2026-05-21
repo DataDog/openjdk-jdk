@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,54 +25,39 @@
 #ifndef OS_POSIX_OS_POSIX_INLINE_HPP
 #define OS_POSIX_OS_POSIX_INLINE_HPP
 
+#include "os_posix.hpp"
+
+#include "runtime/mutex.hpp"
 #include "runtime/os.hpp"
 
-#ifdef SUPPORTS_CLOCK_MONOTONIC
-
-// Exported clock functionality
-
-inline bool os::Posix::supports_monotonic_clock() {
-  return _supports_monotonic_clock;
-}
-
-inline bool os::Posix::supports_clock_gettime() {
-  return _clock_gettime != NULL;
-}
-
-inline int os::Posix::clock_gettime(clockid_t clock_id, struct timespec *tp) {
-  return _clock_gettime != NULL ? _clock_gettime(clock_id, tp) : -1;
-}
-
-inline int os::Posix::clock_getres(clockid_t clock_id, struct timespec *tp) {
-  return _clock_getres != NULL ? _clock_getres(clock_id, tp) : -1;
-}
-
-#endif // SUPPORTS_CLOCK_MONOTONIC
+#include <netdb.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 // Platform Mutex/Monitor implementation
 
-inline void os::PlatformMutex::lock() {
+inline void PlatformMutex::lock() {
   int status = pthread_mutex_lock(mutex());
   assert_status(status == 0, status, "mutex_lock");
 }
 
-inline void os::PlatformMutex::unlock() {
+inline void PlatformMutex::unlock() {
   int status = pthread_mutex_unlock(mutex());
   assert_status(status == 0, status, "mutex_unlock");
 }
 
-inline bool os::PlatformMutex::try_lock() {
+inline bool PlatformMutex::try_lock() {
   int status = pthread_mutex_trylock(mutex());
   assert_status(status == 0 || status == EBUSY, status, "mutex_trylock");
   return status == 0;
 }
 
-inline void os::PlatformMonitor::notify() {
+inline void PlatformMonitor::notify() {
   int status = pthread_cond_signal(cond());
   assert_status(status == 0, status, "cond_signal");
 }
 
-inline void os::PlatformMonitor::notify_all() {
+inline void PlatformMonitor::notify_all() {
   int status = pthread_cond_broadcast(cond());
   assert_status(status == 0, status, "cond_broadcast");
 }

@@ -434,13 +434,11 @@ public class Basic {
             String name = info.getThreadName();
             if ("Signal Dispatcher".equals(name))
                 continue;
-            if ("Reference Handler".equals(name)
-                && info.getLockName().startsWith("java.lang.ref.Reference$Lock"))
+            if ("Reference Handler".equals(name))
                 continue;
-            if ("Finalizer".equals(name)
-                && info.getLockName().startsWith("java.lang.ref.ReferenceQueue$Lock"))
+            if ("Finalizer".equals(name))
                 continue;
-            if ("process reaper".equals(name))
+            if (name.startsWith("process reaper"))
                 continue;
             if (name != null && name.startsWith("ForkJoinPool.commonPool-worker"))
                 continue;

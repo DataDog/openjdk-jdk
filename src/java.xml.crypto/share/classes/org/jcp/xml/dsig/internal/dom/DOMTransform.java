@@ -21,10 +21,7 @@
  * under the License.
  */
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
- */
-/*
- * $Id: DOMTransform.java 1854026 2019-02-21 09:30:01Z coheigea $
+ * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
  */
 package org.jcp.xml.dsig.internal.dom;
 
@@ -101,10 +98,12 @@ public class DOMTransform extends DOMStructure implements Transform {
         }
     }
 
+    @Override
     public final AlgorithmParameterSpec getParameterSpec() {
         return spi.getParameterSpec();
     }
 
+    @Override
     public final String getAlgorithm() {
         return spi.getAlgorithm();
     }
@@ -119,7 +118,7 @@ public class DOMTransform extends DOMStructure implements Transform {
         Document ownerDoc = DOMUtils.getOwnerDocument(parent);
 
         Element transformElem = null;
-        if (parent.getLocalName().equals("Transforms")) {
+        if ("Transforms".equals(parent.getLocalName())) {
             transformElem = DOMUtils.createElement(ownerDoc, "Transform",
                                                    XMLSignature.XMLNS,
                                                    dsPrefix);
@@ -148,6 +147,7 @@ public class DOMTransform extends DOMStructure implements Transform {
      * @throws XMLSignatureException if an unexpected error occurs while
      *    executing the transform
      */
+    @Override
     public Data transform(Data data, XMLCryptoContext xc)
         throws TransformException
     {
@@ -167,6 +167,7 @@ public class DOMTransform extends DOMStructure implements Transform {
      * @throws XMLSignatureException if an unexpected error occurs while
      *    executing the transform
      */
+    @Override
     public Data transform(Data data, XMLCryptoContext xc, OutputStream os)
         throws TransformException
     {
@@ -207,7 +208,7 @@ public class DOMTransform extends DOMStructure implements Transform {
      * the specified {@code DOMSignContext} before transforming the data.
      *
      * @param data the data to be transformed
-     * @param sc the {@code XMLCryptoContext} containing
+     * @param xc the {@code XMLCryptoContext} containing
      *    additional context (may be {@code null} if not applicable)
      * @param context the marshalling context
      * @return the transformed data

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,11 +26,9 @@
 package sun.awt.X11;
 
 import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
 
 @SuppressWarnings("serial") // JDK-implementation class
-public class XCreateWindowParams extends HashMap<Object, Object> {
+public final class XCreateWindowParams extends HashMap<Object, Object> {
     public XCreateWindowParams() {
     }
     public XCreateWindowParams(Object[] map) {
@@ -38,7 +36,7 @@ public class XCreateWindowParams extends HashMap<Object, Object> {
     }
     private void init(Object[] map) {
         if (map.length % 2 != 0) {
-            throw new IllegalArgumentException("Map size should be devisible by two");
+            throw new IllegalArgumentException("Map size should be divisible by two");
         }
         for (int i = 0; i < map.length; i += 2) {
             put(map[i], map[i+1]);
@@ -80,12 +78,14 @@ public class XCreateWindowParams extends HashMap<Object, Object> {
         remove(key);
         return this;
     }
+    @Override
     public String toString() {
-        StringBuffer buf = new StringBuffer();
-        Iterator<Map.Entry<Object, Object>> eIter = entrySet().iterator();
-        while (eIter.hasNext()) {
-            Map.Entry<Object, Object> entry = eIter.next();
-            buf.append(entry.getKey() + ": " + entry.getValue() + "\n");
+        StringBuilder buf = new StringBuilder();
+        for (Entry<Object, Object> entry : entrySet()) {
+            buf.append(entry.getKey())
+               .append(": ")
+               .append(entry.getValue())
+               .append("\n");
         }
         return buf.toString();
     }

@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2017, 2018, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2017, 2021, Red Hat, Inc. All rights reserved.
+ * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,12 +24,11 @@
  */
 
 /*
- * @test TestStringDedupStress
+ * @test id=passive
  * @summary Test Shenandoah string deduplication implementation
  * @key randomness
  * @requires vm.gc.Shenandoah
  * @library /test/lib
- * @modules java.base/jdk.internal.misc:open
  * @modules java.base/java.lang:open
  *          java.management
  *
@@ -44,12 +44,27 @@
  */
 
 /*
- * @test TestStringDedupStress
+ * @test id=generational
  * @summary Test Shenandoah string deduplication implementation
  * @key randomness
  * @requires vm.gc.Shenandoah
  * @library /test/lib
- * @modules java.base/jdk.internal.misc:open
+ * @modules java.base/java.lang:open
+ *          java.management
+ *
+ * @run main/othervm -Xmx1g -Xlog:gc+stats -Xlog:gc -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions -XX:+UseStringDeduplication
+ *      -XX:+UseShenandoahGC -XX:ShenandoahGCMode=generational
+ *      -XX:+ShenandoahDegeneratedGC
+ *      -DtargetStrings=3000000
+ *      TestStringDedupStress
+ */
+
+/*
+ * @test id=default
+ * @summary Test Shenandoah string deduplication implementation
+ * @key randomness
+ * @requires vm.gc.Shenandoah
+ * @library /test/lib
  * @modules java.base/java.lang:open
  *          java.management
  *
@@ -74,61 +89,22 @@
  *      TestStringDedupStress
  */
 
- /*
- * @test TestStringDedupStress
- * @summary Test Shenandoah string deduplication implementation
- * @key randomness
- * @requires vm.gc.Shenandoah
- * @library /test/lib
- * @modules java.base/jdk.internal.misc:open
- * @modules java.base/java.lang:open
- *          java.management
- *
- * @run main/othervm -Xmx1g -Xlog:gc+stats -Xlog:gc -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions -XX:+UseStringDeduplication
- *      -XX:+UseShenandoahGC -XX:ShenandoahGCMode=iu
- *      TestStringDedupStress
- *
- * @run main/othervm -Xmx1g -Xlog:gc+stats -Xlog:gc -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions -XX:+UseStringDeduplication
- *      -XX:+UseShenandoahGC -XX:ShenandoahGCMode=iu -XX:ShenandoahGCHeuristics=aggressive
- *      -DtargetStrings=2000000
- *      TestStringDedupStress
- *
- * @run main/othervm -Xmx1g -Xlog:gc+stats -Xlog:gc -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions -XX:+UseStringDeduplication
- *      -XX:+UseShenandoahGC -XX:ShenandoahGCMode=iu
- *      -XX:+ShenandoahOOMDuringEvacALot
- *      -DtargetStrings=2000000
- *      TestStringDedupStress
- *
- * @run main/othervm -Xmx1g -Xlog:gc+stats -Xlog:gc -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions -XX:+UseStringDeduplication
- *      -XX:+UseShenandoahGC -XX:ShenandoahGCMode=iu -XX:ShenandoahGCHeuristics=aggressive
- *      -XX:+ShenandoahOOMDuringEvacALot
- *      -DtargetStrings=2000000
- *      TestStringDedupStress
- */
-
 import java.lang.management.*;
 import java.lang.reflect.*;
 import java.util.*;
 import jdk.test.lib.Utils;
 
-import sun.misc.*;
-
 public class TestStringDedupStress {
     private static Field valueField;
-    private static Unsafe unsafe;
 
     private static final int TARGET_STRINGS = Integer.getInteger("targetStrings", 2_500_000);
     private static final long MAX_REWRITE_GC_CYCLES = 6;
-    private static final long MAX_REWRITE_TIME = 30*1000; // ms
+    private static final long MAX_REWRITE_TIME_NS = 30L * 1_000_000_000L; // 30s in ns
 
     private static final int UNIQUE_STRINGS = 20;
 
     static {
         try {
-            Field field = Unsafe.class.getDeclaredField("theUnsafe");
-            field.setAccessible(true);
-            unsafe = (Unsafe) field.get(null);
-
             valueField = String.class.getDeclaredField("value");
             valueField.setAccessible(true);
         } catch (Exception e) {
@@ -221,7 +197,7 @@ public class TestStringDedupStress {
         }
 
         long cycleBeforeRewrite = gcCycleMBean.getCollectionCount();
-        long timeBeforeRewrite = System.currentTimeMillis();
+        long timeBeforeRewriteNanos = System.nanoTime();
 
         long loop = 1;
         while (true) {
@@ -239,7 +215,7 @@ public class TestStringDedupStress {
                 }
 
                 // enough time is spent waiting for GC to happen
-                if (System.currentTimeMillis() - timeBeforeRewrite >= MAX_REWRITE_TIME) {
+                if (System.nanoTime() - timeBeforeRewriteNanos >= MAX_REWRITE_TIME_NS) {
                     break;
                 }
             }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,6 +44,7 @@ import javax.tools.Diagnostic;
 import javax.tools.DiagnosticListener;
 import javax.tools.JavaFileManager;
 import javax.tools.JavaFileObject;
+import javax.tools.StandardLocation;
 
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
@@ -54,6 +55,7 @@ import com.sun.source.util.TaskEvent.Kind;
 import com.sun.source.util.TaskListener;
 import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Kinds;
+import com.sun.tools.javac.code.LintMapper;
 import com.sun.tools.javac.code.Preview;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symtab;
@@ -87,7 +89,7 @@ import com.sun.tools.javac.util.Options;
  * For each combination of options, a separate task/context is created and kept, as most option
  * values are cached inside components themselves.
  * <p>
- * When the compilation redefines sensitive classes (e.g. classes in the the java.* packages), the
+ * When the compilation redefines sensitive classes (e.g. classes in the java.* packages), the
  * task/context is not reused.
  * <p>
  * When the task is reused, then packages that were already listed won't be listed again.
@@ -251,6 +253,9 @@ public class JavacTaskPool {
         }
 
         void clear() {
+            //when patching modules (esp. java.base), it may be impossible to
+            //clear the symbols read from the patch path:
+            polluted |= get(JavaFileManager.class).hasLocation(StandardLocation.PATCH_MODULE_PATH);
             drop(Arguments.argsKey);
             drop(DiagnosticListener.class);
             drop(Log.outKey);
@@ -263,13 +268,12 @@ public class JavacTaskPool {
 
             if (ht.get(Log.logKey) instanceof ReusableLog) {
                 //log already inited - not first round
-                ((ReusableLog)Log.instance(this)).clear();
+                Log.instance(this).clear();
+                LintMapper.instance(this).clear();
                 Enter.instance(this).newRound();
                 ((ReusableJavaCompiler)ReusableJavaCompiler.instance(this)).clear();
                 Types.instance(this).newRound();
                 Check.instance(this).newRound();
-                Check.instance(this).clear(); //clear mandatory warning handlers
-                Preview.instance(this).clear(); //clear mandatory warning handlers
                 Modules.instance(this).newRound();
                 Annotate.instance(this).newRound();
                 CompileStates.instance(this).clear();
@@ -291,10 +295,9 @@ public class JavacTaskPool {
         TreeScanner<Void, Symtab> pollutionScanner = new TreeScanner<Void, Symtab>() {
             @Override @DefinedBy(Api.COMPILER_TREE)
             public Void scan(Tree tree, Symtab syms) {
-                if (tree instanceof LetExpr) {
-                    LetExpr le = (LetExpr) tree;
-                    scan(le.defs, syms);
-                    scan(le.expr, syms);
+                if (tree instanceof LetExpr letExpr) {
+                    scan(letExpr.defs, syms);
+                    scan(letExpr.expr, syms);
                     return null;
                 } else {
                     return super.scan(tree, syms);
@@ -356,7 +359,7 @@ public class JavacTaskPool {
          */
         static class ReusableJavaCompiler extends JavaCompiler {
 
-            final static Factory<JavaCompiler> factory = ReusableJavaCompiler::new;
+            static final Factory<JavaCompiler> factory = ReusableJavaCompiler::new;
 
             ReusableJavaCompiler(Context context) {
                 super(context);
@@ -383,7 +386,7 @@ public class JavacTaskPool {
          */
         static class ReusableLog extends Log {
 
-            final static Factory<Log> factory = ReusableLog::new;
+            static final Factory<Log> factory = ReusableLog::new;
 
             Context context;
 
@@ -392,11 +395,9 @@ public class JavacTaskPool {
                 this.context = context;
             }
 
-            void clear() {
-                recorded.clear();
-                sourceMap.clear();
-                nerrors = 0;
-                nwarnings = 0;
+            @Override
+            public void clear() {
+                super.clear();
                 //Set a fake listener that will lazily lookup the context for the 'real' listener. Since
                 //this field is never updated when a new task is created, we cannot simply reset the field
                 //or keep old value. This is a hack to workaround the limitations in the current infrastructure.

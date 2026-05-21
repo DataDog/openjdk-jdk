@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,11 +25,10 @@
 #ifndef SHARE_PRIMS_VECTORSUPPORT_HPP
 #define SHARE_PRIMS_VECTORSUPPORT_HPP
 
-#include "jni.h"
 #include "code/debugInfo.hpp"
-#include "memory/allocation.hpp"
-#include "oops/typeArrayOop.inline.hpp"
-#include "runtime/frame.inline.hpp"
+#include "jni.h"
+#include "memory/allStatic.hpp"
+#include "oops/typeArrayOop.hpp"
 #include "runtime/registerMap.hpp"
 #include "utilities/exceptions.hpp"
 
@@ -42,7 +41,7 @@ class VectorSupport : AllStatic {
   static Handle allocate_vector_payload(InstanceKlass* ik, frame* fr, RegisterMap* reg_map, ScopeValue* payload, TRAPS);
   static Handle allocate_vector_payload_helper(InstanceKlass* ik, frame* fr, RegisterMap* reg_map, Location location, TRAPS);
 
-  static void init_payload_element(typeArrayOop arr, bool is_mask, BasicType elem_bt, int index, address addr);
+  static void init_payload_element(typeArrayOop arr, BasicType elem_bt, int index, address addr);
 
   static BasicType klass2bt(InstanceKlass* ik);
   static jint klass2length(InstanceKlass* ik);
@@ -55,6 +54,7 @@ class VectorSupport : AllStatic {
     VECTOR_OP_ABS     = 0,
     VECTOR_OP_NEG     = 1,
     VECTOR_OP_SQRT    = 2,
+    VECTOR_OP_BIT_COUNT = 3,
 
     // Binary
     VECTOR_OP_ADD     = 4,
@@ -77,15 +77,89 @@ class VectorSupport : AllStatic {
 
     // Convert
     VECTOR_OP_CAST        = 17,
-    VECTOR_OP_REINTERPRET = 18
+    VECTOR_OP_UCAST       = 18,
+    VECTOR_OP_REINTERPRET = 19,
+
+    // Mask manipulation operations
+    VECTOR_OP_MASK_TRUECOUNT = 20,
+    VECTOR_OP_MASK_FIRSTTRUE = 21,
+    VECTOR_OP_MASK_LASTTRUE  = 22,
+    VECTOR_OP_MASK_TOLONG    = 23,
+
+    // Rotate operations
+    VECTOR_OP_LROTATE = 24,
+    VECTOR_OP_RROTATE = 25,
+
+    VECTOR_OP_COMPRESS = 26,
+    VECTOR_OP_EXPAND = 27,
+    VECTOR_OP_MASK_COMPRESS = 28,
+
+    VECTOR_OP_TZ_COUNT = 29,
+    VECTOR_OP_LZ_COUNT = 30,
+    VECTOR_OP_REVERSE  = 31,
+    VECTOR_OP_REVERSE_BYTES = 32,
+    VECTOR_OP_COMPRESS_BITS = 33,
+    VECTOR_OP_EXPAND_BITS = 34,
+
+    VECTOR_OP_TAN   = 101,
+    VECTOR_OP_TANH  = 102,
+    VECTOR_OP_SIN   = 103,
+    VECTOR_OP_SINH  = 104,
+    VECTOR_OP_COS   = 105,
+    VECTOR_OP_COSH  = 106,
+    VECTOR_OP_ASIN  = 107,
+    VECTOR_OP_ACOS  = 108,
+    VECTOR_OP_ATAN  = 109,
+    VECTOR_OP_ATAN2 = 110,
+    VECTOR_OP_CBRT  = 111,
+    VECTOR_OP_LOG   = 112,
+    VECTOR_OP_LOG10 = 113,
+    VECTOR_OP_LOG1P = 114,
+    VECTOR_OP_POW   = 115,
+    VECTOR_OP_EXP   = 116,
+    VECTOR_OP_EXPM1 = 117,
+    VECTOR_OP_HYPOT = 118,
+
+    VECTOR_OP_SADD  = 119,
+    VECTOR_OP_SSUB  = 120,
+    VECTOR_OP_SUADD = 121,
+    VECTOR_OP_SUSUB = 122,
+    VECTOR_OP_UMIN  = 123,
+    VECTOR_OP_UMAX  = 124,
   };
 
-  static int vop2ideal(jint vop, BasicType bt);
+  enum {
+    VEC_SIZE_64 = 0,
+    VEC_SIZE_128 = 1,
+    VEC_SIZE_256 = 2,
+    VEC_SIZE_512 = 3,
+    VEC_SIZE_SCALABLE = 4,
+    NUM_VEC_SIZES = 5
+  };
+
+  // Values in this enum correspond to the jdk.incubator.vector.LaneType ordinal values.
+  enum LaneType : int {
+    LT_FLOAT     = 0,
+    LT_DOUBLE    = 1,
+    LT_BYTE      = 2,
+    LT_SHORT     = 3,
+    LT_INT       = 4,
+    LT_LONG      = 5
+  };
+
+  enum {
+    MODE_BROADCAST = 0,
+    MODE_BITS_COERCED_LONG_TO_MASK = 1
+  };
+
+  static int vop2ideal(jint vop, LaneType lt);
+  static const char* lanetype2name(LaneType lane_type);
+  static bool has_scalar_op(jint id);
+  static bool is_unsigned_op(jint id);
 
   static instanceOop allocate_vector(InstanceKlass* holder, frame* fr, RegisterMap* reg_map, ObjectValue* sv, TRAPS);
 
   static bool is_vector(Klass* klass);
   static bool is_vector_mask(Klass* klass);
-  static bool is_vector_shuffle(Klass* klass);
 };
 #endif // SHARE_PRIMS_VECTORSUPPORT_HPP

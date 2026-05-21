@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,31 +26,22 @@
  * @bug 8199683
  * @summary Tests that escaped characters in URI are correctly
  *          handled (not re-escaped and not unescaped)
- * @library /test/lib http2/server
- * @build jdk.test.lib.net.SimpleSSLContext HttpServerAdapters EncodedCharsInURI
- * @modules java.base/sun.net.www.http
- *          java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- * @run testng/othervm
+ * @library /test/lib /test/jdk/java/net/httpclient/lib
+ * @build jdk.httpclient.test.lib.common.HttpServerAdapters jdk.test.lib.net.SimpleSSLContext
+ *        EncodedCharsInURI
+ * @run junit/othervm
  *        -Djdk.tls.acknowledgeCloseNotify=true
  *        -Djdk.internal.httpclient.debug=true
- *        -Djdk.httpclient.HttpClient.log=headers,errors EncodedCharsInURI
+ *        -Djdk.httpclient.HttpClient.log=headers,errors ${test.main.class}
  */
 //*        -Djdk.internal.httpclient.debug=true
 
-import com.sun.net.httpserver.HttpServer;
-import com.sun.net.httpserver.HttpsConfigurator;
-import com.sun.net.httpserver.HttpsServer;
+import jdk.httpclient.test.lib.http3.Http3TestServer;
 import jdk.test.lib.net.SimpleSSLContext;
-import org.testng.annotations.AfterClass;
-import org.testng.annotations.AfterTest;
-import org.testng.annotations.BeforeTest;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 
 import javax.net.ServerSocketFactory;
 import javax.net.ssl.SSLContext;
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -60,6 +51,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpClient.Version;
 import java.net.http.HttpRequest;
 import java.net.http.HttpRequest.BodyPublisher;
 import java.net.http.HttpRequest.BodyPublishers;
@@ -76,35 +68,47 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
+import jdk.httpclient.test.lib.common.HttpServerAdapters;
 
-import static java.lang.String.format;
-import static java.lang.System.in;
+import static java.lang.System.err;
 import static java.lang.System.out;
-import static java.nio.charset.StandardCharsets.US_ASCII;
+import static java.net.http.HttpClient.Version.HTTP_1_1;
+import static java.net.http.HttpClient.Version.HTTP_2;
+import static java.net.http.HttpClient.Version.HTTP_3;
+import static java.net.http.HttpOption.H3_DISCOVERY;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.net.http.HttpClient.Builder.NO_PROXY;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
+
+import org.junit.jupiter.api.AfterAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 public class EncodedCharsInURI implements HttpServerAdapters {
 
-    SSLContext sslContext;
-    HttpTestServer httpTestServer;    // HTTP/1.1    [ 4 servers ]
-    HttpTestServer httpsTestServer;   // HTTPS/1.1
-    HttpTestServer http2TestServer;   // HTTP/2 ( h2c )
-    HttpTestServer https2TestServer;  // HTTP/2 ( h2  )
-    DummyServer    httpDummyServer;    // HTTP/1.1    [ 2 servers ]
-    DummyServer    httpsDummyServer;   // HTTPS/1.1
-    String httpURI_fixed;
-    String httpURI_chunk;
-    String httpsURI_fixed;
-    String httpsURI_chunk;
-    String http2URI_fixed;
-    String http2URI_chunk;
-    String https2URI_fixed;
-    String https2URI_chunk;
-    String httpDummy;
-    String httpsDummy;
+    private static final SSLContext sslContext = SimpleSSLContext.findSSLContext();
+    private static HttpTestServer httpTestServer;    // HTTP/1.1    [ 4 servers ]
+    private static HttpTestServer httpsTestServer;   // HTTPS/1.1
+    private static HttpTestServer http2TestServer;   // HTTP/2 ( h2c )
+    private static HttpTestServer https2TestServer;  // HTTP/2 ( h2  )
+    private static DummyServer    httpDummyServer;   // HTTP/1.1    [ 2 servers ]
+    private static DummyServer    httpsDummyServer;  // HTTPS/1.1
+    private static HttpTestServer http3TestServer;   // HTTP/3 ( h3  )
+    private static String httpURI_fixed;
+    private static String httpURI_chunk;
+    private static String httpsURI_fixed;
+    private static String httpsURI_chunk;
+    private static String http2URI_fixed;
+    private static String http2URI_chunk;
+    private static String https2URI_fixed;
+    private static String https2URI_chunk;
+    private static String http3URI_fixed;
+    private static String http3URI_chunk;
+    private static String http3URI_head;
+    private static String httpDummy;
+    private static String httpsDummy;
 
     static final int ITERATION_COUNT = 1;
     // a shared executor helps reduce the amount of threads created by the test
@@ -122,7 +126,7 @@ public class EncodedCharsInURI implements HttpServerAdapters {
         return String.format("[%d s, %d ms, %d ns] ", secs, mill, nan);
     }
 
-    private volatile HttpClient sharedClient;
+    private static volatile HttpClient sharedClient;
 
     static class TestExecutor implements Executor {
         final AtomicLong tasks = new AtomicLong();
@@ -139,8 +143,8 @@ public class EncodedCharsInURI implements HttpServerAdapters {
                     command.run();
                 } catch (Throwable t) {
                     tasksFailed = true;
-                    System.out.printf(now() + "Task %s failed: %s%n", id, t);
-                    System.err.printf(now() + "Task %s failed: %s%n", id, t);
+                    out.printf(now() + "Task %s failed: %s%n", id, t);
+                    err.printf(now() + "Task %s failed: %s%n", id, t);
                     FAILURES.putIfAbsent("Task " + id, t);
                     throw t;
                 }
@@ -148,7 +152,7 @@ public class EncodedCharsInURI implements HttpServerAdapters {
         }
     }
 
-    @AfterClass
+    @AfterAll
     static final void printFailedTests() {
         out.println("\n=========================");
         try {
@@ -161,17 +165,19 @@ public class EncodedCharsInURI implements HttpServerAdapters {
                 e.getValue().printStackTrace(out);
             });
             if (tasksFailed) {
-                System.out.println("WARNING: Some tasks failed");
+                out.println("WARNING: Some tasks failed");
             }
         } finally {
             out.println("\n=========================\n");
         }
     }
 
-    private String[] uris() {
+    private static String[] uris() {
         return new String[] {
                 httpDummy,
                 httpsDummy,
+                http3URI_fixed,
+                http3URI_chunk,
                 httpURI_fixed,
                 httpURI_chunk,
                 httpsURI_fixed,
@@ -183,8 +189,7 @@ public class EncodedCharsInURI implements HttpServerAdapters {
         };
     }
 
-    @DataProvider(name = "noThrows")
-    public Object[][] noThrows() {
+    public static Object[][] noThrows() {
         String[] uris = uris();
         Object[][] result = new Object[uris.length * 2][];
         //Object[][] result = new Object[uris.length][];
@@ -200,20 +205,56 @@ public class EncodedCharsInURI implements HttpServerAdapters {
         return result;
     }
 
-    private HttpClient makeNewClient() {
+    static Version version(String uri) {
+        if (uri.contains("/http1/") || uri.contains("/https1/"))
+            return HTTP_1_1;
+        if (uri.contains("/http2/") || uri.contains("/https2/"))
+            return HTTP_2;
+        if (uri.contains("/http3/"))
+            return HTTP_3;
+        return null;
+    }
+
+    static HttpRequest.Builder newRequestBuilder(String uri) {
+        var builder = HttpRequest.newBuilder(URI.create(uri));
+        if (version(uri) == HTTP_3) {
+            builder.version(HTTP_3);
+            builder.setOption(H3_DISCOVERY, http3TestServer.h3DiscoveryConfig());
+        }
+        return builder;
+    }
+
+    static HttpResponse<String> headRequest(HttpClient client)
+            throws IOException, InterruptedException
+    {
+        out.println("\n" + now() + "--- Sending HEAD request ----\n");
+        err.println("\n" + now() + "--- Sending HEAD request ----\n");
+
+        var request = newRequestBuilder(http3URI_head)
+                .HEAD().version(HTTP_2).build();
+        var response = client.send(request, BodyHandlers.ofString());
+        assertEquals(200, response.statusCode());
+        assertEquals(HTTP_2, response.version());
+        out.println("\n" + now() + "--- HEAD request succeeded ----\n");
+        err.println("\n" + now() + "--- HEAD request succeeded ----\n");
+        return response;
+    }
+
+    private static HttpClient makeNewClient() {
         clientCount.incrementAndGet();
-        return HttpClient.newBuilder()
+        return HttpServerAdapters.createClientBuilderForH3()
                 .executor(executor)
                 .proxy(NO_PROXY)
                 .sslContext(sslContext)
                 .build();
     }
 
-    HttpClient newHttpClient(boolean share) {
+    private static final Object zis = new Object();
+    static HttpClient newHttpClient(boolean share) {
         if (!share) return makeNewClient();
         HttpClient shared = sharedClient;
         if (shared != null) return shared;
-        synchronized (this) {
+        synchronized (zis) {
             shared = sharedClient;
             if (shared == null) {
                 shared = sharedClient = makeNewClient();
@@ -224,53 +265,63 @@ public class EncodedCharsInURI implements HttpServerAdapters {
 
     final String ENCODED = "/01%252F03/";
 
-    @Test(dataProvider = "noThrows")
+    record CloseableClient(HttpClient client, boolean shared)
+            implements Closeable {
+        public void close() {
+            if (shared) return;
+            client.close();
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("noThrows")
     public void testEncodedChars(String uri, boolean sameClient)
             throws Exception {
         HttpClient client = null;
         out.printf("%n%s testEncodedChars(%s, %b)%n", now(), uri, sameClient);
         uri = uri + ENCODED;
         for (int i=0; i< ITERATION_COUNT; i++) {
-            if (!sameClient || client == null)
+            if (!sameClient || client == null) {
                 client = newHttpClient(sameClient);
+                if (!sameClient && version(uri) == HTTP_3) {
+                    headRequest(client);
+                }
+            }
+            try (var cl = new CloseableClient(client, sameClient)) {
+                BodyPublisher bodyPublisher = BodyPublishers.ofString(uri);
 
-            BodyPublisher bodyPublisher = BodyPublishers.ofString(uri);
-
-            HttpRequest req = HttpRequest.newBuilder(URI.create(uri))
-                    .POST(bodyPublisher)
-                    .build();
-            BodyHandler<String> handler = BodyHandlers.ofString();
-            CompletableFuture<HttpResponse<String>> responseCF = client.sendAsync(req, handler);
-            HttpResponse<String> response = responseCF.join();
-            String body = response.body();
-            if (!uri.contains(body)) {
-                System.err.println("Test failed: " + response);
-                throw new RuntimeException(uri + " doesn't contain '" + body + "'");
-            } else {
-                System.out.println("Found expected " + body + " in " + uri);
+                HttpRequest req = newRequestBuilder(uri)
+                        .POST(bodyPublisher)
+                        .build();
+                BodyHandler<String> handler = BodyHandlers.ofString();
+                CompletableFuture<HttpResponse<String>> responseCF = client.sendAsync(req, handler);
+                HttpResponse<String> response = responseCF.join();
+                String body = response.body();
+                if (!uri.contains(body)) {
+                    err.println("Test failed: " + response);
+                    throw new RuntimeException(uri + " doesn't contain '" + body + "'");
+                } else {
+                    out.println("Found expected " + body + " in " + uri);
+                }
+                assertEquals(version(uri), response.version());
             }
         }
     }
 
-    @BeforeTest
-    public void setup() throws Exception {
-        sslContext = new SimpleSSLContext().get();
-        if (sslContext == null)
-            throw new AssertionError("Unexpected null sslContext");
+    @BeforeAll
+    public static void setup() throws Exception {
+        out.println(now() + "begin setup");
 
         // HTTP/1.1
         HttpTestHandler h1_fixedLengthHandler = new HTTP_FixedLengthHandler();
         HttpTestHandler h1_chunkHandler = new HTTP_ChunkedHandler();
-        InetSocketAddress sa = new InetSocketAddress(InetAddress.getLoopbackAddress(), 0);
-        httpTestServer = HttpTestServer.of(HttpServer.create(sa, 0));
+        httpTestServer = HttpTestServer.create(HTTP_1_1);
         httpTestServer.addHandler(h1_fixedLengthHandler, "/http1/fixed");
         httpTestServer.addHandler(h1_chunkHandler, "/http1/chunk");
         httpURI_fixed = "http://" + httpTestServer.serverAuthority() + "/http1/fixed/x";
         httpURI_chunk = "http://" + httpTestServer.serverAuthority() + "/http1/chunk/x";
 
-        HttpsServer httpsServer = HttpsServer.create(sa, 0);
-        httpsServer.setHttpsConfigurator(new HttpsConfigurator(sslContext));
-        httpsTestServer = HttpTestServer.of(httpsServer);
+        httpsTestServer = HttpTestServer.create(HTTP_1_1, sslContext);
         httpsTestServer.addHandler(h1_fixedLengthHandler, "/https1/fixed");
         httpsTestServer.addHandler(h1_chunkHandler, "/https1/chunk");
         httpsURI_fixed = "https://" + httpsTestServer.serverAuthority() + "/https1/fixed/x";
@@ -280,41 +331,71 @@ public class EncodedCharsInURI implements HttpServerAdapters {
         HttpTestHandler h2_fixedLengthHandler = new HTTP_FixedLengthHandler();
         HttpTestHandler h2_chunkedHandler = new HTTP_ChunkedHandler();
 
-        http2TestServer = HttpTestServer.of(new Http2TestServer("localhost", false, 0));
+        http2TestServer = HttpTestServer.create(HTTP_2);
         http2TestServer.addHandler(h2_fixedLengthHandler, "/http2/fixed");
         http2TestServer.addHandler(h2_chunkedHandler, "/http2/chunk");
         http2URI_fixed = "http://" + http2TestServer.serverAuthority() + "/http2/fixed/x";
         http2URI_chunk = "http://" + http2TestServer.serverAuthority() + "/http2/chunk/x";
 
-        https2TestServer = HttpTestServer.of(new Http2TestServer("localhost", true, sslContext));
+        https2TestServer = HttpTestServer.create(HTTP_2, sslContext);
         https2TestServer.addHandler(h2_fixedLengthHandler, "/https2/fixed");
         https2TestServer.addHandler(h2_chunkedHandler, "/https2/chunk");
         https2URI_fixed = "https://" + https2TestServer.serverAuthority() + "/https2/fixed/x";
         https2URI_chunk = "https://" + https2TestServer.serverAuthority() + "/https2/chunk/x";
 
         // DummyServer
+        InetSocketAddress sa = new InetSocketAddress(InetAddress.getLoopbackAddress(), 0);
         httpDummyServer = DummyServer.create(sa);
         httpsDummyServer = DummyServer.create(sa, sslContext);
         httpDummy = "http://" + httpDummyServer.serverAuthority() + "/http1/dummy/x";
         httpsDummy = "https://" + httpsDummyServer.serverAuthority() + "/https1/dummy/x";
 
+        // HTTP/3
+        HttpTestHandler h3_fixedLengthHandler = new HTTP_FixedLengthHandler();
+        HttpTestHandler h3_chunkedHandler = new HTTP_ChunkedHandler();
+        http3TestServer = HttpTestServer.create(HTTP_3, sslContext);
+        http3TestServer.addHandler(h3_fixedLengthHandler, "/http3/fixed");
+        http3TestServer.addHandler(h3_chunkedHandler, "/http3/chunk");
+        http3TestServer.addHandler(new HttpHeadOrGetHandler(), "/http3/head");
+        http3URI_fixed = "https://" + http3TestServer.serverAuthority() + "/http3/fixed/x";
+        http3URI_chunk = "https://" + http3TestServer.serverAuthority() + "/http3/chunk/x";
+        http3URI_head = "https://" + http3TestServer.serverAuthority() + "/http3/head/x";
 
-        serverCount.addAndGet(6);
+        err.println(now() + "Starting servers");
+
+        serverCount.addAndGet(7);
         httpTestServer.start();
         httpsTestServer.start();
         http2TestServer.start();
         https2TestServer.start();
         httpDummyServer.start();
         httpsDummyServer.start();
+        http3TestServer.start();
+
+        out.println("HTTP/1.1 dummy server (http) listening at: " + httpDummyServer.serverAuthority());
+        out.println("HTTP/1.1 dummy server (TLS)  listening at: " + httpsDummyServer.serverAuthority());
+        out.println("HTTP/1.1 server       (http) listening at: " + httpTestServer.serverAuthority());
+        out.println("HTTP/1.1 server       (TLS)  listening at: " + httpsTestServer.serverAuthority());
+        out.println("HTTP/2   server       (h2c)  listening at: " + http2TestServer.serverAuthority());
+        out.println("HTTP/2   server       (h2)   listening at: " + https2TestServer.serverAuthority());
+        out.println("HTTP/3   server       (h2)   listening at: " + http3TestServer.serverAuthority());
+        out.println(" + alt endpoint       (h3)   listening at: " + http3TestServer.getH3AltService()
+                .map(Http3TestServer::getAddress));
+
+        headRequest(newHttpClient(true));
+
+        out.println(now() + "setup done");
+        err.println(now() + "setup done");
     }
 
-    @AfterTest
-    public void teardown() throws Exception {
-        sharedClient = null;
+    @AfterAll
+    public static void teardown() throws Exception {
+        sharedClient.close();
         httpTestServer.stop();
         httpsTestServer.stop();
         http2TestServer.stop();
         https2TestServer.stop();
+        http3TestServer.stop();
         httpDummyServer.stopServer();
         httpsDummyServer.stopServer();
     }
@@ -391,14 +472,13 @@ public class EncodedCharsInURI implements HttpServerAdapters {
                 while(!stopped) {
                     Socket clientConnection = ss.accept();
                     connections.add(clientConnection);
-                    System.out.println(now() + getName() + ": Client accepted");
+                    out.println(now() + getName() + ": Client accepted");
                     StringBuilder headers = new StringBuilder();
-                    Socket targetConnection = null;
                     InputStream  ccis = clientConnection.getInputStream();
                     OutputStream ccos = clientConnection.getOutputStream();
-                    System.out.println(now() + getName() + ": Reading request line");
+                    out.println(now() + getName() + ": Reading request line");
                     String requestLine = readLine(ccis);
-                    System.out.println(now() + getName() + ": Request line: " + requestLine);
+                    out.println(now() + getName() + ": Request line: " + requestLine);
 
                     StringTokenizer tokenizer = new StringTokenizer(requestLine);
                     String method = tokenizer.nextToken();
@@ -409,7 +489,7 @@ public class EncodedCharsInURI implements HttpServerAdapters {
                         String hostport = serverAuthority();
                         uri = new URI((secure ? "https" : "http") +"://" + hostport + path);
                     } catch (Throwable x) {
-                        System.err.printf("Bad target address: \"%s\" in \"%s\"%n",
+                        err.printf("Bad target address: \"%s\" in \"%s\"%n",
                                 path, requestLine);
                         clientConnection.close();
                         continue;
@@ -419,7 +499,7 @@ public class EncodedCharsInURI implements HttpServerAdapters {
                     // signals the end of all headers.
                     String line = requestLine;
                     while (!line.equals("")) {
-                        System.out.println(now() + getName() + ": Reading header: "
+                        out.println(now() + getName() + ": Reading header: "
                                 + (line = readLine(ccis)));
                         headers.append(line).append("\r\n");
                     }
@@ -436,11 +516,11 @@ public class EncodedCharsInURI implements HttpServerAdapters {
                         StringTokenizer tk = new StringTokenizer(cl);
                         int len = Integer.parseInt(tk.nextToken());
                         assert len < b.length * 2;
-                        System.out.println(now() + getName()
+                        out.println(now() + getName()
                                 + ": received body: "
                                 + new String(ccis.readNBytes(len), UTF_8));
                     }
-                    System.out.println(now()
+                    out.println(now()
                             + getName() + ": sending back " + uri);
 
                     response.append("HTTP/1.1 200 OK\r\nContent-Length: ")
@@ -448,21 +528,21 @@ public class EncodedCharsInURI implements HttpServerAdapters {
                             .append("\r\n\r\n");
 
                     // Then send the 200 OK response to the client
-                    System.out.println(now() + getName() + ": Sending "
+                    out.println(now() + getName() + ": Sending "
                             + response);
                     ccos.write(response.toString().getBytes(UTF_8));
                     ccos.flush();
-                    System.out.println(now() + getName() + ": sent response headers");
+                    out.println(now() + getName() + ": sent response headers");
                     ccos.write(b);
                     ccos.flush();
                     ccos.close();
-                    System.out.println(now() + getName() + ": sent " + b.length + " body bytes");
+                    out.println(now() + getName() + ": sent " + b.length + " body bytes");
                     connections.remove(clientConnection);
                     clientConnection.close();
                 }
             } catch (Throwable t) {
                 if (!stopped) {
-                    System.out.println(now() + getName() + ": failed: " + t);
+                    out.println(now() + getName() + ": failed: " + t);
                     t.printStackTrace();
                     try {
                         stopServer();
@@ -471,7 +551,7 @@ public class EncodedCharsInURI implements HttpServerAdapters {
                     }
                 }
             } finally {
-                System.out.println(now() + getName() + ": exiting");
+                out.println(now() + getName() + ": exiting");
             }
         }
 
@@ -504,7 +584,6 @@ public class EncodedCharsInURI implements HttpServerAdapters {
                     .createServerSocket(sa.getPort(), -1, sa.getAddress());
             return new DummyServer(ss, true);
         }
-
 
     }
 

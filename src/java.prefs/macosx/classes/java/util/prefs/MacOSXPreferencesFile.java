@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -79,24 +79,17 @@ import java.lang.ref.WeakReference;
 class MacOSXPreferencesFile {
 
     static {
-        java.security.AccessController.doPrivileged(
-            new java.security.PrivilegedAction<Void>() {
-                public Void run() {
-                    System.loadLibrary("prefs");
-                    return null;
-                }
-            });
+        loadPrefsLib();
     }
 
-    private class FlushTask extends TimerTask {
+    @SuppressWarnings("restricted")
+    private static void loadPrefsLib() {
+        System.loadLibrary("prefs");
+    }
+
+    private static class FlushTask extends TimerTask {
         public void run() {
             MacOSXPreferencesFile.flushWorld();
-        }
-    }
-
-    private class SyncTask extends TimerTask {
-        public void run() {
-            MacOSXPreferencesFile.syncWorld();
         }
     }
 

@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -64,17 +62,18 @@ import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.SignStyle;
 import java.time.temporal.ChronoField;
 
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.fail;
-
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * Test.
  */
-@Test
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class TCKSignStyle {
 
     //-----------------------------------------------------------------------
@@ -83,11 +82,10 @@ public class TCKSignStyle {
     @Test
     public void test_valueOf() {
         for (SignStyle style : SignStyle.values()) {
-            assertEquals(SignStyle.valueOf(style.name()), style);
+            assertEquals(style, SignStyle.valueOf(style.name()));
         }
     }
 
-    @DataProvider(name="signStyle")
     Object[][] data_signStyle() {
         return new Object[][] {
                 {LocalDate.of(0, 10, 2), SignStyle.ALWAYS, null, "+00"},
@@ -115,7 +113,8 @@ public class TCKSignStyle {
         };
     }
 
-    @Test(dataProvider = "signStyle")
+    @ParameterizedTest
+    @MethodSource("data_signStyle")
     public void test_signStyle(LocalDate localDate, SignStyle style, Class<?> expectedEx, String expectedStr) {
         DateTimeFormatterBuilder builder = new DateTimeFormatterBuilder();
         DateTimeFormatter formatter = builder.appendValue(ChronoField.YEAR, 2, 4, style)
@@ -123,7 +122,7 @@ public class TCKSignStyle {
         formatter = formatter.withZone(ZoneOffset.UTC);
         if (expectedEx == null) {
             String output = formatter.format(localDate);
-            assertEquals(output, expectedStr);
+            assertEquals(expectedStr, output);
         } else {
             try {
                 formatter.format(localDate);

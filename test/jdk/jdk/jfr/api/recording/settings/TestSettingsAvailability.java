@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -42,7 +40,7 @@ import jdk.test.lib.jfr.EventNames;
 /**
  * @test
  * @summary Verifies that event types has the correct type of settings
- * @key jfr
+ * @requires vm.flagless
  * @requires vm.hasJFR
  * @library /test/lib
  * @run main/othervm jdk.jfr.api.recording.settings.TestSettingsAvailability
@@ -68,7 +66,7 @@ public class TestSettingsAvailability {
                 for (EventType parsedType : rf.readEventTypes()) {
                     EventType inMem = inMemoryTypes.get(parsedType.getName());
                     if (inMem == null) {
-                        throw new Exception("Superflous event type " + parsedType.getName() + " in recording");
+                        throw new Exception("Superfluous event type " + parsedType.getName() + " in recording");
                     }
                     Set<String> inMemsettings = new HashSet<>();
                     for (SettingDescriptor sd : inMem.getSettingDescriptors()) {
@@ -77,7 +75,7 @@ public class TestSettingsAvailability {
 
                     for (SettingDescriptor parsedSetting : parsedType.getSettingDescriptors()) {
                         if (!inMemsettings.contains(parsedSetting.getName())) {
-                            throw new Exception("Superflous setting " + parsedSetting.getName() + " in " + parsedType.getName());
+                            throw new Exception("Superfluous setting " + parsedSetting.getName() + " in " + parsedType.getName());
                         }
                         inMemsettings.remove(parsedSetting.getName());
                     }
@@ -91,14 +89,14 @@ public class TestSettingsAvailability {
 
     private static void testKnownSettings() throws Exception {
         testSetting(EventNames.JVMInformation, "enabled", "period");
-        testSetting(EventNames.FileRead, "enabled", "threshold", "stackTrace");
-        testSetting(EventNames.FileWrite, "enabled", "threshold","stackTrace");
+        testSetting(EventNames.FileRead, "enabled", "threshold", "stackTrace", "throttle");
+        testSetting(EventNames.FileWrite, "enabled", "threshold", "stackTrace", "throttle");
         testSetting(EventNames.ExceptionStatistics, "enabled", "period");
-        testSetting(EventNames.SocketRead, "enabled", "threshold", "stackTrace");
-        testSetting(EventNames.SocketWrite, "enabled", "threshold", "stackTrace");
-        testSetting(EventNames.ActiveRecording, "enabled", "threshold", "stackTrace");
-        testSetting(EventNames.ActiveSetting, "enabled", "threshold", "stackTrace");
-        testSetting(EventNames.JavaExceptionThrow, "enabled", "threshold", "stackTrace");
+        testSetting(EventNames.SocketRead, "enabled", "threshold", "stackTrace", "throttle");
+        testSetting(EventNames.SocketWrite, "enabled", "threshold", "stackTrace", "throttle");
+        testSetting(EventNames.ActiveRecording, "enabled");
+        testSetting(EventNames.ActiveSetting, "enabled");
+        testSetting(EventNames.JavaExceptionThrow, "enabled", "stackTrace", "throttle");
     }
 
     private static void testSetting(String eventName, String... settingNames) throws Exception {

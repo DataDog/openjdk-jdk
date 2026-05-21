@@ -25,6 +25,7 @@
 
 package jdk.jshell;
 
+import com.sun.tools.javac.code.Source;
 import com.sun.tools.javac.parser.JavacParser;
 import com.sun.tools.javac.parser.ParserFactory;
 import com.sun.tools.javac.parser.ScannerFactory;
@@ -49,21 +50,18 @@ class ReplParserFactory extends ParserFactory {
     }
 
     private final ScannerFactory scannerFactory;
+            final Source source;
 
     protected ReplParserFactory(Context context, boolean forceExpression) {
         super(context);
         this.forceExpression = forceExpression;
         this.scannerFactory = ScannerFactory.instance(context);
+        this.source = Source.instance(context);
     }
 
     @Override
-    public JavacParser newParser(CharSequence input, boolean keepDocComments, boolean keepEndPos, boolean keepLineMap) {
+    public JavacParser newParser(CharSequence input, boolean keepDocComments, boolean keepLineMap, boolean parseModuleInfo) {
         com.sun.tools.javac.parser.Lexer lexer = scannerFactory.newScanner(input, keepDocComments);
-        return new ReplParser(this, lexer, keepDocComments, keepLineMap, keepEndPos, forceExpression);
-    }
-
-    @Override
-    public JavacParser newParser(CharSequence input, boolean keepDocComments, boolean keepEndPos, boolean keepLineMap, boolean parseModuleInfo) {
-        return newParser(input, keepDocComments, keepEndPos, keepLineMap);
+        return new ReplParser(this, lexer, keepDocComments, keepLineMap, forceExpression);
     }
 }

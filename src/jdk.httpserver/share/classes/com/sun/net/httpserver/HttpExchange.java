@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,6 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
-import java.util.Map;
 
 /**
  * This class encapsulates a HTTP request received and a
@@ -49,7 +48,7 @@ import java.util.Map;
  *     should be closed.
  *     <li>{@link #getResponseHeaders()} to set any response headers, except
  *     content-length.
- *     <li>{@link #sendResponseHeaders(int,long)} to send the response headers.
+ *     <li>{@link #sendResponseHeaders(int, long)} to send the response headers.
  *     Must be called before next step.
  *     <li>{@link #getResponseBody()} to get a {@link OutputStream} to
  *     send the response body. When the response body has been written, the
@@ -70,7 +69,28 @@ import java.util.Map;
  * @since 1.6
  */
 
-public abstract class HttpExchange implements AutoCloseable {
+public abstract class HttpExchange implements AutoCloseable, Request {
+
+    /*
+     * Symbolic values for the responseLength parameter of
+     * sendResponseHeaders(int, long)
+     */
+
+    /**
+     * No response body is being sent with this response
+     *
+     * @see #sendResponseHeaders(int, long)
+     * @since 26
+     */
+    public static final long RSPBODY_EMPTY = -1l;
+
+    /**
+     * The response body length is unspecified and will be chunk encoded
+     *
+     * @see #sendResponseHeaders(int, long)
+     * @since 26
+     */
+    public static final long RSPBODY_CHUNKED = 0;
 
     /**
      * Constructor for subclasses to call.
@@ -79,51 +99,41 @@ public abstract class HttpExchange implements AutoCloseable {
     }
 
     /**
-     * Returns an immutable {@link Map} containing the HTTP headers that were
-     * included with this request. The keys in this {@code Map} will be the header
-     * names, while the values will be a {@link java.util.List} of
-     * {@linkplain java.lang.String Strings} containing each value that was
-     * included (either for a header that was listed several times, or one that
-     * accepts a comma-delimited list of values on a single line). In either of
-     * these cases, the values for the header name will be presented in the
-     * order that they were included in the request.
-     *
-     * <p> The keys in {@code Map} are case-insensitive.
-     *
-     * @return a read-only {@code Map} which can be used to access request headers
+     * {@inheritDoc}
+     * @return {@inheritDoc}
      */
     public abstract Headers getRequestHeaders();
 
     /**
-     * Returns a mutable {@link Map} into which the HTTP response headers can be
-     * stored and which will be transmitted as part of this response. The keys in
-     * the {@code Map} will be the header names, while the values must be a
-     * {@link java.util.List} of {@linkplain java.lang.String Strings} containing
-     * each value that should be included multiple times (in the order that they
-     * should be included).
+     * Returns a mutable {@link Headers} into which the HTTP response headers
+     * can be stored and which will be transmitted as part of this response.
      *
-     * <p> The keys in {@code Map} are case-insensitive.
+     * <p> The keys in the {@code Headers} are the header names, while the
+     * values must be a {@link java.util.List} of {@linkplain java.lang.String Strings}
+     * containing each value that should be included multiple times (in the
+     * order that they should be included).
      *
-     * @return a writable {@code Map} which can be used to set response headers.
+     * <p> The keys in {@code Headers} are case-insensitive.
+     *
+     * @return a writable {@code Headers} which can be used to set response
+     *         headers.
      */
     public abstract Headers getResponseHeaders();
 
     /**
-     * Get the request {@link URI}.
-     *
-     * @return the request {@code URI}
+     * {@inheritDoc}
+     * @return {@inheritDoc}
      */
     public abstract URI getRequestURI();
 
     /**
-     * Get the request method.
-     *
-     * @return the request method
+     * {@inheritDoc}
+     * @return {@inheritDoc}
      */
     public abstract String getRequestMethod();
 
     /**
-     * Get the {@link HttpContext} for this exchange.
+     * Returns the {@link HttpContext} for this exchange.
      *
      * @return the {@code HttpContext}
      */
@@ -153,7 +163,7 @@ public abstract class HttpExchange implements AutoCloseable {
 
     /**
      * Returns a stream to which the response body must be
-     * written. {@link #sendResponseHeaders(int,long)}) must be called prior to
+     * written. {@link #sendResponseHeaders(int, long)}) must be called prior to
      * calling this method. Multiple calls to this method (for the same exchange)
      * will return the same stream. In order to correctly terminate each exchange,
      * the output stream must be closed, even if no response body is being sent.
@@ -174,25 +184,35 @@ public abstract class HttpExchange implements AutoCloseable {
      */
     public abstract OutputStream getResponseBody();
 
-
     /**
      * Starts sending the response back to the client using the current set of
      * response headers and the numeric response code as specified in this
      * method. The response body length is also specified as follows. If the
      * response length parameter is greater than {@code zero}, this specifies an
      * exact number of bytes to send and the application must send that exact
-     * amount of data. If the response length parameter is {@code zero}, then
-     * chunked transfer encoding is used and an arbitrary amount of data may be
+     * amount of data. If the response length parameter has the value
+     * {@link #RSPBODY_CHUNKED} (zero) then the response body uses
+     * chunked transfer encoding and an arbitrary amount of data may be
      * sent. The application terminates the response body by closing the
      * {@link OutputStream}.
-     * If response length has the value {@code -1} then no response body is
-     * being sent.
+     * If response length has the value {@link #RSPBODY_EMPTY} then no
+     * response body is being sent.
      *
      * <p> If the content-length response header has not already been set then
      * this is set to the appropriate value depending on the response length
      * parameter.
      *
      * <p> This method must be called prior to calling {@link #getResponseBody()}.
+     *
+     * @apiNote If a response body is to be sent from a byte array and the
+     * length of the array is used as the responseLength parameter, then note
+     * the behavior in the case when the array is empty. In that case, the
+     * responseLength will be zero which is the value of {@link #RSPBODY_CHUNKED}
+     * resulting in a zero length, but chunked encoded response body. While this
+     * is not incorrect, it may be preferable to check for an empty array and set
+     * responseLength to {@link #RSPBODY_EMPTY} instead. Also, when sending a
+     * chunked encoded response body, whatever length, the output stream must
+     * be explicitly closed by the handler.
      *
      * @implNote This implementation allows the caller to instruct the
      * server to force a connection close after the exchange terminates, by
@@ -204,10 +224,11 @@ public abstract class HttpExchange implements AutoCloseable {
      * @param responseLength if {@literal > 0}, specifies a fixed response body
      *                       length and that exact number of bytes must be written
      *                       to the stream acquired from {@link #getResponseCode()}
-     *                       If {@literal == 0}, then chunked encoding is used,
+     *                       If equal to {@link #RSPBODY_CHUNKED}, then chunked encoding is used,
      *                       and an arbitrary number of bytes may be written.
-     *                       If {@literal <= -1}, then no response body length is
-     *                       specified and no response body may be written.
+     *                       If equal to {@link #RSPBODY_EMPTY}, then no response body length is
+     *                       specified and no response body may be written. Any value {@literal <= -1}
+     *                       is treated the same as {@link #RSPBODY_EMPTY}.
      * @throws IOException   if the response headers have already been sent or an I/O error occurs
      * @see   HttpExchange#getResponseBody()
      */

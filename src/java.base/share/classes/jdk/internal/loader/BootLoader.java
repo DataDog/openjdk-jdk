@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,8 +32,6 @@ import java.net.URI;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.concurrent.ConcurrentHashMap;
@@ -55,33 +53,35 @@ import jdk.internal.util.StaticProperty;
 public class BootLoader {
     private BootLoader() { }
 
+    private static final JavaLangAccess JLA = SharedSecrets.getJavaLangAccess();
+
     // The unnamed module for the boot loader
     private static final Module UNNAMED_MODULE;
     private static final String JAVA_HOME = StaticProperty.javaHome();
 
     static {
-        UNNAMED_MODULE = SharedSecrets.getJavaLangAccess().defineUnnamedModule(null);
-        setBootLoaderUnnamedModule0(UNNAMED_MODULE);
-    }
-
-    // ServiceCatalog for the boot class loader
-    private static final ServicesCatalog SERVICES_CATALOG;
-    static {
+        JavaLangAccess jla = SharedSecrets.getJavaLangAccess();
         ArchivedClassLoaders archivedClassLoaders = ArchivedClassLoaders.get();
         if (archivedClassLoaders != null) {
-            SERVICES_CATALOG = archivedClassLoaders.servicesCatalog(null);
+            UNNAMED_MODULE = archivedClassLoaders.unnamedModuleForBootLoader();
         } else {
-            SERVICES_CATALOG = ServicesCatalog.create();
+            UNNAMED_MODULE = jla.defineUnnamedModule(null);
         }
+        jla.addEnableNativeAccess(UNNAMED_MODULE);
+        setBootLoaderUnnamedModule0(UNNAMED_MODULE);
     }
 
     // ClassLoaderValue map for the boot class loader
     private static final ConcurrentHashMap<?, ?> CLASS_LOADER_VALUE_MAP
         = new ConcurrentHashMap<>();
 
-    // native libraries loaded by the boot class loader
-    private static final NativeLibraries NATIVE_LIBS
-        = NativeLibraries.jniNativeLibraries(null);
+    // Holder has the field(s) that need to be initialized during JVM bootstrap even if
+    // the outer is aot-initialized.
+    private static class Holder {
+        // native libraries loaded by the boot class loader
+        private static final NativeLibraries NATIVE_LIBS
+            = NativeLibraries.newInstance(null);
+    }
 
     /**
      * Returns the unnamed module for the boot loader.
@@ -94,7 +94,7 @@ public class BootLoader {
      * Returns the ServiceCatalog for modules defined to the boot class loader.
      */
     public static ServicesCatalog getServicesCatalog() {
-        return SERVICES_CATALOG;
+        return ServicesCatalog.getServicesCatalog(ClassLoaders.bootLoader());
     }
 
     /**
@@ -108,7 +108,7 @@ public class BootLoader {
      * Returns NativeLibraries for the boot class loader.
      */
     public static NativeLibraries getNativeLibraries() {
-        return NATIVE_LIBS;
+        return Holder.NATIVE_LIBS;
     }
 
     /**
@@ -131,7 +131,7 @@ public class BootLoader {
      * Loads the Class object with the given name defined to the boot loader.
      */
     public static Class<?> loadClassOrNull(String name) {
-        return ClassLoaders.bootLoader().loadClassOrNull(name);
+        return JLA.findBootstrapClassOrNull(name);
     }
 
     /**
@@ -151,16 +151,7 @@ public class BootLoader {
      * Loads a native library from the system library path.
      */
     public static void loadLibrary(String name) {
-        if (System.getSecurityManager() == null) {
-            BootLoader.getNativeLibraries().loadLibrary(name);
-        } else {
-            AccessController.doPrivileged(new java.security.PrivilegedAction<>() {
-                public Void run() {
-                    BootLoader.getNativeLibraries().loadLibrary(name);
-                    return null;
-                }
-            });
-        }
+        getNativeLibraries().loadLibrary(name);
     }
 
     /**
@@ -301,17 +292,13 @@ public class BootLoader {
          * Returns URL if the given location is a regular file path.
          */
         private static URL toFileURL(String location) {
-            return AccessController.doPrivileged(new PrivilegedAction<>() {
-                public URL run() {
-                    Path path = Path.of(location);
-                    if (Files.isRegularFile(path)) {
-                        try {
-                            return path.toUri().toURL();
-                        } catch (MalformedURLException e) {}
-                    }
-                    return null;
-                }
-            });
+            Path path = Path.of(location);
+            if (Files.isRegularFile(path)) {
+                try {
+                    return path.toUri().toURL();
+                } catch (MalformedURLException e) {}
+            }
+            return null;
         }
 
         /**
@@ -319,17 +306,13 @@ public class BootLoader {
          * containing a manifest.
          */
         private static Manifest getManifest(String location) {
-            return AccessController.doPrivileged(new PrivilegedAction<>() {
-                public Manifest run() {
-                    Path jar = Path.of(location);
-                    try (InputStream in = Files.newInputStream(jar);
-                         JarInputStream jis = new JarInputStream(in, false)) {
-                        return jis.getManifest();
-                    } catch (IOException e) {
-                        return null;
-                    }
-                }
-            });
+            Path jar = Path.of(location);
+            try (InputStream in = Files.newInputStream(jar);
+                 JarInputStream jis = new JarInputStream(in, false)) {
+                return jis.getManifest();
+            } catch (IOException e) {
+                return null;
+            }
         }
     }
 

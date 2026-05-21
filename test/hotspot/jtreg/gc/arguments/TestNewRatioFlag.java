@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,18 +32,17 @@ package gc.arguments;
  * @library /
  * @modules java.base/jdk.internal.misc
  *          java.management
- * @build sun.hotspot.WhiteBox
- * @run driver ClassFileInstaller sun.hotspot.WhiteBox
+ * @build jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run driver gc.arguments.TestNewRatioFlag
  */
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedList;
-import jdk.test.lib.process.ProcessTools;
 import jdk.test.lib.process.OutputAnalyzer;
 import jdk.test.lib.Utils;
-import sun.hotspot.WhiteBox;
+import jdk.test.whitebox.WhiteBox;
 
 public class TestNewRatioFlag {
 
@@ -74,7 +73,6 @@ public class TestNewRatioFlag {
                 "-Xbootclasspath/a:.",
                 "-XX:+UnlockDiagnosticVMOptions",
                 "-XX:+WhiteBoxAPI",
-                "-XX:GCLockerEdenExpansionPercent=0",
                 "-Xmx" + HEAP_SIZE,
                 "-Xms" + HEAP_SIZE,
                 "-XX:NewRatio=" + ratio,
@@ -83,8 +81,7 @@ public class TestNewRatioFlag {
                 Integer.toString(ratio)
         );
 
-        ProcessBuilder procBuilder = GCArguments.createJavaProcessBuilder(vmOptions);
-        OutputAnalyzer analyzer = new OutputAnalyzer(procBuilder.start());
+        OutputAnalyzer analyzer = GCArguments.executeLimitedTestJava(vmOptions);
         analyzer.shouldHaveExitValue(0);
         System.out.println(analyzer.getOutput());
     }
@@ -122,11 +119,12 @@ public class TestNewRatioFlag {
         public static void verifyDefNewNewRatio(int expectedRatio) {
             long initEden = HeapRegionUsageTool.getEdenUsage().getInit();
             long initSurv = HeapRegionUsageTool.getSurvivorUsage().getInit();
-            long initOld = HeapRegionUsageTool.getOldUsage().getInit();
+            long initHeap = HeapRegionUsageTool.getHeapUsage().getInit();
 
             long newSize = initEden + 2 * initSurv;
 
-            long expectedNewSize = HeapRegionUsageTool.alignDown(initOld / expectedRatio,
+            // See GenArguments::scale_by_NewRatio_aligned for calculation in the JVM.
+            long expectedNewSize = HeapRegionUsageTool.alignDown(initHeap / (expectedRatio + 1),
                     wb.getHeapSpaceAlignment());
 
             if (expectedNewSize != newSize) {
@@ -143,14 +141,13 @@ public class TestNewRatioFlag {
         public static void verifyPSNewRatio(int expectedRatio) {
             long initEden = HeapRegionUsageTool.getEdenUsage().getInit();
             long initSurv = HeapRegionUsageTool.getSurvivorUsage().getInit();
-            long initOld = HeapRegionUsageTool.getOldUsage().getInit();
+            long initHeap = HeapRegionUsageTool.getHeapUsage().getInit();
 
             long newSize = initEden + 2 * initSurv;
 
-            long alignedDownNewSize = HeapRegionUsageTool.alignDown(initOld / expectedRatio,
+            // See GenArguments::scale_by_NewRatio_aligned for calculation in the JVM.
+            long expectedNewSize = HeapRegionUsageTool.alignDown(initHeap / (expectedRatio + 1),
                     wb.getHeapSpaceAlignment());
-            long expectedNewSize = HeapRegionUsageTool.alignUp(alignedDownNewSize,
-                    wb.psVirtualSpaceAlignment());
 
             if (expectedNewSize != newSize) {
                 throw new RuntimeException("Expected young gen size is: " + expectedNewSize

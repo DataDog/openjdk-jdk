@@ -35,10 +35,9 @@
 
 package java.util.concurrent;
 
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
-import java.security.ProtectionDomain;
+import jdk.internal.access.JavaLangAccess;
+import jdk.internal.access.SharedSecrets;
+import jdk.internal.misc.Unsafe;
 
 /**
  * A thread managed by a {@link ForkJoinPool}, which executes
@@ -62,26 +61,47 @@ public class ForkJoinWorkerThread extends Thread {
      * ForkJoinTasks. For explanation, see the internal documentation
      * of class ForkJoinPool.
      *
-     * This class just maintains links to its pool and WorkQueue.  The
-     * pool field is set immediately upon construction, but the
-     * workQueue field is not set until a call to registerWorker
-     * completes. This leads to a visibility race, that is tolerated
-     * by requiring that the workQueue field is only accessed by the
-     * owning thread.
-     *
-     * Support for (non-public) subclass InnocuousForkJoinWorkerThread
-     * requires that we break quite a lot of encapsulation (via helper
-     * methods in ThreadLocalRandom) both here and in the subclass to
-     * access and set Thread fields.
+     * This class just maintains links to its pool and WorkQueue.
      */
 
     final ForkJoinPool pool;                // the pool this thread works in
     final ForkJoinPool.WorkQueue workQueue; // work-stealing mechanics
 
-    /** An AccessControlContext supporting no privileges */
-    private static final AccessControlContext INNOCUOUS_ACC =
-        new AccessControlContext(
-            new ProtectionDomain[] { new ProtectionDomain(null, null) });
+    /**
+     * Full nonpublic constructor.
+     */
+    ForkJoinWorkerThread(ThreadGroup group, ForkJoinPool pool,
+                         boolean useSystemClassLoader,
+                         boolean clearThreadLocals) {
+        super(group, null, pool.nextWorkerThreadName(), 0L, !clearThreadLocals);
+        UncaughtExceptionHandler handler = (this.pool = pool).ueh;
+        this.workQueue = new ForkJoinPool.WorkQueue(this, 0, (int)pool.config,
+                                                    clearThreadLocals);
+        super.setDaemon(true);
+        if (handler != null)
+            super.setUncaughtExceptionHandler(handler);
+        if (useSystemClassLoader && !clearThreadLocals) // else done by Thread ctor
+            super.setContextClassLoader(ClassLoader.getSystemClassLoader());
+    }
+
+    /**
+     * Creates a ForkJoinWorkerThread operating in the given thread group and
+     * pool, and with the given policy for preserving ThreadLocals.
+     *
+     * @param group if non-null, the thread group for this
+     * thread. Otherwise, the thread group is set to the current thread's
+     * thread group.
+     * @param pool the pool this thread works in
+     * @param preserveThreadLocals if true, always preserve the values of
+     * ThreadLocal variables across tasks; otherwise they may be cleared.
+     * @throws NullPointerException if pool is null
+     * @since 19
+     */
+    @SuppressWarnings("this-escape")
+    protected ForkJoinWorkerThread(ThreadGroup group, ForkJoinPool pool,
+                                   boolean preserveThreadLocals) {
+        this(group, pool, false, !preserveThreadLocals);
+    }
 
     /**
      * Creates a ForkJoinWorkerThread operating in the given pool.
@@ -89,39 +109,9 @@ public class ForkJoinWorkerThread extends Thread {
      * @param pool the pool this thread works in
      * @throws NullPointerException if pool is null
      */
+    @SuppressWarnings("this-escape")
     protected ForkJoinWorkerThread(ForkJoinPool pool) {
-        // Use a placeholder until a useful name can be set in registerWorker
-        super("aForkJoinWorkerThread");
-        this.pool = pool;
-        this.workQueue = pool.registerWorker(this);
-    }
-
-    /**
-     * Version for use by the default pool.  Supports setting the
-     * context class loader.  This is a separate constructor to avoid
-     * affecting the protected constructor.
-     */
-    ForkJoinWorkerThread(ForkJoinPool pool, ClassLoader ccl) {
-        super("aForkJoinWorkerThread");
-        super.setContextClassLoader(ccl);
-        ThreadLocalRandom.setInheritedAccessControlContext(this, INNOCUOUS_ACC);
-        this.pool = pool;
-        this.workQueue = pool.registerWorker(this);
-    }
-
-    /**
-     * Version for InnocuousForkJoinWorkerThread.
-     */
-    ForkJoinWorkerThread(ForkJoinPool pool,
-                         ClassLoader ccl,
-                         ThreadGroup threadGroup,
-                         AccessControlContext acc) {
-        super(threadGroup, null, "aForkJoinWorkerThread");
-        super.setContextClassLoader(ccl);
-        ThreadLocalRandom.setInheritedAccessControlContext(this, acc);
-        ThreadLocalRandom.eraseThreadLocals(this); // clear before registering
-        this.pool = pool;
-        this.workQueue = pool.registerWorker(this);
+        this(null, pool, false, false);
     }
 
     /**
@@ -145,6 +135,17 @@ public class ForkJoinWorkerThread extends Thread {
      */
     public int getPoolIndex() {
         return workQueue.getPoolIndex();
+    }
+
+    /**
+     * {@return a (non-negative) estimate of the number of tasks in the
+     * thread's queue}
+     *
+     * @since 20
+     * @see ForkJoinPool#getQueuedTaskCount()
+     */
+    public int getQueuedTaskCount() {
+        return workQueue.queueSize();
     }
 
     /**
@@ -176,11 +177,14 @@ public class ForkJoinWorkerThread extends Thread {
      * {@link ForkJoinTask}s.
      */
     public void run() {
-        if (workQueue.array == null) { // only run once
-            Throwable exception = null;
+        Throwable exception = null;
+        ForkJoinPool p = pool;
+        ForkJoinPool.WorkQueue w = workQueue;
+        if (p != null && w != null) {   // skip on failed initialization
             try {
+                p.registerWorker(w);
                 onStart();
-                pool.runWorker(workQueue);
+                p.runWorker(w);
             } catch (Throwable ex) {
                 exception = ex;
             } finally {
@@ -190,55 +194,97 @@ public class ForkJoinWorkerThread extends Thread {
                     if (exception == null)
                         exception = ex;
                 } finally {
-                    pool.deregisterWorker(this, exception);
+                    p.deregisterWorker(this, exception);
                 }
             }
         }
     }
 
     /**
-     * Non-public hook method for InnocuousForkJoinWorkerThread.
+     * Returns true if the current task is being executed by a
+     * ForkJoinWorkerThread that is momentarily known to have one or
+     * more queued tasks that it could execute immediately. This
+     * method is approximate and useful only as a heuristic indicator
+     * within a running task.
+     *
+     * @return true if the current task is being executed by a worker
+     * that has queued work
      */
-    void afterTopLevelExec() {
+    static boolean hasKnownQueuedWork() {
+        ForkJoinWorkerThread wt; ForkJoinPool.WorkQueue q, sq;
+        ForkJoinPool p; ForkJoinPool.WorkQueue[] qs; int i;
+        Thread c = JLA.currentCarrierThread();
+        return ((c instanceof ForkJoinWorkerThread) &&
+                (p = (wt = (ForkJoinWorkerThread)c).pool) != null &&
+                (q = wt.workQueue) != null &&
+                (i = q.source) >= 0 && // check local and current source queues
+                (((qs = p.queues) != null && qs.length > i &&
+                  (sq = qs[i]) != null && sq.top - sq.base > 0) ||
+                 q.top - q.base > 0));
     }
 
     /**
-     * A worker thread that has no permissions, is not a member of any
-     * user-defined ThreadGroup, uses the system class loader as
-     * thread context class loader, and erases all ThreadLocals after
-     * running each top-level task.
+     * Clears ThreadLocals
+     */
+    final void resetThreadLocals() {
+         if (U.getReference(this, THREADLOCALS) != null)
+             U.putReference(this, THREADLOCALS, null);
+         if (U.getReference(this, INHERITABLETHREADLOCALS) != null)
+             U.putReference(this, INHERITABLETHREADLOCALS, null);
+         onThreadLocalReset();
+     }
+
+    /**
+     * Performs any further cleanup after ThreadLocals are cleared in
+     * method resetThreadLocals
+     */
+    void onThreadLocalReset() {
+    }
+
+    private static final Unsafe U = Unsafe.getUnsafe();
+    private static final long THREADLOCALS
+        = U.objectFieldOffset(Thread.class, "threadLocals");
+    private static final long INHERITABLETHREADLOCALS
+        = U.objectFieldOffset(Thread.class, "inheritableThreadLocals");
+    private static final JavaLangAccess JLA = SharedSecrets.getJavaLangAccess();
+
+    /**
+     * A worker thread that is not a member of any user-defined
+     * ThreadGroup, uses the system class loader as thread context
+     * class loader, and clears all ThreadLocals after running each
+     * top-level task.
      */
     static final class InnocuousForkJoinWorkerThread extends ForkJoinWorkerThread {
         /** The ThreadGroup for all InnocuousForkJoinWorkerThreads */
-        private static final ThreadGroup innocuousThreadGroup =
-            AccessController.doPrivileged(new PrivilegedAction<>() {
-                public ThreadGroup run() {
-                    ThreadGroup group = Thread.currentThread().getThreadGroup();
-                    for (ThreadGroup p; (p = group.getParent()) != null; )
-                        group = p;
-                    return new ThreadGroup(
-                        group, "InnocuousForkJoinWorkerThreadGroup");
-                }});
-
+        private static final ThreadGroup innocuousThreadGroup = createGroup();
+        private boolean resetCCL;
         InnocuousForkJoinWorkerThread(ForkJoinPool pool) {
-            super(pool,
-                  ClassLoader.getSystemClassLoader(),
-                  innocuousThreadGroup,
-                  INNOCUOUS_ACC);
-        }
-
-        @Override // to erase ThreadLocals
-        void afterTopLevelExec() {
-            ThreadLocalRandom.eraseThreadLocals(this);
+            super(innocuousThreadGroup, pool, true, true);
         }
 
         @Override // to silently fail
         public void setUncaughtExceptionHandler(UncaughtExceptionHandler x) { }
 
-        @Override // paranoically
+        @Override // to record changes
         public void setContextClassLoader(ClassLoader cl) {
-            if (cl != null && ClassLoader.getSystemClassLoader() != cl)
-                throw new SecurityException("setContextClassLoader");
+            resetCCL = ClassLoader.getSystemClassLoader() != cl;
+            super.setContextClassLoader(cl);
         }
+
+        @Override // to re-establish CCL if necessary
+        final void onThreadLocalReset() {
+            if (resetCCL) {
+                resetCCL = false;
+                super.setContextClassLoader(ClassLoader.getSystemClassLoader());
+            }
+        }
+
+        static ThreadGroup createGroup() {
+            ThreadGroup group = Thread.currentThread().getThreadGroup();
+            for (ThreadGroup p; (p = group.getParent()) != null; )
+                group = p;
+            return new ThreadGroup(group, "InnocuousForkJoinWorkerThreadGroup");
+        }
+
     }
 }

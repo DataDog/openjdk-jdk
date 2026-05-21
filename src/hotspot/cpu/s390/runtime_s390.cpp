@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2016 SAP SE. All rights reserved.
+ * Copyright (c) 2016, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2023 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,10 +23,8 @@
  *
  */
 
-#include "precompiled.hpp"
 #ifdef COMPILER2
 #include "asm/macroAssembler.inline.hpp"
-#include "classfile/systemDictionary.hpp"
 #include "code/vmreg.hpp"
 #include "interpreter/interpreter.hpp"
 #include "memory/resourceArea.hpp"
@@ -45,8 +43,6 @@
 
 //------------------------------generate_exception_blob---------------------------
 // creates exception blob at the end
-// Using exception blob, this code is jumped from a compiled method.
-// (see emit_exception_handler in s390.ad file)
 //
 // Given an exception pc at a call we call into the runtime for the
 // handler in this method. This handler might merely restore state
@@ -67,17 +63,20 @@
 //
 // Note: the exception pc MUST be at a call (precise debug information)
 
-void OptoRuntime::generate_exception_blob() {
+ExceptionBlob* OptoRuntime::generate_exception_blob() {
 
   // Allocate space for the code
   ResourceMark rm;
   // Setup code generation tools
-  CodeBuffer buffer("exception_blob", 2048, 1024);
+  const char* name = OptoRuntime::stub_name(StubId::c2_exception_id);
+  CodeBuffer buffer(name, 2048, 1024);
+  if (buffer.blob() == nullptr) {
+    return nullptr;
+  }
   MacroAssembler* masm = new MacroAssembler(&buffer);
 
   Register handle_exception = Z_ARG5;
 
-  __ verify_thread();
   __ z_stg(Z_ARG1/*exception oop*/, Address(Z_thread, JavaThread::exception_oop_offset()));
   __ z_stg(Z_ARG2/*issuing pc*/,    Address(Z_thread, JavaThread::exception_pc_offset()));
 
@@ -116,12 +115,12 @@ void OptoRuntime::generate_exception_blob() {
   // Pop the exception blob's C frame that has been pushed before.
   __ z_lgr(Z_SP, saved_sp);
 
-  // [Z_RET]!=NULL was possible in hotspot5 but not in sapjvm6.
-  // C2I adapter extensions are now removed by a resize in the frame manager
+  // [Z_RET] isn't null was possible in hotspot5 but not in sapjvm6.
+  // C2I adapter extensions are now removed by a resize in the template interpreter
   // (unwind_initial_activation_pending_exception).
 #ifdef ASSERT
   __ z_ltgr(handle_exception, handle_exception);
-  __ asm_assert_ne("handler must not be NULL", 0x852);
+  __ asm_assert(Assembler::bcondNotZero, "handler must not be null", 0x852);
 #endif
 
   // Handle_exception contains the handler address. If the associated frame
@@ -138,8 +137,8 @@ void OptoRuntime::generate_exception_blob() {
   __ clear_mem(Address(Z_thread, JavaThread::exception_oop_offset()),sizeof(intptr_t));
 #ifdef ASSERT
   __ clear_mem(Address(Z_thread, JavaThread::exception_handler_pc_offset()), sizeof(intptr_t));
-  __ clear_mem(Address(Z_thread, JavaThread::exception_pc_offset()), sizeof(intptr_t));
 #endif
+  NOT_PRODUCT(__ clear_mem(Address(Z_thread, JavaThread::exception_pc_offset()), sizeof(intptr_t)));
 
   __ z_br(handle_exception);
 
@@ -147,6 +146,6 @@ void OptoRuntime::generate_exception_blob() {
   masm->flush();
 
   // Set exception blob.
-  OopMapSet *oop_maps = NULL;
-  _exception_blob =  ExceptionBlob::create(&buffer, oop_maps, frame_size/wordSize);
+  OopMapSet *oop_maps = nullptr;
+  return ExceptionBlob::create(&buffer, oop_maps, frame_size/wordSize);
 }

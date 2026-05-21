@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -38,7 +36,7 @@ import jdk.test.lib.jfr.Events;
 
 /**
  * @test
- * @key jfr
+ * @requires vm.flagless
  * @requires vm.hasJFR
  * @library /test/lib
  * @run main/othervm jdk.jfr.event.os.TestProcessStart
@@ -49,15 +47,16 @@ public class TestProcessStart {
     public static void main(String[] args) throws Throwable {
 
         try (Recording recording = new Recording()) {
-            recording.enable(EVENT_NAME);
+            recording.enable(EVENT_NAME).withStackTrace();
             recording.start();
             List<String> commandList = new ArrayList<>();
             if (Platform.isWindows()) {
+                commandList.add("help");
                 commandList.add("dir");
             } else {
                 commandList.add("ls");
+                commandList.add("*.jfr");
             }
-            commandList.add("*.jfr");
             ProcessBuilder pb = new ProcessBuilder(commandList);
             pb.directory(new File(".").getAbsoluteFile());
             Process p = pb.start();
@@ -76,6 +75,7 @@ public class TestProcessStart {
                 Events.assertField(event, "pid").equal(p.pid());
                 Events.assertField(event, "directory").equal(pb.directory().toString());
                 Events.assertField(event, "command").equal(command.toString());
+                Events.assertTopFrame(event, TestProcessStart.class, "main");
             }
         }
     }

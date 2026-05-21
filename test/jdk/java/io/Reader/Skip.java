@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,29 +22,89 @@
  */
 
 /* @test
-   @bug 4134311
-   @summary Test if skip works correctly
+ * @bug 4134311 8247918
+ * @summary Test if skip works correctly
+ * @run junit Skip
 */
 
+import java.io.CharArrayReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.LineNumberReader;
+import java.io.PushbackReader;
+import java.io.RandomAccessFile;
+import java.io.Reader;
+import java.io.StringReader;
+import java.util.stream.Stream;
 
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
-import java.io.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class Skip {
-    public static void main(String argv[]) throws Exception {
-        File f = new File(System.getProperty("test.src", "."),
-                          "SkipInput.txt");
-        FileReader fr = new FileReader(f);
-        try {
+    private static String FILENAME =
+        System.getProperty("test.src", ".") + File.separator + "SkipInput.txt";
+    private static File file = new File(FILENAME);
+
+    @Test
+    public void skip() throws IOException {
+        try (FileReader fr = new FileReader(file)) {
             long nchars = 8200;
             long actual = fr.skip(nchars);
 
-            if (actual > nchars) {
-                throw new Exception
-                    ("Should skip " + nchars + ", but skipped " +actual+" chars");
-            }
-        } finally {
-            fr.close();
+            assertFalse(actual > nchars,
+                "Should skip " + nchars + ", but skipped " +actual+" chars");
         }
+    }
+
+    public static Reader[] readers() throws IOException {
+        return new Reader[] {
+            new LineNumberReader(new FileReader(file)),
+            new CharArrayReader(new char[] {27}),
+            new PushbackReader(new FileReader(file)),
+            new FileReader(file),
+            new StringReader(new String(new byte[] {(byte)42}))
+        };
+    }
+
+    @ParameterizedTest
+    @MethodSource("readers")
+    public void eof(Reader r) throws IOException {
+         r.skip(Long.MAX_VALUE);
+         assertEquals(0, r.skip(1));
+         assertEquals(-1, r.read());
+    }
+
+    public static Reader[] skipIAE() throws IOException {
+        return new Reader[] {
+            new LineNumberReader(new FileReader(file)),
+            new PushbackReader(new FileReader(file)),
+            new FileReader(file)
+        };
+    }
+
+    @ParameterizedTest
+    @MethodSource("skipIAE")
+    public void testThrowsIAE(Reader r) throws IOException {
+        assertThrows(IllegalArgumentException.class, () -> r.skip(-1));
+    }
+
+    public static Reader[] skipNoIAE() throws IOException {
+        return new Reader[] {
+            new CharArrayReader(new char[] {27}),
+            new StringReader(new String(new byte[] {(byte)42}))
+        };
+    }
+
+    @ParameterizedTest
+    @MethodSource("skipNoIAE")
+    public void testNoIAE(Reader r) throws IOException {
+        r.skip(-1);
     }
 }

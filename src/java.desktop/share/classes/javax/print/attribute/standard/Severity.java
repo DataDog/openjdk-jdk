@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,8 @@
  */
 
 package javax.print.attribute.standard;
+
+import java.io.Serial;
 
 import javax.print.attribute.Attribute;
 import javax.print.attribute.EnumSyntax;
@@ -63,6 +65,7 @@ public final class Severity extends EnumSyntax implements Attribute {
     /**
      * Use serialVersionUID from JDK 1.4 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = 8781881462717925380L;
 
     /**
@@ -121,6 +124,7 @@ public final class Severity extends EnumSyntax implements Attribute {
     /**
      * Returns the string table for class {@code Severity}.
      */
+    @Override
     protected String[] getStringTable() {
         return myStringTable;
     }
@@ -128,6 +132,7 @@ public final class Severity extends EnumSyntax implements Attribute {
     /**
      * Returns the enumeration value table for class {@code Severity}.
      */
+    @Override
     protected EnumSyntax[] getEnumValueTable() {
         return myEnumValueTable;
     }
@@ -142,6 +147,7 @@ public final class Severity extends EnumSyntax implements Attribute {
      * @return printing attribute class (category), an instance of class
      *         {@link Class java.lang.Class}
      */
+    @Override
     public final Class<? extends Attribute> getCategory() {
         return Severity.class;
     }
@@ -154,6 +160,7 @@ public final class Severity extends EnumSyntax implements Attribute {
      *
      * @return attribute category name
      */
+    @Override
     public final String getName() {
         return "severity";
     }

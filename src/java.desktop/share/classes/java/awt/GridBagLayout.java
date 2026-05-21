@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,10 +22,12 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+
 package java.awt;
 
-import java.util.Hashtable;
+import java.io.Serial;
 import java.util.Arrays;
+import java.util.Hashtable;
 
 /**
  * The {@code GridBagLayout} class is a flexible layout
@@ -238,15 +240,15 @@ import java.util.Arrays;
  * left-to-right container and Figure 3 shows the layout for a horizontal,
  * right-to-left container.
  *
- * <div style="margin:0 auto;width:680px;text-align:center;font-weight:bold">
+ * <div style="margin:0 auto;width:850px;text-align:center;font-weight:bold">
  *   <div style="float:left">
- *     <p><img src="doc-files/GridBagLayout-1.gif"
+ *     <p><img src="doc-files/GridBagLayout-1.png"
  *        alt="The preceding text describes this graphic (Figure 2)."
  *        style="margin: 7px 10px;">
  *     <p>Figure 2: Horizontal, Left-to-Right
  *   </div>
  *   <div style="float:right">
- *     <p><img src="doc-files/GridBagLayout-2.gif"
+ *     <p><img src="doc-files/GridBagLayout-2.png"
  *        alt="The preceding text describes this graphic (Figure 3)."
  *        style="margin: 7px 10px;">
  *     <p>Figure 3: Horizontal, Right-to-Left
@@ -274,76 +276,69 @@ import java.util.Arrays;
  * <p>
  * Here is the code that implements the example shown above:
  *
- * <hr><blockquote><pre>
- * import java.awt.*;
- * import java.util.*;
- * import java.applet.Applet;
+ * {@snippet lang='java':
+ * import java.awt.Button;
+ * import java.awt.EventQueue;
+ * import java.awt.Frame;
+ * import java.awt.GridBagConstraints;
+ * import java.awt.GridBagLayout;
  *
- * public class GridBagEx1 extends Applet {
+ * public class GridBagLayoutExample {
  *
- *     protected void makebutton(String name,
- *                               GridBagLayout gridbag,
- *                               GridBagConstraints c) {
+ *     private static void addButton(String name,
+ *                                   GridBagLayout gridbag,
+ *                                   GridBagConstraints c,
+ *                                   Frame frame) {
  *         Button button = new Button(name);
  *         gridbag.setConstraints(button, c);
- *         add(button);
+ *         frame.add(button);
  *     }
  *
- *     public void init() {
- *         GridBagLayout gridbag = new GridBagLayout();
- *         GridBagConstraints c = new GridBagConstraints();
+ *     public static void main(String[] args) throws Exception {
+ *         EventQueue.invokeAndWait(() -> {
+ *             Frame frame = new Frame("GridBagLayout");
+ *             GridBagLayout gridbag = new GridBagLayout();
+ *             GridBagConstraints c = new GridBagConstraints();
+ *             frame.setLayout(gridbag);
  *
- *         setFont(new Font("SansSerif", Font.PLAIN, 14));
- *         setLayout(gridbag);
+ *             c.fill = GridBagConstraints.BOTH;
+ *             c.weightx = 1.0;
+ *             addButton("Button1", gridbag, c, frame);
+ *             addButton("Button2", gridbag, c, frame);
+ *             addButton("Button3", gridbag, c, frame);
  *
- *         c.fill = GridBagConstraints.BOTH;
- *         c.weightx = 1.0;
- *         makebutton("Button1", gridbag, c);
- *         makebutton("Button2", gridbag, c);
- *         makebutton("Button3", gridbag, c);
+ *             c.gridwidth = GridBagConstraints.REMAINDER; //end row
+ *             addButton("Button4", gridbag, c, frame);
  *
- *         c.gridwidth = GridBagConstraints.REMAINDER; //end row
- *         makebutton("Button4", gridbag, c);
+ *             c.weightx = 0.0;                //reset to the default
+ *             addButton("Button5", gridbag, c, frame); //another row
  *
- *         c.weightx = 0.0;                //reset to the default
- *         makebutton("Button5", gridbag, c); //another row
+ *             c.gridwidth = GridBagConstraints.RELATIVE; //next-to-last in row
+ *             addButton("Button6", gridbag, c, frame);
  *
- *         c.gridwidth = GridBagConstraints.RELATIVE; //next-to-last in row
- *         makebutton("Button6", gridbag, c);
+ *             c.gridwidth = GridBagConstraints.REMAINDER; //end row
+ *             addButton("Button7", gridbag, c, frame);
  *
- *         c.gridwidth = GridBagConstraints.REMAINDER; //end row
- *         makebutton("Button7", gridbag, c);
+ *             c.gridwidth = 1;                //reset to the default
+ *             c.gridheight = 2;
+ *             c.weighty = 1.0;
+ *             addButton("Button8", gridbag, c, frame);
  *
- *         c.gridwidth = 1;                //reset to the default
- *         c.gridheight = 2;
- *         c.weighty = 1.0;
- *         makebutton("Button8", gridbag, c);
+ *             c.weighty = 0.0;                //reset to the default
+ *             c.gridwidth = GridBagConstraints.REMAINDER; //end row
+ *             c.gridheight = 1;               //reset to the default
+ *             addButton("Button9", gridbag, c, frame);
+ *             addButton("Button10", gridbag, c, frame);
  *
- *         c.weighty = 0.0;                //reset to the default
- *         c.gridwidth = GridBagConstraints.REMAINDER; //end row
- *         c.gridheight = 1;               //reset to the default
- *         makebutton("Button9", gridbag, c);
- *         makebutton("Button10", gridbag, c);
- *
- *         setSize(300, 100);
- *     }
- *
- *     public static void main(String args[]) {
- *         Frame f = new Frame("GridBag Layout Example");
- *         GridBagEx1 ex1 = new GridBagEx1();
- *
- *         ex1.init();
- *
- *         f.add("Center", ex1);
- *         f.pack();
- *         f.setSize(f.getPreferredSize());
- *         f.show();
+ *             frame.pack();
+ *             frame.setVisible(true);
+ *         });
  *     }
  * }
- * </pre></blockquote><hr>
+ * }
  *
  * @author Doug Stein
- * @author Bill Spitzak (orignial NeWS &amp; OLIT implementation)
+ * @author Bill Spitzak (original NeWS &amp; OLIT implementation)
  * @see       java.awt.GridBagConstraints
  * @see       java.awt.GridBagLayoutInfo
  * @see       java.awt.ComponentOrientation
@@ -471,7 +466,7 @@ java.io.Serializable {
     public double[] rowWeights;
 
     /**
-     * The component being positioned.  This is set before calling into
+     * @serial The component being positioned.  This is set before calling into
      * {@code adjustForGravity}.
      */
     private Component componentAdjusting;
@@ -686,7 +681,7 @@ java.io.Serializable {
      * @param      comp         the component to be added
      * @param      constraints  an object that determines how
      *                          the component is added to the layout
-     * @exception IllegalArgumentException if {@code constraints}
+     * @throws IllegalArgumentException if {@code constraints}
      *            is not a {@code GridBagConstraint}
      */
     public void addLayoutComponent(Component comp, Object constraints) {
@@ -1104,7 +1099,7 @@ java.io.Serializable {
                 }
 
 
-                /* Cache the current slave's size. */
+                /* Cache the current child's size. */
                 if (sizeflag == PREFERREDSIZE)
                     d = comp.getPreferredSize();
                 else
@@ -1245,7 +1240,7 @@ java.io.Serializable {
                 else if (constraints.gridwidth == 0 && curCol < 0)
                     curRow = curY + curHeight;
 
-                /* Assign the new values to the gridbag slave */
+                /* Assign the new values to the gridbag child */
                 constraints.tempX = curX;
                 constraints.tempY = curY;
                 constraints.tempWidth = curWidth;
@@ -1364,7 +1359,7 @@ java.io.Serializable {
                         px = constraints.tempX + constraints.tempWidth; /* right column */
 
                         /*
-                         * Figure out if we should use this slave\'s weight.  If the weight
+                         * Figure out if we should use this child's weight.  If the weight
                          * is less than the total weight spanned by the width of the cell,
                          * then discard the weight.  Otherwise split the difference
                          * according to the existing weights.
@@ -1390,7 +1385,7 @@ java.io.Serializable {
 
                         /*
                          * Calculate the minWidth array values.
-                         * First, figure out how wide the current slave needs to be.
+                         * First, figure out how wide the current child needs to be.
                          * Then, see if it will fit within the current minWidth values.
                          * If it will not fit, add the difference according to the
                          * weightX array.
@@ -1425,7 +1420,7 @@ java.io.Serializable {
                         py = constraints.tempY + constraints.tempHeight; /* bottom row */
 
                         /*
-                         * Figure out if we should use this slave's weight.  If the weight
+                         * Figure out if we should use this child's weight.  If the weight
                          * is less than the total weight spanned by the height of the cell,
                          * then discard the weight.  Otherwise split it the difference
                          * according to the existing weights.
@@ -1451,7 +1446,7 @@ java.io.Serializable {
 
                         /*
                          * Calculate the minHeight array values.
-                         * First, figure out how tall the current slave needs to be.
+                         * First, figure out how tall the current child needs to be.
                          * Then, see if it will fit within the current minHeight values.
                          * If it will not fit, add the difference according to the
                          * weightY array.
@@ -1975,7 +1970,7 @@ java.io.Serializable {
 
     /**
      * Figures out the minimum size of the
-     * master based on the information from {@code getLayoutInfo}.
+     * parent based on the information from {@code getLayoutInfo}.
      * This method should only be used internally by
      * {@code GridBagLayout}.
      *
@@ -2055,7 +2050,7 @@ java.io.Serializable {
         rightToLeft = !parent.getComponentOrientation().isLeftToRight();
 
         /*
-         * If the parent has no slaves anymore, then don't do anything
+         * If the parent has no children anymore, then don't do anything
          * at all:  just leave the parent's size as-is.
          */
         if (components.length == 0 &&
@@ -2065,7 +2060,7 @@ java.io.Serializable {
         }
 
         /*
-         * Pass #1: scan all the slaves to figure out the total amount
+         * Pass #1: scan all the children to figure out the total amount
          * of space needed.
          */
 
@@ -2155,7 +2150,7 @@ java.io.Serializable {
          */
 
         /*
-         * Now do the actual layout of the slaves using the layout information
+         * Now do the actual layout of the children using the layout information
          * that has been collected.
          */
 
@@ -2230,6 +2225,9 @@ java.io.Serializable {
         }
     }
 
-    // Added for serial backwards compatibility (4348425)
-    static final long serialVersionUID = 8838754796412211005L;
+    /**
+     * Use serialVersionUID from JDK 1.4 for interoperability.
+     */
+    @Serial
+    private static final long serialVersionUID = 8838754796412211005L;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,6 @@
 
 package sun.jvm.hotspot.debugger.linux;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -68,6 +67,7 @@ import sun.jvm.hotspot.utilities.PlatformInfo;
     RuntimeException if they are called before the debugger is
     configured with the Java primitive type sizes. </P> */
 
+@SuppressWarnings("restricted")
 public class LinuxDebuggerLocal extends DebuggerBase implements LinuxDebugger {
     private boolean useGCC32ABI;
     private boolean attached;
@@ -91,16 +91,15 @@ public class LinuxDebuggerLocal extends DebuggerBase implements LinuxDebugger {
     }
 
     // called by native method attach0
-    private LoadObject createLoadObject(String fileName, long textsize,
+    private LoadObject createLoadObject(String fileName, long size,
                                         long base) {
-       File f = new File(fileName);
        Address baseAddr = newAddress(base);
-       return new SharedObject(this, fileName, f.length(), baseAddr);
+       return new SharedObject(this, fileName, size, baseAddr);
     }
 
     // native methods
 
-    private native static void init0()
+    private static native void init0()
                                 throws DebuggerException;
     private native void setSAAltRoot0(String altroot);
     private native void attach0(int pid)
@@ -117,7 +116,7 @@ public class LinuxDebuggerLocal extends DebuggerBase implements LinuxDebugger {
                                 throws DebuggerException;
     private native byte[] readBytesFromProcess0(long address, long numBytes)
                                 throws DebuggerException;
-    public native static int  getAddressSize() ;
+    public static native int  getAddressSize() ;
 
     @Override
     public native String demangle(String sym);
@@ -129,6 +128,12 @@ public class LinuxDebuggerLocal extends DebuggerBase implements LinuxDebugger {
       long ptr = findLibPtrByAddress0(pc.asLongValue());
       return (ptr == 0L) ? null
                          : new LinuxAddress(this, ptr);
+    }
+
+    @Override
+    public boolean isSignalTrampoline(Address pc) {
+      var sym = lookup(getAddressValue(pc));
+      return sym == null ? false : SIGTRAMP_NAMES.contains(sym.getName());
     }
 
     // Note on Linux threads are really processes. When target process is
@@ -209,34 +214,12 @@ public class LinuxDebuggerLocal extends DebuggerBase implements LinuxDebugger {
                               boolean useCache) throws DebuggerException {
         this.machDesc = machDesc;
         utils = new DebuggerUtilities(machDesc.getAddressSize(),
-                                      machDesc.isBigEndian()) {
-           public void checkAlignment(long address, long alignment) {
-             // Need to override default checkAlignment because we need to
-             // relax alignment constraints on Linux/x86
-             if ( (address % alignment != 0)
-                &&(alignment != 8 || address % 4 != 0)) {
-                throw new UnalignedAddressException(
-                        "Trying to read at address: "
-                      + addressValueToString(address)
-                      + " with alignment: " + alignment,
-                        address);
-             }
-           }
-        };
+                                      machDesc.isBigEndian(),
+                                      machDesc.supports32bitAlignmentOf64bitTypes());
 
         if (useCache) {
-            // FIXME: re-test necessity of cache on Linux, where data
-            // fetching is faster
-            // Cache portion of the remote process's address space.
-            // Fetching data over the socket connection to dbx is slow.
-            // Might be faster if we were using a binary protocol to talk to
-            // dbx, but would have to test. For now, this cache works best
-            // if it covers the entire heap of the remote process. FIXME: at
-            // least should make this tunable from the outside, i.e., via
-            // the UI. This is a cache of 4096 4K pages, or 16 MB. The page
-            // size must be adjusted to be the hardware's page size.
-            // (FIXME: should pick this up from the debugger.)
-            initCache(4096, parseCacheNumPagesProperty(4096));
+            // This is a cache of 64k of 4K pages, or 256 MB.
+            initCache(4096, parseCacheNumPagesProperty(1024 * 64));
         }
 
         workerThread = new LinuxDebuggerLocalWorkerThread(this);
@@ -553,30 +536,6 @@ public class LinuxDebuggerLocal extends DebuggerBase implements LinuxDebugger {
         }
     }
 
-    /** Need to override this to relax alignment checks on x86. */
-    public long readCInteger(long address, long numBytes, boolean isUnsigned)
-        throws UnmappedAddressException, UnalignedAddressException {
-        // Only slightly relaxed semantics -- this is a hack, but is
-        // necessary on x86 where it seems the compiler is
-        // putting some global 64-bit data on 32-bit boundaries
-        if (numBytes == 8) {
-            utils.checkAlignment(address, 4);
-        } else {
-            utils.checkAlignment(address, numBytes);
-        }
-        byte[] data = readBytes(address, numBytes);
-        return utils.dataToCInteger(data, isUnsigned);
-    }
-
-    // Overridden from DebuggerBase because we need to relax alignment
-    // constraints on x86
-    public long readJLong(long address)
-        throws UnmappedAddressException, UnalignedAddressException {
-        utils.checkAlignment(address, jintSize);
-        byte[] data = readBytes(address, jlongSize);
-        return utils.dataToJLong(data, jlongSize);
-    }
-
     //----------------------------------------------------------------------
     // Address access. Can not be package private, but should only be
     // accessed by the architecture-specific subpackages.
@@ -584,7 +543,7 @@ public class LinuxDebuggerLocal extends DebuggerBase implements LinuxDebugger {
     /** From the LinuxDebugger interface */
     public long getAddressValue(Address addr) {
       if (addr == null) return 0;
-      return ((LinuxAddress) addr).getValue();
+      return addr.asLongValue();
     }
 
     /** From the LinuxDebugger interface */
@@ -660,12 +619,6 @@ public class LinuxDebuggerLocal extends DebuggerBase implements LinuxDebugger {
             workerThread.execute(task);
             return task.result;
         }
-    }
-
-    public void writeBytesToProcess(long address, long numBytes, byte[] data)
-        throws UnmappedAddressException, DebuggerException {
-        // FIXME
-        throw new DebuggerException("Unimplemented");
     }
 
     static {

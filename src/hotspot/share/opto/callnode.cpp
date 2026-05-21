@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,9 +22,9 @@
  *
  */
 
-#include "precompiled.hpp"
-#include "compiler/compileLog.hpp"
 #include "ci/bcEscapeAnalyzer.hpp"
+#include "code/vmreg.hpp"
+#include "compiler/compileLog.hpp"
 #include "compiler/oopMap.hpp"
 #include "gc/shared/barrierSet.hpp"
 #include "gc/shared/c2/barrierSetC2.hpp"
@@ -43,8 +43,8 @@
 #include "opto/rootnode.hpp"
 #include "opto/runtime.hpp"
 #include "runtime/sharedRuntime.hpp"
+#include "runtime/stubRoutines.hpp"
 #include "utilities/powerOfTwo.hpp"
-#include "code/vmreg.hpp"
 
 // Portions of code courtesy of Clifford Click
 
@@ -63,7 +63,7 @@ void StartNode::dump_compact_spec(outputStream *st) const { /* empty */ }
 
 //------------------------------Ideal------------------------------------------
 Node *StartNode::Ideal(PhaseGVN *phase, bool can_reshape){
-  return remove_dead_region(phase, can_reshape) ? this : NULL;
+  return remove_dead_region(phase, can_reshape) ? this : nullptr;
 }
 
 //------------------------------calling_convention-----------------------------
@@ -73,7 +73,7 @@ void StartNode::calling_convention(BasicType* sig_bt, VMRegPair *parm_regs, uint
 
 //------------------------------Registers--------------------------------------
 const RegMask &StartNode::in_RegMask(uint) const {
-  return RegMask::Empty;
+  return RegMask::EMPTY;
 }
 
 //------------------------------match------------------------------------------
@@ -83,7 +83,7 @@ Node *StartNode::match( const ProjNode *proj, const Matcher *match ) {
   case TypeFunc::Control:
   case TypeFunc::I_O:
   case TypeFunc::Memory:
-    return new MachProjNode(this,proj->_con,RegMask::Empty,MachProjNode::unmatched_proj);
+    return new MachProjNode(this,proj->_con,RegMask::EMPTY,MachProjNode::unmatched_proj);
   case TypeFunc::FramePtr:
     return new MachProjNode(this,proj->_con,Matcher::c_frame_ptr_mask, Op_RegP);
   case TypeFunc::ReturnAdr:
@@ -99,7 +99,7 @@ Node *StartNode::match( const ProjNode *proj, const Matcher *match ) {
       return new MachProjNode(this,proj->_con,rm,ideal_reg);
     }
   }
-  return NULL;
+  return nullptr;
 }
 
 //------------------------------StartOSRNode----------------------------------
@@ -138,13 +138,6 @@ void ParmNode::dump_compact_spec(outputStream *st) const {
     bottom_type()->dump_on(st);
   }
 }
-
-// For a ParmNode, all immediate inputs and outputs are considered relevant
-// both in compact and standard representation.
-void ParmNode::related(GrowableArray<Node*> *in_rel, GrowableArray<Node*> *out_rel, bool compact) const {
-  this->collect_nodes(in_rel, 1, false, false);
-  this->collect_nodes(out_rel, -1, false, false);
-}
 #endif
 
 uint ParmNode::ideal_reg() const {
@@ -176,7 +169,7 @@ ReturnNode::ReturnNode(uint edges, Node *cntrl, Node *i_o, Node *memory, Node *f
 }
 
 Node *ReturnNode::Ideal(PhaseGVN *phase, bool can_reshape){
-  return remove_dead_region(phase, can_reshape) ? this : NULL;
+  return remove_dead_region(phase, can_reshape) ? this : nullptr;
 }
 
 const Type* ReturnNode::Value(PhaseGVN* phase) const {
@@ -192,13 +185,18 @@ uint ReturnNode::match_edge(uint idx) const {
 
 
 #ifndef PRODUCT
-void ReturnNode::dump_req(outputStream *st) const {
-  // Dump the required inputs, enclosed in '(' and ')'
+void ReturnNode::dump_req(outputStream *st, DumpConfig* dc) const {
+  // Dump the required inputs, after printing "returns"
   uint i;                       // Exit value of loop
   for (i = 0; i < req(); i++) {    // For all required inputs
-    if (i == TypeFunc::Parms) st->print("returns");
-    if (in(i)) st->print("%c%d ", Compile::current()->node_arena()->contains(in(i)) ? ' ' : 'o', in(i)->_idx);
-    else st->print("_ ");
+    if (i == TypeFunc::Parms) st->print("returns ");
+    Node* p = in(i);
+    if (p != nullptr) {
+      p->dump_idx(false, st, dc);
+      st->print(" ");
+    } else {
+      st->print("_ ");
+    }
   }
 }
 #endif
@@ -221,7 +219,7 @@ RethrowNode::RethrowNode(
 }
 
 Node *RethrowNode::Ideal(PhaseGVN *phase, bool can_reshape){
-  return remove_dead_region(phase, can_reshape) ? this : NULL;
+  return remove_dead_region(phase, can_reshape) ? this : nullptr;
 }
 
 const Type* RethrowNode::Value(PhaseGVN* phase) const {
@@ -235,13 +233,18 @@ uint RethrowNode::match_edge(uint idx) const {
 }
 
 #ifndef PRODUCT
-void RethrowNode::dump_req(outputStream *st) const {
-  // Dump the required inputs, enclosed in '(' and ')'
+void RethrowNode::dump_req(outputStream *st, DumpConfig* dc) const {
+  // Dump the required inputs, after printing "exception"
   uint i;                       // Exit value of loop
   for (i = 0; i < req(); i++) {    // For all required inputs
-    if (i == TypeFunc::Parms) st->print("exception");
-    if (in(i)) st->print("%c%d ", Compile::current()->node_arena()->contains(in(i)) ? ' ' : 'o', in(i)->_idx);
-    else st->print("_ ");
+    if (i == TypeFunc::Parms) st->print("exception ");
+    Node* p = in(i);
+    if (p != nullptr) {
+      p->dump_idx(false, st, dc);
+      st->print(" ");
+    } else {
+      st->print("_ ");
+    }
   }
 }
 #endif
@@ -260,14 +263,15 @@ uint TailJumpNode::match_edge(uint idx) const {
 
 //=============================================================================
 JVMState::JVMState(ciMethod* method, JVMState* caller) :
-  _method(method) {
-  assert(method != NULL, "must be valid call site");
+  _method(method),
+  _receiver_info(nullptr) {
+  assert(method != nullptr, "must be valid call site");
   _bci = InvocationEntryBci;
   _reexecute = Reexecute_Undefined;
-  debug_only(_bci = -99);  // random garbage value
-  debug_only(_map = (SafePointNode*)-1);
+  DEBUG_ONLY(_bci = -99);  // random garbage value
+  DEBUG_ONLY(_map = (SafePointNode*)-1);
   _caller = caller;
-  _depth  = 1 + (caller == NULL ? 0 : caller->depth());
+  _depth  = 1 + (caller == nullptr ? 0 : caller->depth());
   _locoff = TypeFunc::Parms;
   _stkoff = _locoff + _method->max_locals();
   _monoff = _stkoff + _method->max_stack();
@@ -276,11 +280,12 @@ JVMState::JVMState(ciMethod* method, JVMState* caller) :
   _sp = 0;
 }
 JVMState::JVMState(int stack_size) :
-  _method(NULL) {
+  _method(nullptr),
+  _receiver_info(nullptr) {
   _bci = InvocationEntryBci;
   _reexecute = Reexecute_Undefined;
-  debug_only(_map = (SafePointNode*)-1);
-  _caller = NULL;
+  DEBUG_ONLY(_map = (SafePointNode*)-1);
+  _caller = nullptr;
   _depth  = 1;
   _locoff = TypeFunc::Parms;
   _stkoff = _locoff;
@@ -309,26 +314,26 @@ bool JVMState::same_calls_as(const JVMState* that) const {
   const JVMState* q = that;
   for (;;) {
     if (p->_method != q->_method)    return false;
-    if (p->_method == NULL)          return true;   // bci is irrelevant
+    if (p->_method == nullptr)       return true;   // bci is irrelevant
     if (p->_bci    != q->_bci)       return false;
     if (p->_reexecute != q->_reexecute)  return false;
     p = p->caller();
     q = q->caller();
     if (p == q)                      return true;
-    assert(p != NULL && q != NULL, "depth check ensures we don't run off end");
+    assert(p != nullptr && q != nullptr, "depth check ensures we don't run off end");
   }
 }
 
 //------------------------------debug_start------------------------------------
 uint JVMState::debug_start()  const {
-  debug_only(JVMState* jvmroot = of_depth(1));
+  DEBUG_ONLY(JVMState* jvmroot = of_depth(1));
   assert(jvmroot->locoff() <= this->locoff(), "youngest JVMState must be last");
   return of_depth(1)->locoff();
 }
 
 //-------------------------------debug_end-------------------------------------
 uint JVMState::debug_end() const {
-  debug_only(JVMState* jvmroot = of_depth(1));
+  DEBUG_ONLY(JVMState* jvmroot = of_depth(1));
   assert(jvmroot->endoff() <= this->endoff(), "youngest JVMState must be last");
   return endoff();
 }
@@ -336,7 +341,7 @@ uint JVMState::debug_end() const {
 //------------------------------debug_depth------------------------------------
 uint JVMState::debug_depth() const {
   uint total = 0;
-  for (const JVMState* jvmp = this; jvmp != NULL; jvmp = jvmp->caller()) {
+  for (const JVMState* jvmp = this; jvmp != nullptr; jvmp = jvmp->caller()) {
     total += jvmp->debug_size();
   }
   return total;
@@ -348,7 +353,7 @@ uint JVMState::debug_depth() const {
 // Given an allocation (a Chaitin object) and a Node decide if the Node carries
 // any defined value or not.  If it does, print out the register or constant.
 static void format_helper( PhaseRegAlloc *regalloc, outputStream* st, Node *n, const char *msg, uint i, GrowableArray<SafePointScalarObjectNode*> *scobjs ) {
-  if (n == NULL) { st->print(" NULL"); return; }
+  if (n == nullptr) { st->print(" null"); return; }
   if (n->is_SafePointScalarObject()) {
     // Scalar replacement.
     SafePointScalarObjectNode* spobj = n->as_SafePointScalarObject();
@@ -361,7 +366,7 @@ static void format_helper( PhaseRegAlloc *regalloc, outputStream* st, Node *n, c
   if (regalloc->node_regs_max_index() > 0 &&
       OptoReg::is_valid(regalloc->get_reg_first(n))) { // Check for undefined
     char buf[50];
-    regalloc->dump_register(n,buf);
+    regalloc->dump_register(n,buf,sizeof(buf));
     st->print(" %s%d]=%s",msg,i,buf);
   } else {                      // No register, but might be constant
     const Type *t = n->bottom_type();
@@ -371,14 +376,16 @@ static void format_helper( PhaseRegAlloc *regalloc, outputStream* st, Node *n, c
       break;
     case Type::AnyPtr:
       assert( t == TypePtr::NULL_PTR || n->in_dump(), "" );
-      st->print(" %s%d]=#NULL",msg,i);
+      st->print(" %s%d]=#null",msg,i);
       break;
     case Type::AryPtr:
     case Type::InstPtr:
       st->print(" %s%d]=#Ptr" INTPTR_FORMAT,msg,i,p2i(t->isa_oopptr()->const_oop()));
       break;
     case Type::KlassPtr:
-      st->print(" %s%d]=#Ptr" INTPTR_FORMAT,msg,i,p2i(t->make_ptr()->isa_klassptr()->klass()));
+    case Type::AryKlassPtr:
+    case Type::InstKlassPtr:
+      st->print(" %s%d]=#Ptr" INTPTR_FORMAT,msg,i,p2i(t->make_ptr()->isa_klassptr()->exact_klass()));
       break;
     case Type::MetadataPtr:
       st->print(" %s%d]=#Ptr" INTPTR_FORMAT,msg,i,p2i(t->make_ptr()->isa_metadataptr()->metadata()));
@@ -469,10 +476,10 @@ void JVMState::format(PhaseRegAlloc *regalloc, const Node *n, outputStream* st) 
       st->cr();
       st->print("        # ScObj" INT32_FORMAT " ", i);
       SafePointScalarObjectNode* spobj = scobjs.at(i);
-      ciKlass* cik = spobj->bottom_type()->is_oopptr()->klass();
+      ciKlass* cik = spobj->bottom_type()->is_oopptr()->exact_klass();
       assert(cik->is_instance_klass() ||
              cik->is_array_klass(), "Not supported allocation.");
-      ciInstanceKlass *iklass = NULL;
+      ciInstanceKlass *iklass = nullptr;
       if (cik->is_instance_klass()) {
         cik->print_name_on(st);
         iklass = cik->as_instance_klass();
@@ -500,7 +507,7 @@ void JVMState::format(PhaseRegAlloc *regalloc, const Node *n, outputStream* st) 
         uint first_ind = spobj->first_index(mcall->jvms());
         Node* fld_node = mcall->in(first_ind);
         ciField* cifield;
-        if (iklass != NULL) {
+        if (iklass != nullptr) {
           st->print(" [");
           cifield = iklass->nonstatic_field_at(0);
           cifield->print_name_on(st);
@@ -510,7 +517,7 @@ void JVMState::format(PhaseRegAlloc *regalloc, const Node *n, outputStream* st) 
         }
         for (uint j = 1; j < nf; j++) {
           fld_node = mcall->in(first_ind+j);
-          if (iklass != NULL) {
+          if (iklass != nullptr) {
             st->print(", [");
             cifield = iklass->nonstatic_field_at(j);
             cifield->print_name_on(st);
@@ -524,12 +531,12 @@ void JVMState::format(PhaseRegAlloc *regalloc, const Node *n, outputStream* st) 
     }
   }
   st->cr();
-  if (caller() != NULL) caller()->format(regalloc, n, st);
+  if (caller() != nullptr) caller()->format(regalloc, n, st);
 }
 
 
 void JVMState::dump_spec(outputStream *st) const {
-  if (_method != NULL) {
+  if (_method != nullptr) {
     bool printed = false;
     if (!Verbose) {
       // The JVMS dumps make really, really long lines.
@@ -541,8 +548,8 @@ void JVMState::dump_spec(outputStream *st) const {
         const char* name = namest.base();
         if (name[0] == ' ')  ++name;
         const char* endcn = strchr(name, ':');  // end of class name
-        if (endcn == NULL)  endcn = strchr(name, '(');
-        if (endcn == NULL)  endcn = name + strlen(name);
+        if (endcn == nullptr)  endcn = strchr(name, '(');
+        if (endcn == nullptr)  endcn = name + strlen(name);
         while (endcn > name && endcn[-1] != '.' && endcn[-1] != '/')
           --endcn;
         st->print(" %s", endcn);
@@ -555,30 +562,30 @@ void JVMState::dump_spec(outputStream *st) const {
   } else {
     st->print(" runtime stub");
   }
-  if (caller() != NULL)  caller()->dump_spec(st);
+  if (caller() != nullptr)  caller()->dump_spec(st);
 }
 
 
 void JVMState::dump_on(outputStream* st) const {
   bool print_map = _map && !((uintptr_t)_map & 1) &&
-                  ((caller() == NULL) || (caller()->map() != _map));
+                  ((caller() == nullptr) || (caller()->map() != _map));
   if (print_map) {
     if (_map->len() > _map->req()) {  // _map->has_exceptions()
       Node* ex = _map->in(_map->req());  // _map->next_exception()
       // skip the first one; it's already being printed
-      while (ex != NULL && ex->len() > ex->req()) {
+      while (ex != nullptr && ex->len() > ex->req()) {
         ex = ex->in(ex->req());  // ex->next_exception()
         ex->dump(1);
       }
     }
     _map->dump(Verbose ? 2 : 1);
   }
-  if (caller() != NULL) {
+  if (caller() != nullptr) {
     caller()->dump_on(st);
   }
   st->print("JVMS depth=%d loc=%d stk=%d arg=%d mon=%d scalar=%d end=%d mondepth=%d sp=%d bci=%d reexecute=%s method=",
              depth(), locoff(), stkoff(), argoff(), monoff(), scloff(), endoff(), monitor_depth(), sp(), bci(), should_reexecute()?"true":"false");
-  if (_method == NULL) {
+  if (_method == nullptr) {
     st->print_cr("(none)");
   } else {
     _method->print_name(st);
@@ -609,13 +616,14 @@ JVMState* JVMState::clone_shallow(Compile* C) const {
   n->set_endoff(_endoff);
   n->set_sp(_sp);
   n->set_map(_map);
+  n->set_receiver_info(_receiver_info);
   return n;
 }
 
 //---------------------------clone_deep----------------------------------------
 JVMState* JVMState::clone_deep(Compile* C) const {
   JVMState* n = clone_shallow(C);
-  for (JVMState* p = n; p->_caller != NULL; p = p->_caller) {
+  for (JVMState* p = n; p->_caller != nullptr; p = p->_caller) {
     p->_caller = p->_caller->clone_shallow(C);
   }
   assert(n->depth() == depth(), "sanity");
@@ -627,15 +635,21 @@ JVMState* JVMState::clone_deep(Compile* C) const {
  * Reset map for all callers
  */
 void JVMState::set_map_deep(SafePointNode* map) {
-  for (JVMState* p = this; p != NULL; p = p->_caller) {
+  for (JVMState* p = this; p != nullptr; p = p->_caller) {
     p->set_map(map);
   }
+}
+
+// unlike set_map(), this is two-way setting.
+void JVMState::bind_map(SafePointNode* map) {
+  set_map(map);
+  _map->set_jvms(this);
 }
 
 // Adapt offsets in in-array after adding or removing an edge.
 // Prerequisite is that the JVMState is used by only one node.
 void JVMState::adapt_position(int delta) {
-  for (JVMState* jvms = this; jvms != NULL; jvms = jvms->caller()) {
+  for (JVMState* jvms = this; jvms != nullptr; jvms = jvms->caller()) {
     jvms->set_locoff(jvms->locoff() + delta);
     jvms->set_stkoff(jvms->stkoff() + delta);
     jvms->set_monoff(jvms->monoff() + delta);
@@ -654,7 +668,7 @@ int JVMState::interpreter_frame_size() const {
   int callee_locals = 0;
   int extra_args = method()->max_stack() - stk_size();
 
-  while (jvms != NULL) {
+  while (jvms != nullptr) {
     int locks = jvms->nof_monitors();
     int temps = jvms->stk_size();
     bool is_top_frame = (jvms == this);
@@ -677,32 +691,75 @@ int JVMState::interpreter_frame_size() const {
   return size + Deoptimization::last_frame_adjust(0, callee_locals) * BytesPerWord;
 }
 
+// Compute receiver info for a compiled lambda form at call site.
+ciInstance* JVMState::compute_receiver_info(ciMethod* callee) const {
+  assert(callee != nullptr && callee->is_compiled_lambda_form(), "");
+  if (has_method() && method()->is_compiled_lambda_form()) { // callee is not a MH invoker
+    Node* recv = map()->argument(this, 0);
+    assert(recv != nullptr, "");
+    const TypeOopPtr* recv_toop = recv->bottom_type()->isa_oopptr();
+    if (recv_toop != nullptr && recv_toop->const_oop() != nullptr) {
+      return recv_toop->const_oop()->as_instance();
+    }
+  }
+  return nullptr;
+}
+
 //=============================================================================
 bool CallNode::cmp( const Node &n ) const
 { return _tf == ((CallNode&)n)._tf && _jvms == ((CallNode&)n)._jvms; }
 #ifndef PRODUCT
-void CallNode::dump_req(outputStream *st) const {
+void CallNode::dump_req(outputStream *st, DumpConfig* dc) const {
   // Dump the required inputs, enclosed in '(' and ')'
   uint i;                       // Exit value of loop
   for (i = 0; i < req(); i++) {    // For all required inputs
     if (i == TypeFunc::Parms) st->print("(");
-    if (in(i)) st->print("%c%d ", Compile::current()->node_arena()->contains(in(i)) ? ' ' : 'o', in(i)->_idx);
-    else st->print("_ ");
+    Node* p = in(i);
+    if (p != nullptr) {
+      p->dump_idx(false, st, dc);
+      st->print(" ");
+    } else {
+      st->print("_ ");
+    }
   }
   st->print(")");
 }
 
 void CallNode::dump_spec(outputStream *st) const {
   st->print(" ");
-  if (tf() != NULL)  tf()->dump_on(st);
+  if (tf() != nullptr)  tf()->dump_on(st);
   if (_cnt != COUNT_UNKNOWN)  st->print(" C=%f",_cnt);
-  if (jvms() != NULL)  jvms()->dump_spec(st);
+  if (jvms() != nullptr)  jvms()->dump_spec(st);
+}
+
+void AllocateNode::dump_spec(outputStream* st) const {
+  st->print(" ");
+  if (tf() != nullptr) {
+    tf()->dump_on(st);
+  }
+  if (_cnt != COUNT_UNKNOWN) {
+    st->print(" C=%f", _cnt);
+  }
+  const Node* const klass_node = in(KlassNode);
+  if (klass_node != nullptr) {
+    const TypeKlassPtr* const klass_ptr = klass_node->bottom_type()->isa_klassptr();
+
+    if (klass_ptr != nullptr && klass_ptr->klass_is_exact()) {
+      st->print(" allocationKlass:");
+      klass_ptr->exact_klass()->print_name_on(st);
+    }
+  }
+  if (jvms() != nullptr) {
+    jvms()->dump_spec(st);
+  }
 }
 #endif
 
 const Type *CallNode::bottom_type() const { return tf()->range(); }
 const Type* CallNode::Value(PhaseGVN* phase) const {
-  if (phase->type(in(0)) == Type::TOP)  return Type::TOP;
+  if (in(0) == nullptr || phase->type(in(0)) == Type::TOP) {
+    return Type::TOP;
+  }
   return tf()->range();
 }
 
@@ -721,21 +778,35 @@ Node *CallNode::match( const ProjNode *proj, const Matcher *match ) {
   case TypeFunc::Control:
   case TypeFunc::I_O:
   case TypeFunc::Memory:
-    return new MachProjNode(this,proj->_con,RegMask::Empty,MachProjNode::unmatched_proj);
+    return new MachProjNode(this,proj->_con,RegMask::EMPTY,MachProjNode::unmatched_proj);
 
   case TypeFunc::Parms+1:       // For LONG & DOUBLE returns
     assert(tf()->range()->field_at(TypeFunc::Parms+1) == Type::HALF, "");
     // 2nd half of doubles and longs
-    return new MachProjNode(this,proj->_con, RegMask::Empty, (uint)OptoReg::Bad);
+    return new MachProjNode(this,proj->_con, RegMask::EMPTY, (uint)OptoReg::Bad);
 
   case TypeFunc::Parms: {       // Normal returns
     uint ideal_reg = tf()->range()->field_at(TypeFunc::Parms)->ideal_reg();
-    OptoRegPair regs = is_CallRuntime()
-      ? match->c_return_value(ideal_reg)  // Calls into C runtime
-      : match->  return_value(ideal_reg); // Calls into compiled Java code
+    OptoRegPair regs = Opcode() == Op_CallLeafVector
+      ? match->vector_return_value(ideal_reg)      // Calls into assembly vector routine
+      : is_CallRuntime()
+        ? match->c_return_value(ideal_reg)  // Calls into C runtime
+        : match->  return_value(ideal_reg); // Calls into compiled Java code
     RegMask rm = RegMask(regs.first());
+
+    if (Opcode() == Op_CallLeafVector) {
+      // If the return is in vector, compute appropriate regmask taking into account the whole range
+      if(ideal_reg >= Op_VecA && ideal_reg <= Op_VecZ) {
+        if(OptoReg::is_valid(regs.second())) {
+          for (OptoReg::Name r = regs.first(); r <= regs.second(); r = OptoReg::add(r, 1)) {
+            rm.insert(r);
+          }
+        }
+      }
+    }
+
     if( OptoReg::is_valid(regs.second()) )
-      rm.Insert( regs.second() );
+      rm.insert(regs.second());
     return new MachProjNode(this,proj->_con,rm,ideal_reg);
   }
 
@@ -744,7 +815,7 @@ Node *CallNode::match( const ProjNode *proj, const Matcher *match ) {
   default:
     ShouldNotReachHere();
   }
-  return NULL;
+  return nullptr;
 }
 
 // Do we Match on this edge index or not?  Match no edges
@@ -756,11 +827,11 @@ uint CallNode::match_edge(uint idx) const {
 // Determine whether the call could modify the field of the specified
 // instance at the specified offset.
 //
-bool CallNode::may_modify(const TypeOopPtr *t_oop, PhaseTransform *phase) {
-  assert((t_oop != NULL), "sanity");
+bool CallNode::may_modify(const TypeOopPtr* t_oop, PhaseValues* phase) const {
+  assert((t_oop != nullptr), "sanity");
   if (is_call_to_arraycopystub() && strcmp(_name, "unsafe_arraycopy") != 0) {
     const TypeTuple* args = _tf->domain();
-    Node* dest = NULL;
+    Node* dest = nullptr;
     // Stubs that can be called once an ArrayCopyNode is expanded have
     // different signatures. Look for the second pointer argument,
     // that is the destination of the copy.
@@ -773,7 +844,11 @@ bool CallNode::may_modify(const TypeOopPtr *t_oop, PhaseTransform *phase) {
         }
       }
     }
-    guarantee(dest != NULL, "Call had only one ptr in, broken IR!");
+    guarantee(dest != nullptr, "Call had only one ptr in, broken IR!");
+    if (phase->type(dest)->isa_rawptr()) {
+      // may happen for an arraycopy that initializes a newly allocated object. Conservatively return true;
+      return true;
+    }
     if (!dest->is_top() && may_modify_arraycopy_helper(phase->type(dest)->is_oopptr(), t_oop, phase)) {
       return true;
     }
@@ -785,34 +860,34 @@ bool CallNode::may_modify(const TypeOopPtr *t_oop, PhaseTransform *phase) {
     return false;
   }
   if (t_oop->is_ptr_to_boxed_value()) {
-    ciKlass* boxing_klass = t_oop->klass();
+    ciKlass* boxing_klass = t_oop->is_instptr()->instance_klass();
     if (is_CallStaticJava() && as_CallStaticJava()->is_boxing_method()) {
       // Skip unrelated boxing methods.
       Node* proj = proj_out_or_null(TypeFunc::Parms);
-      if ((proj == NULL) || (phase->type(proj)->is_instptr()->klass() != boxing_klass)) {
+      if ((proj == nullptr) || (phase->type(proj)->is_instptr()->instance_klass() != boxing_klass)) {
         return false;
       }
     }
-    if (is_CallJava() && as_CallJava()->method() != NULL) {
+    if (is_CallJava() && as_CallJava()->method() != nullptr) {
       ciMethod* meth = as_CallJava()->method();
       if (meth->is_getter()) {
         return false;
       }
       // May modify (by reflection) if an boxing object is passed
       // as argument or returned.
-      Node* proj = returns_pointer() ? proj_out_or_null(TypeFunc::Parms) : NULL;
-      if (proj != NULL) {
+      Node* proj = returns_pointer() ? proj_out_or_null(TypeFunc::Parms) : nullptr;
+      if (proj != nullptr) {
         const TypeInstPtr* inst_t = phase->type(proj)->isa_instptr();
-        if ((inst_t != NULL) && (!inst_t->klass_is_exact() ||
-                                 (inst_t->klass() == boxing_klass))) {
+        if ((inst_t != nullptr) && (!inst_t->klass_is_exact() ||
+                                   (inst_t->instance_klass() == boxing_klass))) {
           return true;
         }
       }
       const TypeTuple* d = tf()->domain();
       for (uint i = TypeFunc::Parms; i < d->cnt(); i++) {
         const TypeInstPtr* inst_t = d->field_at(i)->isa_instptr();
-        if ((inst_t != NULL) && (!inst_t->klass_is_exact() ||
-                                 (inst_t->klass() == boxing_klass))) {
+        if ((inst_t != nullptr) && (!inst_t->klass_is_exact() ||
+                                 (inst_t->instance_klass() == boxing_klass))) {
           return true;
         }
       }
@@ -823,7 +898,7 @@ bool CallNode::may_modify(const TypeOopPtr *t_oop, PhaseTransform *phase) {
 }
 
 // Does this call have a direct reference to n other than debug information?
-bool CallNode::has_non_debug_use(Node *n) {
+bool CallNode::has_non_debug_use(const Node *n) {
   const TypeTuple * d = tf()->domain();
   for (uint i = TypeFunc::Parms; i < d->cnt(); i++) {
     Node *arg = in(i);
@@ -836,18 +911,18 @@ bool CallNode::has_non_debug_use(Node *n) {
 
 // Returns the unique CheckCastPP of a call
 // or 'this' if there are several CheckCastPP or unexpected uses
-// or returns NULL if there is no one.
+// or returns null if there is no one.
 Node *CallNode::result_cast() {
-  Node *cast = NULL;
+  Node *cast = nullptr;
 
   Node *p = proj_out_or_null(TypeFunc::Parms);
-  if (p == NULL)
-    return NULL;
+  if (p == nullptr)
+    return nullptr;
 
   for (DUIterator_Fast imax, i = p->fast_outs(imax); i < imax; i++) {
     Node *use = p->fast_out(i);
     if (use->is_CheckCastPP()) {
-      if (cast != NULL) {
+      if (cast != nullptr) {
         return this;  // more than 1 CheckCastPP
       }
       cast = use;
@@ -865,16 +940,16 @@ Node *CallNode::result_cast() {
 }
 
 
-void CallNode::extract_projections(CallProjections* projs, bool separate_io_proj, bool do_asserts) {
-  projs->fallthrough_proj      = NULL;
-  projs->fallthrough_catchproj = NULL;
-  projs->fallthrough_ioproj    = NULL;
-  projs->catchall_ioproj       = NULL;
-  projs->catchall_catchproj    = NULL;
-  projs->fallthrough_memproj   = NULL;
-  projs->catchall_memproj      = NULL;
-  projs->resproj               = NULL;
-  projs->exobj                 = NULL;
+void CallNode::extract_projections(CallProjections* projs, bool separate_io_proj, bool do_asserts, bool allow_handlers) const {
+  projs->fallthrough_proj      = nullptr;
+  projs->fallthrough_catchproj = nullptr;
+  projs->fallthrough_ioproj    = nullptr;
+  projs->catchall_ioproj       = nullptr;
+  projs->catchall_catchproj    = nullptr;
+  projs->fallthrough_memproj   = nullptr;
+  projs->catchall_memproj      = nullptr;
+  projs->resproj               = nullptr;
+  projs->exobj                 = nullptr;
 
   for (DUIterator_Fast imax, i = fast_outs(imax); i < imax; i++) {
     ProjNode *pn = fast_out(i)->as_Proj();
@@ -884,16 +959,15 @@ void CallNode::extract_projections(CallProjections* projs, bool separate_io_proj
       {
         // For Control (fallthrough) and I_O (catch_all_index) we have CatchProj -> Catch -> Proj
         projs->fallthrough_proj = pn;
-        const Node *cn = pn->unique_ctrl_out();
-        if (cn != NULL && cn->is_Catch()) {
-          ProjNode *cpn = NULL;
+        const Node* cn = pn->unique_ctrl_out_or_null();
+        if (cn != nullptr && cn->is_Catch()) {
           for (DUIterator_Fast kmax, k = cn->fast_outs(kmax); k < kmax; k++) {
-            cpn = cn->fast_out(k)->as_Proj();
-            assert(cpn->is_CatchProj(), "must be a CatchProjNode");
-            if (cpn->_con == CatchProjNode::fall_through_index)
+            CatchProjNode* cpn = cn->fast_out(k)->as_CatchProj();
+            assert(allow_handlers || !cpn->is_handler_proj(), "not allowed");
+            if (cpn->_con == CatchProjNode::fall_through_index) {
+              assert(cpn->handler_bci() == CatchProjNode::no_handler_bci, "");
               projs->fallthrough_catchproj = cpn;
-            else {
-              assert(cpn->_con == CatchProjNode::catch_all_index, "must be correct index.");
+            } else if (!cpn->is_handler_proj()) {
               projs->catchall_catchproj = cpn;
             }
           }
@@ -901,15 +975,20 @@ void CallNode::extract_projections(CallProjections* projs, bool separate_io_proj
         break;
       }
     case TypeFunc::I_O:
-      if (pn->_is_io_use)
+      if (pn->_is_io_use) {
         projs->catchall_ioproj = pn;
-      else
+      } else {
         projs->fallthrough_ioproj = pn;
+      }
       for (DUIterator j = pn->outs(); pn->has_out(j); j++) {
         Node* e = pn->out(j);
-        if (e->Opcode() == Op_CreateEx && e->in(0)->is_CatchProj() && e->outcnt() > 0) {
-          assert(projs->exobj == NULL, "only one");
-          projs->exobj = e;
+        if (e->Opcode() == Op_CreateEx && e->outcnt() > 0) {
+          CatchProjNode* ecpn = e->in(0)->isa_CatchProj();
+          assert(allow_handlers || ecpn == nullptr || !ecpn->is_handler_proj(), "not allowed");
+          if (ecpn != nullptr && ecpn->_con != CatchProjNode::fall_through_index && !ecpn->is_handler_proj()) {
+            assert(projs->exobj == nullptr, "only one");
+            projs->exobj = e;
+          }
         }
       }
       break;
@@ -930,15 +1009,15 @@ void CallNode::extract_projections(CallProjections* projs, bool separate_io_proj
   // The resproj may not exist because the result could be ignored
   // and the exception object may not exist if an exception handler
   // swallows the exception but all the other must exist and be found.
-  assert(projs->fallthrough_proj      != NULL, "must be found");
+  assert(projs->fallthrough_proj      != nullptr, "must be found");
   do_asserts = do_asserts && !Compile::current()->inlining_incrementally();
-  assert(!do_asserts || projs->fallthrough_catchproj != NULL, "must be found");
-  assert(!do_asserts || projs->fallthrough_memproj   != NULL, "must be found");
-  assert(!do_asserts || projs->fallthrough_ioproj    != NULL, "must be found");
-  assert(!do_asserts || projs->catchall_catchproj    != NULL, "must be found");
+  assert(!do_asserts || projs->fallthrough_catchproj != nullptr, "must be found");
+  assert(!do_asserts || projs->fallthrough_memproj   != nullptr, "must be found");
+  assert(!do_asserts || projs->fallthrough_ioproj    != nullptr, "must be found");
+  assert(!do_asserts || projs->catchall_catchproj    != nullptr, "must be found");
   if (separate_io_proj) {
-    assert(!do_asserts || projs->catchall_memproj    != NULL, "must be found");
-    assert(!do_asserts || projs->catchall_ioproj     != NULL, "must be found");
+    assert(!do_asserts || projs->catchall_memproj    != nullptr, "must be found");
+    assert(!do_asserts || projs->catchall_ioproj     != nullptr, "must be found");
   }
 }
 
@@ -946,16 +1025,25 @@ Node* CallNode::Ideal(PhaseGVN* phase, bool can_reshape) {
 #ifdef ASSERT
   // Validate attached generator
   CallGenerator* cg = generator();
-  if (cg != NULL) {
-    assert(is_CallStaticJava()  && cg->is_mh_late_inline() ||
-           is_CallDynamicJava() && cg->is_virtual_late_inline(), "mismatch");
+  if (cg != nullptr) {
+    assert((is_CallStaticJava()  && cg->is_mh_late_inline()) ||
+           (is_CallDynamicJava() && cg->is_virtual_late_inline()), "mismatch");
   }
 #endif // ASSERT
   return SafePointNode::Ideal(phase, can_reshape);
 }
 
 bool CallNode::is_call_to_arraycopystub() const {
-  if (_name != NULL && strstr(_name, "arraycopy") != 0) {
+  if (_name != nullptr && strstr(_name, "arraycopy") != nullptr) {
+    return true;
+  }
+  return false;
+}
+
+bool CallNode::is_call_to_multianewarray_stub() const {
+  if (_name != nullptr &&
+      strstr(_name, "multianewarray") != nullptr &&
+      strstr(_name, "C2 runtime") != nullptr) {
     return true;
   }
   return false;
@@ -983,7 +1071,7 @@ void CallJavaNode::copy_call_debug_info(PhaseIterGVN* phase, SafePointNode* sfpt
   for (uint i = old_dbg_start; i < sfpt->req(); i++) {
     Node* old_in = sfpt->in(i);
     // Clone old SafePointScalarObjectNodes, adjusting their field contents.
-    if (old_in != NULL && old_in->is_SafePointScalarObject()) {
+    if (old_in != nullptr && old_in->is_SafePointScalarObject()) {
       SafePointScalarObjectNode* old_sosn = old_in->as_SafePointScalarObject();
       bool new_node;
       Node* new_in = old_sosn->clone(sosn_map, new_node);
@@ -997,8 +1085,8 @@ void CallJavaNode::copy_call_debug_info(PhaseIterGVN* phase, SafePointNode* sfpt
   }
 
   // JVMS may be shared so clone it before we modify it
-  set_jvms(sfpt->jvms() != NULL ? sfpt->jvms()->clone_deep(C) : NULL);
-  for (JVMState *jvms = this->jvms(); jvms != NULL; jvms = jvms->caller()) {
+  set_jvms(sfpt->jvms() != nullptr ? sfpt->jvms()->clone_deep(C) : nullptr);
+  for (JVMState *jvms = this->jvms(); jvms != nullptr; jvms = jvms->caller()) {
     jvms->set_map(this);
     jvms->set_locoff(jvms->locoff()+jvms_adj);
     jvms->set_stkoff(jvms->stkoff()+jvms_adj);
@@ -1010,10 +1098,10 @@ void CallJavaNode::copy_call_debug_info(PhaseIterGVN* phase, SafePointNode* sfpt
 
 #ifdef ASSERT
 bool CallJavaNode::validate_symbolic_info() const {
-  if (method() == NULL) {
+  if (method() == nullptr) {
     return true; // call into runtime or uncommon trap
   }
-  ciMethod* symbolic_info = jvms()->method()->get_method_at_bci(_bci);
+  ciMethod* symbolic_info = jvms()->method()->get_method_at_bci(jvms()->bci());
   ciMethod* callee = method();
   if (symbolic_info->is_method_handle_intrinsic() && !callee->is_method_handle_intrinsic()) {
     assert(override_symbolic_info(), "should be set");
@@ -1038,6 +1126,15 @@ void CallJavaNode::dump_compact_spec(outputStream* st) const {
 }
 #endif
 
+void CallJavaNode::register_for_late_inline() {
+  if (generator() != nullptr) {
+    Compile::current()->prepend_late_inline(generator());
+    set_generator(nullptr);
+  } else {
+    assert(false, "repeated inline attempt");
+  }
+}
+
 //=============================================================================
 uint CallStaticJavaNode::size_of() const { return sizeof(*this); }
 bool CallStaticJavaNode::cmp( const Node &n ) const {
@@ -1047,42 +1144,55 @@ bool CallStaticJavaNode::cmp( const Node &n ) const {
 
 Node* CallStaticJavaNode::Ideal(PhaseGVN* phase, bool can_reshape) {
   CallGenerator* cg = generator();
-  if (can_reshape && cg != NULL) {
-    assert(IncrementalInlineMH, "required");
-    assert(cg->call_node() == this, "mismatch");
-    assert(cg->is_mh_late_inline(), "not virtual");
+  if (can_reshape && cg != nullptr) {
+    if (cg->is_mh_late_inline()) {
+      assert(IncrementalInlineMH, "required");
+      assert(cg->call_node() == this, "mismatch");
+      assert(cg->method()->is_method_handle_intrinsic(), "required");
 
-    // Check whether this MH handle call becomes a candidate for inlining.
-    ciMethod* callee = cg->method();
-    vmIntrinsics::ID iid = callee->intrinsic_id();
-    if (iid == vmIntrinsics::_invokeBasic) {
-      if (in(TypeFunc::Parms)->Opcode() == Op_ConP) {
-        phase->C->prepend_late_inline(cg);
-        set_generator(NULL);
+      // Check whether this MH handle call becomes a candidate for inlining.
+      ciMethod* callee = cg->method();
+      vmIntrinsics::ID iid = callee->intrinsic_id();
+      if (iid == vmIntrinsics::_invokeBasic) {
+        if (in(TypeFunc::Parms)->Opcode() == Op_ConP) {
+          register_for_late_inline();
+        }
+      } else if (iid == vmIntrinsics::_linkToNative) {
+        // never retry
+      } else {
+        assert(callee->has_member_arg(), "wrong type of call?");
+        if (in(TypeFunc::Parms + callee->arg_size() - 1)->Opcode() == Op_ConP) {
+          register_for_late_inline();
+        }
       }
     } else {
-      assert(callee->has_member_arg(), "wrong type of call?");
-      if (in(TypeFunc::Parms + callee->arg_size() - 1)->Opcode() == Op_ConP) {
-        phase->C->prepend_late_inline(cg);
-        set_generator(NULL);
+      assert(IncrementalInline, "required");
+      assert(!cg->method()->is_method_handle_intrinsic(), "required");
+      if (phase->C->print_inlining()) {
+        phase->C->inline_printer()->record(cg->method(), cg->call_node()->jvms(), InliningResult::FAILURE,
+          "static call node changed: trying again");
       }
+      register_for_late_inline();
     }
   }
   return CallNode::Ideal(phase, can_reshape);
 }
 
+//----------------------------is_uncommon_trap----------------------------
+// Returns true if this is an uncommon trap.
+bool CallStaticJavaNode::is_uncommon_trap() const {
+  return (_name != nullptr && !strcmp(_name, "uncommon_trap"));
+}
+
 //----------------------------uncommon_trap_request----------------------------
 // If this is an uncommon trap, return the request code, else zero.
 int CallStaticJavaNode::uncommon_trap_request() const {
-  if (_name != NULL && !strcmp(_name, "uncommon_trap")) {
-    return extract_uncommon_trap_request(this);
-  }
-  return 0;
+  return is_uncommon_trap() ? extract_uncommon_trap_request(this) : 0;
 }
 int CallStaticJavaNode::extract_uncommon_trap_request(const Node* call) {
 #ifndef PRODUCT
   if (!(call->req() > TypeFunc::Parms &&
-        call->in(TypeFunc::Parms) != NULL &&
+        call->in(TypeFunc::Parms) != nullptr &&
         call->in(TypeFunc::Parms)->is_Con() &&
         call->in(TypeFunc::Parms)->bottom_type()->isa_int())) {
     assert(in_dump() != 0, "OK if dumping");
@@ -1096,7 +1206,7 @@ int CallStaticJavaNode::extract_uncommon_trap_request(const Node* call) {
 #ifndef PRODUCT
 void CallStaticJavaNode::dump_spec(outputStream *st) const {
   st->print("# Static ");
-  if (_name != NULL) {
+  if (_name != nullptr) {
     st->print("%s", _name);
     int trap_req = uncommon_trap_request();
     if (trap_req != 0) {
@@ -1130,40 +1240,51 @@ bool CallDynamicJavaNode::cmp( const Node &n ) const {
 
 Node* CallDynamicJavaNode::Ideal(PhaseGVN* phase, bool can_reshape) {
   CallGenerator* cg = generator();
-  if (can_reshape && cg != NULL) {
-    assert(IncrementalInlineVirtual, "required");
-    assert(cg->call_node() == this, "mismatch");
-    assert(cg->is_virtual_late_inline(), "not virtual");
+  if (can_reshape && cg != nullptr) {
+    if (cg->is_virtual_late_inline()) {
+      assert(IncrementalInlineVirtual, "required");
+      assert(cg->call_node() == this, "mismatch");
 
-    // Recover symbolic info for method resolution.
-    ciMethod* caller = jvms()->method();
-    ciBytecodeStream iter(caller);
-    iter.force_bci(jvms()->bci());
+      if (cg->callee_method() == nullptr) {
+        // Recover symbolic info for method resolution.
+        ciMethod* caller = jvms()->method();
+        ciBytecodeStream iter(caller);
+        iter.force_bci(jvms()->bci());
 
-    bool             not_used1;
-    ciSignature*     not_used2;
-    ciMethod*        orig_callee  = iter.get_method(not_used1, &not_used2);  // callee in the bytecode
-    ciKlass*         holder       = iter.get_declared_method_holder();
-    if (orig_callee->is_method_handle_intrinsic()) {
-      assert(_override_symbolic_info, "required");
-      orig_callee = method();
-      holder = method()->holder();
-    }
+        bool             not_used1;
+        ciSignature*     not_used2;
+        ciMethod*        orig_callee  = iter.get_method(not_used1, &not_used2);  // callee in the bytecode
+        ciKlass*         holder       = iter.get_declared_method_holder();
+        if (orig_callee->is_method_handle_intrinsic()) {
+          assert(_override_symbolic_info, "required");
+          orig_callee = method();
+          holder = method()->holder();
+        }
 
-    ciInstanceKlass* klass = ciEnv::get_instance_klass_for_declared_method_holder(holder);
+        ciInstanceKlass* klass = ciEnv::get_instance_klass_for_declared_method_holder(holder);
 
-    Node* receiver_node = in(TypeFunc::Parms);
-    const TypeOopPtr* receiver_type = phase->type(receiver_node)->isa_oopptr();
+        Node* receiver_node = in(TypeFunc::Parms);
+        const TypeOopPtr* receiver_type = phase->type(receiver_node)->isa_oopptr();
 
-    int  not_used3;
-    bool call_does_dispatch;
-    ciMethod* callee = phase->C->optimize_virtual_call(caller, klass, holder, orig_callee, receiver_type, true /*is_virtual*/,
-                                                       call_does_dispatch, not_used3);  // out-parameters
-    if (!call_does_dispatch) {
-      // Register for late inlining.
-      cg->set_callee_method(callee);
-      phase->C->prepend_late_inline(cg); // MH late inlining prepends to the list, so do the same
-      set_generator(NULL);
+        int  not_used3;
+        bool call_does_dispatch;
+        ciMethod* callee = phase->C->optimize_virtual_call(caller, klass, holder, orig_callee, receiver_type, true /*is_virtual*/,
+                                                           call_does_dispatch, not_used3);  // out-parameters
+        if (!call_does_dispatch) {
+          cg->set_callee_method(callee);
+        }
+      }
+      if (cg->callee_method() != nullptr) {
+        // Register for late inlining.
+        register_for_late_inline(); // MH late inlining prepends to the list, so do the same
+      }
+    } else {
+      assert(IncrementalInline, "required");
+      if (phase->C->print_inlining()) {
+        phase->C->inline_printer()->record(cg->method(), cg->call_node()->jvms(), InliningResult::FAILURE,
+          "dynamic call node changed: trying again");
+      }
+      register_for_late_inline();
     }
   }
   return CallNode::Ideal(phase, can_reshape);
@@ -1189,109 +1310,30 @@ void CallRuntimeNode::dump_spec(outputStream *st) const {
   CallNode::dump_spec(st);
 }
 #endif
-
-//=============================================================================
-uint CallNativeNode::size_of() const { return sizeof(*this); }
-bool CallNativeNode::cmp( const Node &n ) const {
-  CallNativeNode &call = (CallNativeNode&)n;
-  return CallNode::cmp(call) && !strcmp(_name,call._name)
-    && _arg_regs == call._arg_regs && _ret_regs == call._ret_regs;
+uint CallLeafVectorNode::size_of() const { return sizeof(*this); }
+bool CallLeafVectorNode::cmp( const Node &n ) const {
+  CallLeafVectorNode &call = (CallLeafVectorNode&)n;
+  return CallLeafNode::cmp(call) && _num_bits == call._num_bits;
 }
-Node* CallNativeNode::match(const ProjNode *proj, const Matcher *matcher) {
-  switch (proj->_con) {
-    case TypeFunc::Control:
-    case TypeFunc::I_O:
-    case TypeFunc::Memory:
-      return new MachProjNode(this,proj->_con,RegMask::Empty,MachProjNode::unmatched_proj);
-    case TypeFunc::ReturnAdr:
-    case TypeFunc::FramePtr:
-      ShouldNotReachHere();
-    case TypeFunc::Parms: {
-      const Type* field_at_con = tf()->range()->field_at(proj->_con);
-      const BasicType bt = field_at_con->basic_type();
-      OptoReg::Name optoreg = OptoReg::as_OptoReg(_ret_regs.at(proj->_con - TypeFunc::Parms));
-      OptoRegPair regs;
-      if (bt == T_DOUBLE || bt == T_LONG) {
-        regs.set2(optoreg);
-      } else {
-        regs.set1(optoreg);
-      }
-      RegMask rm = RegMask(regs.first());
-      if(OptoReg::is_valid(regs.second()))
-        rm.Insert(regs.second());
-      return new MachProjNode(this, proj->_con, rm, field_at_con->ideal_reg());
-    }
-    case TypeFunc::Parms + 1: {
-      assert(tf()->range()->field_at(proj->_con) == Type::HALF, "Expected HALF");
-      assert(_ret_regs.at(proj->_con - TypeFunc::Parms) == VMRegImpl::Bad(), "Unexpected register for Type::HALF");
-      // 2nd half of doubles and longs
-      return new MachProjNode(this, proj->_con, RegMask::Empty, (uint) OptoReg::Bad);
-    }
-    default:
-      ShouldNotReachHere();
-  }
-  return NULL;
-}
-#ifndef PRODUCT
-void CallNativeNode::print_regs(const GrowableArray<VMReg>& regs, outputStream* st) {
-  st->print("{ ");
-  for (int i = 0; i < regs.length(); i++) {
-    regs.at(i)->print_on(st);
-    if (i < regs.length() - 1) {
-      st->print(", ");
-    }
-  }
-  st->print(" } ");
-}
-
-void CallNativeNode::dump_spec(outputStream *st) const {
-  st->print("# ");
-  st->print("%s ", _name);
-  st->print("_arg_regs: ");
-  print_regs(_arg_regs, st);
-  st->print("_ret_regs: ");
-  print_regs(_ret_regs, st);
-  CallNode::dump_spec(st);
-}
-#endif
 
 //------------------------------calling_convention-----------------------------
 void CallRuntimeNode::calling_convention(BasicType* sig_bt, VMRegPair *parm_regs, uint argcnt) const {
-  SharedRuntime::c_calling_convention(sig_bt, parm_regs, /*regs2=*/nullptr, argcnt);
+  SharedRuntime::c_calling_convention(sig_bt, parm_regs, argcnt);
 }
 
-void CallNativeNode::calling_convention( BasicType* sig_bt, VMRegPair *parm_regs, uint argcnt ) const {
-  assert((tf()->domain()->cnt() - TypeFunc::Parms) == argcnt, "arg counts must match!");
+void CallLeafVectorNode::calling_convention( BasicType* sig_bt, VMRegPair *parm_regs, uint argcnt ) const {
 #ifdef ASSERT
-  for (uint i = 0; i < argcnt; i++) {
-    assert(tf()->domain()->field_at(TypeFunc::Parms + i)->basic_type() == sig_bt[i], "types must match!");
+  assert(tf()->range()->field_at(TypeFunc::Parms)->is_vect()->length_in_bytes() * BitsPerByte == _num_bits,
+         "return vector size must match");
+  const TypeTuple* d = tf()->domain();
+  for (uint i = TypeFunc::Parms; i < d->cnt(); i++) {
+    Node* arg = in(i);
+    assert(arg->bottom_type()->is_vect()->length_in_bytes() * BitsPerByte == _num_bits,
+           "vector argument size must match");
   }
 #endif
-  for (uint i = 0; i < argcnt; i++) {
-    switch (sig_bt[i]) {
-      case T_BOOLEAN:
-      case T_CHAR:
-      case T_BYTE:
-      case T_SHORT:
-      case T_INT:
-      case T_FLOAT:
-        parm_regs[i].set1(_arg_regs.at(i));
-        break;
-      case T_LONG:
-      case T_DOUBLE:
-        assert((i + 1) < argcnt && sig_bt[i + 1] == T_VOID, "expecting half");
-        parm_regs[i].set2(_arg_regs.at(i));
-        break;
-      case T_VOID: // Halves of longs and doubles
-        assert(i != 0 && (sig_bt[i - 1] == T_LONG || sig_bt[i - 1] == T_DOUBLE), "expecting half");
-        assert(_arg_regs.at(i) == VMRegImpl::Bad(), "expecting bad reg");
-        parm_regs[i].set_bad();
-        break;
-      default:
-        ShouldNotReachHere();
-        break;
-    }
-  }
+
+  SharedRuntime::vector_calling_convention(parm_regs, _num_bits, argcnt);
 }
 
 //=============================================================================
@@ -1299,6 +1341,76 @@ void CallNativeNode::calling_convention( BasicType* sig_bt, VMRegPair *parm_regs
 
 
 //=============================================================================
+bool CallLeafPureNode::is_unused() const {
+  return proj_out_or_null(TypeFunc::Parms) == nullptr;
+}
+
+bool CallLeafPureNode::is_dead() const {
+  return proj_out_or_null(TypeFunc::Control) == nullptr;
+}
+
+/* We make a tuple of the global input state + TOP for the output values.
+ * We use this to delete a pure function that is not used: by replacing the call with
+ * such a tuple, we let output Proj's idealization pick the corresponding input of the
+ * pure call, so jumping over it, and effectively, removing the call from the graph.
+ * This avoids doing the graph surgery manually, but leaves that to IGVN
+ * that is specialized for doing that right. We need also tuple components for output
+ * values of the function to respect the return arity, and in case there is a projection
+ * that would pick an output (which shouldn't happen at the moment).
+ */
+TupleNode* CallLeafPureNode::make_tuple_of_input_state_and_top_return_values(const Compile* C) const {
+  // Transparently propagate input state but parameters
+  TupleNode* tuple = TupleNode::make(
+      tf()->range(),
+      in(TypeFunc::Control),
+      in(TypeFunc::I_O),
+      in(TypeFunc::Memory),
+      in(TypeFunc::FramePtr),
+      in(TypeFunc::ReturnAdr));
+
+  // And add TOPs for the return values
+  for (uint i = TypeFunc::Parms; i < tf()->range()->cnt(); i++) {
+    tuple->set_req(i, C->top());
+  }
+
+  return tuple;
+}
+
+CallLeafPureNode* CallLeafPureNode::inline_call_leaf_pure_node(Node* control) const {
+  Node* top = Compile::current()->top();
+  if (control == nullptr) {
+    control = in(TypeFunc::Control);
+  }
+
+  CallLeafPureNode* call = new CallLeafPureNode(tf(), entry_point(), _name);
+  call->init_req(TypeFunc::Control, control);
+  call->init_req(TypeFunc::I_O, top);
+  call->init_req(TypeFunc::Memory, top);
+  call->init_req(TypeFunc::ReturnAdr, top);
+  call->init_req(TypeFunc::FramePtr, top);
+  for (unsigned int i = 0; i < tf()->domain()->cnt() - TypeFunc::Parms; i++) {
+    call->init_req(TypeFunc::Parms + i, in(TypeFunc::Parms + i));
+  }
+
+  return call;
+}
+
+Node* CallLeafPureNode::Ideal(PhaseGVN* phase, bool can_reshape) {
+  if (is_dead()) {
+    return nullptr;
+  }
+
+  // We need to wait until IGVN because during parsing, usages might still be missing
+  // and we would remove the call immediately.
+  if (can_reshape && is_unused()) {
+    // The result is not used. We remove the call by replacing it with a tuple, that
+    // is later disintegrated by the projections.
+    return make_tuple_of_input_state_and_top_return_values(phase->C);
+  }
+
+  return CallRuntimeNode::Ideal(phase, can_reshape);
+}
+
 #ifndef PRODUCT
 void CallLeafNode::dump_spec(outputStream *st) const {
   st->print("# ");
@@ -1309,13 +1421,13 @@ void CallLeafNode::dump_spec(outputStream *st) const {
 
 //=============================================================================
 
-void SafePointNode::set_local(JVMState* jvms, uint idx, Node *c) {
+void SafePointNode::set_local(const JVMState* jvms, uint idx, Node *c) {
   assert(verify_jvms(jvms), "jvms must match");
   int loc = jvms->locoff() + idx;
   if (in(loc)->is_top() && idx > 0 && !c->is_top() ) {
     // If current local idx is top then local idx - 1 could
     // be a long/double that needs to be killed since top could
-    // represent the 2nd half ofthe long/double.
+    // represent the 2nd half of the long/double.
     uint ideal = in(loc -1)->ideal_reg();
     if (ideal == Op_RegD || ideal == Op_RegL) {
       // set other (low index) half to top
@@ -1332,9 +1444,9 @@ bool SafePointNode::cmp( const Node &n ) const {
 
 //-------------------------set_next_exception----------------------------------
 void SafePointNode::set_next_exception(SafePointNode* n) {
-  assert(n == NULL || n->Opcode() == Op_SafePoint, "correct value for next_exception");
+  assert(n == nullptr || n->Opcode() == Op_SafePoint, "correct value for next_exception");
   if (len() == req()) {
-    if (n != NULL)  add_prec(n);
+    if (n != nullptr)  add_prec(n);
   } else {
     set_prec(req(), n);
   }
@@ -1344,10 +1456,10 @@ void SafePointNode::set_next_exception(SafePointNode* n) {
 //----------------------------next_exception-----------------------------------
 SafePointNode* SafePointNode::next_exception() const {
   if (len() == req()) {
-    return NULL;
+    return nullptr;
   } else {
     Node* n = in(req());
-    assert(n == NULL || n->Opcode() == Op_SafePoint, "no other uses of prec edges");
+    assert(n == nullptr || n->Opcode() == Op_SafePoint, "no other uses of prec edges");
     return (SafePointNode*) n;
   }
 }
@@ -1356,7 +1468,8 @@ SafePointNode* SafePointNode::next_exception() const {
 //------------------------------Ideal------------------------------------------
 // Skip over any collapsed Regions
 Node *SafePointNode::Ideal(PhaseGVN *phase, bool can_reshape) {
-  return remove_dead_region(phase, can_reshape) ? this : NULL;
+  assert(_jvms == nullptr || ((uintptr_t)_jvms->map() & 1) || _jvms->map() == this, "inconsistent JVMState");
+  return remove_dead_region(phase, can_reshape) ? this : nullptr;
 }
 
 //------------------------------Identity---------------------------------------
@@ -1364,8 +1477,14 @@ Node *SafePointNode::Ideal(PhaseGVN *phase, bool can_reshape) {
 Node* SafePointNode::Identity(PhaseGVN* phase) {
 
   // If you have back to back safepoints, remove one
-  if( in(TypeFunc::Control)->is_SafePoint() )
-    return in(TypeFunc::Control);
+  if (in(TypeFunc::Control)->is_SafePoint()) {
+    Node* out_c = unique_ctrl_out_or_null();
+    // This can be the safepoint of an outer strip mined loop if the inner loop's backedge was removed. Replacing the
+    // outer loop's safepoint could confuse removal of the outer loop.
+    if (out_c != nullptr && !out_c->is_OuterStripMinedLoopEnd()) {
+      return in(TypeFunc::Control);
+    }
+  }
 
   // Transforming long counted loops requires a safepoint node. Do not
   // eliminate a safepoint until loop opts are over.
@@ -1406,28 +1525,17 @@ void SafePointNode::dump_spec(outputStream *st) const {
   st->print(" SafePoint ");
   _replaced_nodes.dump(st);
 }
-
-// The related nodes of a SafepointNode are all data inputs, excluding the
-// control boundary, as well as all outputs till level 2 (to include projection
-// nodes and targets). In compact mode, just include inputs till level 1 and
-// outputs as before.
-void SafePointNode::related(GrowableArray<Node*> *in_rel, GrowableArray<Node*> *out_rel, bool compact) const {
-  if (compact) {
-    this->collect_nodes(in_rel, 1, false, false);
-  } else {
-    this->collect_nodes_in_all_data(in_rel, false);
-  }
-  this->collect_nodes(out_rel, -2, false, false);
-}
 #endif
 
 const RegMask &SafePointNode::in_RegMask(uint idx) const {
-  if( idx < TypeFunc::Parms ) return RegMask::Empty;
+  if (idx < TypeFunc::Parms) {
+    return RegMask::EMPTY;
+  }
   // Values outside the domain represent debug info
   return *(Compile::current()->matcher()->idealreg2debugmask[in(idx)->ideal_reg()]);
 }
 const RegMask &SafePointNode::out_RegMask() const {
-  return RegMask::Empty;
+  return RegMask::EMPTY;
 }
 
 
@@ -1453,21 +1561,15 @@ void SafePointNode::push_monitor(const FastLockNode *lock) {
   assert(JVMState::logMonitorEdges == exact_log2(MonitorEdges), "correct MonitorEdges");
   assert(req() == jvms()->endoff(), "correct sizing");
   int nextmon = jvms()->scloff();
-  if (GenerateSynchronizationCode) {
-    ins_req(nextmon,   lock->box_node());
-    ins_req(nextmon+1, lock->obj_node());
-  } else {
-    Node* top = Compile::current()->top();
-    ins_req(nextmon, top);
-    ins_req(nextmon, top);
-  }
+  ins_req(nextmon,   lock->box_node());
+  ins_req(nextmon+1, lock->obj_node());
   jvms()->set_scloff(nextmon + MonitorEdges);
   jvms()->set_endoff(req());
 }
 
 void SafePointNode::pop_monitor() {
   // Delete last monitor from debug info
-  debug_only(int num_before_pop = jvms()->nof_monitors());
+  DEBUG_ONLY(int num_before_pop = jvms()->nof_monitors());
   const int MonitorEdges = 2;
   assert(JVMState::logMonitorEdges == exact_log2(MonitorEdges), "correct MonitorEdges");
   int scloff = jvms()->scloff();
@@ -1492,6 +1594,12 @@ Node *SafePointNode::peek_monitor_obj() const {
   return monitor_obj(jvms(), mon);
 }
 
+Node* SafePointNode::peek_operand(uint off) const {
+  assert(jvms()->sp() > 0, "must have an operand");
+  assert(off < jvms()->sp(), "off is out-of-range");
+  return stack(jvms(), jvms()->sp() - off - 1);
+}
+
 // Do we Match on this edge index or not?  Match no edges
 uint SafePointNode::match_edge(uint idx) const {
   return (TypeFunc::Parms == idx);
@@ -1501,25 +1609,52 @@ void SafePointNode::disconnect_from_root(PhaseIterGVN *igvn) {
   assert(Opcode() == Op_SafePoint, "only value for safepoint in loops");
   int nb = igvn->C->root()->find_prec_edge(this);
   if (nb != -1) {
-    igvn->C->root()->rm_prec(nb);
+    igvn->delete_precedence_of(igvn->C->root(), nb);
   }
+}
+
+void SafePointNode::remove_non_debug_edges(NodeEdgeTempStorage& non_debug_edges) {
+  assert(non_debug_edges._state == NodeEdgeTempStorage::state_initial, "not processed");
+  assert(non_debug_edges.is_empty(), "edges not processed");
+
+  while (req() > jvms()->endoff()) {
+    uint last = req() - 1;
+    non_debug_edges.push(in(last));
+    del_req(last);
+  }
+
+  assert(jvms()->endoff() == req(), "no extra edges past debug info allowed");
+  DEBUG_ONLY(non_debug_edges._state = NodeEdgeTempStorage::state_populated);
+}
+
+void SafePointNode::restore_non_debug_edges(NodeEdgeTempStorage& non_debug_edges) {
+  assert(non_debug_edges._state == NodeEdgeTempStorage::state_populated, "not populated");
+  assert(jvms()->endoff() == req(), "no extra edges past debug info allowed");
+
+  while (!non_debug_edges.is_empty()) {
+    Node* non_debug_edge = non_debug_edges.pop();
+    add_req(non_debug_edge);
+  }
+
+  assert(non_debug_edges.is_empty(), "edges not processed");
+  DEBUG_ONLY(non_debug_edges._state = NodeEdgeTempStorage::state_processed);
 }
 
 //==============  SafePointScalarObjectNode  ==============
 
-SafePointScalarObjectNode::SafePointScalarObjectNode(const TypeOopPtr* tp,
-#ifdef ASSERT
-                                                     AllocateNode* alloc,
-#endif
-                                                     uint first_index,
-                                                     uint n_fields) :
+SafePointScalarObjectNode::SafePointScalarObjectNode(const TypeOopPtr* tp, Node* alloc, uint first_index, uint depth, uint n_fields) :
   TypeNode(tp, 1), // 1 control input -- seems required.  Get from root.
   _first_index(first_index),
-  _n_fields(n_fields)
-#ifdef ASSERT
-  , _alloc(alloc)
-#endif
+  _depth(depth),
+  _n_fields(n_fields),
+  _alloc(alloc)
 {
+#ifdef ASSERT
+  if (!alloc->is_Allocate() && !(alloc->Opcode() == Op_VectorBox)) {
+    alloc->dump();
+    assert(false, "unexpected call node");
+  }
+#endif
   init_class_id(Class_SafePointScalarObject);
 }
 
@@ -1538,7 +1673,7 @@ const RegMask &SafePointScalarObjectNode::in_RegMask(uint idx) const {
 }
 
 const RegMask &SafePointScalarObjectNode::out_RegMask() const {
-  return RegMask::Empty;
+  return RegMask::EMPTY;
 }
 
 uint SafePointScalarObjectNode::match_edge(uint idx) const {
@@ -1548,7 +1683,7 @@ uint SafePointScalarObjectNode::match_edge(uint idx) const {
 SafePointScalarObjectNode*
 SafePointScalarObjectNode::clone(Dict* sosn_map, bool& new_node) const {
   void* cached = (*sosn_map)[(void*)this];
-  if (cached != NULL) {
+  if (cached != nullptr) {
     new_node = false;
     return (SafePointScalarObjectNode*)cached;
   }
@@ -1561,10 +1696,58 @@ SafePointScalarObjectNode::clone(Dict* sosn_map, bool& new_node) const {
 
 #ifndef PRODUCT
 void SafePointScalarObjectNode::dump_spec(outputStream *st) const {
-  st->print(" # fields@[%d..%d]", first_index(),
-             first_index() + n_fields() - 1);
+  st->print(" # fields@[%d..%d]", first_index(), first_index() + n_fields() - 1);
+}
+#endif
+
+//==============  SafePointScalarMergeNode  ==============
+
+SafePointScalarMergeNode::SafePointScalarMergeNode(const TypeOopPtr* tp, int merge_pointer_idx) :
+  TypeNode(tp, 1), // 1 control input -- seems required.  Get from root.
+  _merge_pointer_idx(merge_pointer_idx)
+{
+  init_class_id(Class_SafePointScalarMerge);
 }
 
+// Do not allow value-numbering for SafePointScalarMerge node.
+uint SafePointScalarMergeNode::hash() const { return NO_HASH; }
+bool SafePointScalarMergeNode::cmp( const Node &n ) const {
+  return (&n == this); // Always fail except on self
+}
+
+uint SafePointScalarMergeNode::ideal_reg() const {
+  return 0; // No matching to machine instruction
+}
+
+const RegMask &SafePointScalarMergeNode::in_RegMask(uint idx) const {
+  return *(Compile::current()->matcher()->idealreg2debugmask[in(idx)->ideal_reg()]);
+}
+
+const RegMask &SafePointScalarMergeNode::out_RegMask() const {
+  return RegMask::EMPTY;
+}
+
+uint SafePointScalarMergeNode::match_edge(uint idx) const {
+  return 0;
+}
+
+SafePointScalarMergeNode*
+SafePointScalarMergeNode::clone(Dict* sosn_map, bool& new_node) const {
+  void* cached = (*sosn_map)[(void*)this];
+  if (cached != nullptr) {
+    new_node = false;
+    return (SafePointScalarMergeNode*)cached;
+  }
+  new_node = true;
+  SafePointScalarMergeNode* res = (SafePointScalarMergeNode*)Node::clone();
+  sosn_map->Insert((void*)this, (void*)res);
+  return res;
+}
+
+#ifndef PRODUCT
+void SafePointScalarMergeNode::dump_spec(outputStream *st) const {
+  st->print(" # merge_pointer_idx=%d, scalarized_objects=%d", _merge_pointer_idx, req()-1);
+}
 #endif
 
 //=============================================================================
@@ -1573,7 +1756,7 @@ uint AllocateNode::size_of() const { return sizeof(*this); }
 AllocateNode::AllocateNode(Compile* C, const TypeFunc *atype,
                            Node *ctrl, Node *mem, Node *abio,
                            Node *size, Node *klass_node, Node *initial_test)
-  : CallNode(atype, NULL, TypeRawPtr::BOTTOM)
+  : CallNode(atype, nullptr, TypeRawPtr::BOTTOM)
 {
   init_class_id(Class_Allocate);
   init_flags(Flag_is_macro);
@@ -1591,17 +1774,16 @@ AllocateNode::AllocateNode(Compile* C, const TypeFunc *atype,
   init_req( KlassNode          , klass_node);
   init_req( InitialTest        , initial_test);
   init_req( ALength            , topnode);
+  init_req( ValidLengthTest    , topnode);
   C->add_macro_node(this);
 }
 
 void AllocateNode::compute_MemBar_redundancy(ciMethod* initializer)
 {
-  assert(initializer != NULL &&
-         initializer->is_initializer() &&
-         !initializer->is_static(),
-             "unexpected initializer method");
+  assert(initializer != nullptr && initializer->is_object_initializer(),
+         "unexpected initializer method");
   BCEscapeAnalyzer* analyzer = initializer->get_bcea();
-  if (analyzer == NULL) {
+  if (analyzer == nullptr) {
     return;
   }
 
@@ -1610,98 +1792,52 @@ void AllocateNode::compute_MemBar_redundancy(ciMethod* initializer)
     _is_allocation_MemBar_redundant = true;
   }
 }
-Node *AllocateNode::make_ideal_mark(PhaseGVN *phase, Node* obj, Node* control, Node* mem) {
-  Node* mark_node = NULL;
-  // For now only enable fast locking for non-array types
-  if (UseBiasedLocking && Opcode() == Op_Allocate) {
+Node *AllocateNode::make_ideal_mark(PhaseGVN* phase, Node* control, Node* mem) {
+  Node* mark_node = nullptr;
+  if (UseCompactObjectHeaders) {
     Node* klass_node = in(AllocateNode::KlassNode);
-    Node* proto_adr = phase->transform(new AddPNode(klass_node, klass_node, phase->MakeConX(in_bytes(Klass::prototype_header_offset()))));
-    mark_node = LoadNode::make(*phase, control, mem, proto_adr, TypeRawPtr::BOTTOM, TypeX_X, TypeX_X->basic_type(), MemNode::unordered);
+    Node* proto_adr = phase->transform(AddPNode::make_off_heap(klass_node, phase->MakeConX(in_bytes(Klass::prototype_header_offset()))));
+    mark_node = LoadNode::make(*phase, control, mem, proto_adr, phase->type(proto_adr)->is_ptr(), TypeX_X, TypeX_X->basic_type(), MemNode::unordered);
   } else {
+    // For now only enable fast locking for non-array types
     mark_node = phase->MakeConX(markWord::prototype().value());
   }
   return mark_node;
 }
 
-//=============================================================================
-Node* AllocateArrayNode::Ideal(PhaseGVN *phase, bool can_reshape) {
-  if (remove_dead_region(phase, can_reshape))  return this;
-  // Don't bother trying to transform a dead node
-  if (in(0) && in(0)->is_top())  return NULL;
-
-  const Type* type = phase->type(Ideal_length());
-  if (type->isa_int() && type->is_int()->_hi < 0) {
-    if (can_reshape) {
-      PhaseIterGVN *igvn = phase->is_IterGVN();
-      // Unreachable fall through path (negative array length),
-      // the allocation can only throw so disconnect it.
-      Node* proj = proj_out_or_null(TypeFunc::Control);
-      Node* catchproj = NULL;
-      if (proj != NULL) {
-        for (DUIterator_Fast imax, i = proj->fast_outs(imax); i < imax; i++) {
-          Node *cn = proj->fast_out(i);
-          if (cn->is_Catch()) {
-            catchproj = cn->as_Multi()->proj_out_or_null(CatchProjNode::fall_through_index);
-            break;
-          }
-        }
-      }
-      if (catchproj != NULL && catchproj->outcnt() > 0 &&
-          (catchproj->outcnt() > 1 ||
-           catchproj->unique_out()->Opcode() != Op_Halt)) {
-        assert(catchproj->is_CatchProj(), "must be a CatchProjNode");
-        Node* nproj = catchproj->clone();
-        igvn->register_new_node_with_optimizer(nproj);
-
-        Node *frame = new ParmNode( phase->C->start(), TypeFunc::FramePtr );
-        frame = phase->transform(frame);
-        // Halt & Catch Fire
-        Node* halt = new HaltNode(nproj, frame, "unexpected negative array length");
-        phase->C->root()->add_req(halt);
-        phase->transform(halt);
-
-        igvn->replace_node(catchproj, phase->C->top());
-        return this;
-      }
-    } else {
-      // Can't correct it during regular GVN so register for IGVN
-      phase->C->record_for_igvn(this);
-    }
-  }
-  return NULL;
-}
-
 // Retrieve the length from the AllocateArrayNode. Narrow the type with a
 // CastII, if appropriate.  If we are not allowed to create new nodes, and
-// a CastII is appropriate, return NULL.
-Node *AllocateArrayNode::make_ideal_length(const TypeOopPtr* oop_type, PhaseTransform *phase, bool allow_new_nodes) {
+// a CastII is appropriate, return null.
+Node *AllocateArrayNode::make_ideal_length(const TypeOopPtr* oop_type, PhaseValues* phase, bool allow_new_nodes) {
   Node *length = in(AllocateNode::ALength);
-  assert(length != NULL, "length is not null");
+  assert(length != nullptr, "length is not null");
 
   const TypeInt* length_type = phase->find_int_type(length);
   const TypeAryPtr* ary_type = oop_type->isa_aryptr();
 
-  if (ary_type != NULL && length_type != NULL) {
+  if (ary_type != nullptr && length_type != nullptr) {
     const TypeInt* narrow_length_type = ary_type->narrow_size_type(length_type);
     if (narrow_length_type != length_type) {
       // Assert one of:
       //   - the narrow_length is 0
       //   - the narrow_length is not wider than length
       assert(narrow_length_type == TypeInt::ZERO ||
-             length_type->is_con() && narrow_length_type->is_con() &&
-                (narrow_length_type->_hi <= length_type->_lo) ||
+             (length_type->is_con() && narrow_length_type->is_con() &&
+              (narrow_length_type->_hi <= length_type->_lo)) ||
              (narrow_length_type->_hi <= length_type->_hi &&
               narrow_length_type->_lo >= length_type->_lo),
              "narrow type must be narrower than length type");
 
-      // Return NULL if new nodes are not allowed
-      if (!allow_new_nodes) return NULL;
+      // Return null if new nodes are not allowed
+      if (!allow_new_nodes) {
+        return nullptr;
+      }
       // Create a cast which is control dependent on the initialization to
       // propagate the fact that the array length must be positive.
       InitializeNode* init = initialization();
-      assert(init != NULL, "initialization not found");
-      length = new CastIINode(length, narrow_length_type);
-      length->set_req(0, init->proj_out_or_null(0));
+      if (init != nullptr) {
+        length = new CastIINode(init->proj_out_or_null(TypeFunc::Control), length, narrow_length_type);
+      }
     }
   }
 
@@ -1709,6 +1845,8 @@ Node *AllocateArrayNode::make_ideal_length(const TypeOopPtr* oop_type, PhaseTran
 }
 
 //=============================================================================
+const TypeFunc* LockNode::_lock_type_Type = nullptr;
+
 uint LockNode::size_of() const { return sizeof(*this); }
 
 // Redundant lock elimination
@@ -1743,7 +1881,7 @@ uint LockNode::size_of() const { return sizeof(*this); }
 //
 // Either of these cases subsumes the simple case of sequential control flow
 //
-// Addtionally we can eliminate versions without the else case:
+// Additionally we can eliminate versions without the else case:
 //
 //   s();
 //   if (p)
@@ -1839,13 +1977,13 @@ uint LockNode::size_of() const { return sizeof(*this); }
 //   - eliminated locking nodes
 //
 static Node *next_control(Node *ctrl) {
-  if (ctrl == NULL)
-    return NULL;
+  if (ctrl == nullptr)
+    return nullptr;
   while (1) {
     if (ctrl->is_Region()) {
       RegionNode *r = ctrl->as_Region();
       Node *n = r->is_copy();
-      if (n == NULL)
+      if (n == nullptr)
         break;  // hit a region, return it
       else
         ctrl = n;
@@ -1868,10 +2006,10 @@ static Node *next_control(Node *ctrl) {
 //
 bool AbstractLockNode::find_matching_unlock(const Node* ctrl, LockNode* lock,
                                             GrowableArray<AbstractLockNode*> &lock_ops) {
-  ProjNode *ctrl_proj = (ctrl->is_Proj()) ? ctrl->as_Proj() : NULL;
-  if (ctrl_proj != NULL && ctrl_proj->_con == TypeFunc::Control) {
+  ProjNode *ctrl_proj = (ctrl->is_Proj()) ? ctrl->as_Proj() : nullptr;
+  if (ctrl_proj != nullptr && ctrl_proj->_con == TypeFunc::Control) {
     Node *n = ctrl_proj->in(0);
-    if (n != NULL && n->is_Unlock()) {
+    if (n != nullptr && n->is_Unlock()) {
       UnlockNode *unlock = n->as_Unlock();
       BarrierSetC2* bs = BarrierSet::barrier_set()->barrier_set_c2();
       Node* lock_obj = bs->step_over_gc_barrier(lock->obj_node());
@@ -1891,11 +2029,11 @@ bool AbstractLockNode::find_matching_unlock(const Node* ctrl, LockNode* lock,
 // Find the lock matching an unlock.  Returns null if a safepoint
 // or complicated control is encountered first.
 LockNode *AbstractLockNode::find_matching_lock(UnlockNode* unlock) {
-  LockNode *lock_result = NULL;
+  LockNode *lock_result = nullptr;
   // find the matching lock, or an intervening safepoint
   Node *ctrl = next_control(unlock->in(0));
   while (1) {
-    assert(ctrl != NULL, "invalid control graph");
+    assert(ctrl != nullptr, "invalid control graph");
     assert(!ctrl->is_Start(), "missing lock for unlock");
     if (ctrl->is_top()) break;  // dead control path
     if (ctrl->is_Proj()) ctrl = ctrl->in(0);
@@ -1903,7 +2041,7 @@ LockNode *AbstractLockNode::find_matching_lock(UnlockNode* unlock) {
         break;  // found a safepoint (may be the lock we are searching for)
     } else if (ctrl->is_Region()) {
       // Check for a simple diamond pattern.  Punt on anything more complicated
-      if (ctrl->req() == 3 && ctrl->in(1) != NULL && ctrl->in(2) != NULL) {
+      if (ctrl->req() == 3 && ctrl->in(1) != nullptr && ctrl->in(2) != nullptr) {
         Node *in1 = next_control(ctrl->in(1));
         Node *in2 = next_control(ctrl->in(2));
         if (((in1->is_IfTrue() && in2->is_IfFalse()) ||
@@ -1942,7 +2080,7 @@ bool AbstractLockNode::find_lock_and_unlock_through_if(Node* node, LockNode* loc
   if (if_node->is_If() && if_node->outcnt() == 2 && (if_true || node->is_IfFalse())) {
     Node *lock_ctrl = next_control(if_node->in(0));
     if (find_matching_unlock(lock_ctrl, lock, lock_ops)) {
-      Node* lock1_node = NULL;
+      Node* lock1_node = nullptr;
       ProjNode* proj = if_node->as_If()->proj_out(!if_true);
       if (if_true) {
         if (proj->is_IfFalse() && proj->outcnt() == 1) {
@@ -1953,7 +2091,7 @@ bool AbstractLockNode::find_lock_and_unlock_through_if(Node* node, LockNode* loc
           lock1_node = proj->unique_out();
         }
       }
-      if (lock1_node != NULL && lock1_node->is_Lock()) {
+      if (lock1_node != nullptr && lock1_node->is_Lock()) {
         LockNode *lock1 = lock1_node->as_Lock();
         BarrierSetC2* bs = BarrierSet::barrier_set()->barrier_set_c2();
         Node* lock_obj = bs->step_over_gc_barrier(lock->obj_node());
@@ -1978,7 +2116,7 @@ bool AbstractLockNode::find_unlocks_for_region(const RegionNode* region, LockNod
   // in(0) should be self edge so skip it.
   for (int i = 1; i < (int)region->req(); i++) {
     Node *in_node = next_control(region->in(i));
-    if (in_node != NULL) {
+    if (in_node != nullptr) {
       if (find_matching_unlock(in_node, lock, lock_ops)) {
         // found a match so keep on checking.
         continue;
@@ -1995,6 +2133,28 @@ bool AbstractLockNode::find_unlocks_for_region(const RegionNode* region, LockNod
   }
   return true;
 
+}
+
+// Check that all locks/unlocks associated with object come from balanced regions.
+bool AbstractLockNode::is_balanced() {
+  Node* obj = obj_node();
+  for (uint j = 0; j < obj->outcnt(); j++) {
+    Node* n = obj->raw_out(j);
+    if (n->is_AbstractLock() &&
+        n->as_AbstractLock()->obj_node()->eqv_uncast(obj)) {
+      BoxLockNode* n_box = n->as_AbstractLock()->box_node()->as_BoxLock();
+      if (n_box->is_unbalanced()) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+const char* AbstractLockNode::_kind_names[] = {"Regular", "NonEscObj", "Coarsened", "Nested"};
+
+const char * AbstractLockNode::kind_as_string() const {
+  return _kind_names[_kind];
 }
 
 #ifndef PRODUCT
@@ -2014,8 +2174,6 @@ void AbstractLockNode::set_eliminated_lock_counter() {
   }
 }
 
-const char* AbstractLockNode::_kind_names[] = {"Regular", "NonEscObj", "Coarsened", "Nested"};
-
 void AbstractLockNode::dump_spec(outputStream* st) const {
   st->print("%s ", _kind_names[_kind]);
   CallNode::dump_spec(st);
@@ -2024,26 +2182,16 @@ void AbstractLockNode::dump_spec(outputStream* st) const {
 void AbstractLockNode::dump_compact_spec(outputStream* st) const {
   st->print("%s", _kind_names[_kind]);
 }
-
-// The related set of lock nodes includes the control boundary.
-void AbstractLockNode::related(GrowableArray<Node*> *in_rel, GrowableArray<Node*> *out_rel, bool compact) const {
-  if (compact) {
-      this->collect_nodes(in_rel, 1, false, false);
-    } else {
-      this->collect_nodes_in_all_data(in_rel, true);
-    }
-    this->collect_nodes(out_rel, -2, false, false);
-}
 #endif
 
 //=============================================================================
 Node *LockNode::Ideal(PhaseGVN *phase, bool can_reshape) {
 
-  // perform any generic optimizations first (returns 'this' or NULL)
+  // perform any generic optimizations first (returns 'this' or null)
   Node *result = SafePointNode::Ideal(phase, can_reshape);
-  if (result != NULL)  return result;
+  if (result != nullptr)  return result;
   // Don't bother trying to transform a dead node
-  if (in(0) && in(0)->is_top())  return NULL;
+  if (in(0) && in(0)->is_top())  return nullptr;
 
   // Now see if we can optimize away this lock.  We don't actually
   // remove the locking here, we simply set the _eliminate flag which
@@ -2052,10 +2200,10 @@ Node *LockNode::Ideal(PhaseGVN *phase, bool can_reshape) {
   // one computed above.
   if (can_reshape && EliminateLocks && !is_non_esc_obj()) {
     //
-    // If we are locking an unescaped object, the lock/unlock is unnecessary
+    // If we are locking an non-escaped object, the lock/unlock is unnecessary
     //
     ConnectionGraph *cgr = phase->C->congraph();
-    if (cgr != NULL && cgr->not_global_escape(obj_node())) {
+    if (cgr != nullptr && cgr->can_eliminate_lock(this)) {
       assert(!is_eliminated() || is_coarsened(), "sanity");
       // The lock could be marked eliminated by lock coarsening
       // code during first IGVN before EA. Replace coarsened flag
@@ -2067,11 +2215,14 @@ Node *LockNode::Ideal(PhaseGVN *phase, bool can_reshape) {
       return result;
     }
 
+    if (!phase->C->do_locks_coarsening()) {
+      return result; // Compiling without locks coarsening
+    }
     //
     // Try lock coarsening
     //
     PhaseIterGVN* iter = phase->is_IterGVN();
-    if (iter != NULL && !is_eliminated()) {
+    if (iter != nullptr && !is_eliminated()) {
 
       GrowableArray<AbstractLockNode*>   lock_ops;
 
@@ -2104,6 +2255,11 @@ Node *LockNode::Ideal(PhaseGVN *phase, bool can_reshape) {
         if (PrintEliminateLocks) {
           int locks = 0;
           int unlocks = 0;
+          if (Verbose) {
+            tty->print_cr("=== Locks coarsening ===");
+            tty->print("Obj: ");
+            obj_node()->dump();
+          }
           for (int i = 0; i < lock_ops.length(); i++) {
             AbstractLockNode* lock = lock_ops.at(i);
             if (lock->Opcode() == Op_Lock)
@@ -2111,10 +2267,13 @@ Node *LockNode::Ideal(PhaseGVN *phase, bool can_reshape) {
             else
               unlocks++;
             if (Verbose) {
-              lock->dump(1);
+              tty->print("Box %d: ", i);
+              box_node()->dump();
+              tty->print(" %d: ", i);
+              lock->dump();
             }
           }
-          tty->print_cr("***Eliminated %d unlocks and %d locks", unlocks, locks);
+          tty->print_cr("=== Coarsened %d unlocks and %d locks", unlocks, locks);
         }
   #endif
 
@@ -2129,6 +2288,8 @@ Node *LockNode::Ideal(PhaseGVN *phase, bool can_reshape) {
 #endif
           lock->set_coarsened();
         }
+        // Record this coarsened group.
+        phase->C->add_coarsened_locks(lock_ops);
       } else if (ctrl->is_Region() &&
                  iter->_worklist.member(ctrl)) {
         // We weren't able to find any opportunities but the region this
@@ -2145,10 +2306,10 @@ Node *LockNode::Ideal(PhaseGVN *phase, bool can_reshape) {
 
 //=============================================================================
 bool LockNode::is_nested_lock_region() {
-  return is_nested_lock_region(NULL);
+  return is_nested_lock_region(nullptr);
 }
 
-// p is used for access to compilation log; no logging if NULL
+// p is used for access to compilation log; no logging if null
 bool LockNode::is_nested_lock_region(Compile * c) {
   BoxLockNode* box = box_node()->as_BoxLock();
   int stk_slot = box->stack_slot();
@@ -2161,16 +2322,35 @@ bool LockNode::is_nested_lock_region(Compile * c) {
 
   // Ignore complex cases: merged locks or multiple locks.
   Node* obj = obj_node();
-  LockNode* unique_lock = NULL;
-  if (!box->is_simple_lock_region(&unique_lock, obj)) {
+  LockNode* unique_lock = nullptr;
+  Node* bad_lock = nullptr;
+  if (!box->is_simple_lock_region(&unique_lock, obj, &bad_lock)) {
 #ifdef ASSERT
-    this->log_lock_optimization(c, "eliminate_lock_INLR_2a");
+    this->log_lock_optimization(c, "eliminate_lock_INLR_2a", bad_lock);
 #endif
     return false;
   }
   if (unique_lock != this) {
 #ifdef ASSERT
-    this->log_lock_optimization(c, "eliminate_lock_INLR_2b");
+    this->log_lock_optimization(c, "eliminate_lock_INLR_2b", (unique_lock != nullptr ? unique_lock : bad_lock));
+    if (PrintEliminateLocks && Verbose) {
+      tty->print_cr("=============== unique_lock != this ============");
+      tty->print(" this: ");
+      this->dump();
+      tty->print(" box: ");
+      box->dump();
+      tty->print(" obj: ");
+      obj->dump();
+      if (unique_lock != nullptr) {
+        tty->print(" unique_lock: ");
+        unique_lock->dump();
+      }
+      if (bad_lock != nullptr) {
+        tty->print(" bad_lock: ");
+        bad_lock->dump();
+      }
+      tty->print_cr("===============");
+    }
 #endif
     return false;
   }
@@ -2190,6 +2370,7 @@ bool LockNode::is_nested_lock_region(Compile * c) {
       obj_node = bs->step_over_gc_barrier(obj_node);
       BoxLockNode* box_node = sfn->monitor_box(jvms, idx)->as_BoxLock();
       if ((box_node->stack_slot() < stk_slot) && obj_node->eqv_uncast(obj)) {
+        box->set_nested();
         return true;
       }
     }
@@ -2206,11 +2387,11 @@ uint UnlockNode::size_of() const { return sizeof(*this); }
 //=============================================================================
 Node *UnlockNode::Ideal(PhaseGVN *phase, bool can_reshape) {
 
-  // perform any generic optimizations first (returns 'this' or NULL)
+  // perform any generic optimizations first (returns 'this' or null)
   Node *result = SafePointNode::Ideal(phase, can_reshape);
-  if (result != NULL)  return result;
+  if (result != nullptr)  return result;
   // Don't bother trying to transform a dead node
-  if (in(0) && in(0)->is_top())  return NULL;
+  if (in(0) && in(0)->is_top())  return nullptr;
 
   // Now see if we can optimize away this unlock.  We don't actually
   // remove the unlocking here, we simply set the _eliminate flag which
@@ -2220,10 +2401,10 @@ Node *UnlockNode::Ideal(PhaseGVN *phase, bool can_reshape) {
   // Escape state is defined after Parse phase.
   if (can_reshape && EliminateLocks && !is_non_esc_obj()) {
     //
-    // If we are unlocking an unescaped object, the lock/unlock is unnecessary.
+    // If we are unlocking an non-escaped object, the lock/unlock is unnecessary.
     //
     ConnectionGraph *cgr = phase->C->congraph();
-    if (cgr != NULL && cgr->not_global_escape(obj_node())) {
+    if (cgr != nullptr && cgr->can_eliminate_lock(this)) {
       assert(!is_eliminated() || is_coarsened(), "sanity");
       // The lock could be marked eliminated by lock coarsening
       // code during first IGVN before EA. Replace coarsened flag
@@ -2237,27 +2418,25 @@ Node *UnlockNode::Ideal(PhaseGVN *phase, bool can_reshape) {
   return result;
 }
 
-const char * AbstractLockNode::kind_as_string() const {
-  return is_coarsened()   ? "coarsened" :
-         is_nested()      ? "nested" :
-         is_non_esc_obj() ? "non_escaping" :
-         "?";
-}
-
-void AbstractLockNode::log_lock_optimization(Compile *C, const char * tag)  const {
-  if (C == NULL) {
+void AbstractLockNode::log_lock_optimization(Compile *C, const char * tag, Node* bad_lock)  const {
+  if (C == nullptr) {
     return;
   }
   CompileLog* log = C->log();
-  if (log != NULL) {
-    log->begin_head("%s lock='%d' compile_id='%d' class_id='%s' kind='%s'",
-          tag, is_Lock(), C->compile_id(),
+  if (log != nullptr) {
+    Node* box = box_node();
+    Node* obj = obj_node();
+    int box_id = box != nullptr ? box->_idx : -1;
+    int obj_id = obj != nullptr ? obj->_idx : -1;
+
+    log->begin_head("%s compile_id='%d' lock_id='%d' class='%s' kind='%s' box_id='%d' obj_id='%d' bad_id='%d'",
+          tag, C->compile_id(), this->_idx,
           is_Unlock() ? "unlock" : is_Lock() ? "lock" : "?",
-          kind_as_string());
+          kind_as_string(), box_id, obj_id, (bad_lock != nullptr ? bad_lock->_idx : -1));
     log->stamp();
     log->end_head();
     JVMState* p = is_Unlock() ? (as_Unlock()->dbg_jvms()) : jvms();
-    while (p != NULL) {
+    while (p != nullptr) {
       log->elem("jvms bci='%d' method='%d'", p->bci(), log->identify(p->method()));
       p = p->caller();
     }
@@ -2265,12 +2444,12 @@ void AbstractLockNode::log_lock_optimization(Compile *C, const char * tag)  cons
   }
 }
 
-bool CallNode::may_modify_arraycopy_helper(const TypeOopPtr* dest_t, const TypeOopPtr *t_oop, PhaseTransform *phase) {
+bool CallNode::may_modify_arraycopy_helper(const TypeOopPtr* dest_t, const TypeOopPtr* t_oop, PhaseValues* phase) const {
   if (dest_t->is_known_instance() && t_oop->is_known_instance()) {
     return dest_t->instance_id() == t_oop->instance_id();
   }
 
-  if (dest_t->isa_instptr() && !dest_t->klass()->equals(phase->C->env()->Object_klass())) {
+  if (dest_t->isa_instptr() && !dest_t->is_instptr()->instance_klass()->equals(phase->C->env()->Object_klass())) {
     // clone
     if (t_oop->isa_aryptr()) {
       return false;
@@ -2278,7 +2457,7 @@ bool CallNode::may_modify_arraycopy_helper(const TypeOopPtr* dest_t, const TypeO
     if (!t_oop->isa_instptr()) {
       return true;
     }
-    if (dest_t->klass()->is_subtype_of(t_oop->klass()) || t_oop->klass()->is_subtype_of(dest_t->klass())) {
+    if (dest_t->maybe_java_subtype_of(t_oop) || t_oop->maybe_java_subtype_of(dest_t)) {
       return true;
     }
     // unrelated
@@ -2308,4 +2487,158 @@ bool CallNode::may_modify_arraycopy_helper(const TypeOopPtr* dest_t, const TypeO
   }
 
   return true;
+}
+
+PowDNode::PowDNode(Compile* C, Node* base, Node* exp)
+    : CallLeafPureNode(
+        OptoRuntime::Math_DD_D_Type(),
+        StubRoutines::dpow() != nullptr ? StubRoutines::dpow() : CAST_FROM_FN_PTR(address, SharedRuntime::dpow),
+        "pow") {
+  add_flag(Flag_is_macro);
+  C->add_macro_node(this);
+
+  init_req(TypeFunc::Parms + 0, base);
+  init_req(TypeFunc::Parms + 1, C->top());  // double slot padding
+  init_req(TypeFunc::Parms + 2, exp);
+  init_req(TypeFunc::Parms + 3, C->top());  // double slot padding
+}
+
+const Type* PowDNode::Value(PhaseGVN* phase) const {
+  const Type* t_base = phase->type(base());
+  const Type* t_exp  = phase->type(exp());
+
+  if (t_base == Type::TOP || t_exp == Type::TOP) {
+    return Type::TOP;
+  }
+
+  const TypeD* base_con = t_base->isa_double_constant();
+  const TypeD* exp_con  = t_exp->isa_double_constant();
+  const TypeD* result_t = nullptr;
+
+  // constant folding: both inputs are constants
+  if (base_con != nullptr && exp_con != nullptr) {
+    result_t = TypeD::make(SharedRuntime::dpow(base_con->getd(), exp_con->getd()));
+  }
+
+  // Special cases when only the exponent is known:
+  if (exp_con != nullptr) {
+    double e = exp_con->getd();
+
+    // If the second argument is positive or negative zero, then the result is 1.0.
+    // i.e., pow(x, +/-0.0D) => 1.0
+    if (e == 0.0) { // true for both -0.0 and +0.0
+      result_t = TypeD::ONE;
+    }
+
+    // If the second argument is NaN, then the result is NaN.
+    // i.e., pow(x, NaN) => NaN
+    if (g_isnan(e)) {
+      result_t = TypeD::make(NAN);
+    }
+  }
+
+  if (result_t != nullptr) {
+    // We can't simply return a TypeD here, it must be a tuple type to be compatible with call nodes.
+    const Type** fields = TypeTuple::fields(2);
+    fields[TypeFunc::Parms + 0] = result_t;
+    fields[TypeFunc::Parms + 1] = Type::HALF;
+    return TypeTuple::make(TypeFunc::Parms + 2, fields);
+  }
+
+  return tf()->range();
+}
+
+Node* PowDNode::Ideal(PhaseGVN* phase, bool can_reshape) {
+  if (!can_reshape) {
+    return nullptr;  // wait for igvn
+  }
+
+  PhaseIterGVN* igvn = phase->is_IterGVN();
+  Node* base = this->base();
+  Node* exp  = this->exp();
+
+  const Type* t_exp  = phase->type(exp);
+  const TypeD* exp_con  = t_exp->isa_double_constant();
+
+  // Special cases when only the exponent is known:
+  if (exp_con != nullptr) {
+    double e = exp_con->getd();
+
+    // If the second argument is 1.0, then the result is the same as the first argument.
+    // i.e., pow(x, 1.0) => x
+    if (e == 1.0) {
+      return make_tuple_of_input_state_and_result(igvn, base);
+    }
+
+    // If the second argument is 2.0, then strength reduce to multiplications.
+    // i.e., pow(x, 2.0) => x * x
+    if (e == 2.0) {
+      Node* mul = igvn->transform(new MulDNode(base, base));
+      return make_tuple_of_input_state_and_result(igvn, mul);
+    }
+
+    // If the second argument is 0.5, the strength reduce to square roots.
+    // i.e., pow(x, 0.5) => sqrt(x) iff x > 0
+    if (e == 0.5 && Matcher::match_rule_supported(Op_SqrtD)) {
+      Node* ctrl = in(TypeFunc::Control);
+      Node* zero = igvn->zerocon(T_DOUBLE);
+
+      // According to the API specs, pow(-0.0, 0.5) = 0.0 and sqrt(-0.0) = -0.0.
+      // So pow(-0.0, 0.5) shouldn't be replaced with sqrt(-0.0).
+      // -0.0/+0.0 are both excluded since floating-point comparison doesn't distinguish -0.0 from +0.0.
+      Node* cmp = igvn->register_new_node_with_optimizer(new CmpDNode(base, zero));
+      Node* test = igvn->register_new_node_with_optimizer(new BoolNode(cmp, BoolTest::le));
+
+      IfNode* iff = new IfNode(ctrl, test, PROB_UNLIKELY_MAG(3), COUNT_UNKNOWN);
+      igvn->register_new_node_with_optimizer(iff);
+      Node* if_slow = igvn->register_new_node_with_optimizer(new IfTrueNode(iff));  // x <= 0
+      Node* if_fast = igvn->register_new_node_with_optimizer(new IfFalseNode(iff)); // x > 0
+
+      // slow path: call pow(x, 0.5)
+      Node* call = igvn->register_new_node_with_optimizer(inline_call_leaf_pure_node(if_slow));
+      Node* call_ctrl = igvn->register_new_node_with_optimizer(new ProjNode(call, TypeFunc::Control));
+      Node* call_result = igvn->register_new_node_with_optimizer(new ProjNode(call, TypeFunc::Parms + 0));
+
+      // fast path: sqrt(x)
+      Node* sqrt = igvn->register_new_node_with_optimizer(new SqrtDNode(igvn->C, if_fast, base));
+
+      // merge paths
+      RegionNode* region = new RegionNode(3);
+      igvn->register_new_node_with_optimizer(region);
+      region->init_req(1, call_ctrl); // slow path
+      region->init_req(2, if_fast);   // fast path
+
+      PhiNode* phi = new PhiNode(region, Type::DOUBLE);
+      igvn->register_new_node_with_optimizer(phi);
+      phi->init_req(1, call_result); // slow: pow() result
+      phi->init_req(2, sqrt);        // fast: sqrt() result
+
+      igvn->C->set_has_split_ifs(true); // Has chance for split-if optimization
+
+      return make_tuple_of_input_state_and_result(igvn, phi, region);
+    }
+  }
+
+  return CallLeafPureNode::Ideal(phase, can_reshape);
+}
+
+// We can't simply have Ideal() returning a Con or MulNode since the users are still expecting a Call node, but we could
+// produce a tuple that follows the same pattern so users can still get control, io, memory, etc..
+TupleNode* PowDNode::make_tuple_of_input_state_and_result(PhaseIterGVN* phase, Node* result, Node* control) {
+  if (control == nullptr) {
+    control = in(TypeFunc::Control);
+  }
+
+  Compile* C = phase->C;
+  C->remove_macro_node(this);
+  TupleNode* tuple = TupleNode::make(
+      tf()->range(),
+      control,
+      in(TypeFunc::I_O),
+      in(TypeFunc::Memory),
+      in(TypeFunc::FramePtr),
+      in(TypeFunc::ReturnAdr),
+      result,
+      C->top());
+  return tuple;
 }

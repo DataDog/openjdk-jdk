@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,6 +29,7 @@ import java.io.InputStream;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URLConnection;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.NoSuchAlgorithmException;
@@ -48,14 +49,20 @@ import java.security.cert.X509CRL;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import sun.security.action.GetIntegerAction;
+import java.util.Optional;
+import java.util.Set;
+
 import sun.security.x509.AccessDescription;
 import sun.security.x509.GeneralNameInterface;
 import sun.security.x509.URIName;
 import sun.security.util.Cache;
 import sun.security.util.Debug;
+import sun.security.util.SecurityProperties;
+
+import javax.security.auth.x500.X500Principal;
 
 /**
  * A <code>CertStore</code> that retrieves <code>Certificates</code> or
@@ -113,7 +120,7 @@ class URICertStore extends CertStoreSpi {
     private long lastModified;
 
     // the URI of this CertStore
-    private URI uri;
+    private final URI uri;
 
     // true if URI is ldap
     private boolean ldap = false;
@@ -127,8 +134,12 @@ class URICertStore extends CertStoreSpi {
     // allowed when downloading CRLs
     private static final int DEFAULT_CRL_READ_TIMEOUT = 15000;
 
+    // Default connect and read timeouts for CA certificate fetching (15 sec)
+    private static final int DEFAULT_CACERT_CONNECT_TIMEOUT = 15000;
+    private static final int DEFAULT_CACERT_READ_TIMEOUT = 15000;
+
     /**
-     * Integer value indicating the connect timeout, in seconds, to be
+     * Integer value indicating the connect timeout, in milliseconds, to be
      * used for the CRL download. A timeout of zero is interpreted as
      * an infinite timeout.
      */
@@ -137,7 +148,7 @@ class URICertStore extends CertStoreSpi {
                           DEFAULT_CRL_CONNECT_TIMEOUT);
 
     /**
-     * Integer value indicating the read timeout, in seconds, to be
+     * Integer value indicating the read timeout, in milliseconds, to be
      * used for the CRL download. A timeout of zero is interpreted as
      * an infinite timeout.
      */
@@ -146,21 +157,195 @@ class URICertStore extends CertStoreSpi {
                           DEFAULT_CRL_READ_TIMEOUT);
 
     /**
+     * Integer value indicating the connect timeout, in milliseconds, to be
+     * used for the CA certificate download. A timeout of zero is interpreted
+     * as an infinite timeout.
+     */
+    private static final int CACERT_CONNECT_TIMEOUT =
+            initializeTimeout("com.sun.security.cert.timeout",
+                    DEFAULT_CACERT_CONNECT_TIMEOUT);
+
+    /**
+     * Integer value indicating the read timeout, in milliseconds, to be
+     * used for the CA certificate download. A timeout of zero is interpreted
+     * as an infinite timeout.
+     */
+    private static final int CACERT_READ_TIMEOUT =
+            initializeTimeout("com.sun.security.cert.readtimeout",
+                    DEFAULT_CACERT_READ_TIMEOUT);
+
+    /**
      * Initialize the timeout length by getting the specified CRL timeout
      * system property. If the property has not been set, or if its
      * value is negative, set the timeout length to the specified default.
      */
     private static int initializeTimeout(String prop, int def) {
-        Integer tmp = GetIntegerAction.privilegedGetProperty(prop);
-        if (tmp == null || tmp < 0) {
-            return def;
-        }
+        int timeoutVal =
+                SecurityProperties.getTimeoutSystemProp(prop, def, debug);
         if (debug != null) {
-            debug.println(prop + " set to " + tmp + " seconds");
+            debug.println(prop + " set to " + timeoutVal + " milliseconds");
         }
-        // Convert to milliseconds, as the system property will be
-        // specified in seconds
-        return tmp * 1000;
+        return timeoutVal;
+    }
+
+    /**
+     * Enumeration for the allowed schemes we support when following a
+     * URI from an authorityInfoAccess extension on a certificate.
+     */
+    private enum AllowedScheme {
+        HTTP(HttpFtpRuleMatcher.HTTP),
+        HTTPS(HttpFtpRuleMatcher.HTTPS),
+        LDAP(LdapRuleMatcher.LDAP),
+        LDAPS(LdapRuleMatcher.LDAPS),
+        FTP(HttpFtpRuleMatcher.FTP);
+
+        final URIRuleMatcher ruleMatcher;
+
+        AllowedScheme(URIRuleMatcher matcher) {
+            ruleMatcher = matcher;
+        }
+
+        /**
+         * Return an {@code AllowedScheme} based on a case-insensitive match
+         * @param name the scheme name to be matched
+         * @return the {@code AllowedScheme} that corresponds to the
+         *      {@code name} provided, or null if there is no match.
+         */
+        static AllowedScheme nameOf(String name) {
+            if (name == null) {
+                return null;
+            }
+
+            try {
+                return AllowedScheme.valueOf(name.toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException _) {
+                return null;
+            }
+        }
+    }
+
+    private static Set<URI> CA_ISS_URI_FILTERS = null;
+    private static final boolean CA_ISS_ALLOW_ANY;
+
+    static {
+        boolean allowAny = false;
+        try {
+            if (Builder.USE_AIA) {
+                CA_ISS_URI_FILTERS = new LinkedHashSet<>();
+                String aiaPropVal = Optional.ofNullable(
+                        SecurityProperties.getOverridableProperty(
+                                "com.sun.security.allowedAIALocations")).
+                        map(String::trim).orElse("");
+                if (aiaPropVal.equalsIgnoreCase("any")) {
+                    allowAny = true;
+                    if (debug != null) {
+                        debug.println("allowedAIALocations: Warning: " +
+                                "Allow-All URI filtering enabled!");
+                    }
+                } else {
+                    // Load all the valid rules from the Security property
+                    if (!aiaPropVal.isEmpty()) {
+                        String[] aiaUriStrs = aiaPropVal.trim().split("\\s+");
+                        addCaIssUriFilters(aiaUriStrs);
+                    }
+
+                    if (CA_ISS_URI_FILTERS.isEmpty()) {
+                        if (debug != null) {
+                            debug.println("allowedAIALocations: Warning: " +
+                                    "No valid filters found. Deny-all URI " +
+                                    "filtering is active.");
+                        }
+                    }
+                }
+            }
+        } finally {
+            CA_ISS_ALLOW_ANY = allowAny;
+        }
+    }
+
+    /**
+     * Populate the filter collection from the list of AIA CA issuer URIs
+     * found in the {@code com.sun.security.allowedAIALocations} security
+     * or system property.
+     *
+     * @param aiaUriStrs array containing String URI filters
+     */
+    private static void addCaIssUriFilters(String[] aiaUriStrs) {
+        for (String aiaStr : aiaUriStrs) {
+            if (aiaStr != null && !aiaStr.isEmpty()) {
+                try {
+                    AllowedScheme scheme;
+                    URI aiaUri = new URI(aiaStr).normalize();
+                    // It must be absolute and non-opaque
+                    if (!aiaUri.isAbsolute() || aiaUri.isOpaque()) {
+                        if (debug != null) {
+                            debug.println("allowedAIALocations: Skipping " +
+                                    "non-absolute or opaque URI " + aiaUri);
+                        }
+                    } else if (aiaUri.getHost() == null) {
+                        // We do not allow rules with URIs that omit a hostname
+                        // or address.
+                        if (debug != null) {
+                            debug.println("allowedAIALocations: Skipping " +
+                                    "URI rule with no hostname or address: " +
+                                    aiaUri);
+                        }
+                    } else if ((scheme = AllowedScheme.nameOf(
+                            aiaUri.getScheme())) != null) {
+                        // When it is an LDAP type, we can check the path
+                        // portion (the DN) for proper structure and reject
+                        // the rule early if it isn't correct.
+                        if (scheme == AllowedScheme.LDAP ||
+                                scheme == AllowedScheme.LDAPS) {
+                            try {
+                                new X500Principal(aiaUri.getPath().
+                                        replaceFirst("^/+", ""));
+                            } catch (IllegalArgumentException iae) {
+                                if (debug != null) {
+                                    debug.println("allowedAIALocations: " +
+                                            "Skipping LDAP rule: " + iae);
+                                }
+                                continue;
+                            }
+                        }
+
+                        // When a URI has a non-null query or fragment
+                        // warn the user upon adding the rule that those
+                        // components will be ignored
+                        if (aiaUri.getQuery() != null) {
+                            if (debug != null) {
+                                debug.println("allowedAIALocations: " +
+                                        "Rule will ignore non-null query");
+                            }
+                        }
+                        if (aiaUri.getFragment() != null) {
+                            if (debug != null) {
+                                debug.println("allowedAIALocations: " +
+                                        "Rule will ignore non-null fragment");
+                            }
+                        }
+
+                        CA_ISS_URI_FILTERS.add(aiaUri);
+                        if (debug != null) {
+                            debug.println("allowedAIALocations: Added " +
+                                    aiaUri + " to URI filters");
+                        }
+                    } else {
+                        if (debug != null) {
+                            debug.println("allowedAIALocations: Disallowed " +
+                                    "filter URI scheme: " +
+                                    aiaUri.getScheme());
+                        }
+                    }
+                } catch (URISyntaxException urise) {
+                    if (debug != null) {
+                        debug.println("allowedAIALocations: Skipping " +
+                                "filter URI entry " + aiaStr +
+                                ": parse failure at index " + urise.getIndex());
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -225,6 +410,39 @@ class URICertStore extends CertStoreSpi {
             return null;
         }
         URI uri = ((URIName) gn).getURI();
+
+        // Before performing any instantiation make sure that
+        // the URI passes any filtering rules.  This processing should
+        // only occur if the com.sun.security.enableAIAcaIssuers is true
+        // and the "any" rule has not been specified.
+        if (Builder.USE_AIA && !CA_ISS_ALLOW_ANY) {
+            URI normAIAUri = uri.normalize();
+            AllowedScheme scheme = AllowedScheme.nameOf(normAIAUri.getScheme());
+
+            if (scheme == null) {
+                if (debug != null) {
+                    debug.println("allowedAIALocations: No matching ruleset " +
+                            "for scheme " + normAIAUri.getScheme());
+                }
+                return null;
+            }
+
+            // Go through each of the filter rules and see if any will
+            // make a positive match against the caIssuer URI.  If nothing
+            // matches then we won't instantiate a URICertStore.
+            if (CA_ISS_URI_FILTERS.stream().noneMatch(rule ->
+                    scheme.ruleMatcher.matchRule(rule, normAIAUri))) {
+                if (debug != null) {
+                    debug.println("allowedAIALocations: Warning - " +
+                        "The caIssuer URI " + normAIAUri +
+                        " in the AuthorityInfoAccess extension is denied " +
+                        "access. Use the com.sun.security.allowedAIALocations" +
+                        " security/system property to allow access.");
+                }
+                return null;
+            }
+        }
+
         try {
             return URICertStore.getInstance(new URICertStoreParameters(uri));
         } catch (Exception ex) {
@@ -251,7 +469,7 @@ class URICertStore extends CertStoreSpi {
     @Override
     @SuppressWarnings("unchecked")
     public synchronized Collection<X509Certificate> engineGetCertificates
-        (CertSelector selector) throws CertStoreException {
+            (CertSelector selector) throws CertStoreException {
 
         if (ldap) {
             // caching mechanism, see the class description for more info.
@@ -276,6 +494,8 @@ class URICertStore extends CertStoreSpi {
                 connection.setIfModifiedSince(lastModified);
             }
             long oldLastModified = lastModified;
+            connection.setConnectTimeout(CACERT_CONNECT_TIMEOUT);
+            connection.setReadTimeout(CACERT_READ_TIMEOUT);
             try (InputStream in = connection.getInputStream()) {
                 lastModified = connection.getLastModified();
                 if (oldLastModified != 0) {
@@ -284,9 +504,8 @@ class URICertStore extends CertStoreSpi {
                             debug.println("Not modified, using cached copy");
                         }
                         return getMatchingCerts(certs, selector);
-                    } else if (connection instanceof HttpURLConnection) {
+                    } else if (connection instanceof HttpURLConnection hconn) {
                         // some proxy servers omit last modified
-                        HttpURLConnection hconn = (HttpURLConnection)connection;
                         if (hconn.getResponseCode()
                                     == HttpURLConnection.HTTP_NOT_MODIFIED) {
                             if (debug != null) {
@@ -390,9 +609,8 @@ class URICertStore extends CertStoreSpi {
                             debug.println("Not modified, using cached copy");
                         }
                         return getMatchingCRLs(crl, selector);
-                    } else if (connection instanceof HttpURLConnection) {
+                    } else if (connection instanceof HttpURLConnection hconn) {
                         // some proxy servers omit last modified
-                        HttpURLConnection hconn = (HttpURLConnection)connection;
                         if (hconn.getResponseCode()
                                     == HttpURLConnection.HTTP_NOT_MODIFIED) {
                             if (debug != null) {
@@ -441,6 +659,161 @@ class URICertStore extends CertStoreSpi {
         protected UCS(CertStoreSpi spi, Provider p, String type,
             CertStoreParameters params) {
             super(spi, p, type, params);
+        }
+    }
+
+    /**
+     * URIRuleMatcher - abstract base class for the rule sets used for
+     * various URI schemes.
+     */
+    static abstract class URIRuleMatcher {
+        protected final int wellKnownPort;
+
+        protected URIRuleMatcher(int port) {
+            wellKnownPort = port;
+        }
+
+        /**
+         * Attempt to match the scheme, host and port between a filter
+         * rule URI and a URI coming from an AIA extension.
+         *
+         * @param filterRule the filter rule to match against
+         * @param caIssuer the AIA URI being compared
+         * @return true if the scheme, host and port numbers match, false if
+         * any of the components do not match. If a port number is omitted in
+         * either the filter rule or AIA URI, the well-known port for that
+         * scheme is used in the comparison.
+         */
+        boolean schemeHostPortCheck(URI filterRule, URI caIssuer) {
+            if (!filterRule.getScheme().equalsIgnoreCase(
+                    caIssuer.getScheme())) {
+                return false;
+            } else if (!filterRule.getHost().equalsIgnoreCase(
+                    caIssuer.getHost())) {
+                return false;
+            } else {
+                try {
+                    // Check for port matching, taking into consideration
+                    // default ports
+                    int fPort = (filterRule.getPort() == -1) ? wellKnownPort :
+                            filterRule.getPort();
+                    int caiPort = (caIssuer.getPort() == -1) ? wellKnownPort :
+                            caIssuer.getPort();
+                    if (fPort != caiPort) {
+                        return false;
+                    }
+                } catch (IllegalArgumentException iae) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /**
+         * Attempt to match an AIA URI against a specific filter rule.  The
+         * specific rules to apply are implementation dependent.
+         *
+         * @param filterRule the filter rule to match against
+         * @param caIssuer the AIA URI being compared
+         * @return true if all matching rules pass, false if any fail.
+         */
+        abstract boolean matchRule(URI filterRule, URI caIssuer);
+    }
+
+    static class HttpFtpRuleMatcher extends URIRuleMatcher {
+        static final HttpFtpRuleMatcher HTTP = new HttpFtpRuleMatcher(80);
+        static final HttpFtpRuleMatcher HTTPS = new HttpFtpRuleMatcher(443);
+        static final HttpFtpRuleMatcher FTP = new HttpFtpRuleMatcher(21);
+
+        private HttpFtpRuleMatcher(int port) {
+            super(port);
+        }
+
+        @Override
+        boolean matchRule(URI filterRule, URI caIssuer) {
+            // Check for scheme/host/port matching
+            if (!schemeHostPortCheck(filterRule, caIssuer)) {
+                return false;
+            }
+
+            // Check the path component to make sure the filter is at
+            // least a root of the AIA caIssuer URI's path.  It must be
+            // a case-sensitive match for all platforms.
+            if (!isRootOf(filterRule, caIssuer)) {
+                if (debug != null) {
+                    debug.println("allowedAIALocations: Match failed: " +
+                            "AIA URI is not within the rule's path hierarchy.");
+                }
+                return false;
+            }
+            return true;
+        }
+
+        /**
+         * Performs a hierarchical containment check, ensuring that the
+         * base URI's path is a root component of the candidate path.  The
+         * path comparison is case-sensitive.  If the base path ends in a
+         * slash (/) then all candidate paths that begin with the base
+         * path are allowed.  If it does not end in a slash, then it is
+         * assumed that the leaf node in the base path is a file component
+         * and both paths must match exactly.
+         *
+         * @param base the URI that contains the root path
+         * @param candidate the URI that contains the path being evaluated
+         * @return true if {@code candidate} is a child path of {@code base},
+         *         false otherwise.
+         */
+        private static boolean isRootOf(URI base, URI candidate) {
+            // Note: The URIs have already been normalized at this point and
+            // HTTP URIs cannot have null paths.  If it's an empty path
+            // then consider the path to be "/".
+            String basePath = Optional.of(base.getPath()).
+                    filter(p -> !p.isEmpty()).orElse("/");
+            String candPath = Optional.of(candidate.getPath()).
+                    filter(p -> !p.isEmpty()).orElse("/");
+            return (basePath.endsWith("/")) ? candPath.startsWith(basePath) :
+                    candPath.equals(basePath);
+        }
+    }
+
+    static class LdapRuleMatcher extends URIRuleMatcher {
+        static final LdapRuleMatcher LDAP = new LdapRuleMatcher(389);
+        static final LdapRuleMatcher LDAPS = new LdapRuleMatcher(636);
+
+        private LdapRuleMatcher(int port) {
+            super(port);
+        }
+
+        @Override
+        boolean matchRule(URI filterRule, URI caIssuer) {
+            // Check for scheme/host/port matching
+            if (!schemeHostPortCheck(filterRule, caIssuer)) {
+                return false;
+            }
+
+            // Obtain the base DN component and compare
+            try {
+                X500Principal filterBaseDn = new X500Principal(
+                        filterRule.getPath().replaceFirst("^/+", ""));
+                X500Principal caIssBaseDn = new X500Principal(
+                        caIssuer.getPath().replaceFirst("^/+", ""));
+                if (!filterBaseDn.equals(caIssBaseDn)) {
+                    if (debug != null) {
+                        debug.println("allowedAIALocations: Match failed: " +
+                                "Base DN mismatch (" + filterBaseDn + " vs " +
+                                caIssBaseDn + ")");
+                    }
+                    return false;
+                }
+            } catch (IllegalArgumentException iae) {
+                if (debug != null) {
+                    debug.println("allowedAIALocations: Match failed on DN: " +
+                            iae);
+                }
+                return false;
+            }
+
+            return true;
         }
     }
 }

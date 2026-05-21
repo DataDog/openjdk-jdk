@@ -26,6 +26,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.security.SecurityPermission;
@@ -38,6 +39,7 @@ public final class JavaUtils {
     private static final com.sun.org.slf4j.internal.Logger LOG =
         com.sun.org.slf4j.internal.LoggerFactory.getLogger(JavaUtils.class);
 
+    @SuppressWarnings("removal")
     private static final SecurityPermission REGISTER_PERMISSION =
         new SecurityPermission("com.sun.org.apache.xml.internal.security.register");
 
@@ -57,11 +59,11 @@ public final class JavaUtils {
     public static byte[] getBytesFromFile(String fileName)
         throws FileNotFoundException, IOException {
 
-        byte refBytes[] = null;
+        byte[] refBytes = null;
 
         try (InputStream inputStream = Files.newInputStream(Paths.get(fileName));
             UnsyncByteArrayOutputStream baos = new UnsyncByteArrayOutputStream()) {
-            byte buf[] = new byte[1024];
+            byte[] buf = new byte[1024];
             int len;
 
             while ((len = inputStream.read(buf)) > 0) {
@@ -94,7 +96,7 @@ public final class JavaUtils {
 
     /**
      * This method reads all bytes from the given InputStream till EOF and
-     * returns them as a byte array.
+     * returns them as a byte array. The method doesn't close the input stream.
      *
      * @param inputStream
      * @return the bytes read from the stream
@@ -104,7 +106,7 @@ public final class JavaUtils {
      */
     public static byte[] getBytesFromStream(InputStream inputStream) throws IOException {
         try (UnsyncByteArrayOutputStream baos = new UnsyncByteArrayOutputStream()) {
-            byte buf[] = new byte[4 * 1024];
+            byte[] buf = new byte[4 * 1024];
             int len;
             while ((len = inputStream.read(buf)) > 0) {
                 baos.write(buf, 0, len);
@@ -217,9 +219,29 @@ public final class JavaUtils {
      *    {@code SecurityPermission}
      */
     public static void checkRegisterPermission() {
+        @SuppressWarnings("removal")
         SecurityManager sm = System.getSecurityManager();
         if (sm != null) {
             sm.checkPermission(REGISTER_PERMISSION);
+        }
+    }
+
+    /**
+     * Creates a new instance of this class with the empty constructor.
+     *
+     * @param clazz the class
+     * @param <T> the type of the class
+     * @return the new instance
+     * @throws InstantiationException
+     * @throws IllegalAccessException
+     */
+    public static <T> T newInstanceWithEmptyConstructor(Class<T> clazz)
+            throws InstantiationException, IllegalAccessException, InvocationTargetException {
+        try {
+            return clazz.getDeclaredConstructor().newInstance();
+        } catch (NoSuchMethodException e) {
+            throw (InstantiationException)
+                    new InstantiationException(clazz.getName()).initCause(e);
         }
     }
 }

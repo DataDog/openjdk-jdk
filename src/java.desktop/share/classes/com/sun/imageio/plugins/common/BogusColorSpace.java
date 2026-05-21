@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,7 +38,7 @@ public class BogusColorSpace extends ColorSpace {
      *
      * @param numComponents The number of components in the
      * {@code ColorSpace}.
-     * @exception IllegalArgumentException if {@code numComponents}
+     * @throws IllegalArgumentException if {@code numComponents}
      * is less than 1.
      */
     private static int getType(int numComponents) {
@@ -66,7 +66,7 @@ public class BogusColorSpace extends ColorSpace {
      *
      * @param numComponents The number of components in the
      * {@code ColorSpace}.
-     * @exception IllegalArgumentException if {@code numComponents}
+     * @throws IllegalArgumentException if {@code numComponents}
      * is less than 1.
      */
     public BogusColorSpace(int numComponents) {
@@ -79,6 +79,7 @@ public class BogusColorSpace extends ColorSpace {
     // specified behavior of the methods vis-a-vis exceptions.
     //
 
+    @Override
     public float[] toRGB(float[] colorvalue) {
         if(colorvalue.length < getNumComponents()) {
             throw new ArrayIndexOutOfBoundsException
@@ -90,9 +91,10 @@ public class BogusColorSpace extends ColorSpace {
         System.arraycopy(colorvalue, 0, rgbvalue, 0,
                          Math.min(3, getNumComponents()));
 
-        return colorvalue;
+        return rgbvalue;
     }
 
+    @Override
     public float[] fromRGB(float[] rgbvalue) {
         if(rgbvalue.length < 3) {
             throw new ArrayIndexOutOfBoundsException
@@ -104,9 +106,10 @@ public class BogusColorSpace extends ColorSpace {
         System.arraycopy(rgbvalue, 0, colorvalue, 0,
                          Math.min(3, colorvalue.length));
 
-        return rgbvalue;
+        return colorvalue;
     }
 
+    @Override
     public float[] toCIEXYZ(float[] colorvalue) {
         if(colorvalue.length < getNumComponents()) {
             throw new ArrayIndexOutOfBoundsException
@@ -118,9 +121,10 @@ public class BogusColorSpace extends ColorSpace {
         System.arraycopy(colorvalue, 0, xyzvalue, 0,
                          Math.min(3, getNumComponents()));
 
-        return colorvalue;
+        return xyzvalue;
     }
 
+    @Override
     public float[] fromCIEXYZ(float[] xyzvalue) {
         if(xyzvalue.length < 3) {
             throw new ArrayIndexOutOfBoundsException
@@ -132,6 +136,6 @@ public class BogusColorSpace extends ColorSpace {
         System.arraycopy(xyzvalue, 0, colorvalue, 0,
                          Math.min(3, colorvalue.length));
 
-        return xyzvalue;
+        return colorvalue;
     }
 }

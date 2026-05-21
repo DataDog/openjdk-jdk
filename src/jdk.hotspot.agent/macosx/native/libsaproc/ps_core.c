@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,8 +34,14 @@
 #include "ps_core_common.h"
 
 #ifdef __APPLE__
+#if defined(amd64)
 #include "sun_jvm_hotspot_debugger_amd64_AMD64ThreadContext.h"
+#elif defined(aarch64)
+#include "sun_jvm_hotspot_debugger_aarch64_AARCH64ThreadContext.h"
+#else
+#error UNSUPPORTED_ARCH
 #endif
+#endif /* __APPLE__ */
 
 // This file has the libproc implementation to read core files.
 // For live processes, refer to ps_proc.c. Portions of this is adapted
@@ -67,7 +74,7 @@ static bool sort_map_array(struct ps_prochandle* ph) {
   // allocate map_array
   map_info** array;
   if ( (array = (map_info**) malloc(sizeof(map_info*) * num_maps)) == NULL) {
-    print_debug("can't allocate memory for map array\n");
+    print_error("can't allocate memory for map array\n");
     return false;
   }
 
@@ -195,6 +202,8 @@ static ps_prochandle_ops core_ops = {
 void print_thread(sa_thread_info *threadinfo) {
   print_debug("thread added: %d\n", threadinfo->lwp_id);
   print_debug("registers:\n");
+
+#if defined(amd64)
   print_debug("  r_r15: 0x%" PRIx64 "\n", threadinfo->regs.r_r15);
   print_debug("  r_r14: 0x%" PRIx64 "\n", threadinfo->regs.r_r14);
   print_debug("  r_r13: 0x%" PRIx64 "\n", threadinfo->regs.r_r13);
@@ -216,6 +225,45 @@ void print_thread(sa_thread_info *threadinfo) {
   print_debug("  r_cs:  0x%" PRIx64 "\n", threadinfo->regs.r_cs);
   print_debug("  r_rsp: 0x%" PRIx64 "\n", threadinfo->regs.r_rsp);
   print_debug("  r_rflags: 0x%" PRIx64 "\n", threadinfo->regs.r_rflags);
+
+#elif defined(aarch64)
+  print_debug(" r_r0:  0x%" PRIx64 "\n", threadinfo->regs.r_r0);
+  print_debug(" r_r1:  0x%" PRIx64 "\n", threadinfo->regs.r_r1);
+  print_debug(" r_r2:  0x%" PRIx64 "\n", threadinfo->regs.r_r2);
+  print_debug(" r_r3:  0x%" PRIx64 "\n", threadinfo->regs.r_r3);
+  print_debug(" r_r4:  0x%" PRIx64 "\n", threadinfo->regs.r_r4);
+  print_debug(" r_r5:  0x%" PRIx64 "\n", threadinfo->regs.r_r5);
+  print_debug(" r_r6:  0x%" PRIx64 "\n", threadinfo->regs.r_r6);
+  print_debug(" r_r7:  0x%" PRIx64 "\n", threadinfo->regs.r_r7);
+  print_debug(" r_r8:  0x%" PRIx64 "\n", threadinfo->regs.r_r8);
+  print_debug(" r_r9:  0x%" PRIx64 "\n", threadinfo->regs.r_r9);
+  print_debug(" r_r10: 0x%" PRIx64 "\n", threadinfo->regs.r_r10);
+  print_debug(" r_r11: 0x%" PRIx64 "\n", threadinfo->regs.r_r11);
+  print_debug(" r_r12: 0x%" PRIx64 "\n", threadinfo->regs.r_r12);
+  print_debug(" r_r13: 0x%" PRIx64 "\n", threadinfo->regs.r_r13);
+  print_debug(" r_r14: 0x%" PRIx64 "\n", threadinfo->regs.r_r14);
+  print_debug(" r_r15: 0x%" PRIx64 "\n", threadinfo->regs.r_r15);
+  print_debug(" r_r16: 0x%" PRIx64 "\n", threadinfo->regs.r_r16);
+  print_debug(" r_r17: 0x%" PRIx64 "\n", threadinfo->regs.r_r17);
+  print_debug(" r_r18: 0x%" PRIx64 "\n", threadinfo->regs.r_r18);
+  print_debug(" r_r19: 0x%" PRIx64 "\n", threadinfo->regs.r_r19);
+  print_debug(" r_r20: 0x%" PRIx64 "\n", threadinfo->regs.r_r20);
+  print_debug(" r_r21: 0x%" PRIx64 "\n", threadinfo->regs.r_r21);
+  print_debug(" r_r22: 0x%" PRIx64 "\n", threadinfo->regs.r_r22);
+  print_debug(" r_r23: 0x%" PRIx64 "\n", threadinfo->regs.r_r23);
+  print_debug(" r_r24: 0x%" PRIx64 "\n", threadinfo->regs.r_r24);
+  print_debug(" r_r25: 0x%" PRIx64 "\n", threadinfo->regs.r_r25);
+  print_debug(" r_r26: 0x%" PRIx64 "\n", threadinfo->regs.r_r26);
+  print_debug(" r_r27: 0x%" PRIx64 "\n", threadinfo->regs.r_r27);
+  print_debug(" r_r28: 0x%" PRIx64 "\n", threadinfo->regs.r_r28);
+  print_debug(" r_fp:  0x%" PRIx64 "\n", threadinfo->regs.r_fp);
+  print_debug(" r_lr:  0x%" PRIx64 "\n", threadinfo->regs.r_lr);
+  print_debug(" r_sp:  0x%" PRIx64 "\n", threadinfo->regs.r_sp);
+  print_debug(" r_pc:  0x%" PRIx64 "\n", threadinfo->regs.r_pc);
+
+#else
+#error UNSUPPORTED_ARCH
+#endif
 }
 
 // read all segments64 commands from core file
@@ -232,6 +280,7 @@ static bool read_core_segments(struct ps_prochandle* ph) {
 
   lseek(fd, offset, SEEK_SET);
   if(read(fd, (void *)&fhead, sizeof(mach_header_64)) != sizeof(mach_header_64)) {
+     print_error("Failed to read program header table\n");
      goto err;
   }
   print_debug("total commands: %d\n", fhead.ncmds);
@@ -239,6 +288,7 @@ static bool read_core_segments(struct ps_prochandle* ph) {
   for (i = 0; i < fhead.ncmds; i++) {
     lseek(fd, offset, SEEK_SET);
     if (read(fd, (void *)&lcmd, sizeof(load_command)) != sizeof(load_command)) {
+      print_error("Failed to read command\n");
       goto err;
     }
     offset += lcmd.cmdsize;    // next command position
@@ -246,14 +296,19 @@ static bool read_core_segments(struct ps_prochandle* ph) {
     if (lcmd.cmd == LC_SEGMENT_64) {
       lseek(fd, -sizeof(load_command), SEEK_CUR);
       if (read(fd, (void *)&segcmd, sizeof(segment_command_64)) != sizeof(segment_command_64)) {
-        print_debug("failed to read LC_SEGMENT_64 i = %d!\n", i);
+        print_error("failed to read LC_SEGMENT_64 i = %d!\n", i);
         goto err;
       }
-      if (add_map_info(ph, fd, segcmd.fileoff, segcmd.vmaddr, segcmd.vmsize, segcmd.flags) == NULL) {
-        print_debug("Failed to add map_info at i = %d\n", i);
-        goto err;
+      // The base of the library is offset by a random amount which ends up as a load command with a
+      // filesize of 0.  This must be ignored otherwise the base address of the library is wrong.
+      if (segcmd.filesize != 0) {
+        if (add_map_info(ph, fd, segcmd.fileoff, segcmd.vmaddr, segcmd.vmsize, segcmd.flags) == NULL) {
+          print_error("Failed to add map_info at i = %d\n", i);
+          goto err;
+        }
       }
-      print_debug("LC_SEGMENT_64 added: nsects=%d fileoff=0x%llx vmaddr=0x%llx vmsize=0x%llx filesize=0x%llx %s\n",
+      print_debug("LC_SEGMENT_64 %s: nsects=%d fileoff=0x%llx vmaddr=0x%llx vmsize=0x%llx filesize=0x%llx %s\n",
+                  segcmd.filesize == 0 ? "with filesize == 0 ignored" : "added",
                   segcmd.nsects, segcmd.fileoff, segcmd.vmaddr, segcmd.vmsize,
                   segcmd.filesize, &segcmd.segname[0]);
     } else if (lcmd.cmd == LC_THREAD || lcmd.cmd == LC_UNIXTHREAD) {
@@ -265,21 +320,22 @@ static bool read_core_segments(struct ps_prochandle* ph) {
       uint32_t size = sizeof(load_command);
       while (size < lcmd.cmdsize) {
         if (read(fd, (void *)&fc, sizeof(thread_fc)) != sizeof(thread_fc)) {
-          printf("Reading flavor, count failed.\n");
+          print_error("Reading flavor, count failed.\n");
           goto err;
         }
         size += sizeof(thread_fc);
+#if defined(amd64)
         if (fc.flavor == x86_THREAD_STATE) {
           x86_thread_state_t thrstate;
           if (read(fd, (void *)&thrstate, sizeof(x86_thread_state_t)) != sizeof(x86_thread_state_t)) {
-            printf("Reading flavor, count failed.\n");
+            print_error("Reading flavor, count failed.\n");
             goto err;
           }
           size += sizeof(x86_thread_state_t);
           // create thread info list, update lwp_id later
           sa_thread_info* newthr = add_thread_info(ph, (pthread_t) -1, (lwpid_t) num_threads++);
           if (newthr == NULL) {
-            printf("create thread_info failed\n");
+            print_error("create thread_info failed\n");
             goto err;
           }
 
@@ -316,18 +372,102 @@ static bool read_core_segments(struct ps_prochandle* ph) {
         } else if (fc.flavor == x86_FLOAT_STATE) {
           x86_float_state_t flstate;
           if (read(fd, (void *)&flstate, sizeof(x86_float_state_t)) != sizeof(x86_float_state_t)) {
-            print_debug("Reading flavor, count failed.\n");
+            print_error("Reading flavor, count failed.\n");
             goto err;
           }
           size += sizeof(x86_float_state_t);
         } else if (fc.flavor == x86_EXCEPTION_STATE) {
           x86_exception_state_t excpstate;
           if (read(fd, (void *)&excpstate, sizeof(x86_exception_state_t)) != sizeof(x86_exception_state_t)) {
-            printf("Reading flavor, count failed.\n");
+            print_error("Reading flavor, count failed.\n");
             goto err;
           }
           size += sizeof(x86_exception_state_t);
         }
+
+#elif defined(aarch64)
+        if (fc.flavor == ARM_THREAD_STATE64) {
+          arm_thread_state64_t thrstate;
+          if (read(fd, (void *)&thrstate, sizeof(arm_thread_state64_t)) != sizeof(arm_thread_state64_t)) {
+            print_error("Reading flavor, count failed.\n");
+            goto err;
+          }
+          size += sizeof(arm_thread_state64_t);
+          // create thread info list, update lwp_id later
+          sa_thread_info* newthr = add_thread_info(ph, (pthread_t) -1, (lwpid_t) num_threads++);
+          if (newthr == NULL) {
+            print_error("create thread_info failed\n");
+            goto err;
+          }
+
+          // note __DARWIN_UNIX03 depengs on other definitions
+#if __DARWIN_UNIX03
+#define get_register_v(regst, regname) \
+  regst.__##regname
+#else
+#define get_register_v(regst, regname) \
+  regst.##regname
+#endif // __DARWIN_UNIX03
+          newthr->regs.r_r0  = get_register_v(thrstate, x[0]);
+          newthr->regs.r_r1  = get_register_v(thrstate, x[1]);
+          newthr->regs.r_r2  = get_register_v(thrstate, x[2]);
+          newthr->regs.r_r3  = get_register_v(thrstate, x[3]);
+          newthr->regs.r_r4  = get_register_v(thrstate, x[4]);
+          newthr->regs.r_r5  = get_register_v(thrstate, x[5]);
+          newthr->regs.r_r6  = get_register_v(thrstate, x[6]);
+          newthr->regs.r_r7  = get_register_v(thrstate, x[7]);
+          newthr->regs.r_r8  = get_register_v(thrstate, x[8]);
+          newthr->regs.r_r9  = get_register_v(thrstate, x[9]);
+          newthr->regs.r_r10 = get_register_v(thrstate, x[10]);
+          newthr->regs.r_r11 = get_register_v(thrstate, x[11]);
+          newthr->regs.r_r12 = get_register_v(thrstate, x[12]);
+          newthr->regs.r_r13 = get_register_v(thrstate, x[13]);
+          newthr->regs.r_r14 = get_register_v(thrstate, x[14]);
+          newthr->regs.r_r15 = get_register_v(thrstate, x[15]);
+          newthr->regs.r_r16 = get_register_v(thrstate, x[16]);
+          newthr->regs.r_r17 = get_register_v(thrstate, x[17]);
+          newthr->regs.r_r18 = get_register_v(thrstate, x[18]);
+          newthr->regs.r_r19 = get_register_v(thrstate, x[19]);
+          newthr->regs.r_r20 = get_register_v(thrstate, x[20]);
+          newthr->regs.r_r21 = get_register_v(thrstate, x[21]);
+          newthr->regs.r_r22 = get_register_v(thrstate, x[22]);
+          newthr->regs.r_r23 = get_register_v(thrstate, x[23]);
+          newthr->regs.r_r24 = get_register_v(thrstate, x[24]);
+          newthr->regs.r_r25 = get_register_v(thrstate, x[25]);
+          newthr->regs.r_r26 = get_register_v(thrstate, x[26]);
+          newthr->regs.r_r27 = get_register_v(thrstate, x[27]);
+          newthr->regs.r_r28 = get_register_v(thrstate, x[28]);
+          newthr->regs.r_fp  = get_register_v(thrstate, fp);
+          newthr->regs.r_lr  = get_register_v(thrstate, lr);
+          newthr->regs.r_sp  = get_register_v(thrstate, sp);
+          newthr->regs.r_pc  = get_register_v(thrstate, pc);
+          print_thread(newthr);
+        } else if (fc.flavor == ARM_NEON_STATE64) {
+          arm_neon_state64_t flstate;
+          if (read(fd, (void *)&flstate, sizeof(arm_neon_state64_t)) != sizeof(arm_neon_state64_t)) {
+            print_error("Reading flavor, count failed.\n");
+            goto err;
+          }
+          size += sizeof(arm_neon_state64_t);
+        } else if (fc.flavor == ARM_EXCEPTION_STATE64) {
+          arm_exception_state64_t excpstate;
+          if (read(fd, (void *)&excpstate, sizeof(arm_exception_state64_t)) != sizeof(arm_exception_state64_t)) {
+            print_error("Reading flavor, count failed.\n");
+            goto err;
+          }
+          size += sizeof(arm_exception_state64_t);
+        } else if (fc.flavor == ARM_DEBUG_STATE64) {
+          arm_debug_state64_t dbgstate;
+          if (read(fd, (void *)&dbgstate, sizeof(arm_debug_state64_t)) != sizeof(arm_debug_state64_t)) {
+            print_error("Reading flavor, count failed.\n");
+            goto err;
+          }
+          size += sizeof(arm_debug_state64_t);
+        }
+
+#else
+#error UNSUPPORTED_ARCH
+#endif
       }
     }
   }
@@ -412,7 +552,7 @@ static bool get_real_path(struct ps_prochandle* ph, char *rpath) {
 
   // Look for bin directory in path. This is useful when attaching to a core file
   // that was launched with a JDK tool other than "java".
-  posbin = rstrstr(execname, "/bin/");  // look for the last occurence of "/bin/"
+  posbin = rstrstr(execname, "/bin/");  // look for the last occurrence of "/bin/"
   if (posbin != NULL) {
     strncpy(jdk_dir, execname, posbin - execname);
     jdk_dir[posbin - execname] = '\0';
@@ -491,8 +631,9 @@ static bool read_shared_lib_info(struct ps_prochandle* ph) {
         continue;
       }
       lseek(fd, -sizeof(uint32_t), SEEK_CUR);
-      // This is the begining of the mach-o file in the segment.
+      // This is the beginning of the mach-o file in the segment.
       if (read(fd, (void *)&header, sizeof(mach_header_64)) != sizeof(mach_header_64)) {
+        print_error("Failed to file header\n");
         goto err;
       }
       fpos = ltell(fd);
@@ -503,17 +644,19 @@ static bool read_shared_lib_info(struct ps_prochandle* ph) {
         // LC_ID_DYLIB is the file itself for a .dylib
         lseek(fd, fpos, SEEK_SET);
         if (read(fd, (void *)&lcmd, sizeof(load_command)) != sizeof(load_command)) {
+          print_error("Failed to read command\n");
           return false;   // error
         }
         fpos += lcmd.cmdsize;  // next command position
         // make sure still within seg size.
         if (fpos  - lcmd.cmdsize - iter->offset > iter->memsz) {
-          print_debug("Warning: out of segement limit: %ld \n", fpos  - lcmd.cmdsize - iter->offset);
+          print_debug("Warning: out of segment limit: %ld \n", fpos  - lcmd.cmdsize - iter->offset);
           break;  // no need to iterate all commands
         }
         if (lcmd.cmd == LC_ID_DYLIB) {
           lseek(fd, -sizeof(load_command), SEEK_CUR);
           if (read(fd, (void *)&dylibcmd, sizeof(dylib_command)) != sizeof(dylib_command)) {
+            print_error("Failed to read command\n");
             return false;
           }
           /**** name stored at dylib_command.dylib.name.offset, is a C string  */
@@ -572,13 +715,13 @@ struct ps_prochandle* Pgrab_core(const char* exec_file, const char* core_file) {
 
   struct ps_prochandle* ph = (struct ps_prochandle*) calloc(1, sizeof(struct ps_prochandle));
   if (ph == NULL) {
-    print_debug("cant allocate ps_prochandle\n");
+    print_error("can't allocate ps_prochandle\n");
     return NULL;
   }
 
   if ((ph->core = (struct core_data*) calloc(1, sizeof(struct core_data))) == NULL) {
     free(ph);
-    print_debug("can't allocate ps_prochandle\n");
+    print_error("can't allocate ps_prochandle\n");
     return NULL;
   }
 
@@ -600,12 +743,12 @@ struct ps_prochandle* Pgrab_core(const char* exec_file, const char* core_file) {
 
   // read core file header
   if (read_macho64_header(ph->core->core_fd, &core_header) != true || core_header.filetype != MH_CORE) {
-    print_debug("core file is not a valid Mach-O file\n");
+    print_error("core file is not a valid Mach-O file\n");
     goto err;
   }
 
   if ((ph->core->exec_fd = open(exec_file, O_RDONLY)) < 0) {
-    print_error("can't open executable file\n");
+    print_error("can't open executable file: %s\n", strerror(errno));
     goto err;
   }
 
@@ -641,7 +784,7 @@ struct ps_prochandle* Pgrab_core(const char* exec_file, const char* core_file) {
   }
 
   if (init_classsharing_workaround(ph) != true) {
-    print_error("failed to workaround classshareing\n");
+    print_error("failed to workaround class sharing\n");
     goto err;
   }
 
@@ -671,18 +814,6 @@ static bool core_handle_prstatus(struct ps_prochandle* ph, const char* buf, size
 
    if (is_debug()) {
       print_debug("integer regset\n");
-#if defined(i586) || defined(i386)
-      // print the regset
-      print_debug("\teax = 0x%x\n", newthr->regs.r_eax);
-      print_debug("\tebx = 0x%x\n", newthr->regs.r_ebx);
-      print_debug("\tecx = 0x%x\n", newthr->regs.r_ecx);
-      print_debug("\tedx = 0x%x\n", newthr->regs.r_edx);
-      print_debug("\tesp = 0x%x\n", newthr->regs.r_esp);
-      print_debug("\tebp = 0x%x\n", newthr->regs.r_ebp);
-      print_debug("\tesi = 0x%x\n", newthr->regs.r_esi);
-      print_debug("\tedi = 0x%x\n", newthr->regs.r_edi);
-      print_debug("\teip = 0x%x\n", newthr->regs.r_eip);
-#endif
 
 #if defined(amd64) || defined(x86_64)
       // print the regset
@@ -902,7 +1033,7 @@ static bool read_interp_segments(struct ps_prochandle* ph) {
    return true;
 }
 
-// process segments of a a.out
+// process segments of an a.out
 static bool read_exec_segments(struct ps_prochandle* ph, ELF_EHDR* exec_ehdr) {
    int i = 0;
    ELF_PHDR* phbuf = NULL;

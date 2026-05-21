@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,8 +34,6 @@ import java.nio.file.attribute.*;
 import java.nio.channels.*;
 import java.util.*;
 import java.io.IOException;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 
 /**
  * Base implementation of FileStore for Unix/like implementations.
@@ -172,6 +170,36 @@ abstract class UnixFileStore
         throw new UnsupportedOperationException("'" + attribute + "' not recognized");
     }
 
+    /**
+     * Checks whether extended attributes are enabled on the file system where the given file resides.
+     *
+     * @param path A path pointing to an existing node, such as the file system's root
+     * @return <code>true</code> if enabled, <code>false</code> if disabled or unable to determine
+     */
+    protected boolean isExtendedAttributesEnabled(UnixPath path) {
+        if (!UnixNativeDispatcher.xattrSupported()) {
+            // avoid I/O if native code doesn't support xattr
+            return false;
+        }
+
+        int fd = -1;
+        try {
+            fd = path.openForAttributeAccess(false);
+
+            // fgetxattr returns size if called with size==0
+            byte[] name = Util.toBytes("user.java");
+            UnixNativeDispatcher.fgetxattr(fd, name, 0L, 0);
+            return true;
+        } catch (UnixException e) {
+            // attribute does not exist
+            if (e.errno() == UnixConstants.XATTR_NOT_FOUND)
+                return true;
+        } finally {
+            UnixNativeDispatcher.close(fd, e -> null);
+        }
+        return false;
+    }
+
     @Override
     public boolean supportsFileAttributeView(Class<? extends FileAttributeView> type) {
         if (type == null)
@@ -204,9 +232,8 @@ abstract class UnixFileStore
     public boolean equals(Object ob) {
         if (ob == this)
             return true;
-        if (!(ob instanceof UnixFileStore))
+        if (!(ob instanceof UnixFileStore other))
             return false;
-        UnixFileStore other = (UnixFileStore)ob;
         return (this.dev == other.dev) &&
                Arrays.equals(this.entry.dir(), other.entry.dir()) &&
                this.entry.name().equals(other.entry.name());
@@ -214,7 +241,7 @@ abstract class UnixFileStore
 
     @Override
     public int hashCode() {
-        return (int)(dev ^ (dev >>> 32)) ^ Arrays.hashCode(entry.dir());
+        return Long.hashCode(dev) ^ Arrays.hashCode(entry.dir());
     }
 
     @Override
@@ -244,12 +271,7 @@ abstract class UnixFileStore
         if (props == null) {
             synchronized (loadLock) {
                 if (props == null) {
-                    props = AccessController.doPrivileged(
-                        new PrivilegedAction<>() {
-                            @Override
-                            public Properties run() {
-                                return loadProperties();
-                            }});
+                    props = loadProperties();
                 }
             }
         }
@@ -258,7 +280,7 @@ abstract class UnixFileStore
         if (value != null) {
             String[] values = value.split("\\s");
             for (String s: values) {
-                s = s.trim().toLowerCase();
+                s = s.trim().toLowerCase(Locale.ROOT);
                 if (s.equals(feature)) {
                     return FeatureStatus.PRESENT;
                 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
 
 package sun.security.ssl;
 
-import java.io.*;
 import java.security.*;
 import java.security.cert.*;
 import java.util.*;
@@ -49,24 +48,28 @@ abstract class TrustManagerFactoryImpl extends TrustManagerFactorySpi {
                 trustManager = getInstance(TrustStoreManager.getTrustedCerts());
             } catch (SecurityException se) {
                 // eat security exceptions but report other throwables
-                if (SSLLogger.isOn && SSLLogger.isOn("trustmanager")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.TRUSTMANAGER)) {
                     SSLLogger.fine(
                             "SunX509: skip default keystore", se);
                 }
             } catch (Error err) {
-                if (SSLLogger.isOn && SSLLogger.isOn("trustmanager")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.TRUSTMANAGER)) {
                     SSLLogger.fine(
                         "SunX509: skip default keystore", err);
                 }
                 throw err;
             } catch (RuntimeException re) {
-                if (SSLLogger.isOn && SSLLogger.isOn("trustmanager")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.TRUSTMANAGER)) {
                     SSLLogger.fine(
-                        "SunX509: skip default keystor", re);
+                        "SunX509: skip default keystore", re);
                 }
                 throw re;
             } catch (Exception e) {
-                if (SSLLogger.isOn && SSLLogger.isOn("trustmanager")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.TRUSTMANAGER)) {
                     SSLLogger.fine(
                         "SunX509: skip default keystore", e);
                 }
@@ -105,29 +108,6 @@ abstract class TrustManagerFactoryImpl extends TrustManagerFactorySpi {
         return new TrustManager[] { trustManager };
     }
 
-    /*
-     * Try to get an InputStream based on the file we pass in.
-     */
-    private static FileInputStream getFileInputStream(final File file)
-            throws Exception {
-        return AccessController.doPrivileged(
-                new PrivilegedExceptionAction<FileInputStream>() {
-                    @Override
-                    public FileInputStream run() throws Exception {
-                        try {
-                            if (file.exists()) {
-                                return new FileInputStream(file);
-                            } else {
-                                return null;
-                            }
-                        } catch (FileNotFoundException e) {
-                            // couldn't find it, oh well.
-                            return null;
-                        }
-                    }
-                });
-    }
-
     public static final class SimpleFactory extends TrustManagerFactoryImpl {
         @Override
         X509TrustManager getInstance(
@@ -155,17 +135,16 @@ abstract class TrustManagerFactoryImpl extends TrustManagerFactorySpi {
         @Override
         X509TrustManager getInstance(ManagerFactoryParameters spec)
                 throws InvalidAlgorithmParameterException {
-            if (spec instanceof CertPathTrustManagerParameters == false) {
+            if (!(spec instanceof CertPathTrustManagerParameters)) {
                 throw new InvalidAlgorithmParameterException
                     ("Parameters must be CertPathTrustManagerParameters");
             }
             CertPathParameters params =
                 ((CertPathTrustManagerParameters)spec).getParameters();
-            if (params instanceof PKIXBuilderParameters == false) {
+            if (!(params instanceof PKIXBuilderParameters pkixParams)) {
                 throw new InvalidAlgorithmParameterException
                     ("Encapsulated parameters must be PKIXBuilderParameters");
             }
-            PKIXBuilderParameters pkixParams = (PKIXBuilderParameters)params;
             return new X509TrustManagerImpl(Validator.TYPE_PKIX, pkixParams);
         }
     }

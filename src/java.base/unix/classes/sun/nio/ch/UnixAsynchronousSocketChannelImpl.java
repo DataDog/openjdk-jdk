@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,10 +32,9 @@ import java.util.concurrent.*;
 import java.io.IOException;
 import java.io.FileDescriptor;
 
+import jdk.internal.util.Exceptions;
+
 import sun.net.ConnectionResetException;
-import sun.net.NetHooks;
-import sun.net.util.SocketExceptions;
-import sun.security.action.GetPropertyAction;
 
 /**
  * Unix implementation of AsynchronousSocketChannel
@@ -49,7 +48,7 @@ class UnixAsynchronousSocketChannelImpl
 
     private static final boolean disableSynchronousRead;
     static {
-        String propValue = GetPropertyAction.privilegedGetProperty(
+        String propValue = System.getProperty(
             "sun.nio.ch.disableSynchronousRead", "false");
         disableSynchronousRead = propValue.isEmpty() ?
             true : Boolean.parseBoolean(propValue);
@@ -76,6 +75,7 @@ class UnixAsynchronousSocketChannelImpl
     private boolean isScatteringRead;
     private ByteBuffer readBuffer;
     private ByteBuffer[] readBuffers;
+    private Runnable readScopeHandleReleasers;
     private CompletionHandler<Number,Object> readHandler;
     private Object readAttachment;
     private PendingFuture<Number,Object> readFuture;
@@ -86,6 +86,7 @@ class UnixAsynchronousSocketChannelImpl
     private boolean isGatheringWrite;
     private ByteBuffer writeBuffer;
     private ByteBuffer[] writeBuffers;
+    private Runnable writeScopeHandleReleasers;
     private CompletionHandler<Number,Object> writeHandler;
     private Object writeAttachment;
     private PendingFuture<Number,Object> writeFuture;
@@ -263,7 +264,7 @@ class UnixAsynchronousSocketChannelImpl
         if (e != null) {
             if (e instanceof IOException) {
                 var isa = (InetSocketAddress)pendingRemote;
-                e = SocketExceptions.of((IOException)e, isa);
+                e = Exceptions.ioException((IOException)e, isa);
             }
             // close channel if connection cannot be established
             try {
@@ -307,13 +308,7 @@ class UnixAsynchronousSocketChannelImpl
 
         InetSocketAddress isa = Net.checkAddress(remote);
 
-        // permission check
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null)
-            sm.checkConnect(isa.getAddress().getHostAddress(), isa.getPort());
-
         // check and set state
-        boolean notifyBeforeTcpConnect;
         synchronized (stateLock) {
             if (state == ST_CONNECTED)
                 throw new AlreadyConnectedException();
@@ -321,15 +316,11 @@ class UnixAsynchronousSocketChannelImpl
                 throw new ConnectionPendingException();
             state = ST_PENDING;
             pendingRemote = remote;
-            notifyBeforeTcpConnect = (localAddress == null);
         }
 
         Throwable e = null;
         try {
             begin();
-            // notify hook if unbound
-            if (notifyBeforeTcpConnect)
-                NetHooks.beforeTcpConnect(fd, isa.getAddress(), isa.getPort());
             int n = Net.connect(fd, isa.getAddress(), isa.getPort());
             if (n == IOStatus.UNAVAILABLE) {
                 // connection could not be established immediately
@@ -359,7 +350,7 @@ class UnixAsynchronousSocketChannelImpl
         // close channel if connect fails
         if (e != null) {
             if (e instanceof IOException) {
-                e = SocketExceptions.of((IOException)e, isa);
+                e = Exceptions.ioException((IOException)e, isa);
             }
             try {
                 close();
@@ -392,9 +383,9 @@ class UnixAsynchronousSocketChannelImpl
             begin();
 
             if (scattering) {
-                n = (int)IOUtil.read(fd, readBuffers, nd);
+                n = (int)IOUtil.read(fd, readBuffers, true, nd);
             } else {
-                n = IOUtil.read(fd, readBuffer, -1, nd);
+                n = IOUtil.read(fd, readBuffer, -1, true, nd);
             }
             if (n == IOStatus.UNAVAILABLE) {
                 // spurious wakeup, is this possible?
@@ -409,6 +400,7 @@ class UnixAsynchronousSocketChannelImpl
             this.readBuffers = null;
             this.readAttachment = null;
             this.readHandler = null;
+            IOUtil.releaseScopes(readScopeHandleReleasers);
 
             // allow another read to be initiated
             enableReading();
@@ -516,9 +508,9 @@ class UnixAsynchronousSocketChannelImpl
 
             if (attemptRead) {
                 if (isScatteringRead) {
-                    n = (int)IOUtil.read(fd, dsts, nd);
+                    n = (int)IOUtil.read(fd, dsts, true, nd);
                 } else {
-                    n = IOUtil.read(fd, dst, -1, nd);
+                    n = IOUtil.read(fd, dst, -1, true, nd);
                 }
             }
 
@@ -526,6 +518,7 @@ class UnixAsynchronousSocketChannelImpl
                 PendingFuture<V,A> result = null;
                 synchronized (updateLock) {
                     this.isScatteringRead = isScatteringRead;
+                    this.readScopeHandleReleasers = IOUtil.acquireScopes(dst, dsts);
                     this.readBuffer = dst;
                     this.readBuffers = dsts;
                     if (handler == null) {
@@ -592,9 +585,9 @@ class UnixAsynchronousSocketChannelImpl
             begin();
 
             if (gathering) {
-                n = (int)IOUtil.write(fd, writeBuffers, nd);
+                n = (int)IOUtil.write(fd, writeBuffers, true, nd);
             } else {
-                n = IOUtil.write(fd, writeBuffer, -1, nd);
+                n = IOUtil.write(fd, writeBuffer, -1, true, nd);
             }
             if (n == IOStatus.UNAVAILABLE) {
                 // spurious wakeup, is this possible?
@@ -609,6 +602,7 @@ class UnixAsynchronousSocketChannelImpl
             this.writeBuffers = null;
             this.writeAttachment = null;
             this.writeHandler = null;
+            IOUtil.releaseScopes(writeScopeHandleReleasers);
 
             // allow another write to be initiated
             enableWriting();
@@ -702,9 +696,9 @@ class UnixAsynchronousSocketChannelImpl
 
             if (attemptWrite) {
                 if (isGatheringWrite) {
-                    n = (int)IOUtil.write(fd, srcs, nd);
+                    n = (int)IOUtil.write(fd, srcs, true, nd);
                 } else {
-                    n = IOUtil.write(fd, src, -1, nd);
+                    n = IOUtil.write(fd, src, -1, true, nd);
                 }
             }
 
@@ -712,6 +706,7 @@ class UnixAsynchronousSocketChannelImpl
                 PendingFuture<V,A> result = null;
                 synchronized (updateLock) {
                     this.isGatheringWrite = isGatheringWrite;
+                    this.writeScopeHandleReleasers = IOUtil.acquireScopes(src, srcs);
                     this.writeBuffer = src;
                     this.writeBuffers = srcs;
                     if (handler == null) {

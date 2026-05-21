@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -71,7 +71,7 @@ public class X509ExtendedTMEnabled {
     /*
      * Turn on SSL debugging?
      */
-    static boolean debug = false;
+    static boolean debug = Boolean.getBoolean("test.debug");
 
     /*
      * If the client or server is doing some kind of object creation
@@ -181,13 +181,11 @@ public class X509ExtendedTMEnabled {
                 "/" + trustStoreFile;
 
         KeyManagerFactory kmf = KeyManagerFactory.getInstance("SunX509");
-        KeyStore ks = KeyStore.getInstance("JKS");
-        ks.load(new FileInputStream(keyFilename), cpasswd);
+        KeyStore ks = KeyStore.getInstance(new File(keyFilename), cpasswd);
         kmf.init(ks, cpasswd);
 
         TrustManagerFactory tmf = TrustManagerFactory.getInstance("SunX509");
-        KeyStore ts = KeyStore.getInstance("JKS");
-        ts.load(new FileInputStream(trustFilename), cpasswd);
+        KeyStore ts = KeyStore.getInstance(new File(trustFilename), cpasswd);
         tmf.init(ts);
 
         TrustManager tms[] = tmf.getTrustManagers();

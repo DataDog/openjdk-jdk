@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,7 +32,7 @@
  *          jdk.compiler/com.sun.tools.javac.parser
  *          jdk.compiler/com.sun.tools.javac.util
  * @build ArgTypeCompilerFactory Example HTMLWriter RunExamples DocCommentProcessor
- * @run main/othervm RunExamples
+ * @run main/othervm/timeout=480 RunExamples
  */
 /*
  *      See CR 7127924 for info on why othervm is used.
@@ -261,11 +261,8 @@ public class RunExamples {
 
         protected String read(File f) throws IOException {
             byte[] bytes = new byte[(int) f.length()];
-            DataInputStream in = new DataInputStream(new FileInputStream(f));
-            try {
+            try (DataInputStream in = new DataInputStream(new FileInputStream(f))) {
                 in.readFully(bytes);
-            } finally {
-                in.close();
             }
             return new String(bytes);
         }

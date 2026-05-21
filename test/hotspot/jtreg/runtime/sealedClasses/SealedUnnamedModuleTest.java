@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,8 +25,8 @@
  * @test
  * @bug 8225056
  * @compile planets/OuterPlanets.jcod planets/Mars.jcod
- * @compile --enable-preview -source ${jdk.version} planets/Neptune.java asteroids/Pluto.java asteroids/Charon.java
- * @run main/othervm --enable-preview SealedUnnamedModuleTest
+ * @compile planets/Neptune.java asteroids/Pluto.java asteroids/Charon.java
+ * @run main/othervm SealedUnnamedModuleTest
  */
 
 public class SealedUnnamedModuleTest {
@@ -46,7 +46,8 @@ public class SealedUnnamedModuleTest {
             Class mars = Class.forName("planets.Mars");
             throw new RuntimeException("Expected IncompatibleClassChangeError exception not thrown");
         } catch (IncompatibleClassChangeError e) {
-            if (!e.getMessage().contains("cannot inherit from sealed class")) {
+            if (!e.getMessage().equals("Failed listed permitted subclass check: class planets.Mars is " +
+                                       "not a permitted subclass of planets.OuterPlanets")) {
                 throw new RuntimeException("Wrong IncompatibleClassChangeError exception thrown: " + e.getMessage());
             }
         }
@@ -57,7 +58,9 @@ public class SealedUnnamedModuleTest {
             Class pluto = Class.forName("asteroids.Pluto");
             throw new RuntimeException("Expected IncompatibleClassChangeError exception not thrown");
         } catch (IncompatibleClassChangeError e) {
-            if (!e.getMessage().contains("cannot inherit from sealed class")) {
+            if (!e.getMessage().equals("Failed same package check: non-public subclass asteroids.Pluto is " +
+                                       "in package 'asteroids' with classloader 'app', and sealed class " +
+                                       "planets.OuterPlanets is in package 'planets' with classloader 'app'")) {
                 throw new RuntimeException("Wrong IncompatibleClassChangeError exception thrown: " + e.getMessage());
             }
         }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,7 @@
  */
 package java.util.stream;
 
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.Spliterator;
@@ -325,12 +326,24 @@ enum StreamOpFlag {
      */
     // 12, 0x01000000
     SHORT_CIRCUIT(12,
-                  set(Type.OP).set(Type.TERMINAL_OP));
+                  set(Type.OP).set(Type.TERMINAL_OP)),
+
+    /**
+     * Characteristic value signifying that an operation may adjust the
+     * total size of the stream.
+     * <p>
+     * The flag, if present, is only valid when SIZED is present;
+     * and is only valid for sequential streams.
+     * <p>
+     * An intermediate operation can preserve or inject this value.
+     */
+    // 13, 0x04000000
+    SIZE_ADJUSTING(13,
+                   set(Type.OP));
 
     // The following 2 flags are currently undefined and a free for any further
     // stream flags if/when required
     //
-    // 13, 0x04000000
     // 14, 0x10000000
     // 15, 0x40000000
 
@@ -629,6 +642,11 @@ enum StreamOpFlag {
      */
     static final int IS_SHORT_CIRCUIT = SHORT_CIRCUIT.set;
 
+    /**
+     * The bit value to inject {@link #SIZE_ADJUSTING}.
+     */
+    static final int IS_SIZE_ADJUSTING = SIZE_ADJUSTING.set;
+
     private static int getMask(int flags) {
         return (flags == 0)
                ? FLAG_MASK
@@ -721,9 +739,9 @@ enum StreamOpFlag {
      *
      * @implSpec
      * If the spliterator is naturally {@code SORTED} (the associated
-     * {@code Comparator} is {@code null}) then the characteristic is converted
-     * to the {@link #SORTED} flag, otherwise the characteristic is not
-     * converted.
+     * {@code Comparator} is {@code null} or {@code Comparator.naturalOrder()}) then
+     * the characteristic is converted to the {@link #SORTED} flag, otherwise
+     * the characteristic is not converted.
      *
      * @param spliterator the spliterator from which to obtain characteristic
      *        bit set.
@@ -731,14 +749,15 @@ enum StreamOpFlag {
      */
     static int fromCharacteristics(Spliterator<?> spliterator) {
         int characteristics = spliterator.characteristics();
-        if ((characteristics & Spliterator.SORTED) != 0 && spliterator.getComparator() != null) {
-            // Do not propagate the SORTED characteristic if it does not correspond
-            // to a natural sort order
-            return characteristics & SPLITERATOR_CHARACTERISTICS_MASK & ~Spliterator.SORTED;
+        if ((characteristics & Spliterator.SORTED) != 0) {
+            Comparator<?> comparator = spliterator.getComparator();
+            if (comparator != null && !Comparator.naturalOrder().equals(comparator)) {
+                // Do not propagate the SORTED characteristic if it does not correspond
+                // to a natural sort order
+                return characteristics & SPLITERATOR_CHARACTERISTICS_MASK & ~Spliterator.SORTED;
+            }
         }
-        else {
-            return characteristics & SPLITERATOR_CHARACTERISTICS_MASK;
-        }
+        return characteristics & SPLITERATOR_CHARACTERISTICS_MASK;
     }
 
     /**

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -58,8 +58,6 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.UserPrincipal;
 import java.nio.file.spi.FileSystemProvider;
 import java.nio.file.spi.FileTypeDetector;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -149,10 +147,6 @@ public final class Files {
      *          if an unsupported option is specified
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the file.
      */
     public static InputStream newInputStream(Path path, OpenOption... options)
         throws IOException
@@ -180,7 +174,7 @@ public final class Files {
      * regular-file} to a size of {@code 0} if it exists.
      *
      * <p> <b>Usage Examples:</b>
-     * <pre>
+     * {@snippet lang=java :
      *     Path path = ...
      *
      *     // truncate and overwrite an existing file, or create the file if
@@ -195,7 +189,7 @@ public final class Files {
      *
      *     // always create new file, failing if it already exists
      *     out = Files.newOutputStream(path, CREATE_NEW);
-     * </pre>
+     * }
      *
      * @param   path
      *          the path to the file to open or create
@@ -208,15 +202,12 @@ public final class Files {
      *          if {@code options} contains an invalid combination of options
      * @throws  UnsupportedOperationException
      *          if an unsupported option is specified
+     * @throws  FileAlreadyExistsException
+     *          If the path locates an existing file and the {@link
+     *          StandardOpenOption#CREATE_NEW CREATE_NEW} option is specified
+     *          <i>(optional specific exception)</i>
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked to check write access to the file. The {@link
-     *          SecurityManager#checkDelete(String) checkDelete} method is
-     *          invoked to check delete access if the file is opened with the
-     *          {@code DELETE_ON_CLOSE} option.
      */
     public static OutputStream newOutputStream(Path path, OpenOption... options)
         throws IOException
@@ -317,7 +308,7 @@ public final class Files {
      * is a {@link java.nio.channels.FileChannel}.
      *
      * <p> <b>Usage Examples:</b>
-     * <pre>{@code
+     * {@snippet lang=java :
      *     Path path = ...
      *
      *     // open file for reading
@@ -331,7 +322,7 @@ public final class Files {
      *     FileAttribute<Set<PosixFilePermission>> perms = ...
      *     SeekableByteChannel sbc =
      *         Files.newByteChannel(path, EnumSet.of(CREATE_NEW,READ,WRITE), perms);
-     * }</pre>
+     * }
      *
      * @param   path
      *          the path to the file to open or create
@@ -349,21 +340,12 @@ public final class Files {
      *          if an unsupported open option is specified or the array contains
      *          attributes that cannot be set atomically when creating the file
      * @throws  FileAlreadyExistsException
-     *          if a file of that name already exists and the {@link
+     *          If the path locates an existing file and the {@link
      *          StandardOpenOption#CREATE_NEW CREATE_NEW} option is specified
-     *          <i>(optional specific exception)</i>
+     *          and the file is being opened for writing <i>(optional specific
+     *          exception)</i>
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the path if the file is
-     *          opened for reading. The {@link SecurityManager#checkWrite(String)
-     *          checkWrite} method is invoked to check write access to the path
-     *          if the file is opened for writing. The {@link
-     *          SecurityManager#checkDelete(String) checkDelete} method is
-     *          invoked to check delete access if the file is opened with the
-     *          {@code DELETE_ON_CLOSE} option.
      *
      * @see java.nio.channels.FileChannel#open(Path,Set,FileAttribute[])
      */
@@ -395,21 +377,12 @@ public final class Files {
      * @throws  UnsupportedOperationException
      *          if an unsupported open option is specified
      * @throws  FileAlreadyExistsException
-     *          if a file of that name already exists and the {@link
+     *          If the path locates an existing file and the {@link
      *          StandardOpenOption#CREATE_NEW CREATE_NEW} option is specified
-     *          <i>(optional specific exception)</i>
+     *          and the file is being opened for writing <i>(optional specific
+     *          exception)</i>
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the path if the file is
-     *          opened for reading. The {@link SecurityManager#checkWrite(String)
-     *          checkWrite} method is invoked to check write access to the path
-     *          if the file is opened for writing. The {@link
-     *          SecurityManager#checkDelete(String) checkDelete} method is
-     *          invoked to check delete access if the file is opened with the
-     *          {@code DELETE_ON_CLOSE} option.
      *
      * @see java.nio.channels.FileChannel#open(Path,OpenOption[])
      */
@@ -465,10 +438,6 @@ public final class Files {
      *          a directory <i>(optional specific exception)</i>
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the directory.
      */
     public static DirectoryStream<Path> newDirectoryStream(Path dir)
         throws IOException
@@ -488,12 +457,12 @@ public final class Files {
      *
      * <p> For example, suppose we want to iterate over the files ending with
      * ".java" in a directory:
-     * <pre>
+     * {@snippet lang=java :
      *     Path dir = ...
-     *     try (DirectoryStream&lt;Path&gt; stream = Files.newDirectoryStream(dir, "*.java")) {
+     *     try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "*.java")) {
      *         :
      *     }
-     * </pre>
+     * }
      *
      * <p> The globbing pattern is specified by the {@link
      * FileSystem#getPathMatcher getPathMatcher} method.
@@ -520,10 +489,6 @@ public final class Files {
      *          a directory <i>(optional specific exception)</i>
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the directory.
      */
     public static DirectoryStream<Path> newDirectoryStream(Path dir, String glob)
         throws IOException
@@ -572,17 +537,17 @@ public final class Files {
      * <p> <b>Usage Example:</b>
      * Suppose we want to iterate over the files in a directory that are
      * larger than 8K.
-     * <pre>
-     *     DirectoryStream.Filter&lt;Path&gt; filter = new DirectoryStream.Filter&lt;Path&gt;() {
+     * {@snippet lang=java :
+     *     DirectoryStream.Filter<Path> filter = new DirectoryStream.Filter<Path>() {
      *         public boolean accept(Path file) throws IOException {
-     *             return (Files.size(file) &gt; 8192L);
+     *             return (Files.size(file) > 8192L);
      *         }
      *     };
      *     Path dir = ...
-     *     try (DirectoryStream&lt;Path&gt; stream = Files.newDirectoryStream(dir, filter)) {
+     *     try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, filter)) {
      *         :
      *     }
-     * </pre>
+     * }
      *
      * @param   dir
      *          the path to the directory
@@ -596,10 +561,6 @@ public final class Files {
      *          a directory <i>(optional specific exception)</i>
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the directory.
      */
     public static DirectoryStream<Path> newDirectoryStream(Path dir,
                                                            DirectoryStream.Filter<? super Path> filter)
@@ -614,10 +575,11 @@ public final class Files {
         Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
 
     /**
-     * Creates a new and empty file, failing if the file already exists. The
-     * check for the existence of the file and the creation of the new file if
-     * it does not exist are a single operation that is atomic with respect to
-     * all other filesystem activities that might affect the directory.
+     * Creates a new and empty file, failing if {@code path} locates an existing
+     * file. The check for the existence of the file and the creation of the new
+     * file if it does not exist are a single operation that is atomic with
+     * respect to all other filesystem activities that might affect the
+     * directory.
      *
      * <p> The {@code attrs} parameter is optional {@link FileAttribute
      * file-attributes} to set atomically when creating the file. Each attribute
@@ -637,14 +599,10 @@ public final class Files {
      *          if the array contains an attribute that cannot be set atomically
      *          when creating the file
      * @throws  FileAlreadyExistsException
-     *          if a file of that name already exists
+     *          if {@code path} locates an existing file
      *          <i>(optional specific exception)</i>
      * @throws  IOException
      *          if an I/O error occurs or the parent directory does not exist
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked to check write access to the new file.
      */
     public static Path createFile(Path path, FileAttribute<?>... attrs)
         throws IOException
@@ -654,7 +612,8 @@ public final class Files {
     }
 
     /**
-     * Creates a new directory. The check for the existence of the file and the
+     * Creates a new directory, failing if {@code dir} locates an existing
+     * file. The check for the existence of the file and the
      * creation of the directory if it does not exist are a single operation
      * that is atomic with respect to all other filesystem activities that might
      * affect the directory. The {@link #createDirectories createDirectories}
@@ -679,14 +638,10 @@ public final class Files {
      *          if the array contains an attribute that cannot be set atomically
      *          when creating the directory
      * @throws  FileAlreadyExistsException
-     *          if a directory could not otherwise be created because a file of
-     *          that name already exists <i>(optional specific exception)</i>
+     *          if {@code dir} locates an existing file
+     *          <i>(optional specific exception)</i>
      * @throws  IOException
      *          if an I/O error occurs or the parent directory does not exist
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked to check write access to the new directory.
      */
     public static Path createDirectory(Path dir, FileAttribute<?>... attrs)
         throws IOException
@@ -723,21 +678,10 @@ public final class Files {
      *          if the array contains an attribute that cannot be set atomically
      *          when creating the directory
      * @throws  FileAlreadyExistsException
-     *          if {@code dir} exists but is not a directory <i>(optional specific
-     *          exception)</i>
+     *          if {@code dir} locates an existing file that is not a directory
+     *          <i>(optional specific exception)</i>
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          in the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked prior to attempting to create a directory and
-     *          its {@link SecurityManager#checkRead(String) checkRead} is
-     *          invoked for each parent directory that is checked. If {@code
-     *          dir} is not an absolute path then its {@link Path#toAbsolutePath
-     *          toAbsolutePath} may need to be invoked to get its absolute path.
-     *          This may invoke the security manager's {@link
-     *          SecurityManager#checkPropertyAccess(String) checkPropertyAccess}
-     *          method to check access to the system property {@code user.dir}
      */
     public static Path createDirectories(Path dir, FileAttribute<?>... attrs)
         throws IOException
@@ -752,15 +696,10 @@ public final class Files {
         } catch (IOException x) {
             // parent may not exist or other reason
         }
-        SecurityException se = null;
-        try {
-            dir = dir.toAbsolutePath();
-        } catch (SecurityException x) {
-            // don't have permission to get absolute path
-            se = x;
-        }
+        Path absDir = dir.toAbsolutePath();
+
         // find a descendant that exists
-        Path parent = dir.getParent();
+        Path parent = absDir.getParent();
         while (parent != null) {
             try {
                 provider(parent).checkAccess(parent);
@@ -772,17 +711,13 @@ public final class Files {
         }
         if (parent == null) {
             // unable to find existing parent
-            if (se == null) {
-                throw new FileSystemException(dir.toString(), null,
-                    "Unable to determine if root directory exists");
-            } else {
-                throw se;
-            }
+            throw new FileSystemException(absDir.toString(), null,
+                "Unable to determine if root directory exists");
         }
 
         // create directories
         Path child = parent;
-        for (Path name: parent.relativize(dir)) {
+        for (Path name: parent.relativize(absDir)) {
             child = child.resolve(name);
             createAndCheckIsDirectory(child, attrs);
         }
@@ -800,7 +735,7 @@ public final class Files {
         try {
             createDirectory(dir, attrs);
         } catch (FileAlreadyExistsException x) {
-            if (!isDirectory(dir, LinkOption.NOFOLLOW_LINKS))
+            if (!isDirectory(dir))
                 throw x;
         }
     }
@@ -818,7 +753,7 @@ public final class Files {
      * java.io.File#createTempFile(String,String,File)} method.
      *
      * <p> As with the {@code File.createTempFile} methods, this method is only
-     * part of a temporary-file facility. Where used as a <em>work files</em>,
+     * part of a temporary-file facility. Where used as a <em>work file</em>,
      * the resulting file may be opened using the {@link
      * StandardOpenOption#DELETE_ON_CLOSE DELETE_ON_CLOSE} option so that the
      * file is deleted when the appropriate {@code close} method is invoked.
@@ -831,7 +766,7 @@ public final class Files {
      * is identified by its {@link FileAttribute#name name}. If more than one
      * attribute of the same name is included in the array then all but the last
      * occurrence is ignored. When no file attributes are specified, then the
-     * resulting file may have more restrictive access permissions to files
+     * resulting file may have more restrictive access permissions than files
      * created by the {@link java.io.File#createTempFile(String,String,File)}
      * method.
      *
@@ -858,10 +793,6 @@ public final class Files {
      *          when creating the directory
      * @throws  IOException
      *          if an I/O error occurs or {@code dir} does not exist
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked to check write access to the file.
      */
     public static Path createTempFile(Path dir,
                                       String prefix,
@@ -904,10 +835,6 @@ public final class Files {
      * @throws  IOException
      *          if an I/O error occurs or the temporary-file directory does not
      *          exist
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked to check write access to the file.
      */
     public static Path createTempFile(String prefix,
                                       String suffix,
@@ -935,7 +862,10 @@ public final class Files {
      * file-attributes} to set atomically when creating the directory. Each
      * attribute is identified by its {@link FileAttribute#name name}. If more
      * than one attribute of the same name is included in the array then all but
-     * the last occurrence is ignored.
+     * the last occurrence is ignored. When no file attributes are specified,
+     * then the resulting directory may have more restrictive access
+     * permissions than directories created by the
+     * {@linkplain Files#createDirectory(Path, FileAttribute<?>...)} method.
      *
      * @param   dir
      *          the path to directory in which to create the directory
@@ -956,11 +886,6 @@ public final class Files {
      *          when creating the directory
      * @throws  IOException
      *          if an I/O error occurs or {@code dir} does not exist
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked to check write access when creating the
-     *          directory.
      */
     public static Path createTempDirectory(Path dir,
                                            String prefix,
@@ -998,11 +923,6 @@ public final class Files {
      * @throws  IOException
      *          if an I/O error occurs or the temporary-file directory does not
      *          exist
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked to check write access when creating the
-     *          directory.
      */
     public static Path createTempDirectory(String prefix,
                                            FileAttribute<?>... attrs)
@@ -1012,7 +932,8 @@ public final class Files {
     }
 
     /**
-     * Creates a symbolic link to a target <i>(optional operation)</i>.
+     * Creates a symbolic link to a target, failing if {@code link} locates an
+     * existing file <i>(optional operation)</i>.
      *
      * <p> The {@code target} parameter is the target of the link. It may be an
      * {@link Path#isAbsolute absolute} or relative path and may not exist. When
@@ -1046,15 +967,10 @@ public final class Files {
      *          array contains an attribute that cannot be set atomically when
      *          creating the symbolic link
      * @throws  FileAlreadyExistsException
-     *          if a file with the name already exists <i>(optional specific
-     *          exception)</i>
+     *          if {@code link} locates an existing file
+     *          <i>(optional specific exception)</i>
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager
-     *          is installed, it denies {@link LinkPermission}{@code ("symbolic")}
-     *          or its {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method denies write access to the path of the symbolic link.
      */
     public static Path createSymbolicLink(Path link, Path target,
                                           FileAttribute<?>... attrs)
@@ -1065,14 +981,18 @@ public final class Files {
     }
 
     /**
-     * Creates a new link (directory entry) for an existing file <i>(optional
+     * Creates a new link (directory entry) for an existing file,
+     * failing if {@code link} locates an existing file <i>(optional
      * operation)</i>.
      *
      * <p> The {@code link} parameter locates the directory entry to create.
      * The {@code existing} parameter is the path to an existing file. This
      * method creates a new directory entry for the file so that it can be
      * accessed using {@code link} as the path. On some file systems this is
-     * known as creating a "hard link". Whether the file attributes are
+     * known as creating a "hard link". If the {@code existing} parameter
+     * is the path to a symbolic link, then whether the new link is for the
+     * target of the symbolic link or for the symbolic link itself is platform
+     * dependent and therefore not specified. Whether the file attributes are
      * maintained for the file or for each directory entry is file system
      * specific and therefore not specified. Typically, a file system requires
      * that all links (directory entries) for a file be on the same file system.
@@ -1091,16 +1011,10 @@ public final class Files {
      *          if the implementation does not support adding an existing file
      *          to a directory
      * @throws  FileAlreadyExistsException
-     *          if the entry could not otherwise be created because a file of
-     *          that name already exists <i>(optional specific exception)</i>
+     *          if {@code link} locates an existing file
+     *          <i>(optional specific exception)</i>
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager
-     *          is installed, it denies {@link LinkPermission}{@code ("hard")}
-     *          or its {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method denies write access to either the link or the
-     *          existing file.
      */
     public static Path createLink(Path link, Path existing) throws IOException {
         provider(link).createLink(link, existing);
@@ -1137,10 +1051,6 @@ public final class Files {
      *          exception)</i>
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkDelete(String)} method
-     *          is invoked to check delete access to the file
      */
     public static void delete(Path path) throws IOException {
         provider(path).delete(path);
@@ -1176,10 +1086,6 @@ public final class Files {
      *          exception)</i>
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkDelete(String)} method
-     *          is invoked to check delete access to the file.
      */
     public static boolean deleteIfExists(Path path) throws IOException {
         return provider(path).deleteIfExists(path);
@@ -1197,8 +1103,8 @@ public final class Files {
      * which case the method completes without copying the file. File attributes
      * are not required to be copied to the target file. If symbolic links are
      * supported, and the file is a symbolic link, then the final target of the
-     * link is copied. If the file is a directory then it creates an empty
-     * directory in the target location (entries in the directory are not
+     * link is copied. If the file is a directory then an empty directory is
+     * created in the target location (entries in the directory are not
      * copied). This method can be used with the {@link #walkFileTree
      * walkFileTree} method to copy a directory and all entries in the directory,
      * or an entire <i>file-tree</i> where required.
@@ -1213,10 +1119,9 @@ public final class Files {
      * <tbody>
      * <tr>
      *   <th scope="row"> {@link StandardCopyOption#REPLACE_EXISTING REPLACE_EXISTING} </th>
-     *   <td> If the target file exists, then the target file is replaced if it
-     *     is not a non-empty directory. If the target file exists and is a
-     *     symbolic link, then the symbolic link itself, not the target of
-     *     the link, is replaced. </td>
+     *   <td> Replace an existing file. A non-empty directory cannot be
+     *     replaced. If the target file exists and is a symbolic link, then the
+     *     symbolic link itself, not the target of the link, is replaced. </td>
      * </tr>
      * <tr>
      *   <th scope="row"> {@link StandardCopyOption#COPY_ATTRIBUTES COPY_ATTRIBUTES} </th>
@@ -1253,11 +1158,11 @@ public final class Files {
      * <p> <b>Usage Example:</b>
      * Suppose we want to copy a file into a directory, giving it the same file
      * name as the source file:
-     * <pre>
+     * {@snippet lang=java :
      *     Path source = ...
      *     Path newdir = ...
      *     Files.copy(source, newdir.resolve(source.getFileName());
-     * </pre>
+     * }
      *
      * @param   source
      *          the path to the file to copy
@@ -1281,14 +1186,6 @@ public final class Files {
      *          <i>(optional specific exception)</i>
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the source file, the
-     *          {@link SecurityManager#checkWrite(String) checkWrite} is invoked
-     *          to check write access to the target file. If a symbolic link is
-     *          copied the security manager is invoked to check {@link
-     *          LinkPermission}{@code ("symbolic")}.
      */
     public static Path copy(Path source, Path target, CopyOption... options)
         throws IOException
@@ -1336,10 +1233,9 @@ public final class Files {
      * <tbody>
      * <tr>
      *   <th scope="row"> {@link StandardCopyOption#REPLACE_EXISTING REPLACE_EXISTING} </th>
-     *   <td> If the target file exists, then the target file is replaced if it
-     *     is not a non-empty directory. If the target file exists and is a
-     *     symbolic link, then the symbolic link itself, not the target of
-     *     the link, is replaced. </td>
+     *   <td> Replace an existing file. A non-empty directory cannot be
+     *     replaced. If the target file exists and is a symbolic link, then the
+     *     symbolic link itself, not the target of the link, is replaced. </td>
      * </tr>
      * <tr>
      *   <th scope="row"> {@link StandardCopyOption#ATOMIC_MOVE ATOMIC_MOVE} </th>
@@ -1354,6 +1250,9 @@ public final class Files {
      *     associated with a different provider to this object. </td>
      * </tbody>
      * </table>
+     * If the {@code ATOMIC_MOVE} option is not specified, then the check
+     * whether the target file exists and the actual move might not be atomic
+     * with respect to other filesystem activities.
      *
      * <p> An implementation of this interface may support additional
      * implementation specific options.
@@ -1372,18 +1271,18 @@ public final class Files {
      * <p> <b>Usage Examples:</b>
      * Suppose we want to rename a file to "newname", keeping the file in the
      * same directory:
-     * <pre>
+     * {@snippet lang=java :
      *     Path source = ...
      *     Files.move(source, source.resolveSibling("newname"));
-     * </pre>
+     * }
      * Alternatively, suppose we want to move a file to new directory, keeping
      * the same file name, and replacing any existing file of that name in the
      * directory:
-     * <pre>
+     * {@snippet lang=java :
      *     Path source = ...
      *     Path newdir = ...
      *     Files.move(source, newdir.resolve(source.getFileName()), REPLACE_EXISTING);
-     * </pre>
+     * }
      *
      * @param   source
      *          the path to the file to move
@@ -1399,8 +1298,11 @@ public final class Files {
      *          if the array contains a copy option that is not supported
      * @throws  FileAlreadyExistsException
      *          if the target file exists but cannot be replaced because the
-     *          {@code REPLACE_EXISTING} option is not specified <i>(optional
-     *          specific exception)</i>
+     *          {@code REPLACE_EXISTING} option is <i>not</i> specified.
+     *          It may also be thrown when the {@code REPLACE_EXISTING} option
+     *          <i>is</i> specified, the move is not atomic, and the target
+     *          file is created by some other entity at around the same time
+     *          that this method is called
      * @throws  DirectoryNotEmptyException
      *          the {@code REPLACE_EXISTING} option is specified but the file
      *          cannot be replaced because it is a non-empty directory, or the
@@ -1411,11 +1313,6 @@ public final class Files {
      *          the file cannot be moved as an atomic file system operation.
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked to check write access to both the source and
-     *          target file.
      */
     public static Path move(Path source, Path target, CopyOption... options)
         throws IOException
@@ -1454,10 +1351,6 @@ public final class Files {
      *          is not a symbolic link <i>(optional specific exception)</i>
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager
-     *          is installed, it checks that {@code FilePermission} has been
-     *          granted with the "{@code readlink}" action to read the link.
      */
     public static Path readSymbolicLink(Path link) throws IOException {
         return provider(link).readSymbolicLink(link);
@@ -1481,12 +1374,6 @@ public final class Files {
      *
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the file, and in
-     *          addition it checks
-     *          {@link RuntimePermission}{@code ("getFileStoreAttributes")}
      */
     public static FileStore getFileStore(Path path) throws IOException {
         return provider(path).getFileStore(path);
@@ -1524,10 +1411,6 @@ public final class Files {
      *
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to both files.
      *
      * @see java.nio.file.attribute.BasicFileAttributes#fileKey
      */
@@ -1546,7 +1429,7 @@ public final class Files {
      * <ul>
      * <li> The two paths locate the {@linkplain #isSameFile(Path, Path) same file},
      *      even if two {@linkplain Path#equals(Object) equal} paths locate a file
-     *      does not exist, or </li>
+     *      that does not exist, or </li>
      * <li> The two files are the same size, and every byte in the first file
      *      is identical to the corresponding byte in the second file. </li>
      * </ul>
@@ -1555,7 +1438,7 @@ public final class Files {
      * returned by this method is:
      * <ul>
      * <li> The position of the first mismatched byte, or </li>
-     * <li> The size of the smaller file (in bytes) when the files are different
+     * <li> The size of the smaller file (in bytes) when the files are of different
      *      sizes and every byte of the smaller file is identical to the
      *      corresponding byte of the larger file. </li>
      * </ul>
@@ -1567,6 +1450,9 @@ public final class Files {
      * and {@code g}, {@code mismatch(f,g)} will return the same value as
      * {@code mismatch(g,f)}).
      *
+     * <p> If both {@code Path} objects are equal, then this method returns
+     * {@code true} without checking if the file exists.
+     *
      * @param   path
      *          the path to the first file
      * @param   path2
@@ -1576,10 +1462,6 @@ public final class Files {
      *
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to both files.
      *
      * @since 12
      */
@@ -1590,7 +1472,7 @@ public final class Files {
         byte[] buffer1 = new byte[BUFFER_SIZE];
         byte[] buffer2 = new byte[BUFFER_SIZE];
         try (InputStream in1 = Files.newInputStream(path);
-             InputStream in2 = Files.newInputStream(path2);) {
+             InputStream in2 = Files.newInputStream(path2)) {
             long totalRead = 0;
             while (true) {
                 int nRead1 = in1.readNBytes(buffer1, 0, BUFFER_SIZE);
@@ -1628,17 +1510,13 @@ public final class Files {
      *
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the file.
      */
     public static boolean isHidden(Path path) throws IOException {
         return provider(path).isHidden(path);
     }
 
     // lazy loading of default and installed file type detectors
-    private static class FileTypeDetectors{
+    private static class FileTypeDetectors {
         static final FileTypeDetector defaultFileTypeDetector =
             createDefaultFileTypeDetector();
         static final List<FileTypeDetector> installedDetectors =
@@ -1646,26 +1524,16 @@ public final class Files {
 
         // creates the default file type detector
         private static FileTypeDetector createDefaultFileTypeDetector() {
-            return AccessController
-                .doPrivileged(new PrivilegedAction<>() {
-                    @Override public FileTypeDetector run() {
-                        return sun.nio.fs.DefaultFileTypeDetector.create();
-                }});
+            return sun.nio.fs.DefaultFileTypeDetector.create();
         }
 
         // loads all installed file type detectors
         private static List<FileTypeDetector> loadInstalledDetectors() {
-            return AccessController
-                .doPrivileged(new PrivilegedAction<>() {
-                    @Override public List<FileTypeDetector> run() {
-                        List<FileTypeDetector> list = new ArrayList<>();
-                        ServiceLoader<FileTypeDetector> loader = ServiceLoader
-                            .load(FileTypeDetector.class, ClassLoader.getSystemClassLoader());
-                        for (FileTypeDetector detector: loader) {
-                            list.add(detector);
-                        }
-                        return list;
-                }});
+            return ServiceLoader.load(FileTypeDetector.class,
+                                      ClassLoader.getSystemClassLoader())
+                .stream()
+                .map(ServiceLoader.Provider::get)
+                .toList();
         }
     }
 
@@ -1711,9 +1579,10 @@ public final class Files {
      *
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          If a security manager is installed and it denies an unspecified
-     *          permission required by a file type detector implementation.
+     *
+     * @spec https://www.rfc-editor.org/info/rfc2045
+     *      RFC 2045: Multipurpose Internet Mail Extensions (MIME) Part One:
+     *              Format of Internet Message Bodies
      */
     public static String probeContentType(Path path)
         throws IOException
@@ -1752,14 +1621,14 @@ public final class Files {
      *
      * <p> <b>Usage Example:</b>
      * Suppose we want read or set a file's ACL, if supported:
-     * <pre>
+     * {@snippet lang=java :
      *     Path path = ...
      *     AclFileAttributeView view = Files.getFileAttributeView(path, AclFileAttributeView.class);
      *     if (view != null) {
-     *         List&lt;AclEntry&gt; acl = view.getAcl();
+     *         List<AclEntry> acl = view.getAcl();
      *         :
      *     }
-     * </pre>
+     * }
      *
      * @param   <V>
      *          The {@code FileAttributeView} type
@@ -1801,16 +1670,16 @@ public final class Files {
      *
      * <p> <b>Usage Example:</b>
      * Suppose we want to read a file's attributes in bulk:
-     * <pre>
-     *    Path path = ...
-     *    BasicFileAttributes attrs = Files.readAttributes(path, BasicFileAttributes.class);
-     * </pre>
+     * {@snippet lang=java :
+     *     Path path = ...
+     *     BasicFileAttributes attrs = Files.readAttributes(path, BasicFileAttributes.class);
+     * }
      * Alternatively, suppose we want to read file's POSIX attributes without
      * following symbolic links:
-     * <pre>
-     *    PosixFileAttributes attrs =
-     *        Files.readAttributes(path, PosixFileAttributes.class, NOFOLLOW_LINKS);
-     * </pre>
+     * {@snippet lang=java :
+     *     PosixFileAttributes attrs =
+     *         Files.readAttributes(path, PosixFileAttributes.class, NOFOLLOW_LINKS);
+     * }
      *
      * @param   <A>
      *          The {@code BasicFileAttributes} type
@@ -1828,12 +1697,6 @@ public final class Files {
      *          if an attributes of the given type are not supported
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, a security manager is
-     *          installed, its {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the file. If this
-     *          method is invoked to read security sensitive attributes then the
-     *          security manager may be invoke to check for additional permissions.
      */
     public static <A extends BasicFileAttributes> A readAttributes(Path path,
                                                                    Class<A> type,
@@ -1869,10 +1732,10 @@ public final class Files {
      *
      * <p> <b>Usage Example:</b>
      * Suppose we want to set the DOS "hidden" attribute:
-     * <pre>
-     *    Path path = ...
-     *    Files.setAttribute(path, "dos:hidden", true);
-     * </pre>
+     * {@snippet lang=java :
+     *     Path path = ...
+     *     Files.setAttribute(path, "dos:hidden", true);
+     * }
      *
      * @param   path
      *          the path to the file
@@ -1897,12 +1760,6 @@ public final class Files {
      *          type
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, its {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method denies write access to the file. If this method is invoked
-     *          to set security sensitive attributes then the security manager
-     *          may be invoked to check for additional permissions.
      */
     public static Path setAttribute(Path path, String attribute, Object value,
                                     LinkOption... options)
@@ -1938,10 +1795,10 @@ public final class Files {
      * <p> <b>Usage Example:</b>
      * Suppose we require the user ID of the file owner on a system that
      * supports a "{@code unix}" view:
-     * <pre>
-     *    Path path = ...
-     *    int uid = (Integer)Files.getAttribute(path, "unix:uid");
-     * </pre>
+     * {@snippet lang=java :
+     *     Path path = ...
+     *     int uid = (Integer)Files.getAttribute(path, "unix:uid");
+     * }
      *
      * @param   path
      *          the path to the file
@@ -1958,12 +1815,6 @@ public final class Files {
      *          if the attribute name is not specified or is not recognized
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, its {@link SecurityManager#checkRead(String) checkRead}
-     *          method denies read access to the file. If this method is invoked
-     *          to read security sensitive attributes then the security manager
-     *          may be invoked to check for additional permissions.
      */
     public static Object getAttribute(Path path, String attribute,
                                       LinkOption... options)
@@ -2062,12 +1913,6 @@ public final class Files {
      *          specified
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, its {@link SecurityManager#checkRead(String) checkRead}
-     *          method denies read access to the file. If this method is invoked
-     *          to read security sensitive attributes then the security manager
-     *          may be invoke to check for additional permissions.
      */
     public static Map<String,Object> readAttributes(Path path, String attributes,
                                                     LinkOption... options)
@@ -2103,12 +1948,6 @@ public final class Files {
      *          PosixFileAttributeView}
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, a security manager is
-     *          installed, and it denies
-     *          {@link RuntimePermission}{@code ("accessUserInformation")}
-     *          or its {@link SecurityManager#checkRead(String) checkRead} method
-     *          denies read access to the file.
      */
     public static Set<PosixFilePermission> getPosixFilePermissions(Path path,
                                                                    LinkOption... options)
@@ -2141,12 +1980,6 @@ public final class Files {
      *          PosixFilePermission}
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, it denies
-     *          {@link RuntimePermission}{@code ("accessUserInformation")}
-     *          or its {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method denies write access to the file.
      */
     public static Path setPosixFilePermissions(Path path,
                                                Set<PosixFilePermission> perms)
@@ -2179,12 +2012,6 @@ public final class Files {
      *          FileOwnerAttributeView}
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, it denies
-     *          {@link RuntimePermission}{@code ("accessUserInformation")}
-     *          or its {@link SecurityManager#checkRead(String) checkRead} method
-     *          denies read access to the file.
      */
     public static UserPrincipal getOwner(Path path, LinkOption... options) throws IOException {
         FileOwnerAttributeView view =
@@ -2203,13 +2030,13 @@ public final class Files {
      *
      * <p> <b>Usage Example:</b>
      * Suppose we want to make "joe" the owner of a file:
-     * <pre>
+     * {@snippet lang=java :
      *     Path path = ...
      *     UserPrincipalLookupService lookupService =
      *         provider(path).getUserPrincipalLookupService();
      *     UserPrincipal joe = lookupService.lookupPrincipalByName("joe");
      *     Files.setOwner(path, joe);
-     * </pre>
+     * }
      *
      * @param   path
      *          The path to the file
@@ -2223,12 +2050,6 @@ public final class Files {
      *          FileOwnerAttributeView}
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, it denies
-     *          {@link RuntimePermission}{@code ("accessUserInformation")}
-     *          or its {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method denies write access to the file.
      *
      * @see FileSystem#getUserPrincipalLookupService
      * @see java.nio.file.attribute.UserPrincipalLookupService
@@ -2258,11 +2079,6 @@ public final class Files {
      * @return  {@code true} if the file is a symbolic link; {@code false} if
      *          the file does not exist, is not a symbolic link, or it cannot
      *          be determined if the file is a symbolic link or not.
-     *
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, its {@link SecurityManager#checkRead(String) checkRead}
-     *          method denies read access to the file.
      */
     public static boolean isSymbolicLink(Path path) {
         try {
@@ -2297,21 +2113,12 @@ public final class Files {
      * @return  {@code true} if the file is a directory; {@code false} if
      *          the file does not exist, is not a directory, or it cannot
      *          be determined if the file is a directory or not.
-     *
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, its {@link SecurityManager#checkRead(String) checkRead}
-     *          method denies read access to the file.
      */
     public static boolean isDirectory(Path path, LinkOption... options) {
-        if (options.length == 0) {
-            FileSystemProvider provider = provider(path);
-            if (provider instanceof AbstractFileSystemProvider)
-                return ((AbstractFileSystemProvider)provider).isDirectory(path);
-        }
-
         try {
-            return readAttributes(path, BasicFileAttributes.class, options).isDirectory();
+            var attrs = provider(path)
+                    .readAttributesIfExists(path, BasicFileAttributes.class, options);
+            return (attrs != null) && attrs.isDirectory();
         } catch (IOException ioe) {
             return false;
         }
@@ -2340,21 +2147,12 @@ public final class Files {
      * @return  {@code true} if the file is a regular file; {@code false} if
      *          the file does not exist, is not a regular file, or it
      *          cannot be determined if the file is a regular file or not.
-     *
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, its {@link SecurityManager#checkRead(String) checkRead}
-     *          method denies read access to the file.
      */
     public static boolean isRegularFile(Path path, LinkOption... options) {
-        if (options.length == 0) {
-            FileSystemProvider provider = provider(path);
-            if (provider instanceof AbstractFileSystemProvider)
-                return ((AbstractFileSystemProvider)provider).isRegularFile(path);
-        }
-
         try {
-            return readAttributes(path, BasicFileAttributes.class, options).isRegularFile();
+            var attrs = provider(path)
+                    .readAttributesIfExists(path, BasicFileAttributes.class, options);
+            return (attrs != null) && attrs.isRegularFile();
         } catch (IOException ioe) {
             return false;
         }
@@ -2381,10 +2179,6 @@ public final class Files {
      *
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, its {@link SecurityManager#checkRead(String) checkRead}
-     *          method denies read access to the file.
      *
      * @see BasicFileAttributes#lastModifiedTime
      */
@@ -2405,11 +2199,11 @@ public final class Files {
      *
      * <p> <b>Usage Example:</b>
      * Suppose we want to set the last modified time to the current time:
-     * <pre>
-     *    Path path = ...
-     *    FileTime now = FileTime.fromMillis(System.currentTimeMillis());
-     *    Files.setLastModifiedTime(path, now);
-     * </pre>
+     * {@snippet lang=java :
+     *     Path path = ...
+     *     FileTime now = FileTime.fromMillis(System.currentTimeMillis());
+     *     Files.setLastModifiedTime(path, now);
+     * }
      *
      * @param   path
      *          the path to the file
@@ -2420,10 +2214,6 @@ public final class Files {
      *
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, its {@link SecurityManager#checkWrite(String)
-     *          checkWrite} method denies write access to the file.
      *
      * @see BasicFileAttributeView#setTimes
      */
@@ -2449,10 +2239,6 @@ public final class Files {
      *
      * @throws  IOException
      *          if an I/O error occurs
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, its {@link SecurityManager#checkRead(String) checkRead}
-     *          method denies read access to the file.
      *
      * @see BasicFileAttributes#size
      */
@@ -2496,39 +2282,15 @@ public final class Files {
      *          the path to the file to test
      * @param   options
      *          options indicating how symbolic links are handled
-     * .
+     *
      * @return  {@code true} if the file exists; {@code false} if the file does
      *          not exist or its existence cannot be determined.
      *
-     * @throws  SecurityException
-     *          In the case of the default provider, the {@link
-     *          SecurityManager#checkRead(String)} is invoked to check
-     *          read access to the file.
-     *
      * @see #notExists
+     * @see FileSystemProvider#checkAccess
      */
     public static boolean exists(Path path, LinkOption... options) {
-        if (options.length == 0) {
-            FileSystemProvider provider = provider(path);
-            if (provider instanceof AbstractFileSystemProvider)
-                return ((AbstractFileSystemProvider)provider).exists(path);
-        }
-
-        try {
-            if (followLinks(options)) {
-                provider(path).checkAccess(path);
-            } else {
-                // attempt to read attributes without following links
-                readAttributes(path, BasicFileAttributes.class,
-                               LinkOption.NOFOLLOW_LINKS);
-            }
-            // file exists
-            return true;
-        } catch (IOException x) {
-            // does not exist or unable to determine if file exists
-            return false;
-        }
-
+        return provider(path).exists(path, options);
     }
 
     /**
@@ -2556,11 +2318,6 @@ public final class Files {
      *
      * @return  {@code true} if the file does not exist; {@code false} if the
      *          file exists or its existence cannot be determined
-     *
-     * @throws  SecurityException
-     *          In the case of the default provider, the {@link
-     *          SecurityManager#checkRead(String)} is invoked to check
-     *          read access to the file.
      */
     public static boolean notExists(Path path, LinkOption... options) {
         try {
@@ -2614,14 +2371,13 @@ public final class Files {
      *          if the file does not exist, read access would be denied because
      *          the Java virtual machine has insufficient privileges, or access
      *          cannot be determined
-     *
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          is invoked to check read access to the file.
      */
     public static boolean isReadable(Path path) {
-        return isAccessible(path, AccessMode.READ);
+        FileSystemProvider provider = provider(path);
+        if (provider instanceof AbstractFileSystemProvider afsp)
+            return afsp.isReadable(path);
+        else
+            return isAccessible(path, AccessMode.READ);
     }
 
     /**
@@ -2645,14 +2401,13 @@ public final class Files {
      *          if the file does not exist, write access would be denied because
      *          the Java virtual machine has insufficient privileges, or access
      *          cannot be determined
-     *
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          is invoked to check write access to the file.
      */
     public static boolean isWritable(Path path) {
-        return isAccessible(path, AccessMode.WRITE);
+        FileSystemProvider provider = provider(path);
+        if (provider instanceof AbstractFileSystemProvider afsp)
+            return afsp.isWritable(path);
+        else
+            return isAccessible(path, AccessMode.WRITE);
     }
 
     /**
@@ -2680,14 +2435,13 @@ public final class Files {
      *          if the file does not exist, execute access would be denied because
      *          the Java virtual machine has insufficient privileges, or access
      *          cannot be determined
-     *
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkExec(String)
-     *          checkExec} is invoked to check execute access to the file.
      */
     public static boolean isExecutable(Path path) {
-        return isAccessible(path, AccessMode.EXECUTE);
+        FileSystemProvider provider = provider(path);
+        if (provider instanceof AbstractFileSystemProvider afsp)
+            return afsp.isExecutable(path);
+        else
+            return isAccessible(path, AccessMode.EXECUTE);
     }
 
     // -- Recursive operations --
@@ -2747,19 +2501,14 @@ public final class Files {
      *
      * <p> The {@code maxDepth} parameter is the maximum number of levels of
      * directories to visit. A value of {@code 0} means that only the starting
-     * file is visited, unless denied by the security manager. A value of
-     * {@link Integer#MAX_VALUE MAX_VALUE} may be used to indicate that all
-     * levels should be visited. The {@code visitFile} method is invoked for all
-     * files, including directories, encountered at {@code maxDepth}, unless the
-     * basic file attributes cannot be read, in which case the {@code
+     * file is visited. A value of {@link Integer#MAX_VALUE MAX_VALUE} may be used
+     * to indicate that all levels should be visited. The {@code visitFile} method
+     * is invoked for all files, including directories, encountered at {@code maxDepth},
+     * unless the basic file attributes cannot be read, in which case the {@code
      * visitFileFailed} method is invoked.
      *
      * <p> If a visitor returns a result of {@code null} then {@code
      * NullPointerException} is thrown.
-     *
-     * <p> When a security manager is installed and it denies access to a file
-     * (or directory), then it is ignored and the visitor is not invoked for
-     * that file (or directory).
      *
      * @param   start
      *          the starting file
@@ -2774,11 +2523,6 @@ public final class Files {
      *
      * @throws  IllegalArgumentException
      *          if the {@code maxDepth} parameter is negative
-     * @throws  SecurityException
-     *          If the security manager denies access to the starting file.
-     *          In the case of the default provider, the {@link
-     *          SecurityManager#checkRead(String) checkRead} method is invoked
-     *          to check read access to the directory.
      * @throws  IOException
      *          if an I/O error is thrown by a visitor method
      */
@@ -2795,40 +2539,37 @@ public final class Files {
         try (FileTreeWalker walker = new FileTreeWalker(options, maxDepth)) {
             FileTreeWalker.Event ev = walker.walk(start);
             do {
-                FileVisitResult result;
-                switch (ev.type()) {
-                    case ENTRY :
+                FileVisitResult result = switch (ev.type()) {
+                    case ENTRY -> {
                         IOException ioe = ev.ioeException();
                         if (ioe == null) {
                             assert ev.attributes() != null;
-                            result = visitor.visitFile(ev.file(), ev.attributes());
+                            yield visitor.visitFile(ev.file(), ev.attributes());
                         } else {
-                            result = visitor.visitFileFailed(ev.file(), ioe);
+                            yield visitor.visitFileFailed(ev.file(), ioe);
                         }
-                        break;
-
-                    case START_DIRECTORY :
-                        result = visitor.preVisitDirectory(ev.file(), ev.attributes());
+                    }
+                    case START_DIRECTORY -> {
+                        var res = visitor.preVisitDirectory(ev.file(), ev.attributes());
 
                         // if SKIP_SIBLINGS and SKIP_SUBTREE is returned then
                         // there shouldn't be any more events for the current
                         // directory.
-                        if (result == FileVisitResult.SKIP_SUBTREE ||
-                            result == FileVisitResult.SKIP_SIBLINGS)
+                        if (res == FileVisitResult.SKIP_SUBTREE ||
+                            res == FileVisitResult.SKIP_SIBLINGS)
                             walker.pop();
-                        break;
-
-                    case END_DIRECTORY :
-                        result = visitor.postVisitDirectory(ev.file(), ev.ioeException());
+                        yield res;
+                    }
+                    case END_DIRECTORY -> {
+                        var res = visitor.postVisitDirectory(ev.file(), ev.ioeException());
 
                         // SKIP_SIBLINGS is a no-op for postVisitDirectory
-                        if (result == FileVisitResult.SKIP_SIBLINGS)
-                            result = FileVisitResult.CONTINUE;
-                        break;
-
-                    default :
-                        throw new AssertionError("Should not get here");
-                }
+                        if (res == FileVisitResult.SKIP_SIBLINGS)
+                            res = FileVisitResult.CONTINUE;
+                        yield res;
+                    }
+                    default -> throw new AssertionError("Should not get here");
+                };
 
                 if (Objects.requireNonNull(result) != FileVisitResult.CONTINUE) {
                     if (result == FileVisitResult.TERMINATE) {
@@ -2849,9 +2590,10 @@ public final class Files {
      *
      * <p> This method works as if invoking it were equivalent to evaluating the
      * expression:
-     * <blockquote><pre>
-     * walkFileTree(start, EnumSet.noneOf(FileVisitOption.class), Integer.MAX_VALUE, visitor)
-     * </pre></blockquote>
+     * <blockquote>{@link
+     * walkFileTree(Path, Set<FileVisitOption>, int, FileVisitor<? super Path>)
+     * Files.walkFileTree(start, EnumSet.noneOf(FileVisitOption.class), Integer.MAX_VALUE, visitor)
+     * }</blockquote>
      * In other words, it does not follow symbolic links, and visits all levels
      * of the file tree.
      *
@@ -2862,11 +2604,6 @@ public final class Files {
      *
      * @return  the starting file
      *
-     * @throws  SecurityException
-     *          If the security manager denies access to the starting file.
-     *          In the case of the default provider, the {@link
-     *          SecurityManager#checkRead(String) checkRead} method is invoked
-     *          to check read access to the directory.
      * @throws  IOException
      *          if an I/O error is thrown by a visitor method
      */
@@ -2902,10 +2639,6 @@ public final class Files {
      *
      * @throws  IOException
      *          if an I/O error occurs opening the file
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the file.
      *
      * @see #readAllLines
      */
@@ -2925,9 +2658,10 @@ public final class Files {
      *
      * <p> This method works as if invoking it were equivalent to evaluating the
      * expression:
-     * <pre>{@code
+     * <blockquote>{@link
+     * newBufferedReader(Path, Charset)
      * Files.newBufferedReader(path, StandardCharsets.UTF_8)
-     * }</pre>
+     * }</blockquote>
      *
      * @param   path
      *          the path to the file
@@ -2937,10 +2671,6 @@ public final class Files {
      *
      * @throws  IOException
      *          if an I/O error occurs opening the file
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the file.
      *
      * @since 1.8
      */
@@ -2961,7 +2691,12 @@ public final class Files {
      * a size of {@code 0} if it exists.
      *
      * <p> The {@code Writer} methods to write text throw {@code IOException}
-     * if the text cannot be encoded using the specified charset.
+     * if the text cannot be encoded using the specified charset. Due to
+     * buffering, an {@code IOException} caused by an encoding error
+     * (unmappable-character or malformed-input) may be thrown when {@linkplain
+     * BufferedWriter#write(char[],int,int) writing}, {@linkplain
+     * BufferedWriter#flush flushing}, or {@linkplain BufferedWriter#close
+     * closing} the buffered writer.
      *
      * @param   path
      *          the path to the file
@@ -2979,13 +2714,10 @@ public final class Files {
      *          if an I/O error occurs opening or creating the file
      * @throws  UnsupportedOperationException
      *          if an unsupported option is specified
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked to check write access to the file. The {@link
-     *          SecurityManager#checkDelete(String) checkDelete} method is
-     *          invoked to check delete access if the file is opened with the
-     *          {@code DELETE_ON_CLOSE} option.
+     * @throws  FileAlreadyExistsException
+     *          If the path locates an existing file and the {@link
+     *          StandardOpenOption#CREATE_NEW CREATE_NEW} option is specified
+     *          <i>(optional specific exception)</i>
      *
      * @see #write(Path,Iterable,Charset,OpenOption[])
      */
@@ -3006,9 +2738,10 @@ public final class Files {
      *
      * <p> This method works as if invoking it were equivalent to evaluating the
      * expression:
-     * <pre>{@code
+     * <blockquote>{@link
+     * newBufferedWriter(Path, Charset, OpenOption...)
      * Files.newBufferedWriter(path, StandardCharsets.UTF_8, options)
-     * }</pre>
+     * }</blockquote>
      *
      * @param   path
      *          the path to the file
@@ -3024,13 +2757,10 @@ public final class Files {
      *          if an I/O error occurs opening or creating the file
      * @throws  UnsupportedOperationException
      *          if an unsupported option is specified
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked to check write access to the file. The {@link
-     *          SecurityManager#checkDelete(String) checkDelete} method is
-     *          invoked to check delete access if the file is opened with the
-     *          {@code DELETE_ON_CLOSE} option.
+     * @throws  FileAlreadyExistsException
+     *          If the path locates an existing file and the {@link
+     *          StandardOpenOption#CREATE_NEW CREATE_NEW} option is specified
+     *          <i>(optional specific exception)</i>
      *
      * @since 1.8
      */
@@ -3068,13 +2798,13 @@ public final class Files {
      *
      * <p> <b>Usage example</b>: Suppose we want to capture a web page and save
      * it to a file:
-     * <pre>
+     * {@snippet lang=java :
      *     Path path = ...
      *     URI u = URI.create("http://www.example.com/");
      *     try (InputStream in = u.toURL().openStream()) {
      *         Files.copy(in, path);
      *     }
-     * </pre>
+     * }
      *
      * @param   in
      *          the input stream to read from
@@ -3094,16 +2824,9 @@ public final class Files {
      * @throws  DirectoryNotEmptyException
      *          the {@code REPLACE_EXISTING} option is specified but the file
      *          cannot be replaced because it is a non-empty directory
-     *          <i>(optional specific exception)</i>     *
+     *          <i>(optional specific exception)</i>
      * @throws  UnsupportedOperationException
      *          if {@code options} contains a copy option that is not supported
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked to check write access to the file. Where the
-     *          {@code REPLACE_EXISTING} option is specified, the security
-     *          manager's {@link SecurityManager#checkDelete(String) checkDelete}
-     *          method is invoked to check that an existing file can be deleted.
      */
     public static long copy(InputStream in, Path target, CopyOption... options)
         throws IOException
@@ -3126,26 +2849,16 @@ public final class Files {
         }
 
         // attempt to delete an existing file
-        SecurityException se = null;
         if (replaceExisting) {
-            try {
-                deleteIfExists(target);
-            } catch (SecurityException x) {
-                se = x;
-            }
+            deleteIfExists(target);
         }
 
-        // attempt to create target file. If it fails with
-        // FileAlreadyExistsException then it may be because the security
-        // manager prevented us from deleting the file, in which case we just
-        // throw the SecurityException.
+        // attempt to create target file.
         OutputStream ostream;
         try {
             ostream = newOutputStream(target, StandardOpenOption.CREATE_NEW,
                                               StandardOpenOption.WRITE);
         } catch (FileAlreadyExistsException x) {
-            if (se != null)
-                throw se;
             // someone else won the race and created the file
             throw x;
         }
@@ -3184,10 +2897,6 @@ public final class Files {
      *
      * @throws  IOException
      *          if an I/O error occurs when reading or writing
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the file.
      */
     public static long copy(Path source, OutputStream out) throws IOException {
         // ensure not null before opening file
@@ -3263,10 +2972,6 @@ public final class Files {
      * @throws  OutOfMemoryError
      *          if an array of the required size cannot be allocated, for
      *          example the file is larger that {@code 2GB}
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the file.
      */
     public static byte[] readAllBytes(Path path) throws IOException {
         try (SeekableByteChannel sbc = Files.newByteChannel(path);
@@ -3286,8 +2991,8 @@ public final class Files {
      * The method ensures that the file is closed when all content have been read
      * or an I/O error, or other runtime exception, is thrown.
      *
-     * <p> This method is equivalent to:
-     * {@code readString(path, StandardCharsets.UTF_8) }
+     * <p> This method is equivalent to: {@link readString(Path, Charset)
+     * readString(path, StandardCharsets.UTF_8)}.
      *
      * @param   path the path to the file
      *
@@ -3298,10 +3003,6 @@ public final class Files {
      *          unmappable byte sequence is read
      * @throws  OutOfMemoryError
      *          if the file is extremely large, for example larger than {@code 2GB}
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the file.
      *
      * @since 11
      */
@@ -3336,10 +3037,6 @@ public final class Files {
      *          unmappable byte sequence is read
      * @throws  OutOfMemoryError
      *          if the file is extremely large, for example larger than {@code 2GB}
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the file.
      *
      * @since 11
      */
@@ -3350,7 +3047,7 @@ public final class Files {
         byte[] ba = readAllBytes(path);
         if (path.getClass().getModule() != Object.class.getModule())
             ba = ba.clone();
-        return JLA.newStringNoRepl(ba, cs);
+        return JLA.uncheckedNewStringOrThrow(ba, cs);
     }
 
     /**
@@ -3385,10 +3082,6 @@ public final class Files {
      * @throws  IOException
      *          if an I/O error occurs reading from the file or a malformed or
      *          unmappable byte sequence is read
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the file.
      *
      * @see #newBufferedReader
      */
@@ -3411,9 +3104,10 @@ public final class Files {
      *
      * <p> This method works as if invoking it were equivalent to evaluating the
      * expression:
-     * <pre>{@code
+     * <blockquote>{@link
+     * readAllLines(Path, Charset)
      * Files.readAllLines(path, StandardCharsets.UTF_8)
-     * }</pre>
+     * }</blockquote>
      *
      * @param   path
      *          the path to the file
@@ -3425,10 +3119,6 @@ public final class Files {
      * @throws  IOException
      *          if an I/O error occurs reading from the file or a malformed or
      *          unmappable byte sequence is read
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the file.
      *
      * @since 1.8
      */
@@ -3453,11 +3143,11 @@ public final class Files {
      * <p> <b>Usage example</b>: By default the method creates a new file or
      * overwrites an existing file. Suppose you instead want to append bytes
      * to an existing file:
-     * <pre>
+     * {@snippet lang=java :
      *     Path path = ...
      *     byte[] bytes = ...
      *     Files.write(path, bytes, StandardOpenOption.APPEND);
-     * </pre>
+     * }
      *
      * @param   path
      *          the path to the file
@@ -3474,13 +3164,10 @@ public final class Files {
      *          if an I/O error occurs writing to or creating the file
      * @throws  UnsupportedOperationException
      *          if an unsupported option is specified
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked to check write access to the file. The {@link
-     *          SecurityManager#checkDelete(String) checkDelete} method is
-     *          invoked to check delete access if the file is opened with the
-     *          {@code DELETE_ON_CLOSE} option.
+     * @throws  FileAlreadyExistsException
+     *          If the path locates an existing file and the {@link
+     *          StandardOpenOption#CREATE_NEW CREATE_NEW} option is specified
+     *          <i>(optional specific exception)</i>
      */
     public static Path write(Path path, byte[] bytes, OpenOption... options)
         throws IOException
@@ -3538,13 +3225,10 @@ public final class Files {
      *          text cannot be encoded using the specified charset
      * @throws  UnsupportedOperationException
      *          if an unsupported option is specified
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked to check write access to the file. The {@link
-     *          SecurityManager#checkDelete(String) checkDelete} method is
-     *          invoked to check delete access if the file is opened with the
-     *          {@code DELETE_ON_CLOSE} option.
+     * @throws  FileAlreadyExistsException
+     *          If the path locates an existing file and the {@link
+     *          StandardOpenOption#CREATE_NEW CREATE_NEW} option is specified
+     *          <i>(optional specific exception)</i>
      */
     public static Path write(Path path, Iterable<? extends CharSequence> lines,
                              Charset cs, OpenOption... options)
@@ -3569,9 +3253,10 @@ public final class Files {
      *
      * <p> This method works as if invoking it were equivalent to evaluating the
      * expression:
-     * <pre>{@code
-     * Files.write(path, lines, StandardCharsets.UTF_8, options);
-     * }</pre>
+     * <blockquote>{@link
+     * write(Path, Iterable<? extends CharSequence>, Charset, OpenOption...)
+     * Files.write(path, lines, StandardCharsets.UTF_8, options)
+     * }</blockquote>
      *
      * @param   path
      *          the path to the file
@@ -3589,13 +3274,6 @@ public final class Files {
      *          text cannot be encoded as {@code UTF-8}
      * @throws  UnsupportedOperationException
      *          if an unsupported option is specified
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked to check write access to the file. The {@link
-     *          SecurityManager#checkDelete(String) checkDelete} method is
-     *          invoked to check delete access if the file is opened with the
-     *          {@code DELETE_ON_CLOSE} option.
      *
      * @since 1.8
      */
@@ -3612,8 +3290,9 @@ public final class Files {
      * Characters are encoded into bytes using the
      * {@link StandardCharsets#UTF_8 UTF-8} {@link Charset charset}.
      *
-     * <p> This method is equivalent to:
-     * {@code writeString(path, test, StandardCharsets.UTF_8, options) }
+     * <p> This method is equivalent to: {@link
+     * writeString(Path, CharSequence, Charset, OpenOption...)
+     * writeString(path, csq, StandardCharsets.UTF_8, options)}.
      *
      * @param   path
      *          the path to the file
@@ -3628,16 +3307,9 @@ public final class Files {
      *          if {@code options} contains an invalid combination of options
      * @throws  IOException
      *          if an I/O error occurs writing to or creating the file, or the
-     *          text cannot be encoded using the specified charset
+     *          text cannot be encoded using UTF-8
      * @throws  UnsupportedOperationException
      *          if an unsupported option is specified
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked to check write access to the file. The {@link
-     *          SecurityManager#checkDelete(String) checkDelete} method is
-     *          invoked to check delete access if the file is opened with the
-     *          {@code DELETE_ON_CLOSE} option.
      *
      * @since 11
      */
@@ -3683,13 +3355,6 @@ public final class Files {
      *          text cannot be encoded using the specified charset
      * @throws  UnsupportedOperationException
      *          if an unsupported option is specified
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkWrite(String) checkWrite}
-     *          method is invoked to check write access to the file. The {@link
-     *          SecurityManager#checkDelete(String) checkDelete} method is
-     *          invoked to check delete access if the file is opened with the
-     *          {@code DELETE_ON_CLOSE} option.
      *
      * @since 11
      */
@@ -3701,7 +3366,7 @@ public final class Files {
         Objects.requireNonNull(csq);
         Objects.requireNonNull(cs);
 
-        byte[] bytes = JLA.getBytesNoRepl(String.valueOf(csq), cs);
+        byte[] bytes = JLA.uncheckedGetBytesOrThrow(String.valueOf(csq), cs);
         if (path.getClass().getModule() != Object.class.getModule())
             bytes = bytes.clone();
         write(path, bytes, options);
@@ -3712,7 +3377,7 @@ public final class Files {
     // -- Stream APIs --
 
     /**
-     * Return a lazily populated {@code Stream}, the elements of
+     * Returns a lazily populated {@code Stream}, the elements of
      * which are the entries in the directory.  The listing is not recursive.
      *
      * <p> The elements of the stream are {@link Path} objects that are
@@ -3753,10 +3418,6 @@ public final class Files {
      *          a directory <i>(optional specific exception)</i>
      * @throws  IOException
      *          if an I/O error occurs when opening the directory
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the directory.
      *
      * @see     #newDirectoryStream(Path)
      * @since   1.8
@@ -3803,11 +3464,12 @@ public final class Files {
     }
 
     /**
-     * Return a {@code Stream} that is lazily populated with {@code
+     * Returns a {@code Stream} that is lazily populated with {@code
      * Path} by walking the file tree rooted at a given starting file.  The
-     * file tree is traversed <em>depth-first</em>, the elements in the stream
-     * are {@link Path} objects that are obtained as if by {@link
-     * Path#resolve(Path) resolving} the relative path against {@code start}.
+     * file tree is traversed <em>depth-first</em> with a directory visited
+     * before the entries in that directory. The elements in the stream are
+     * {@link Path} objects that are obtained as if by {@link Path#resolve(Path)
+     * resolving} the relative path against {@code start}.
      *
      * <p> The {@code stream} walks the file tree as elements are consumed.
      * The {@code Stream} returned is guaranteed to have at least one
@@ -3843,12 +3505,8 @@ public final class Files {
      *
      * <p> The {@code maxDepth} parameter is the maximum number of levels of
      * directories to visit. A value of {@code 0} means that only the starting
-     * file is visited, unless denied by the security manager. A value of
-     * {@link Integer#MAX_VALUE MAX_VALUE} may be used to indicate that all
-     * levels should be visited.
-     *
-     * <p> When a security manager is installed and it denies access to a file
-     * (or directory), then it is ignored and not included in the stream.
+     * file is visited. A value of {@link Integer#MAX_VALUE MAX_VALUE} may be used
+     * to indicate that all levels should be visited.
      *
      * <p> The returned stream contains references to one or more open directories.
      * The directories are closed by closing the stream.
@@ -3874,11 +3532,6 @@ public final class Files {
      *
      * @throws  IllegalArgumentException
      *          if the {@code maxDepth} parameter is negative
-     * @throws  SecurityException
-     *          If the security manager denies access to the starting file.
-     *          In the case of the default provider, the {@link
-     *          SecurityManager#checkRead(String) checkRead} method is invoked
-     *          to check read access to the directory.
      * @throws  IOException
      *          if an I/O error is thrown when accessing the starting file.
      * @since   1.8
@@ -3902,17 +3555,19 @@ public final class Files {
     }
 
     /**
-     * Return a {@code Stream} that is lazily populated with {@code
+     * Returns a {@code Stream} that is lazily populated with {@code
      * Path} by walking the file tree rooted at a given starting file.  The
-     * file tree is traversed <em>depth-first</em>, the elements in the stream
-     * are {@link Path} objects that are obtained as if by {@link
-     * Path#resolve(Path) resolving} the relative path against {@code start}.
+     * file tree is traversed <em>depth-first</em> with a directory visited
+     * before the entries in that directory. The elements in the stream are
+     * {@link Path} objects that are obtained as if by {@link Path#resolve(Path)
+     * resolving} the relative path against {@code start}.
      *
      * <p> This method works as if invoking it were equivalent to evaluating the
      * expression:
-     * <blockquote><pre>
-     * walk(start, Integer.MAX_VALUE, options)
-     * </pre></blockquote>
+     * <blockquote>{@link
+     * walk(Path, int, FileVisitOption...)
+     * Files.walk(start, Integer.MAX_VALUE, options)
+     * }</blockquote>
      * In other words, it visits all levels of the file tree.
      *
      * <p> The returned stream contains references to one or more open directories.
@@ -3930,11 +3585,6 @@ public final class Files {
      *
      * @return  the {@link Stream} of {@link Path}
      *
-     * @throws  SecurityException
-     *          If the security manager denies access to the starting file.
-     *          In the case of the default provider, the {@link
-     *          SecurityManager#checkRead(String) checkRead} method is invoked
-     *          to check read access to the directory.
      * @throws  IOException
      *          if an I/O error is thrown when accessing the starting file.
      *
@@ -3946,7 +3596,7 @@ public final class Files {
     }
 
     /**
-     * Return a {@code Stream} that is lazily populated with {@code
+     * Returns a {@code Stream} that is lazily populated with {@code
      * Path} by searching for files in a file tree rooted at a given starting
      * file.
      *
@@ -3988,11 +3638,6 @@ public final class Files {
      *
      * @throws  IllegalArgumentException
      *          if the {@code maxDepth} parameter is negative
-     * @throws  SecurityException
-     *          If the security manager denies access to the starting file.
-     *          In the case of the default provider, the {@link
-     *          SecurityManager#checkRead(String) checkRead} method is invoked
-     *          to check read access to the directory.
      * @throws  IOException
      *          if an I/O error is thrown when accessing the starting file.
      *
@@ -4083,10 +3728,6 @@ public final class Files {
      *
      * @throws  IOException
      *          if an I/O error occurs opening the file
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the file.
      *
      * @see     #readAllLines(Path, Charset)
      * @see     #newBufferedReader(Path, Charset)
@@ -4100,7 +3741,7 @@ public final class Files {
         // 3) the file size is such that all bytes can be indexed by int values
         //    (this limitation is imposed by ByteBuffer)
         if (path.getFileSystem() == FileSystems.getDefault() &&
-            FileChannelLinesSpliterator.SUPPORTED_CHARSET_NAMES.contains(cs.name())) {
+            FileChannelLinesSpliterator.SUPPORTED_CHARSETS.contains(cs)) {
             FileChannel fc = FileChannel.open(path, StandardOpenOption.READ);
 
             Stream<String> fcls = createFileChannelLinesStream(fc, cs);
@@ -4121,9 +3762,11 @@ public final class Files {
             // FileChannel.size() may in certain circumstances return zero
             // for a non-zero length file so disallow this case.
             if (length > 0 && length <= Integer.MAX_VALUE) {
-                Spliterator<String> s = new FileChannelLinesSpliterator(fc, cs, 0, (int) length);
-                return StreamSupport.stream(s, false)
-                        .onClose(Files.asUncheckedRunnable(fc));
+                FileChannelLinesSpliterator fcls =
+                    new FileChannelLinesSpliterator(fc, cs, 0, (int) length);
+                return StreamSupport.stream(fcls, false)
+                        .onClose(Files.asUncheckedRunnable(fc))
+                        .onClose(() -> fcls.close());
             }
         } catch (Error|RuntimeException|IOException e) {
             try {
@@ -4169,9 +3812,10 @@ public final class Files {
      *
      * <p> This method works as if invoking it were equivalent to evaluating the
      * expression:
-     * <pre>{@code
+     * <blockquote>{@link
+     * lines(Path, Charset)
      * Files.lines(path, StandardCharsets.UTF_8)
-     * }</pre>
+     * }</blockquote>
      *
      * @apiNote
      * This method must be used within a try-with-resources statement or similar
@@ -4185,10 +3829,6 @@ public final class Files {
      *
      * @throws  IOException
      *          if an I/O error occurs opening the file
-     * @throws  SecurityException
-     *          In the case of the default provider, and a security manager is
-     *          installed, the {@link SecurityManager#checkRead(String) checkRead}
-     *          method is invoked to check read access to the file.
      *
      * @since 1.8
      */

@@ -37,13 +37,14 @@
  * <ul>
  *   <li><b>Info-ZIP file format</b> - The JAR format is based on the Info-ZIP
  *       file format. See
- *       <a href="../zip/package-summary.html#package.description">java.util.zip
+ *       <a href="../zip/package-summary.html#package-description">java.util.zip
  *       package description.</a> <p>
  *       In JAR files, all file names must be encoded in the UTF-8 encoding.
  *   <li><a href="{@docRoot}/../specs/jar/jar.html">
  *       Manifest and Signature Specification</a> - The manifest format specification.
  * </ul>
  *
+ * @spec jar/jar.html JAR File Specification
  * @since 1.2
  */
 package java.util.jar;

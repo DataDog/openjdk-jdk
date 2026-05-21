@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,13 +24,14 @@
 /*
  * @test
  * @key headful
- * @bug 8249548
+ * @bug 8249548 8259237
  * @summary Test focus traversal in button group containing JToggleButton
  * and JRadioButton
  * @run main TestButtonGroupFocusTraversal
  */
 
 import javax.swing.ButtonGroup;
+import javax.swing.JCheckBox;
 import javax.swing.JFrame;
 import javax.swing.JRadioButton;
 import javax.swing.JTextField;
@@ -41,7 +42,6 @@ import java.awt.Component;
 import java.awt.Container;
 import java.awt.FlowLayout;
 import java.awt.KeyboardFocusManager;
-import java.awt.Point;
 import java.awt.Robot;
 import java.awt.event.KeyEvent;
 
@@ -49,22 +49,11 @@ public class TestButtonGroupFocusTraversal {
     private static JFrame frame;
     private static JTextField textFieldFirst, textFieldLast;
     private static JToggleButton toggleButton1, toggleButton2;
+    private static JCheckBox checkBox1, checkBox2;
+    private static volatile boolean toggleButtonActionPerformed;
+    private static volatile boolean checkboxActionPerformed;
     private static JRadioButton radioButton1, radioButton2;
     private static Robot robot;
-
-    private static void blockTillDisplayed(Component comp) {
-        Point p = null;
-        while (p == null) {
-            try {
-                p = comp.getLocationOnScreen();
-            } catch (IllegalStateException e) {
-                try {
-                    Thread.sleep(500);
-                } catch (InterruptedException ie) {
-                }
-            }
-        }
-    }
 
     private static void createUI() throws Exception {
         SwingUtilities.invokeAndWait(new Runnable() {
@@ -75,6 +64,14 @@ public class TestButtonGroupFocusTraversal {
                 toggleButton2 = new JToggleButton("2");
                 radioButton1 = new JRadioButton("1");
                 radioButton2 = new JRadioButton("2");
+                checkBox1 = new JCheckBox("1");
+                checkBox2 = new JCheckBox("2");
+
+                toggleButton1.addActionListener((_) -> toggleButtonActionPerformed = true);
+                toggleButton2.addActionListener((_) -> toggleButtonActionPerformed = true);
+
+                checkBox1.addActionListener((_) -> checkboxActionPerformed = true);
+                checkBox2.addActionListener((_) -> checkboxActionPerformed = true);
 
                 ButtonGroup toggleGroup = new ButtonGroup();
                 toggleGroup.add(toggleButton1);
@@ -84,10 +81,15 @@ public class TestButtonGroupFocusTraversal {
                 radioGroup.add(radioButton1);
                 radioGroup.add(radioButton2);
 
+                ButtonGroup checkboxButtonGroup = new ButtonGroup();
+                checkboxButtonGroup.add(checkBox1);
+                checkboxButtonGroup.add(checkBox2);
+
                 toggleButton2.setSelected(true);
                 radioButton2.setSelected(true);
+                checkBox2.setSelected(true);
 
-                frame = new JFrame("Test");
+                frame = new JFrame("TestButtonGroupFocusTraversal");
                 frame.setLayout(new FlowLayout());
 
                 Container pane = frame.getContentPane();
@@ -96,6 +98,8 @@ public class TestButtonGroupFocusTraversal {
                 pane.add(toggleButton2);
                 pane.add(radioButton1);
                 pane.add(radioButton2);
+                pane.add(checkBox1);
+                pane.add(checkBox2);
                 pane.add(textFieldLast);
 
                 frame.pack();
@@ -127,6 +131,20 @@ public class TestButtonGroupFocusTraversal {
         }
     }
 
+    private static void checkToggleButtonActionPerformed() {
+        if (toggleButtonActionPerformed) {
+            throw new RuntimeException("Toggle Button Action should not be" +
+                    "performed");
+        }
+    }
+
+    private static void checkCheckboxActionPerformed() {
+        if (checkboxActionPerformed) {
+            throw new RuntimeException("Checkbox Action should not be" +
+                    "performed");
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         robot = new Robot();
         robot.setAutoDelay(100);
@@ -139,19 +157,13 @@ public class TestButtonGroupFocusTraversal {
                 createUI();
 
                 robot.waitForIdle();
-                robot.delay(200);
-
-                blockTillDisplayed(frame);
+                robot.delay(500);
 
                 SwingUtilities.invokeAndWait(textFieldFirst::requestFocus);
 
                 if (!textFieldFirst.equals(KeyboardFocusManager.getCurrentKeyboardFocusManager()
                         .getFocusOwner())) {
-                    try {
-                        Thread.sleep(100);
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
+                    robot.delay(300);
                     SwingUtilities.invokeAndWait(textFieldFirst::requestFocus);
                 }
 
@@ -165,7 +177,13 @@ public class TestButtonGroupFocusTraversal {
                 checkFocusedComponent(radioButton2);
 
                 pressKey(KeyEvent.VK_TAB);
+                checkFocusedComponent(checkBox2);
+
+                pressKey(KeyEvent.VK_TAB);
                 checkFocusedComponent(textFieldLast);
+
+                pressKey(KeyEvent.VK_SHIFT, KeyEvent.VK_TAB);
+                checkFocusedComponent(checkBox2);
 
                 pressKey(KeyEvent.VK_SHIFT, KeyEvent.VK_TAB);
                 checkFocusedComponent(radioButton2);
@@ -181,15 +199,19 @@ public class TestButtonGroupFocusTraversal {
 
                 pressKey(KeyEvent.VK_LEFT);
                 checkFocusedComponent(toggleButton1);
+                checkToggleButtonActionPerformed();
 
                 pressKey(KeyEvent.VK_RIGHT);
                 checkFocusedComponent(toggleButton2);
+                checkToggleButtonActionPerformed();
 
                 pressKey(KeyEvent.VK_UP);
                 checkFocusedComponent(toggleButton1);
+                checkToggleButtonActionPerformed();
 
                 pressKey(KeyEvent.VK_DOWN);
                 checkFocusedComponent(toggleButton2);
+                checkToggleButtonActionPerformed();
 
                 pressKey(KeyEvent.VK_TAB);
                 checkFocusedComponent(radioButton2);
@@ -206,6 +228,24 @@ public class TestButtonGroupFocusTraversal {
                 pressKey(KeyEvent.VK_DOWN);
                 checkFocusedComponent(radioButton2);
 
+                pressKey(KeyEvent.VK_TAB);
+                checkFocusedComponent(checkBox2);
+
+                pressKey(KeyEvent.VK_LEFT);
+                checkCheckboxActionPerformed();
+                checkFocusedComponent(checkBox1);
+
+                pressKey(KeyEvent.VK_RIGHT);
+                checkCheckboxActionPerformed();
+                checkFocusedComponent(checkBox2);
+
+                pressKey(KeyEvent.VK_UP);
+                checkCheckboxActionPerformed();
+                checkFocusedComponent(checkBox1);
+
+                pressKey(KeyEvent.VK_DOWN);
+                checkCheckboxActionPerformed();
+                checkFocusedComponent(checkBox2);
             } finally {
                 if (frame != null) {
                     SwingUtilities.invokeAndWait(frame::dispose);
@@ -214,4 +254,3 @@ public class TestButtonGroupFocusTraversal {
         }
     }
 }
-

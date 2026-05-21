@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -344,7 +344,7 @@ public class BasicSplitPaneUI extends SplitPaneUI
 
         Border    b = divider.getBorder();
 
-        if (b == null || !(b instanceof UIResource)) {
+        if (!(b instanceof UIResource)) {
             divider.setBorder(UIManager.getBorder("SplitPaneDivider.border"));
         }
 
@@ -899,7 +899,6 @@ public class BasicSplitPaneUI extends SplitPaneUI
      *
      * @return the default non continuous layout divider
      */
-    @SuppressWarnings("serial") // anonymous class
     protected Component createDefaultNonContinuousLayoutDivider() {
         return new Canvas() {
             public void paint(Graphics g) {
@@ -1362,7 +1361,8 @@ public class BasicSplitPaneUI extends SplitPaneUI
      * LayoutManager for JSplitPanes that have an orientation of
      * HORIZONTAL_SPLIT.
      */
-    public class BasicHorizontalLayoutManager implements LayoutManager2
+    public sealed class BasicHorizontalLayoutManager implements LayoutManager2
+         permits BasicVerticalLayoutManager
     {
         /* left, right, divider. (in this exact order) */
         /**
@@ -1377,7 +1377,7 @@ public class BasicSplitPaneUI extends SplitPaneUI
         private int             lastSplitPaneSize;
         /** True if resetToPreferredSizes has been invoked. */
         private boolean         doReset;
-        /** Axis, 0 for horizontal, or 1 for veritcal. */
+        /** Axis, 0 for horizontal, or 1 for vertical. */
         private int             axis;
 
 
@@ -1405,7 +1405,7 @@ public class BasicSplitPaneUI extends SplitPaneUI
             // If the splitpane has a zero size then no op out of here.
             // If we execute this function now, we're going to cause ourselves
             // much grief.
-            if (containerSize.height <= 0 || containerSize.width <= 0 ) {
+            if (containerSize.height <= 0 && containerSize.width <= 0 ) {
                 lastSplitPaneSize = 0;
                 return;
             }
@@ -2142,7 +2142,7 @@ public class BasicSplitPaneUI extends SplitPaneUI
      * VERTICAL_SPLIT.
      *
      */
-    public class BasicVerticalLayoutManager extends
+    public non-sealed class BasicVerticalLayoutManager extends
             BasicHorizontalLayoutManager
     {
         /**
@@ -2273,7 +2273,7 @@ public class BasicSplitPaneUI extends SplitPaneUI
                     JSplitPane parentSplitPane =
                         (JSplitPane)SwingUtilities.getAncestorOfClass(
                                          JSplitPane.class, splitPane);
-                    if (parentSplitPane!=null) {
+                    if (parentSplitPane != null) {
                         parentSplitPane.requestFocus();
                     }
                 }
@@ -2307,7 +2307,7 @@ public class BasicSplitPaneUI extends SplitPaneUI
                 } while (splitPane.isAncestorOf(focusOn) &&
                          !focusFrom.contains(focusOn));
             }
-            if ( focusOn!=null && !splitPane.isAncestorOf(focusOn) ) {
+            if ( focusOn != null && !splitPane.isAncestorOf(focusOn) ) {
                 focusOn.requestFocus();
             }
         }
@@ -2323,7 +2323,7 @@ public class BasicSplitPaneUI extends SplitPaneUI
             if (focusOn != null) {
                 // don't change the focus if the new focused component belongs
                 // to the same splitpane and the same side
-                if ( focus!=null &&
+                if ( focus != null &&
                      ( (SwingUtilities.isDescendingFrom(focus, left) &&
                         SwingUtilities.isDescendingFrom(focusOn, left)) ||
                        (SwingUtilities.isDescendingFrom(focus, right) &&
@@ -2338,15 +2338,15 @@ public class BasicSplitPaneUI extends SplitPaneUI
             Component left = splitPane.getLeftComponent();
             Component right = splitPane.getRightComponent();
             Component next;
-            if (focus!=null && SwingUtilities.isDescendingFrom(focus, left) &&
-                right!=null) {
+            if (focus != null && SwingUtilities.isDescendingFrom(focus, left) &&
+                right != null) {
                 next = getFirstAvailableComponent(right);
                 if (next != null) {
                     return next;
                 }
             }
             JSplitPane parentSplitPane = (JSplitPane)SwingUtilities.getAncestorOfClass(JSplitPane.class, splitPane);
-            if (parentSplitPane!=null) {
+            if (parentSplitPane != null) {
                 // focus next side of the parent split pane
                 next = getNextSide(parentSplitPane, focus);
             } else {
@@ -2359,8 +2359,7 @@ public class BasicSplitPaneUI extends SplitPaneUI
         }
 
         private Component getFirstAvailableComponent(Component c) {
-            if (c!=null && c instanceof JSplitPane) {
-                JSplitPane sp = (JSplitPane)c;
+            if (c instanceof JSplitPane sp) {
                 Component left = getFirstAvailableComponent(sp.getLeftComponent());
                 if (left != null) {
                     c = left;

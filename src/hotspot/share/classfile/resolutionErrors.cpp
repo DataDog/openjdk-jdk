@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,155 +22,159 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "classfile/resolutionErrors.hpp"
 #include "memory/allocation.hpp"
-#include "memory/resourceArea.hpp"
-#include "oops/oop.inline.hpp"
+#include "oops/constantPool.hpp"
+#include "oops/instanceKlass.hpp"
+#include "oops/klass.inline.hpp"
+#include "oops/symbol.hpp"
 #include "runtime/handles.inline.hpp"
-#include "runtime/safepoint.hpp"
-#include "utilities/hashtable.inline.hpp"
+#include "runtime/mutexLocker.hpp"
+#include "utilities/hashTable.hpp"
 
-// add new entry to the table
-void ResolutionErrorTable::add_entry(int index, unsigned int hash,
-                                     const constantPoolHandle& pool, int cp_index,
-                                     Symbol* error, Symbol* message)
-{
-  assert_locked_or_safepoint(SystemDictionary_lock);
-  assert(!pool.is_null() && error != NULL, "adding NULL obj");
+class ResolutionErrorKey {
+  ConstantPool* _cpool;
+  int           _index;
 
-  ResolutionErrorEntry* entry = new_entry(hash, pool(), cp_index, error, message);
-  add_entry(index, entry);
+ public:
+  ResolutionErrorKey(ConstantPool* cpool, int index) : _cpool(cpool), _index(index) {
+    assert(_index > 0, "should be already encoded or otherwise greater than zero");
+  }
+
+  ConstantPool* cpool() const { return _cpool; }
+
+  static unsigned hash(const ResolutionErrorKey& key) {
+    Symbol* name = key._cpool->pool_holder()->name();
+    return (unsigned int)(name->identity_hash() ^ key._index);
+  }
+
+  static bool equals(const ResolutionErrorKey& l, const ResolutionErrorKey& r) {
+    return (l._cpool == r._cpool) && (l._index == r._index);
+  }
+};
+
+using InternalResolutionErrorTable = HashTable<ResolutionErrorKey, ResolutionErrorEntry*, 107, AnyObj::C_HEAP, mtClass,
+                  ResolutionErrorKey::hash,
+                  ResolutionErrorKey::equals>;
+
+static InternalResolutionErrorTable* _resolution_error_table;
+
+void ResolutionErrorTable::initialize() {
+  _resolution_error_table = new (mtClass) InternalResolutionErrorTable();
 }
 
-// add new entry to the table
-void ResolutionErrorTable::add_entry(int index, unsigned int hash,
-                                     const constantPoolHandle& pool, int cp_index,
+// create new error entry
+void ResolutionErrorTable::add_entry(const constantPoolHandle& pool, int cp_index,
+                                     Symbol* error, const char* message,
+                                     Symbol* cause, const char* cause_msg)
+{
+  assert_locked_or_safepoint(SystemDictionary_lock);
+  assert(!pool.is_null() && error != nullptr, "adding null obj");
+
+  ResolutionErrorKey key(pool(), cp_index);
+  ResolutionErrorEntry *entry = new ResolutionErrorEntry(error, message, cause, cause_msg);
+  _resolution_error_table->put_when_absent(key, entry);
+}
+
+// create new nest host error entry
+void ResolutionErrorTable::add_entry(const constantPoolHandle& pool, int cp_index,
                                      const char* message)
 {
   assert_locked_or_safepoint(SystemDictionary_lock);
-  assert(!pool.is_null() && message != NULL, "adding NULL obj");
+  assert(!pool.is_null() && message != nullptr, "adding null obj");
 
-  ResolutionErrorEntry* entry = new_entry(hash, pool(), cp_index, message);
-  add_entry(index, entry);
+  ResolutionErrorKey key(pool(), cp_index);
+  ResolutionErrorEntry *entry = new ResolutionErrorEntry(message);
+  _resolution_error_table->put_when_absent(key, entry);
 }
 
 // find entry in the table
-ResolutionErrorEntry* ResolutionErrorTable::find_entry(int index, unsigned int hash,
-                                                       const constantPoolHandle& pool, int cp_index)
-{
+ResolutionErrorEntry* ResolutionErrorTable::find_entry(const constantPoolHandle& pool, int cp_index) {
   assert_locked_or_safepoint(SystemDictionary_lock);
-
-  for (ResolutionErrorEntry *error_probe = bucket(index);
-                         error_probe != NULL;
-                         error_probe = error_probe->next()) {
-  if (error_probe->hash() == hash && error_probe->pool() == pool()) {
-      return error_probe;;
-    }
-  }
-  return NULL;
+  ResolutionErrorKey key(pool(), cp_index);
+  ResolutionErrorEntry** entry = _resolution_error_table->get(key);
+  return entry == nullptr ? nullptr : *entry;
 }
 
-void ResolutionErrorEntry::set_error(Symbol* e) {
-  _error = e;
-  if (_error != NULL) {
-    _error->increment_refcount();
-  }
+ResolutionErrorEntry::ResolutionErrorEntry(Symbol* error, const char* message,
+                                           Symbol* cause, const char* cause_msg):
+        _error(error),
+        _message(message != nullptr ? os::strdup(message) : nullptr),
+        _cause(cause),
+        _cause_msg(cause_msg != nullptr ? os::strdup(cause_msg) : nullptr),
+        _nest_host_error(nullptr) {
+
+  Symbol::maybe_increment_refcount(_error);
+  Symbol::maybe_increment_refcount(_cause);
 }
 
-void ResolutionErrorEntry::set_message(Symbol* c) {
-  _message = c;
-  if (_message != NULL) {
-    _message->increment_refcount();
+ResolutionErrorEntry::~ResolutionErrorEntry() {
+  // decrement error refcount
+  Symbol::maybe_decrement_refcount(_error);
+  Symbol::maybe_decrement_refcount(_cause);
+
+  if (_message != nullptr) {
+    FREE_C_HEAP_ARRAY(_message);
+  }
+
+  if (_cause_msg != nullptr) {
+    FREE_C_HEAP_ARRAY(_cause_msg);
+  }
+
+  if (nest_host_error() != nullptr) {
+    FREE_C_HEAP_ARRAY(nest_host_error());
   }
 }
 
 void ResolutionErrorEntry::set_nest_host_error(const char* message) {
+  assert(_nest_host_error == nullptr, "caller should have checked");
+  assert_lock_strong(SystemDictionary_lock);
   _nest_host_error = message;
 }
 
-// create new error entry
-ResolutionErrorEntry* ResolutionErrorTable::new_entry(int hash, ConstantPool* pool,
-                                                      int cp_index, Symbol* error,
-                                                      Symbol* message)
-{
-  ResolutionErrorEntry* entry = (ResolutionErrorEntry*)Hashtable<ConstantPool*, mtClass>::new_entry(hash, pool);
-  entry->set_cp_index(cp_index);
-  entry->set_error(error);
-  entry->set_message(message);
-  entry->set_nest_host_error(NULL);
 
-  return entry;
-}
+class ResolutionErrorDeleteIterate : StackObj {
+  ConstantPool* p;
 
-// create new nest host error entry
-ResolutionErrorEntry* ResolutionErrorTable::new_entry(int hash, ConstantPool* pool,
-                                                      int cp_index, const char* message)
-{
-  ResolutionErrorEntry* entry = (ResolutionErrorEntry*)Hashtable<ConstantPool*, mtClass>::new_entry(hash, pool);
-  entry->set_cp_index(cp_index);
-  entry->set_nest_host_error(message);
-  entry->set_error(NULL);
-  entry->set_message(NULL);
+public:
+  ResolutionErrorDeleteIterate(ConstantPool* pool):
+    p(pool) {};
 
-  return entry;
-}
-
-void ResolutionErrorTable::free_entry(ResolutionErrorEntry *entry) {
-  // decrement error refcount
-  if (entry->error() != NULL) {
-    entry->error()->decrement_refcount();
-  }
-  if (entry->message() != NULL) {
-    entry->message()->decrement_refcount();
-  }
-  if (entry->nest_host_error() != NULL) {
-    FREE_C_HEAP_ARRAY(char, entry->nest_host_error());
-  }
-  Hashtable<ConstantPool*, mtClass>::free_entry(entry);
-}
-
-
-// create resolution error table
-ResolutionErrorTable::ResolutionErrorTable(int table_size)
-    : Hashtable<ConstantPool*, mtClass>(table_size, sizeof(ResolutionErrorEntry)) {
-}
-
-// RedefineClasses support - remove matching entry of a
-// constant pool that is going away
-void ResolutionErrorTable::delete_entry(ConstantPool* c) {
-  assert_locked_or_safepoint(SystemDictionary_lock);
-  for (int i = 0; i < table_size(); i++) {
-    for (ResolutionErrorEntry** p = bucket_addr(i); *p != NULL; ) {
-      ResolutionErrorEntry* entry = *p;
-      assert(entry->pool() != NULL, "resolution error table is corrupt");
-      if (entry->pool() == c) {
-        *p = entry->next();
-        free_entry(entry);
-      } else {
-        p = entry->next_addr();
-      }
+  bool do_entry(const ResolutionErrorKey& key, ResolutionErrorEntry* value){
+    if (key.cpool() == p) {
+      delete value;
+      return true;
+    } else {
+      return false;
     }
   }
+};
+
+// Delete entries in the table that match with ConstantPool c
+void ResolutionErrorTable::delete_entry(ConstantPool* c) {
+  assert_locked_or_safepoint(SystemDictionary_lock);
+
+  ResolutionErrorDeleteIterate deleteIterator(c);
+  _resolution_error_table->unlink(&deleteIterator);
 }
 
+class ResolutionIteratePurgeErrors : StackObj {
+public:
+  bool do_entry(const ResolutionErrorKey& key, ResolutionErrorEntry* value){
+    ConstantPool* pool = key.cpool();
+    if (!(pool->pool_holder()->is_loader_alive())) {
+      delete value;
+      return true;
+    } else {
+      return false;
+    }
+  }
+};
 
 // Remove unloaded entries from the table
 void ResolutionErrorTable::purge_resolution_errors() {
   assert_locked_or_safepoint(SystemDictionary_lock);
-  for (int i = 0; i < table_size(); i++) {
-    for (ResolutionErrorEntry** p = bucket_addr(i); *p != NULL; ) {
-      ResolutionErrorEntry* entry = *p;
-      assert(entry->pool() != (ConstantPool*)NULL, "resolution error table is corrupt");
-      ConstantPool* pool = entry->pool();
-      assert(pool->pool_holder() != NULL, "Constant pool without a class?");
 
-      if (pool->pool_holder()->is_loader_alive()) {
-        p = entry->next_addr();
-      } else {
-        *p = entry->next();
-        free_entry(entry);
-      }
-    }
-  }
+  ResolutionIteratePurgeErrors purgeErrorsIterator;
+  _resolution_error_table->unlink(&purgeErrorsIterator);
 }

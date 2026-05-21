@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,12 +21,11 @@
  * questions.
  */
 
-#include "precompiled.hpp"
 
+#include "cppstdlib/limits.hpp"
+#include "cppstdlib/type_traits.hpp"
 #include "utilities/globalDefinitions.hpp"
 #include "utilities/powerOfTwo.hpp"
-#include <limits>
-#include <type_traits>
 #include "unittest.hpp"
 
 struct StaticTestIsPowerOf2Result {
@@ -262,3 +261,86 @@ TEST(power_of_2, max) {
   EXPECT_EQ(max_power_of_2<uint32_t>(), 0x80000000u);
   EXPECT_EQ(max_power_of_2<uint64_t>(), UCONST64(0x8000000000000000));
 }
+
+template <typename T, ENABLE_IF(std::is_integral<T>::value)>
+void check_log2i_variants_for(T dummy) {
+  int limit = sizeof(T) * BitsPerByte;
+  if (std::is_signed<T>::value) {
+    T min = std::numeric_limits<T>::min();
+    EXPECT_EQ(limit - 1, log2i_graceful(min));
+    EXPECT_EQ(limit - 1, log2i_graceful((T)-1));
+    limit--;
+  }
+  {
+    // Test log2i_graceful handles 0 input
+    EXPECT_EQ(-1, log2i_graceful(T(0)));
+  }
+  {
+    // Test the all-1s bit patterns
+    T var = 1;
+    for (int i = 0; i < limit; i++, var = (var << 1) | 1) {
+      EXPECT_EQ(i, log2i(var));
+    }
+  }
+  {
+    // Test the powers of 2 and powers + 1
+    T var = 1;
+    for (int i = 0; i < limit; i++, var <<= 1) {
+      EXPECT_EQ(i, log2i(var));
+      EXPECT_EQ(i, log2i_graceful(var));
+      EXPECT_EQ(i, log2i_exact(var));
+      EXPECT_EQ(i, log2i(var | 1));
+    }
+  }
+}
+
+TEST(power_of_2, log2i) {
+  check_log2i_variants_for((uintptr_t)0);
+  check_log2i_variants_for((intptr_t)0);
+  check_log2i_variants_for((julong)0);
+  check_log2i_variants_for((int)0);
+  check_log2i_variants_for((jint)0);
+  check_log2i_variants_for((uint)0);
+  check_log2i_variants_for((jlong)0);
+}
+
+template <typename T> void test_log2i_ceil() {
+  EXPECT_EQ(log2i_ceil(T(1)), 0) << "value = " << T(1);
+  EXPECT_EQ(log2i_ceil(T(2)), 1) << "value = " << T(2);
+  EXPECT_EQ(log2i_ceil(T(3)), 2) << "value = " << T(3);
+  EXPECT_EQ(log2i_ceil(T(4)), 2) << "value = " << T(4);
+  EXPECT_EQ(log2i_ceil(T(5)), 3) << "value = " << T(5);
+  EXPECT_EQ(log2i_ceil(T(6)), 3) << "value = " << T(6);
+  EXPECT_EQ(log2i_ceil(T(7)), 3) << "value = " << T(7);
+  EXPECT_EQ(log2i_ceil(T(8)), 3) << "value = " << T(8);
+  EXPECT_EQ(log2i_ceil(T(9)), 4) << "value = " << T(9);
+  EXPECT_EQ(log2i_ceil(T(10)), 4) << "value = " << T(10);
+
+  // Test max values
+  if (std::is_unsigned<T>::value) {
+    EXPECT_EQ(log2i_ceil(std::numeric_limits<T>::max()),
+            (int)(sizeof(T) * 8)) << "value = " << std::numeric_limits<T>::max();
+  } else {
+    EXPECT_EQ(log2i_ceil(std::numeric_limits<T>::max()),
+            (int)(sizeof(T) * 8 - 1)) << "value = " << std::numeric_limits<T>::max();
+  }
+}
+
+TEST(power_of_2, log2i_ceil) {
+  test_log2i_ceil<int8_t>();
+  test_log2i_ceil<int16_t>();
+  test_log2i_ceil<int32_t>();
+  test_log2i_ceil<int64_t>();
+  test_log2i_ceil<uint8_t>();
+  test_log2i_ceil<uint16_t>();
+  test_log2i_ceil<uint32_t>();
+  test_log2i_ceil<uint64_t>();
+}
+
+#ifdef ASSERT
+TEST_VM_ASSERT_MSG(power_of_2, log2i_ceil_invalid,
+    ".*Invalid value") {
+  log2i_ceil(0);
+}
+
+#endif // ASSERT

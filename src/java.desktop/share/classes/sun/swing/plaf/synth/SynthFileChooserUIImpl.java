@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,8 +29,6 @@ import java.awt.event.*;
 import java.beans.*;
 import java.io.*;
 import java.util.*;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 
 import javax.swing.*;
 import javax.swing.event.*;
@@ -53,7 +51,7 @@ import sun.swing.*;
  * these classes, developers cannot depend on their availability in
  * non-Sun implementations. Additionally this API may change in
  * incompatible ways between releases. While this class is public, it
- * shoud be considered an implementation detail, and subject to change.
+ * should be considered an implementation detail, and subject to change.
  *
  * @author Leif Samuelsson
  * @author Jeff Dinkins
@@ -190,7 +188,6 @@ public class SynthFileChooserUIImpl extends SynthFileChooserUI {
         readOnly = UIManager.getBoolean("FileChooser.readOnly");
     }
 
-    @SuppressWarnings("serial") // anonymous classes inside
     public void installComponents(JFileChooser fc) {
         super.installComponents(fc);
 
@@ -692,12 +689,14 @@ public class SynthFileChooserUIImpl extends SynthFileChooserUI {
             ii.depth = directoryComboBoxModel.getDepth(index);
             label.setIcon(ii);
 
+            label.putClientProperty("html.disable", getFileChooser().getClientProperty("html.disable"));
+
             return label;
         }
     }
 
     static final int space = 10;
-    class IndentIcon implements Icon {
+    static class IndentIcon implements Icon {
 
         Icon icon = null;
         int depth = 0;
@@ -723,7 +722,7 @@ public class SynthFileChooserUIImpl extends SynthFileChooserUI {
     }
 
     //
-    // DataModel for DirectoryComboxbox
+    // DataModel for DirectoryCombobox
     //
     protected DirectoryComboBoxModel createDirectoryComboBoxModel(JFileChooser fc) {
         return new DirectoryComboBoxModel();
@@ -789,9 +788,9 @@ public class SynthFileChooserUIImpl extends SynthFileChooserUI {
                 File sf = useShellFolder ? ShellFolder.getShellFolder(canonical)
                                          : canonical;
                 File f = sf;
-                Vector<File> path = new Vector<File>(10);
+                ArrayList<File> path = new ArrayList<File>(10);
                 do {
-                    path.addElement(f);
+                    path.add(f);
                 } while ((f = f.getParentFile()) != null);
 
                 int pathCount = path.size();
@@ -907,7 +906,7 @@ public class SynthFileChooserUIImpl extends SynthFileChooserUI {
     }
 
     //
-    // DataModel for Types Comboxbox
+    // DataModel for Types Combobox
     //
     protected FilterComboBoxModel createFilterComboBoxModel() {
         return new FilterComboBoxModel();
@@ -944,9 +943,9 @@ public class SynthFileChooserUIImpl extends SynthFileChooserUI {
 
         public Object getSelectedItem() {
             // Ensure that the current filter is in the list.
-            // NOTE: we shouldnt' have to do this, since JFileChooser adds
+            // NOTE: we shouldn't have to do this, since JFileChooser adds
             // the filter to the choosable filters list when the filter
-            // is set. Lets be paranoid just in case someone overrides
+            // is set. Let's be paranoid just in case someone overrides
             // setFileFilter in JFileChooser.
             FileFilter currentFilter = getFileChooser().getFileFilter();
             boolean found = false;
@@ -1068,7 +1067,7 @@ public class SynthFileChooserUIImpl extends SynthFileChooserUI {
     }
 
     @SuppressWarnings("serial") // JDK-implementation class
-    private class AlignedLabel extends JLabel {
+    private static class AlignedLabel extends JLabel {
         private AlignedLabel[] group;
         private int maxWidth = 0;
 

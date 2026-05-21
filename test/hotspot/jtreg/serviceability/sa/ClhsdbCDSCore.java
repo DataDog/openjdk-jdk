@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,9 +24,11 @@
 /**
  * @test
  * @bug 8174994 8200613
- * @summary Test the clhsdb commands 'printmdo', 'printall', 'jstack' on a CDS enabled corefile.
- * @requires vm.cds
+ * @summary Test the clhsdb commands 'printall', 'jstack' on a CDS enabled corefile.
  * @requires vm.hasSA
+ * @requires !vm.ubsan
+ * @requires vm.gc != "Z"
+ * @requires vm.cds
  * @requires vm.flavor == "server"
  * @library /test/lib
  * @modules java.base/jdk.internal.misc
@@ -82,6 +84,7 @@ public class ClhsdbCDSCore {
                 "-Xshare:auto",
                 "-XX:+ProfileInterpreter",
                 "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+                CoreUtils.getAlwaysPretouchArg(true),
                 CrashApp.class.getName()
             };
 
@@ -89,7 +92,7 @@ public class ClhsdbCDSCore {
             try {
                List<String> options = new ArrayList<>();
                options.addAll(Arrays.asList(jArgs));
-               ProcessBuilder pb = ProcessTools.createTestJvm(options);
+               ProcessBuilder pb = ProcessTools.createTestJavaProcessBuilder(options);
                // Add "ulimit -c unlimited" if we can since we are generating a core file.
                pb = CoreUtils.addCoreUlimitCommand(pb);
                crashOutput = ProcessTools.executeProcess(pb);
@@ -98,7 +101,7 @@ public class ClhsdbCDSCore {
             }
 
             try {
-                coreFileName = CoreUtils.getCoreFileLocation(crashOutput.getStdout());
+                coreFileName = CoreUtils.getCoreFileLocation(crashOutput.getStdout(), crashOutput.pid());
             } catch (Exception e) {
                 cleanup();
                 throw e;
@@ -123,24 +126,10 @@ public class ClhsdbCDSCore {
                 throw new SkippedException("The CDS archive is not mapped");
             }
 
-            List testJavaOpts = Arrays.asList(Utils.getTestJavaOpts());
-
-            if (testJavaOpts.contains("-Xcomp") && testJavaOpts.contains("-XX:TieredStopAtLevel=1")) {
-                // No MDOs are allocated in -XX:TieredStopAtLevel=1 + -Xcomp mode
-                // The reason is methods being compiled aren't hot enough
-                // Let's not call printmdo in such scenario
-                cmds = List.of("printall", "jstack -v");
-            } else {
-                cmds = List.of("printmdo -a", "printall", "jstack -v");
-            }
+            cmds = List.of("printall", "jstack -v");
 
             Map<String, List<String>> expStrMap = new HashMap<>();
             Map<String, List<String>> unExpStrMap = new HashMap<>();
-            expStrMap.put("printmdo -a", List.of(
-                "CounterData",
-                "BranchData"));
-            unExpStrMap.put("printmdo -a", List.of(
-                "No suitable match for type of address"));
             expStrMap.put("printall", List.of(
                 "aload_0",
                 "_nofast_aload_0",

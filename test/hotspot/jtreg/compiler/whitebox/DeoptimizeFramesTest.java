@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,18 +25,22 @@
  * @test DeoptimizeFramesTest
  * @bug 8028595
  * @summary testing of WB::deoptimizeFrames()
+ * @requires vm.opt.StressUnstableIfTraps == null | !vm.opt.StressUnstableIfTraps
  * @library /test/lib /
  * @modules java.base/jdk.internal.misc
  *          java.management
- * @build sun.hotspot.WhiteBox
- * @run driver ClassFileInstaller sun.hotspot.WhiteBox
+ *
+ * @requires vm.opt.DeoptimizeALot != true
+ *
+ * @build jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run main/othervm -Xbootclasspath/a:. -XX:+UnlockDiagnosticVMOptions
- *                   -XX:+WhiteBoxAPI -Xmixed -XX:-UseCounterDecay
+ *                   -XX:+WhiteBoxAPI -Xmixed
  *                   -XX:CompileCommand=compileonly,compiler.whitebox.DeoptimizeFramesTest$TestCaseImpl::method
  *                   -XX:+IgnoreUnrecognizedVMOptions -XX:-DeoptimizeRandom -XX:-DeoptimizeALot
  *                   compiler.whitebox.DeoptimizeFramesTest true
  * @run main/othervm -Xbootclasspath/a:. -XX:+UnlockDiagnosticVMOptions
- *                   -XX:+WhiteBoxAPI -Xmixed -XX:-UseCounterDecay
+ *                   -XX:+WhiteBoxAPI -Xmixed
  *                   -XX:CompileCommand=compileonly,compiler.whitebox.DeoptimizeFramesTest$TestCaseImpl::method
  *                   -XX:CompileCommand=dontinline,java.util.concurrent.Phaser::*
  *                   -XX:+IgnoreUnrecognizedVMOptions -XX:-DeoptimizeRandom -XX:-DeoptimizeALot
@@ -46,7 +50,7 @@
 package compiler.whitebox;
 
 import jdk.test.lib.Asserts;
-import sun.hotspot.code.NMethod;
+import jdk.test.whitebox.code.NMethod;
 
 import java.lang.reflect.Executable;
 import java.util.concurrent.Callable;

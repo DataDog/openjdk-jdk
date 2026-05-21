@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -87,8 +87,6 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -101,7 +99,6 @@ import javax.swing.UIManager;
 
 import com.apple.laf.AquaMenuBarUI;
 import sun.awt.AWTAccessor;
-import sun.awt.AppContext;
 import sun.awt.CGraphicsDevice;
 import sun.awt.LightweightFrame;
 import sun.awt.PlatformGraphicsInfo;
@@ -109,6 +106,7 @@ import sun.awt.SunToolkit;
 import sun.awt.datatransfer.DataTransferer;
 import sun.awt.dnd.SunDragSourceContextPeer;
 import sun.awt.util.ThreadGroupUtils;
+import sun.java2d.metal.MTLRenderQueue;
 import sun.java2d.opengl.OGLRenderQueue;
 import sun.lwawt.LWComponentPeer;
 import sun.lwawt.LWCursorManager;
@@ -118,7 +116,6 @@ import sun.lwawt.LWWindowPeer.PeerType;
 import sun.lwawt.PlatformComponent;
 import sun.lwawt.PlatformDropTarget;
 import sun.lwawt.PlatformWindow;
-import sun.lwawt.SecurityWarningWindow;
 
 @SuppressWarnings("serial") // JDK implementation class
 final class NamedCursor extends Cursor {
@@ -143,25 +140,14 @@ public final class LWCToolkit extends LWToolkit {
     private static CInputMethodDescriptor sInputMethodDescriptor;
 
     static {
-        System.err.flush();
+        ResourceBundle platformResources = null;
+        try {
+            platformResources = ResourceBundle.getBundle("sun.awt.resources.awtosx");
+        } catch (MissingResourceException e) {
+            // No resource file; defaults will be used.
+        }
 
-        ResourceBundle platformResources = java.security.AccessController.doPrivileged(
-                new java.security.PrivilegedAction<ResourceBundle>() {
-            @Override
-            public ResourceBundle run() {
-                ResourceBundle platformResources = null;
-                try {
-                    platformResources = ResourceBundle.getBundle("sun.awt.resources.awtosx");
-                } catch (MissingResourceException e) {
-                    // No resource file; defaults will be used.
-                }
-
-                System.loadLibrary("awt");
-                System.loadLibrary("fontmanager");
-
-                return platformResources;
-            }
-        });
+        loadLibrary();
 
         if (!GraphicsEnvironment.isHeadless() &&
             !PlatformGraphicsInfo.isInAquaSession())
@@ -174,44 +160,48 @@ public final class LWCToolkit extends LWToolkit {
         if (!GraphicsEnvironment.isHeadless()) {
             initIDs();
         }
-        inAWT = AccessController.doPrivileged(new PrivilegedAction<Boolean>() {
-            @Override
-            public Boolean run() {
-                return !Boolean.parseBoolean(System.getProperty("javafx.embed.singleThread", "false"));
-            }
-        });
+    }
+
+    @SuppressWarnings("restricted")
+    private static void loadLibrary() {
+        System.loadLibrary("awt");
+        System.loadLibrary("fontmanager");
     }
 
     /*
      * If true  we operate in normal mode and nested runloop is executed in JavaRunLoopMode
      * If false we operate in singleThreaded FX/AWT interop mode and nested loop uses NSDefaultRunLoopMode
      */
-    private static final boolean inAWT;
+    private static final boolean inAWT
+            = !Boolean.parseBoolean(
+                    System.getProperty("javafx.embed.singleThread", "false"));
 
     public LWCToolkit() {
         final String extraButtons = "sun.awt.enableExtraMouseButtons";
-        AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
             areExtraMouseButtonsEnabled =
                  Boolean.parseBoolean(System.getProperty(extraButtons, "true"));
             //set system property if not yet assigned
-            System.setProperty(extraButtons, ""+areExtraMouseButtonsEnabled);
+            System.setProperty(extraButtons, "" + areExtraMouseButtonsEnabled);
             initAppkit(ThreadGroupUtils.getRootThreadGroup(),
                        GraphicsEnvironment.isHeadless());
-            return null;
-        });
     }
 
     /*
      * System colors with default initial values, overwritten by toolkit if system values differ and are available.
      */
-    private static final int NUM_APPLE_COLORS = 3;
+    private static final int NUM_APPLE_COLORS = 5;
     public static final int KEYBOARD_FOCUS_COLOR = 0;
     public static final int INACTIVE_SELECTION_BACKGROUND_COLOR = 1;
     public static final int INACTIVE_SELECTION_FOREGROUND_COLOR = 2;
+    public static final int SELECTED_CONTROL_TEXT_COLOR = 3;
+    public static final int CELL_HIGHLIGHT_COLOR = 4;
+
     private static int[] appleColors = {
         0xFF808080, // keyboardFocusColor = Color.gray;
         0xFFC0C0C0, // secondarySelectedControlColor
         0xFF303030, // controlDarkShadowColor
+        0xFFFFFFFF, // controlTextColor
+        0xFF808080, // cellHighlightColor = Color.gray;
     };
 
     private native void loadNativeColors(final int[] systemColors, final int[] appleColors);
@@ -223,7 +213,7 @@ public final class LWCToolkit extends LWToolkit {
     }
 
     @SuppressWarnings("serial") // JDK implementation class
-    private static class AppleSpecificColor extends Color {
+    private static final class AppleSpecificColor extends Color {
         private final int index;
         AppleSpecificColor(int index) {
             super(appleColors[index]);
@@ -246,10 +236,7 @@ public final class LWCToolkit extends LWToolkit {
     // This is only called from native code.
     static void systemColorsChanged() {
         EventQueue.invokeLater(() -> {
-            AccessController.doPrivileged( (PrivilegedAction<Object>) () -> {
                 AWTAccessor.getSystemColorAccessor().updateSystemColors();
-                return null;
-            });
         });
     }
 
@@ -299,12 +286,6 @@ public final class LWCToolkit extends LWToolkit {
             return createCPrinterDialog((CPrinterDialog)target);
         }
         return super.createDialog(target);
-    }
-
-    @Override
-    protected SecurityWarningWindow createSecurityWarning(Window ownerWindow,
-                                                          LWWindowPeer ownerPeer) {
-        return new CWarningWindow(ownerWindow, ownerPeer);
     }
 
     @Override
@@ -418,8 +399,7 @@ public final class LWCToolkit extends LWToolkit {
         // TODO Auto-generated method stub
     }
 
-    class OSXPlatformFont extends sun.awt.PlatformFont
-    {
+    static final class OSXPlatformFont extends sun.awt.PlatformFont {
         OSXPlatformFont(String name, int style)
         {
             super(name, style);
@@ -446,7 +426,7 @@ public final class LWCToolkit extends LWToolkit {
         desktopProperties.put("awt.multiClickInterval", getMultiClickTime());
 
         // These DnD properties must be set, otherwise Swing ends up spewing NPEs
-        // all over the place. The values came straight off of MToolkit.
+        // all over the place. The values came straight off of XToolkit.
         desktopProperties.put("DnD.Autoscroll.initialDelay", Integer.valueOf(50));
         desktopProperties.put("DnD.Autoscroll.interval", Integer.valueOf(50));
         desktopProperties.put("DnD.Autoscroll.cursorHysteresis", Integer.valueOf(5));
@@ -498,8 +478,12 @@ public final class LWCToolkit extends LWToolkit {
 
     @Override
     public void sync() {
-        // flush the OGL pipeline (this is a no-op if OGL is not enabled)
-        OGLRenderQueue.sync();
+        // flush the rendering pipeline
+        if (CGraphicsDevice.usingMetalPipeline()) {
+            MTLRenderQueue.sync();
+        } else {
+            OGLRenderQueue.sync();
+        }
         // setNeedsDisplay() selector was sent to the appropriate CALayer so now
         // we have to flush the native selectors queue.
         flushNativeSelectors();
@@ -580,10 +564,7 @@ public final class LWCToolkit extends LWToolkit {
     // Intended to be called from the LWCToolkit.m only.
     private static void installToolkitThreadInJava() {
         Thread.currentThread().setName(APPKIT_THREAD_NAME);
-        AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            Thread.currentThread().setContextClassLoader(null);
-            return null;
-        });
+        Thread.currentThread().setContextClassLoader(null);
     }
 
     @Override
@@ -718,10 +699,9 @@ public final class LWCToolkit extends LWToolkit {
                         },
                         true);
 
-        AppContext appContext = SunToolkit.targetToAppContext(component);
-        SunToolkit.postEvent(appContext, invocationEvent);
+        SunToolkit.postEvent(invocationEvent);
         // 3746956 - flush events from PostEventQueue to prevent them from getting stuck and causing a deadlock
-        SunToolkit.flushPendingEvents(appContext);
+        SunToolkit.flushPendingEvents();
         doAWTRunLoop(mediator, false);
 
         checkException(invocationEvent);
@@ -733,10 +713,9 @@ public final class LWCToolkit extends LWToolkit {
 
         InvocationEvent invocationEvent = new InvocationEvent(component, event);
 
-        AppContext appContext = SunToolkit.targetToAppContext(component);
-        SunToolkit.postEvent(SunToolkit.targetToAppContext(component), invocationEvent);
+        SunToolkit.postEvent(invocationEvent);
         // 3746956 - flush events from PostEventQueue to prevent them from getting stuck and causing a deadlock
-        SunToolkit.flushPendingEvents(appContext);
+        SunToolkit.flushPendingEvents();
 
         checkException(invocationEvent);
     }
@@ -948,7 +927,6 @@ public final class LWCToolkit extends LWToolkit {
     @Override
     public boolean isModalityTypeSupported(Dialog.ModalityType modalityType) {
         //TODO: FileDialog blocks excluded windows...
-        //TODO: Test: 2 file dialogs, separate AppContexts: a) Dialog 1 blocked, shouldn't be. Frame 4 blocked (shouldn't be).
         return (modalityType == null) ||
             (modalityType == Dialog.ModalityType.MODELESS) ||
             (modalityType == Dialog.ModalityType.DOCUMENT_MODAL) ||
@@ -984,8 +962,10 @@ public final class LWCToolkit extends LWToolkit {
     private static URL getScaledImageURL(URL url) {
         try {
             String scaledImagePath = getScaledImageName(url.getPath());
-            return scaledImagePath == null ? null : new URL(url.getProtocol(),
+            @SuppressWarnings("deprecation")
+            var result = scaledImagePath == null ? null : new URL(url.getProtocol(),
                     url.getHost(), url.getPort(), scaledImagePath);
+            return result;
         } catch (MalformedURLException e) {
             return null;
         }

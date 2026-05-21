@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,8 +30,8 @@
  * @library /test/lib /
  * @requires vm.flavor != "minimal" & !vm.graal.enabled
  *
- * @build sun.hotspot.WhiteBox
- * @run driver ClassFileInstaller sun.hotspot.WhiteBox
+ * @build jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run driver compiler.compilercontrol.jcmd.PrintDirectivesTest
  */
 
@@ -48,6 +48,8 @@ import jdk.test.lib.Utils;
 
 import java.lang.reflect.Executable;
 
+import static compiler.compilercontrol.share.IntrinsicCommand.VALID_INTRINSIC_SAMPLES;
+
 public class PrintDirectivesTest extends AbstractTestBase {
     private static final int AMOUNT = Utils.getRandomInstance().nextInt(
             Integer.getInteger("compiler.compilercontrol.jcmd."
@@ -63,6 +65,8 @@ public class PrintDirectivesTest extends AbstractTestBase {
         Scenario.Builder builder = Scenario.getBuilder();
         // Add some commands with directives file
         for (int i = 0; i < AMOUNT; i++) {
+            String argument = null;
+
             Executable exec = Utils.getRandomElement(METHODS).first;
             MethodDescriptor methodDescriptor = getValidMethodDescriptor(exec);
             Command command = cmdGen.generateCommand();
@@ -70,13 +74,16 @@ public class PrintDirectivesTest extends AbstractTestBase {
                 // skip invalid command
                 command = Command.COMPILEONLY;
             }
-            CompileCommand compileCommand = new CompileCommand(command,
+            if (command == Command.INTRINSIC) {
+                argument = Utils.getRandomElement(VALID_INTRINSIC_SAMPLES);
+            }
+            CompileCommand compileCommand = new CompileCommand(command, true,
                     methodDescriptor, cmdGen.generateCompiler(),
-                    Scenario.Type.DIRECTIVE);
+                    Scenario.Type.DIRECTIVE, argument);
             builder.add(compileCommand);
         }
         // print all directives
-        builder.add(new JcmdCommand(Command.NONEXISTENT, null, null,
+        builder.add(new JcmdCommand(Command.NONEXISTENT, true, null, null,
                 Scenario.Type.JCMD, Scenario.JcmdType.PRINT));
         Scenario scenario = builder.build();
         scenario.execute();

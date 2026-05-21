@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -43,41 +43,48 @@ struct Tarjan;
 
 //------------------------------Block_Array------------------------------------
 // Map dense integer indices to Blocks.  Uses classic doubling-array trick.
-// Abstractly provides an infinite array of Block*'s, initialized to NULL.
+// Abstractly provides an infinite array of Block*'s, initialized to null.
 // Note that the constructor just zeros things, and since I use Arena
 // allocation I do not need a destructor to reclaim storage.
-class Block_Array : public ResourceObj {
-  friend class VMStructs;
+class Block_Array : public ArenaObj {
   uint _size;                   // allocated size, as opposed to formal limit
-  debug_only(uint _limit;)      // limit to formal domain
+  DEBUG_ONLY(uint _limit;)      // limit to formal domain
   Arena *_arena;                // Arena to allocate in
+  ReallocMark _nesting;         // Safety checks for arena reallocation
 protected:
   Block **_blocks;
-  void grow( uint i );          // Grow array node to fit
+  void maybe_grow(uint i) {
+    _nesting.check(_arena);     // Check if a potential reallocation in the arena is safe
+    if (i >= Max()) {
+      grow(i);
+    }
+  }
+  void grow(uint i);            // Grow array node to fit
 
 public:
   Block_Array(Arena *a) : _size(OptoBlockListSize), _arena(a) {
-    debug_only(_limit=0);
+    DEBUG_ONLY(_limit=0);
     _blocks = NEW_ARENA_ARRAY( a, Block *, OptoBlockListSize );
     for( int i = 0; i < OptoBlockListSize; i++ ) {
-      _blocks[i] = NULL;
+      _blocks[i] = nullptr;
     }
   }
-  Block *lookup( uint i ) const // Lookup, or NULL for not mapped
-  { return (i<Max()) ? _blocks[i] : (Block*)NULL; }
+  Block *lookup( uint i ) const // Lookup, or null for not mapped
+  { return (i<Max()) ? _blocks[i] : (Block*)nullptr; }
   Block *operator[] ( uint i ) const // Lookup, or assert for not mapped
   { assert( i < Max(), "oob" ); return _blocks[i]; }
   // Extend the mapping: index i maps to Block *n.
-  void map( uint i, Block *n ) { if( i>=Max() ) grow(i); _blocks[i] = n; }
-  uint Max() const { debug_only(return _limit); return _size; }
+  void map( uint i, Block *n ) { maybe_grow(i); _blocks[i] = n; }
+  uint Max() const { DEBUG_ONLY(return _limit); return _size; }
 };
 
 
 class Block_List : public Block_Array {
-  friend class VMStructs;
 public:
   uint _cnt;
-  Block_List() : Block_Array(Thread::current()->resource_area()), _cnt(0) {}
+  Block_List() : Block_List(Thread::current()->resource_area()) { }
+  Block_List(Arena* a) : Block_Array(a), _cnt(0) { }
+
   void push( Block *b ) {  map(_cnt++,b); }
   Block *pop() { return _blocks[--_cnt]; }
   Block *rpop() { Block *b = _blocks[0]; _blocks[0]=_blocks[--_cnt]; return b;}
@@ -89,8 +96,7 @@ public:
 };
 
 
-class CFGElement : public ResourceObj {
-  friend class VMStructs;
+class CFGElement : public AnyObj {
  public:
   double _freq; // Execution frequency (estimate)
 
@@ -106,7 +112,6 @@ class CFGElement : public ResourceObj {
 // Basic blocks are used during the output routines, and are not used during
 // any optimization pass.  They are created late in the game.
 class Block : public CFGElement {
-  friend class VMStructs;
 
 private:
   // Nodes in this block, in order
@@ -114,7 +119,7 @@ private:
 
 public:
 
-  // Get the node at index 'at_index', if 'at_index' is out of bounds return NULL
+  // Get the node at index 'at_index', if 'at_index' is out of bounds return null
   Node* get_node(uint at_index) const {
     return _nodes[at_index];
   }
@@ -211,7 +216,7 @@ public:
   uint _freg_pressure;
   uint _fhrp_index;
 
-  // Mark and visited bits for an LCA calculation in insert_anti_dependences.
+  // Mark and visited bits for an LCA calculation in raise_above_anti_dependences.
   // Since they hold unique node indexes, they do not need reinitialization.
   node_idx_t _raise_LCA_mark;
   void    set_raise_LCA_mark(node_idx_t x)    { _raise_LCA_mark = x; }
@@ -281,8 +286,8 @@ public:
       _succs(a),
       _num_succs(0),
       _pre_order(0),
-      _idom(0),
-      _loop(NULL),
+      _idom(nullptr),
+      _loop(nullptr),
       _reg_pressure(0),
       _ihrp_index(1),
       _freg_pressure(0),
@@ -320,6 +325,9 @@ public:
   void find_remove( const Node *n );
   // Check whether the node is in the block.
   bool contains (const Node *n) const;
+
+  // Whether the block is not root-like and does not have any predecessors.
+  bool is_trivially_unreachable() const;
 
   // Return the empty status of a block
   enum { not_empty, empty_with_goto, completely_empty };
@@ -366,7 +374,6 @@ public:
 //------------------------------PhaseCFG---------------------------------------
 // Build an array of Basic Block pointers, one per Node.
 class PhaseCFG : public Phase {
-  friend class VMStructs;
  private:
   // Root of whole program
   RootNode* _root;
@@ -435,12 +442,18 @@ class PhaseCFG : public Phase {
   // Compute the instruction global latency with a backwards walk
   void compute_latencies_backwards(VectorSet &visited, Node_Stack &stack);
 
+  // Check if a block between early and LCA block of uses is cheaper by
+  // frequency-based policy, latency-based policy and random-based policy
+  bool is_cheaper_block(Block* LCA, Node* self, uint target_latency,
+                        uint end_latency, double least_freq,
+                        int cand_cnt, bool in_latency);
+
   // Pick a block between early and late that is a cheaper alternative
   // to late. Helper for schedule_late.
   Block* hoist_to_cheaper_block(Block* LCA, Block* early, Node* self);
 
   bool schedule_local(Block* block, GrowableArray<int>& ready_cnt, VectorSet& next_call, intptr_t* recacl_pressure_nodes);
-  void set_next_call(Block* block, Node* n, VectorSet& next_call);
+  void set_next_call(const Block* block, Node* n, VectorSet& next_call) const;
   void needed_for_next_call(Block* block, Node* this_call, VectorSet& next_call);
 
   // Perform basic-block local scheduling
@@ -457,8 +470,16 @@ class PhaseCFG : public Phase {
   Node* catch_cleanup_find_cloned_def(Block* use_blk, Node* def, Block* def_blk, int n_clone_idx);
   void  catch_cleanup_inter_block(Node *use, Block *use_blk, Node *def, Block *def_blk, int n_clone_idx);
 
-  // Detect implicit-null-check opportunities.  Basically, find NULL checks
-  // with suitable memory ops nearby.  Use the memory op to do the NULL check.
+  // Ensure that n happens at b or above, i.e. at a block that dominates b.
+  // We expect n to be an orphan node without further inputs.
+  void ensure_node_is_at_block_or_above(Node* n, Block* b);
+
+  // Move node n from its current placement into the end of block b.
+  // Move also outgoing Mach projections.
+  void move_node_and_its_projections_to_block(Node* n, Block* b);
+
+  // Detect implicit-null-check opportunities.  Basically, find null checks
+  // with suitable memory ops nearby.  Use the memory op to do the null check.
   // I can generate a memory op if there is not one nearby.
   void implicit_null_check(Block* block, Node *proj, Node *val, int allowed_reasons);
 
@@ -480,10 +501,10 @@ class PhaseCFG : public Phase {
   // Used when building the CFG and creating end nodes for blocks.
   MachNode* _goto;
 
-  Block* insert_anti_dependences(Block* LCA, Node* load, bool verify = false);
+  Block* raise_above_anti_dependences(Block* LCA, Node* load, bool verify = false);
   void verify_anti_dependences(Block* LCA, Node* load) const {
     assert(LCA == get_block_for_node(load), "should already be scheduled");
-    const_cast<PhaseCFG*>(this)->insert_anti_dependences(LCA, load, true);
+    const_cast<PhaseCFG*>(this)->raise_above_anti_dependences(LCA, load, true);
   }
 
   bool move_to_next(Block* bx, uint b_index);
@@ -501,8 +522,8 @@ class PhaseCFG : public Phase {
   CFGLoop* create_loop_tree();
   bool is_dominator(Node* dom_node, Node* node);
   bool is_CFG(Node* n);
-  bool is_control_proj_or_safepoint(Node* n);
-  Block* find_block_for_node(Node* n);
+  bool is_control_proj_or_safepoint(Node* n) const;
+  Block* find_block_for_node(Node* n) const;
   bool is_dominating_control(Node* dom_ctrl, Node* n);
   #ifndef PRODUCT
   bool _trace_opto_pipelining;  // tracing flag
@@ -569,7 +590,7 @@ class PhaseCFG : public Phase {
 
   // removes the mapping from a node to a block
   void unmap_node_from_block(const Node* node) {
-    _node_to_block_mapping.map(node->_idx, NULL);
+    _node_to_block_mapping.map(node->_idx, nullptr);
   }
 
   // get the block in which this node resides
@@ -579,7 +600,7 @@ class PhaseCFG : public Phase {
 
   // does this node reside in a block; return true
   bool has_block(const Node* node) const {
-    return (_node_to_block_mapping.lookup(node->_idx) != NULL);
+    return (_node_to_block_mapping.lookup(node->_idx) != nullptr);
   }
 
   // Use frequency calculations and code shape to predict if the block
@@ -604,6 +625,10 @@ class PhaseCFG : public Phase {
   void remove_empty_blocks();
   Block *fixup_trap_based_check(Node *branch, Block *block, int block_pos, Block *bnext);
   void fixup_flow();
+  // Remove all blocks that are transitively unreachable. Such blocks can be
+  // found e.g. after PhaseCFG::convert_NeverBranch_to_Goto(). This function
+  // assumes post-fixup_flow() block indices (Block::_pre_order, Block::_rpo).
+  void remove_unreachable_blocks();
 
   // Insert a node into a block at index and map the node to the block
   void insert(Block *b, uint idx, Node *n) {
@@ -620,11 +645,19 @@ class PhaseCFG : public Phase {
   // Debugging print of CFG
   void dump( ) const;           // CFG only
   void _dump_cfg( const Node *end, VectorSet &visited  ) const;
-  void verify() const;
   void dump_headers();
 #else
   bool trace_opto_pipelining() const { return false; }
 #endif
+
+  bool unrelated_load_in_store_null_block(Node* store, Node* load);
+
+  // Check that block b is in the home loop (or an ancestor) of n, if n is a
+  // memory writer.
+  void verify_memory_writer_placement(const Block* b, const Node* n) const NOT_DEBUG_RETURN;
+  // Check local dominator tree invariants.
+  void verify_dominator_tree() const NOT_DEBUG_RETURN;
+  void verify() const NOT_DEBUG_RETURN;
 };
 
 
@@ -634,7 +667,7 @@ class PhaseCFG : public Phase {
 class UnionFind : public ResourceObj {
   uint _cnt, _max;
   uint* _indices;
-  ReallocMark _nesting;  // assertion check for reallocations
+  ReallocMark _nesting; // Safety checks for arena reallocation
 public:
   UnionFind( uint max );
   void reset( uint max );  // Reset to identity map for [0..max]
@@ -670,7 +703,7 @@ protected:
   Block* _target;      // block target
   double  _prob;        // probability of edge to block
 public:
-  BlockProbPair() : _target(NULL), _prob(0.0) {}
+  BlockProbPair() : _target(nullptr), _prob(0.0) {}
   BlockProbPair(Block* b, double p) : _target(b), _prob(p) {}
 
   Block* get_target() const { return _target; }
@@ -679,7 +712,6 @@ public:
 
 //------------------------------CFGLoop-------------------------------------------
 class CFGLoop : public CFGElement {
-  friend class VMStructs;
   int _id;
   int _depth;
   CFGLoop *_parent;      // root of loop tree is the method level "pseudo" loop, it's parent is null
@@ -695,9 +727,9 @@ class CFGLoop : public CFGElement {
     CFGElement(),
     _id(id),
     _depth(0),
-    _parent(NULL),
-    _sibling(NULL),
-    _child(NULL),
+    _parent(nullptr),
+    _sibling(nullptr),
+    _child(nullptr),
     _exit_prob(1.0f) {}
   CFGLoop* parent() { return _parent; }
   void push_pred(Block* blk, int i, Block_List& worklist, PhaseCFG* cfg);
@@ -710,7 +742,7 @@ class CFGLoop : public CFGElement {
     assert(hd->head()->is_Loop(), "must begin with loop head node");
     return hd;
   }
-  Block* backedge_block(); // Return the block on the backedge of the loop (else NULL)
+  Block* backedge_block(); // Return the block on the backedge of the loop (else null)
   void compute_loop_depth(int depth);
   void compute_freq(); // compute frequency with loop assuming head freq 1.0f
   void scale_freq();   // scale frequency by loop trip count (including outer loops)
@@ -719,6 +751,7 @@ class CFGLoop : public CFGElement {
   double trip_count() const { return 1.0 / _exit_prob; }
   virtual bool is_loop()  { return true; }
   int id() { return _id; }
+  int depth() { return _depth; }
 
 #ifndef PRODUCT
   void dump( ) const;
@@ -731,7 +764,6 @@ class CFGLoop : public CFGElement {
 // A edge between two basic blocks that will be embodied by a branch or a
 // fall-through.
 class CFGEdge : public ResourceObj {
-  friend class VMStructs;
  private:
   Block * _from;        // Source basic block
   Block * _to;          // Destination basic block
@@ -744,8 +776,8 @@ class CFGEdge : public ResourceObj {
   // Private accessors
   int  from_pct() const { return _from_pct; }
   int  to_pct()   const { return _to_pct;   }
-  int  from_infrequent() const { return from_pct() < BlockLayoutMinDiamondPercentage; }
-  int  to_infrequent()   const { return to_pct()   < BlockLayoutMinDiamondPercentage; }
+  bool from_infrequent() const { return from_pct() < BlockLayoutMinDiamondPercentage; }
+  bool to_infrequent()   const { return to_pct()   < BlockLayoutMinDiamondPercentage; }
 
  public:
   enum {
@@ -763,7 +795,7 @@ class CFGEdge : public ResourceObj {
   double  freq() const { return _freq; }
   Block* from() const { return _from; }
   Block* to  () const { return _to;   }
-  int  infrequent() const { return _infrequent; }
+  bool   infrequent() const { return _infrequent; }
   int state() const { return _state; }
 
   void set_state(int state) { _state = state; }
@@ -784,8 +816,6 @@ class Trace : public ResourceObj {
   Block * _first;       // First block in the trace
   Block * _last;        // Last block in the trace
 
-  // Return the block that follows "b" in the trace.
-  Block * next(Block *b) const { return _next_list[b->_pre_order]; }
   void set_next(Block *b, Block *n) const { _next_list[b->_pre_order] = n; }
 
   // Return the block that precedes "b" in the trace.
@@ -797,8 +827,8 @@ class Trace : public ResourceObj {
   void break_loop_after(Block *b) {
     _last = b;
     _first = next(b);
-    set_prev(_first, NULL);
-    set_next(_last, NULL);
+    set_prev(_first, nullptr);
+    set_next(_last, nullptr);
   }
 
  public:
@@ -809,8 +839,8 @@ class Trace : public ResourceObj {
     _prev_list(prev_list),
     _first(b),
     _last(b) {
-    set_next(b, NULL);
-    set_prev(b, NULL);
+    set_next(b, nullptr);
+    set_prev(b, nullptr);
   };
 
   // Return the id number
@@ -823,10 +853,13 @@ class Trace : public ResourceObj {
   // Return the last block in the trace
   Block * last_block() const { return _last; }
 
+  // Return the block that follows "b" in the trace.
+  Block * next(Block *b) const { return _next_list[b->_pre_order]; }
+
   // Insert a trace in the middle of this one after b
   void insert_after(Block *b, Trace *tr) {
     set_next(tr->last_block(), next(b));
-    if (next(b) != NULL) {
+    if (next(b) != nullptr) {
       set_prev(next(b), tr->last_block());
     }
 
@@ -840,7 +873,7 @@ class Trace : public ResourceObj {
 
   void insert_before(Block *b, Trace *tr) {
     Block *p = prev(b);
-    assert(p != NULL, "use append instead");
+    assert(p != nullptr, "use append instead");
     insert_after(p, tr);
   }
 
@@ -856,8 +889,6 @@ class Trace : public ResourceObj {
     _last = b;
   }
 
-  // Adjust the the blocks in this trace
-  void fixup_blocks(PhaseCFG &cfg);
   bool backedge(CFGEdge *e);
 
 #ifndef PRODUCT
@@ -868,7 +899,6 @@ class Trace : public ResourceObj {
 //------------------------------PhaseBlockLayout-------------------------------
 // Rearrange blocks into some canonical order, based on edges and their frequencies
 class PhaseBlockLayout : public Phase {
-  friend class VMStructs;
   PhaseCFG &_cfg;               // Control flow graph
 
   GrowableArray<CFGEdge *> *edges;

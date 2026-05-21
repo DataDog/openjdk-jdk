@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,14 +22,13 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "gc/g1/g1CollectedHeap.inline.hpp"
 #include "gc/g1/g1UncommitRegionTask.hpp"
 #include "gc/shared/suspendibleThreadSet.hpp"
 #include "runtime/globals.hpp"
 #include "utilities/ticks.hpp"
 
-G1UncommitRegionTask* G1UncommitRegionTask::_instance = NULL;
+G1UncommitRegionTask* G1UncommitRegionTask::_instance = nullptr;
 
 G1UncommitRegionTask::G1UncommitRegionTask() :
     G1ServiceTask("G1 Uncommit Region Task"),
@@ -38,7 +37,7 @@ G1UncommitRegionTask::G1UncommitRegionTask() :
     _summary_region_count(0) { }
 
 void G1UncommitRegionTask::initialize() {
-  assert(_instance == NULL, "Already initialized");
+  assert(_instance == nullptr, "Already initialized");
   _instance = new G1UncommitRegionTask();
 
   // Register the task with the service thread. This will automatically
@@ -48,7 +47,7 @@ void G1UncommitRegionTask::initialize() {
 }
 
 G1UncommitRegionTask* G1UncommitRegionTask::instance() {
-  if (_instance == NULL) {
+  if (_instance == nullptr) {
     initialize();
   }
   return _instance;
@@ -59,9 +58,9 @@ void G1UncommitRegionTask::enqueue() {
 
   G1UncommitRegionTask* uncommit_task = instance();
   if (!uncommit_task->is_active()) {
-    // Change state to active and schedule with no delay.
+    // Change state to active and schedule using UncommitInitialDelayMs.
     uncommit_task->set_active(true);
-    G1CollectedHeap::heap()->service_thread()->schedule_task(uncommit_task, 0);
+    G1CollectedHeap::heap()->service_thread()->schedule_task(uncommit_task, UncommitInitialDelayMs);
   }
 }
 
@@ -82,17 +81,17 @@ void G1UncommitRegionTask::report_execution(Tickspan time, uint regions) {
   _summary_region_count += regions;
   _summary_duration += time;
 
-  log_trace(gc, heap)("Concurrent Uncommit: " SIZE_FORMAT "%s, %u regions, %1.3fms",
-                      byte_size_in_proper_unit(regions * HeapRegion::GrainBytes),
-                      proper_unit_for_byte_size(regions * HeapRegion::GrainBytes),
+  log_trace(gc, heap)("Concurrent Uncommit: %zu%s, %u regions, %1.3fms",
+                      byte_size_in_proper_unit(regions * G1HeapRegion::GrainBytes),
+                      proper_unit_for_byte_size(regions * G1HeapRegion::GrainBytes),
                       regions,
                       time.seconds() * 1000);
 }
 
 void G1UncommitRegionTask::report_summary() {
-  log_debug(gc, heap)("Concurrent Uncommit Summary: " SIZE_FORMAT "%s, %u regions, %1.3fms",
-                      byte_size_in_proper_unit(_summary_region_count * HeapRegion::GrainBytes),
-                      proper_unit_for_byte_size(_summary_region_count * HeapRegion::GrainBytes),
+  log_debug(gc, heap)("Concurrent Uncommit Summary: %zu%s, %u regions, %1.3fms",
+                      byte_size_in_proper_unit(_summary_region_count * G1HeapRegion::GrainBytes),
+                      proper_unit_for_byte_size(_summary_region_count * G1HeapRegion::GrainBytes),
                       _summary_region_count,
                       _summary_duration.seconds() * 1000);
 }
@@ -124,9 +123,8 @@ void G1UncommitRegionTask::execute() {
   // Reschedule if there are more regions to uncommit, otherwise
   // change state to inactive.
   if (g1h->has_uncommittable_regions()) {
-    // No delay, reason to reschedule rather then to loop is to allow
-    // other tasks to run without waiting for a full uncommit cycle.
-    schedule(0);
+    // Delay to avoid starving application.
+    schedule(UncommitTaskDelayMs);
   } else {
     // Nothing more to do, change state and report a summary.
     set_active(false);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,9 +30,26 @@
  *
  * @author  Mandy Chung
  *
+ * @requires vm.gc == null | vm.gc == "G1"
+ *
  * @modules jdk.management
- * @build MemoryManagement MemoryUtil
- * @run main/othervm/timeout=600 -Xmn8m -XX:+IgnoreUnrecognizedVMOptions -XX:G1HeapRegionSize=1 -XX:-UseLargePages MemoryManagement
+ *
+ * @run main/othervm/timeout=600 -Xmn8m -XX:+IgnoreUnrecognizedVMOptions
+ * -XX:G1HeapRegionSize=1 -XX:-UseLargePages MemoryManagement
+ */
+
+/*
+ * @test
+ * @bug     4530538 6980984
+ * @summary Basic unit test of memory management testing:
+ *          1) setUsageThreshold() and getUsageThreshold()
+ *          2) test low memory detection on the old generation.
+ *
+ * @author  Mandy Chung
+ *
+ * @modules jdk.management
+ *
+ * @run main/othervm/timeout=600 -Xmn8m MemoryManagement
  */
 
 import java.lang.management.*;
@@ -41,6 +58,10 @@ import javax.management.*;
 import javax.management.openmbean.CompositeData;
 
 public class MemoryManagement {
+
+    private static final int YOUNG_GEN_SIZE = 8 * 1024 * 1024; // Must match -Xmn set on the @run line
+    private static final int NUM_CHUNKS = 2;
+
     private static final MemoryMXBean mm = ManagementFactory.getMemoryMXBean();
     private static final List pools =
             Collections.synchronizedList(ManagementFactory.getMemoryPoolMXBeans());
@@ -49,9 +70,6 @@ public class MemoryManagement {
     private static volatile MemoryPoolMXBean mpool = null;
     private static volatile boolean trace = false;
     private static volatile boolean testFailed = false;
-    private static final int NUM_CHUNKS = 2;
-    // Must match -Xmn set on the @run line
-    private static final int YOUNG_GEN_SIZE = 8 * 1024 * 1024;
     private static volatile long chunkSize;
     private static volatile int listenerInvoked = 0;
 

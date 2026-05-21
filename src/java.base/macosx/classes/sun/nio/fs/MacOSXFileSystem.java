@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,12 +25,7 @@
 
 package sun.nio.fs;
 
-import java.nio.file.*;
-import java.io.IOException;
-import java.util.*;
 import java.util.regex.Pattern;
-
-import static sun.nio.fs.MacOSXNativeDispatcher.*;
 
 /**
  * MacOS implementation of FileSystem
@@ -42,26 +37,12 @@ class MacOSXFileSystem extends BsdFileSystem {
         super(provider, dir);
     }
 
+    boolean isCaseInsensitiveAndPreserving() {
+        return true;
+    }
+
     // match in unicode canon_eq
     Pattern compilePathMatchPattern(String expr) {
         return Pattern.compile(expr, Pattern.CANON_EQ) ;
     }
-
-    char[] normalizeNativePath(char[] path) {
-        for (char c : path) {
-            if (c > 0x80)
-                return normalizepath(path, kCFStringNormalizationFormD);
-        }
-        return path;
-    }
-
-    String normalizeJavaPath(String path) {
-        for (int i = 0; i < path.length(); i++) {
-            if (path.charAt(i) > 0x80)
-                return new String(normalizepath(path.toCharArray(),
-                                  kCFStringNormalizationFormC));
-        }
-        return path;
-    }
-
 }

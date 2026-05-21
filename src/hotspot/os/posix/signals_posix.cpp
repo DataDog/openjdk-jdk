@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,23 +22,51 @@
  *
  */
 
-#include "precompiled.hpp"
-
+#include "code/codeCache.hpp"
+#include "code/nativeInst.hpp"
+#include "code/nmethod.hpp"
 #include "jvm.h"
 #include "logging/log.hpp"
-#include "runtime/atomic.hpp"
+#include "os_posix.hpp"
+#include "runtime/atomicAccess.hpp"
 #include "runtime/globals.hpp"
 #include "runtime/interfaceSupport.inline.hpp"
 #include "runtime/java.hpp"
+#include "runtime/javaThread.hpp"
 #include "runtime/os.hpp"
 #include "runtime/osThread.hpp"
-#include "runtime/thread.hpp"
+#include "runtime/safefetch.hpp"
+#include "runtime/semaphore.inline.hpp"
+#include "runtime/suspendedThreadTask.hpp"
+#include "runtime/threadCrashProtection.hpp"
 #include "signals_posix.hpp"
+#include "suspendResume_posix.hpp"
+#include "utilities/checkedCast.hpp"
+#include "utilities/deferredStatic.hpp"
 #include "utilities/events.hpp"
 #include "utilities/ostream.hpp"
+#include "utilities/parseInteger.hpp"
 #include "utilities/vmError.hpp"
 
 #include <signal.h>
+
+#define SEGV_BNDERR_value 3
+
+#if defined(SEGV_BNDERR)
+STATIC_ASSERT(SEGV_BNDERR == SEGV_BNDERR_value);
+#else
+#define SEGV_BNDERR SEGV_BNDERR_value
+#endif
+
+static const char* get_signal_name(int sig, char* out, size_t outlen);
+
+// Returns address of a handler associated with the given sigaction
+static address get_signal_handler(const struct sigaction* action);
+
+#define HANDLER_IS(handler, address)    ((handler) == CAST_FROM_FN_PTR(void*, (address)))
+#define HANDLER_IS_IGN(handler)         (HANDLER_IS(handler, SIG_IGN))
+#define HANDLER_IS_DFL(handler)         (HANDLER_IS(handler, SIG_DFL))
+#define HANDLER_IS_IGN_OR_DFL(handler)  (HANDLER_IS_IGN(handler) || HANDLER_IS_DFL(handler))
 
 // Various signal related mechanism are laid out in the following order:
 //
@@ -47,13 +75,25 @@
 // signal handling (except suspend/resume)
 // suspend/resume
 
-// Glibc on Linux uses the SA_RESTORER flag to indicate
-// the use of a "signal trampoline". We have no interest
-// in this flag and need to ignore it when checking our
-// own flag settings.
-// Note: SA_RESTORER is not exposed through signal.h so we
-// have to hardwire its 0x04000000 value in the mask.
-LINUX_ONLY(const int SA_RESTORER_FLAG_MASK = ~0x04000000;)
+// Helper function to strip any flags from a sigaction sa_flag
+// which are not needed for semantic comparison (see remarks below
+// about SA_RESTORER on Linux).
+// Also to work around the fact that not all platforms define sa_flags
+// as signed int (looking at you, zlinux).
+static int get_sanitized_sa_flags(const struct sigaction* sa) {
+  int f = (int) sa->sa_flags;
+#ifdef LINUX
+  // Glibc on Linux uses the SA_RESTORER flag to indicate
+  // the use of a "signal trampoline". We have no interest
+  // in this flag and need to ignore it when checking our
+  // own flag settings.
+  // Note: SA_RESTORER is not exposed through signal.h so we
+  // have to hardcode its 0x04000000 value here.
+  const int sa_restorer_flag = 0x04000000;
+  f &= ~sa_restorer_flag;
+#endif // LINUX
+  return f;
+}
 
 // Todo: provide a os::get_max_process_id() or similar. Number of processes
 // may have been configured, can be read more accurately from proc fs etc.
@@ -64,32 +104,73 @@ LINUX_ONLY(const int SA_RESTORER_FLAG_MASK = ~0x04000000;)
 
 #define NUM_IMPORTANT_SIGS 32
 
-extern "C" {
-  typedef void (*sa_handler_t)(int);
-  typedef void (*sa_sigaction_t)(int, siginfo_t *, void *);
-}
+// At various places we store handler information for each installed handler.
+//  SavedSignalHandlers is a helper class for those cases, keeping an array of sigaction
+//  structures.
+class SavedSignalHandlers {
+  // Note: NSIG can be largish, depending on platform, and this array is expected
+  // to be sparsely populated. To save space the contained structures are
+  // C-heap allocated. Since they only get added outside of signal handling
+  // this is no problem.
+  struct sigaction* _sa[NSIG];
 
-// For diagnostics to print a message once. see run_periodic_checks
-static sigset_t check_signal_done;
-static bool check_signals = true;
+  bool check_signal_number(int sig) const {
+    assert(sig > 0 && sig < NSIG, "invalid signal number %d", sig);
+    return sig > 0 && sig < NSIG;
+  }
 
-debug_only(static bool signal_sets_initialized = false);
+public:
+
+  SavedSignalHandlers() {
+    ::memset(_sa, 0, sizeof(_sa));
+  }
+
+  ~SavedSignalHandlers() {
+    for (int i = 0; i < NSIG; i ++) {
+      FREE_C_HEAP_OBJ(_sa[i]);
+    }
+  }
+
+  void set(int sig, const struct sigaction* act) {
+    if (check_signal_number(sig)) {
+      assert(_sa[sig] == nullptr, "Overwriting signal handler?");
+      _sa[sig] = NEW_C_HEAP_OBJ(struct sigaction, mtInternal);
+      *_sa[sig] = *act;
+    }
+  }
+
+  const struct sigaction* get(int sig) const {
+    if (check_signal_number(sig)) {
+      return _sa[sig];
+    }
+    return nullptr;
+  }
+};
+
+
+DEBUG_ONLY(static bool signal_sets_initialized = false);
 static sigset_t unblocked_sigs, vm_sigs, preinstalled_sigs;
-struct sigaction sigact[NSIG];
 
-// For signal-chaining
+// Our own signal handlers should never ever get replaced by a third party one.
+//  To check that, and to aid with diagnostics, store a copy of the handler setup
+//  and compare it periodically against reality (see os::run_periodic_checks()).
+static bool check_signals = true;
+static SavedSignalHandlers vm_handlers;
+static bool do_check_signal_periodically[NSIG] = { 0 };
+
+// For signal-chaining:
+//  if chaining is active, chained_handlers contains all handlers which we
+//  replaced with our own and to which we must delegate.
+static SavedSignalHandlers chained_handlers;
 static bool libjsig_is_loaded = false;
 typedef struct sigaction *(*get_signal_t)(int);
-static get_signal_t get_signal_action = NULL;
-
-// For diagnostic
-int sigflags[NSIG];
+static get_signal_t get_signal_action = nullptr;
 
 // suspend/resume support
 #if defined(__APPLE__)
-  static OSXSemaphore sr_semaphore;
+static DeferredStatic<OSXSemaphore> sr_semaphore;
 #else
-  static PosixSemaphore sr_semaphore;
+static DeferredStatic<PosixSemaphore> sr_semaphore;
 #endif
 
 // Signal number used to suspend/resume a thread
@@ -97,7 +178,7 @@ int sigflags[NSIG];
 int PosixSignals::SR_signum = SIGUSR2;
 
 // sun.misc.Signal support
-static Semaphore* sig_semaphore = NULL;
+static DeferredStatic<Semaphore> sig_semaphore;
 // a counter for each possible signal value
 static volatile jint pending_signals[NSIG+1] = { 0 };
 
@@ -260,30 +341,27 @@ static const struct {
 #ifdef SIGXRES
   {  SIGXRES,     "SIGXRES" },
 #endif
-  { -1, NULL }
+  { -1, nullptr }
 };
 
-static const char* get_signal_name(int sig, char* out, size_t outlen);
-
 ////////////////////////////////////////////////////////////////////////////////
-// sun.misc.Signal support
+// sun.misc.Signal and BREAK_SIGNAL support
 
-void jdk_misc_signal_init() {
+static void jdk_misc_signal_init() {
   // Initialize signal structures
   ::memset((void*)pending_signals, 0, sizeof(pending_signals));
 
   // Initialize signal semaphore
-  sig_semaphore = new Semaphore();
+  int sem_count = 0;
+  sig_semaphore.initialize(sem_count);
 }
 
 void os::signal_notify(int sig) {
-  if (sig_semaphore != NULL) {
-    Atomic::inc(&pending_signals[sig]);
+  // Signal thread is not created with ReduceSignalUsage and jdk_misc_signal_init
+  // initialization isn't called.
+  if (!ReduceSignalUsage) {
+    AtomicAccess::inc(&pending_signals[sig]);
     sig_semaphore->signal();
-  } else {
-    // Signal thread is not created with ReduceSignalUsage and jdk_misc_signal_init
-    // initialization isn't called.
-    assert(ReduceSignalUsage, "signal semaphore should be created");
   }
 }
 
@@ -291,31 +369,11 @@ static int check_pending_signals() {
   for (;;) {
     for (int i = 0; i < NSIG + 1; i++) {
       jint n = pending_signals[i];
-      if (n > 0 && n == Atomic::cmpxchg(&pending_signals[i], n, n - 1)) {
+      if (n > 0 && n == AtomicAccess::cmpxchg(&pending_signals[i], n, n - 1)) {
         return i;
       }
     }
-    JavaThread *thread = JavaThread::current();
-    ThreadBlockInVM tbivm(thread);
-
-    bool threadIsSuspended;
-    do {
-      thread->set_suspend_equivalent();
-      // cleared by handle_special_suspend_equivalent_condition() or java_suspend_self()
-      sig_semaphore->wait();
-
-      // were we externally suspended while we were waiting?
-      threadIsSuspended = thread->handle_special_suspend_equivalent_condition();
-      if (threadIsSuspended) {
-        // The semaphore has been incremented, but while we were waiting
-        // another thread suspended us. We don't want to continue running
-        // while suspended because that would surprise the thread that
-        // suspended us.
-        sig_semaphore->signal();
-
-        thread->java_suspend_self();
-      }
-    } while (threadIsSuspended);
+    sig_semaphore->wait_with_safepoint_check(JavaThread::current());
   }
   ShouldNotReachHere();
   return 0; // Satisfy compiler
@@ -328,29 +386,16 @@ int os::signal_wait() {
 ////////////////////////////////////////////////////////////////////////////////
 // signal chaining support
 
-static struct sigaction* get_preinstalled_handler(int sig) {
-  if (sigismember(&preinstalled_sigs, sig)) {
-    return &sigact[sig];
-  }
-  return NULL;
-}
-
-static void save_preinstalled_handler(int sig, struct sigaction& oldAct) {
-  assert(sig > 0 && sig < NSIG, "vm signal out of expected range");
-  sigact[sig] = oldAct;
-  sigaddset(&preinstalled_sigs, sig);
-}
-
-struct sigaction* get_chained_signal_action(int sig) {
-  struct sigaction *actp = NULL;
+static struct sigaction* get_chained_signal_action(int sig) {
+  struct sigaction *actp = nullptr;
 
   if (libjsig_is_loaded) {
     // Retrieve the old signal handler from libjsig
     actp = (*get_signal_action)(sig);
   }
-  if (actp == NULL) {
+  if (actp == nullptr) {
     // Retrieve the preinstalled signal handler from jvm
-    actp = get_preinstalled_handler(sig);
+    actp = const_cast<struct sigaction*>(chained_handlers.get(sig));
   }
 
   return actp;
@@ -365,12 +410,12 @@ static bool call_chained_handler(struct sigaction *actp, int sig,
     return false;
   } else if (actp->sa_handler != SIG_IGN) {
     if ((actp->sa_flags & SA_NODEFER) == 0) {
-      // automaticlly block the signal
+      // automatically block the signal
       sigaddset(&(actp->sa_mask), sig);
     }
 
-    sa_handler_t hand = NULL;
-    sa_sigaction_t sa = NULL;
+    sa_handler_t hand = nullptr;
+    sa_sigaction_t sa = nullptr;
     bool siginfo_flag_set = (actp->sa_flags & SA_SIGINFO) != 0;
     // retrieve the chained handler
     if (siginfo_flag_set) {
@@ -396,7 +441,7 @@ static bool call_chained_handler(struct sigaction *actp, int sig,
     }
 
     // restore the signal mask
-    pthread_sigmask(SIG_SETMASK, &oset, NULL);
+    pthread_sigmask(SIG_SETMASK, &oset, nullptr);
   }
   // Tell jvm's signal handler the signal is taken care of.
   return true;
@@ -407,7 +452,7 @@ bool PosixSignals::chained_handler(int sig, siginfo_t* siginfo, void* context) {
   // signal-chaining
   if (UseSignalChaining) {
     struct sigaction *actp = get_chained_signal_action(sig);
-    if (actp != NULL) {
+    if (actp != nullptr) {
       chained = call_chained_handler(actp, sig, siginfo, context);
     }
   }
@@ -430,7 +475,7 @@ bool PosixSignals::chained_handler(int sig, siginfo_t* siginfo, void* context) {
 // We also include SIGTRAP in that list of never-to-block-signals. While not
 // mentioned by the Posix documentation, in our (SAPs) experience blocking it
 // causes similar problems. Beside, during normal operation - outside of error
-// handling - SIGTRAP may be used for implicit NULL checking, so it makes sense
+// handling - SIGTRAP may be used for implicit null checking, so it makes sense
 // to never block it.
 //
 // We deal with those signals in two ways:
@@ -461,15 +506,8 @@ void PosixSignals::unblock_error_signals() {
   sigset_t set;
   sigemptyset(&set);
   add_error_signals_to_set(&set);
-  ::pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+  ::pthread_sigmask(SIG_UNBLOCK, &set, nullptr);
 }
-
-class ErrnoPreserver: public StackObj {
-  const int _saved;
-public:
-  ErrnoPreserver() : _saved(errno) {}
-  ~ErrnoPreserver() { errno = _saved; }
-};
 
 ////////////////////////////////////////////////////////////////////////////////
 // JVM_handle_(linux|aix|bsd)_signal()
@@ -518,7 +556,7 @@ extern "C" JNIEXPORT
 int JVM_HANDLE_XXX_SIGNAL(int sig, siginfo_t* info,
                           void* ucVoid, int abort_if_unrecognized)
 {
-  assert(info != NULL && ucVoid != NULL, "sanity");
+  assert(info != nullptr && ucVoid != nullptr, "sanity");
 
   // Note: it's not uncommon that JNI code uses signal/sigset to install,
   // then restore certain signal handler (e.g. to temporarily block SIGPIPE,
@@ -540,26 +578,65 @@ int JVM_HANDLE_XXX_SIGNAL(int sig, siginfo_t* info,
   // Handle JFR thread crash protection.
   //  Note: this may cause us to longjmp away. Do not use any code before this
   //  point which really needs any form of epilogue code running, eg RAII objects.
-  os::ThreadCrashProtection::check_crash_protection(sig, t);
+  ThreadCrashProtection::check_crash_protection(sig, t);
 
   bool signal_was_handled = false;
 
   // Handle assertion poison page accesses.
 #ifdef CAN_SHOW_REGISTERS_ON_ASSERT
-  if ((sig == SIGSEGV || sig == SIGBUS) && info != NULL && info->si_addr == g_assert_poison) {
-    signal_was_handled = handle_assert_poison_fault(ucVoid, info->si_addr);
+  if (VMError::was_assert_poison_crash(info)) {
+    signal_was_handled = handle_assert_poison_fault(ucVoid);
   }
 #endif
 
+  // Extract pc from context. Note that for certain signals and certain
+  // architectures the pc in ucontext_t will point *after* the offending
+  // instruction. In those cases, use siginfo si_addr instead.
+  address pc = nullptr;
+  if (uc != nullptr) {
+    if (S390_ONLY(sig == SIGILL || sig == SIGFPE) NOT_S390(false)) {
+      pc = (address)info->si_addr;
+    } else {
+      pc = os::Posix::ucontext_get_pc(uc);
+    }
+  }
+
+  if (!signal_was_handled) {
+    signal_was_handled = handle_safefetch(sig, pc, uc);
+  }
+
   // Ignore SIGPIPE and SIGXFSZ (4229104, 6499219).
-  if (sig == SIGPIPE || sig == SIGXFSZ) {
+  if (!signal_was_handled &&
+      (sig == SIGPIPE || sig == SIGXFSZ)) {
     PosixSignals::chained_handler(sig, info, ucVoid);
     signal_was_handled = true; // unconditionally.
   }
 
+#ifndef ZERO
+  // Check for UD trap caused by NOP patching.
+  // If it is, patch return address to be deopt handler.
+  if (!signal_was_handled && pc != nullptr && os::is_readable_pointer(pc)) {
+    if (NativeDeoptInstruction::is_deopt_at(pc)) {
+      CodeBlob* cb = CodeCache::find_blob(pc);
+      if (cb != nullptr && cb->is_nmethod()) {
+        nmethod* nm = cb->as_nmethod();
+        assert(nm->insts_contains_inclusive(pc), "");
+        address deopt = nm->deopt_handler_entry();
+        assert(deopt != nullptr, "");
+
+        frame fr = os::fetch_frame_from_context(uc);
+        nm->set_original_pc(&fr, pc);
+
+        os::Posix::ucontext_set_pc(uc, deopt);
+        signal_was_handled = true;
+      }
+    }
+  }
+#endif // !ZERO
+
   // Call platform dependent signal handler.
   if (!signal_was_handled) {
-    JavaThread* const jt = (t != NULL && t->is_Java_thread()) ? (JavaThread*) t : NULL;
+    JavaThread* const jt = (t != nullptr && t->is_Java_thread()) ? JavaThread::cast(t) : nullptr;
     signal_was_handled = PosixSignals::pd_hotspot_signal_handler(sig, info, uc, jt);
   }
 
@@ -572,32 +649,7 @@ int JVM_HANDLE_XXX_SIGNAL(int sig, siginfo_t* info,
 
   // Invoke fatal error handling.
   if (!signal_was_handled && abort_if_unrecognized) {
-    // Extract pc from context for the error handler to display.
-    address pc = NULL;
-    if (uc != NULL) {
-      // prepare fault pc address for error reporting.
-      if (S390_ONLY(sig == SIGILL || sig == SIGFPE) NOT_S390(false)) {
-        pc = (address)info->si_addr;
-      } else {
-        pc = os::Posix::ucontext_get_pc(uc);
-      }
-    }
-#if defined(ZERO) && !defined(PRODUCT)
-    char buf[64];
-    VMError::report_and_die(t, sig, pc, info, ucVoid,
-          "\n#"
-          "\n#    /--------------------\\"
-          "\n#    |      %-7s       |"
-          "\n#    \\---\\ /--------------/"
-          "\n#        /"
-          "\n#    [-]        |\\_/|    "
-          "\n#    (+)=C      |o o|__  "
-          "\n#    | |        =-*-=__\\ "
-          "\n#    OOO        c_c_(___)",
-          get_signal_name(sig, buf, sizeof(buf)));
-#else
     VMError::report_and_die(t, sig, pc, info, ucVoid);
-#endif
     // VMError should not return.
     ShouldNotReachHere();
   }
@@ -605,13 +657,13 @@ int JVM_HANDLE_XXX_SIGNAL(int sig, siginfo_t* info,
 }
 
 // Entry point for the hotspot signal handler.
-static void javaSignalHandler(int sig, siginfo_t* info, void* ucVoid) {
+static void javaSignalHandler(int sig, siginfo_t* info, void* context) {
   // Do not add any code here!
   // Only add code to either JVM_HANDLE_XXX_SIGNAL or PosixSignals::pd_hotspot_signal_handler.
-  (void)JVM_HANDLE_XXX_SIGNAL(sig, info, ucVoid, true);
+  (void)JVM_HANDLE_XXX_SIGNAL(sig, info, context, true);
 }
 
-static void UserHandler(int sig, void *siginfo, void *context) {
+static void UserHandler(int sig, siginfo_t* siginfo, void* context) {
 
   PosixSignals::unblock_error_signals();
 
@@ -624,29 +676,13 @@ static void UserHandler(int sig, void *siginfo, void *context) {
   os::signal_notify(sig);
 }
 
-static const char* get_signal_handler_name(address handler,
-                                           char* buf, int buflen) {
-  int offset = 0;
-  bool found = os::dll_address_to_library_name(handler, buf, buflen, &offset);
-  if (found) {
-    // skip directory names
-    const char *p1, *p2;
-    p1 = buf;
-    size_t len = strlen(os::file_separator());
-    while ((p2 = strstr(p1, os::file_separator())) != NULL) p1 = p2 + len;
-#if !defined(AIX)
-    jio_snprintf(buf, buflen, "%s+0x%x", p1, offset);
-#else
-    // The way os::dll_address_to_library_name is implemented on Aix
-    // right now, it always returns -1 for the offset which is not
-    // terribly informative.
-    // Will fix that. For now, omit the offset.
-    jio_snprintf(buf, buflen, "%s", p1);
-#endif
-  } else {
-    jio_snprintf(buf, buflen, PTR_FORMAT, handler);
-  }
-  return buf;
+static void print_signal_handler_name(outputStream* os, address handler, char* buf, size_t buflen) {
+  // We demangle, but omit arguments - signal handlers should have always the same prototype.
+  os::print_function_and_library_name(os, handler, buf, checked_cast<int>(buflen),
+                                       true, // shorten_path
+                                       true, // demangle
+                                       true  // omit arguments
+                                       );
 }
 
 // Writes one-line description of a combination of sigaction.sa_flags into a user
@@ -726,122 +762,139 @@ static void print_sa_flags(outputStream* st, int flags) {
   st->print("%s", buffer);
 }
 
-static int get_our_sigflags(int sig) {
-  assert(sig > 0 && sig < NSIG, "vm signal out of expected range");
-  return sigflags[sig];
-}
-
-static void set_our_sigflags(int sig, int flags) {
-  assert(sig > 0 && sig < NSIG, "vm signal out of expected range");
-  if (sig > 0 && sig < NSIG) {
-    sigflags[sig] = flags;
+// Implementation may use the same storage for both the sa_sigaction field and the sa_handler field,
+// so check for "sigAct.sa_flags == SA_SIGINFO"
+static address get_signal_handler(const struct sigaction* action) {
+  bool siginfo_flag_set = (action->sa_flags & SA_SIGINFO) != 0;
+  if (siginfo_flag_set) {
+    return CAST_FROM_FN_PTR(address, action->sa_sigaction);
+  } else {
+    return CAST_FROM_FN_PTR(address, action->sa_handler);
   }
 }
 
 typedef int (*os_sigaction_t)(int, const struct sigaction *, struct sigaction *);
 
-static void SR_handler(int sig, siginfo_t* siginfo, ucontext_t* context);
+static void SR_handler(int sig, siginfo_t* siginfo, void* context);
 
-static void check_signal_handler(int sig) {
-  char buf[O_BUFLEN];
-  address jvmHandler = NULL;
-
-  struct sigaction act;
-  static os_sigaction_t os_sigaction = NULL;
-  if (os_sigaction == NULL) {
-    // only trust the default sigaction, in case it has been interposed
-    os_sigaction = (os_sigaction_t)dlsym(RTLD_DEFAULT, "sigaction");
-    if (os_sigaction == NULL) return;
-  }
-
-  os_sigaction(sig, (struct sigaction*)NULL, &act);
-
-  // See comment for SA_RESTORER_FLAG_MASK
-  LINUX_ONLY(act.sa_flags &= SA_RESTORER_FLAG_MASK;)
-
-  address thisHandler = (act.sa_flags & SA_SIGINFO)
-    ? CAST_FROM_FN_PTR(address, act.sa_sigaction)
-    : CAST_FROM_FN_PTR(address, act.sa_handler);
-
-
-  switch (sig) {
-  case SIGSEGV:
-  case SIGBUS:
-  case SIGFPE:
-  case SIGPIPE:
-  case SIGILL:
-  case SIGXFSZ:
-    jvmHandler = CAST_FROM_FN_PTR(address, (sa_sigaction_t)javaSignalHandler);
-    break;
-
-  case SHUTDOWN1_SIGNAL:
-  case SHUTDOWN2_SIGNAL:
-  case SHUTDOWN3_SIGNAL:
-  case BREAK_SIGNAL:
-    jvmHandler = (address)os::user_handler();
-    break;
-
-  default:
-    if (sig == PosixSignals::SR_signum) {
-      jvmHandler = CAST_FROM_FN_PTR(address, (sa_sigaction_t)SR_handler);
-    } else {
-      return;
-    }
-    break;
-  }
-
-  if (thisHandler != jvmHandler) {
-    tty->print("Warning: %s handler ", os::exception_name(sig, buf, O_BUFLEN));
-    tty->print("expected:%s", get_signal_handler_name(jvmHandler, buf, O_BUFLEN));
-    tty->print_cr("  found:%s", get_signal_handler_name(thisHandler, buf, O_BUFLEN));
-    // No need to check this sig any longer
-    sigaddset(&check_signal_done, sig);
-    // Running under non-interactive shell, SHUTDOWN2_SIGNAL will be reassigned SIG_IGN
-    if (sig == SHUTDOWN2_SIGNAL && !isatty(fileno(stdin))) {
-      tty->print_cr("Running in non-interactive shell, %s handler is replaced by shell",
-                    os::exception_name(sig, buf, O_BUFLEN));
-    }
-  } else if (get_our_sigflags(sig) != 0 && (int)act.sa_flags != get_our_sigflags(sig)) {
-    tty->print("Warning: %s handler flags ", os::exception_name(sig, buf, O_BUFLEN));
-    tty->print("expected:");
-    print_sa_flags(tty, get_our_sigflags(sig));
-    tty->cr();
-    tty->print("  found:");
-    print_sa_flags(tty, act.sa_flags);
-    tty->cr();
-    // No need to check this sig any longer
-    sigaddset(&check_signal_done, sig);
-  }
-
-  // Dump all the signal
-  if (sigismember(&check_signal_done, sig)) {
-    os::print_signal_handlers(tty, buf, O_BUFLEN);
-  }
+// Semantically compare two sigaction structures. Return true if they are referring to
+// the same handler, using the same flags.
+static bool are_actions_equal(const struct sigaction* sa,
+                              const struct sigaction* expected_sa) {
+  address this_handler = get_signal_handler(sa);
+  address expected_handler = get_signal_handler(expected_sa);
+  const int this_flags = get_sanitized_sa_flags(sa);
+  const int expected_flags = get_sanitized_sa_flags(expected_sa);
+  return (this_handler == expected_handler) &&
+         (this_flags == expected_flags);
 }
 
-void* os::user_handler() {
+// If we installed one of our signal handlers for sig, check that the current
+// setup matches what we originally installed.  Return true if signal handler
+// is different.  Otherwise, return false;
+static bool check_signal_handler(int sig) {
+  char buf[O_BUFLEN];
+  bool mismatch = false;
+
+  if (!do_check_signal_periodically[sig]) {
+    return false;
+  }
+
+  const struct sigaction* expected_act = vm_handlers.get(sig);
+  assert(expected_act != nullptr, "Sanity");
+
+  // Retrieve current signal setup.
+  struct sigaction act;
+  static os_sigaction_t os_sigaction = nullptr;
+  if (os_sigaction == nullptr) {
+    // only trust the default sigaction, in case it has been interposed
+    os_sigaction = (os_sigaction_t)dlsym(RTLD_DEFAULT, "sigaction");
+    if (os_sigaction == nullptr) return false;
+  }
+
+  os_sigaction(sig, (struct sigaction*)nullptr, &act);
+
+  // Compare both sigaction structures (intelligently; only the members we care about).
+  // Ignore if the handler is our own crash handler.
+  if (!are_actions_equal(&act, expected_act) &&
+      !(HANDLER_IS(get_signal_handler(&act), VMError::crash_handler_address))) {
+    tty->print_cr("Warning: %s handler modified!", os::exception_name(sig, buf, sizeof(buf)));
+    // If we had a mismatch:
+    // - Disable any further checks for this signal - we do not want to flood stdout. Though
+    //   depending on which signal had been overwritten, we may die very soon anyway.
+    do_check_signal_periodically[sig] = false;
+    // Running under non-interactive shell, SHUTDOWN2_SIGNAL will be reassigned SIG_IGN
+    if (sig == SHUTDOWN2_SIGNAL && !isatty(fileno(stdin))) {
+      tty->print_cr("Note: Running in non-interactive shell, %s handler is replaced by shell",
+                    os::exception_name(sig, buf, O_BUFLEN));
+    }
+    return true;
+  }
+  return false;
+}
+
+void* PosixSignals::user_handler() {
   return CAST_FROM_FN_PTR(void*, UserHandler);
 }
 
-void* os::signal(int signal_number, void* handler) {
+// Used by JVM_RegisterSignal to install a signal handler.
+// The allowed set of signals is restricted by the caller.
+// The incoming handler is one of:
+// - psuedo-handler: SIG_IGN or SIG_DFL
+// - the VM's UserHandler of type sa_sigaction_t
+// - unknown signal handling function which we assume is also
+//   of type sa_sigaction_t - this is a bug - see JDK-8295702
+// Returns the currently installed handler.
+void* PosixSignals::install_generic_signal_handler(int sig, void* handler) {
   struct sigaction sigAct, oldSigAct;
 
   sigfillset(&(sigAct.sa_mask));
   remove_error_signals_from_set(&(sigAct.sa_mask));
 
-  sigAct.sa_flags   = SA_RESTART|SA_SIGINFO;
-  sigAct.sa_handler = CAST_TO_FN_PTR(sa_handler_t, handler);
+  sigAct.sa_flags = SA_RESTART;
+  if (HANDLER_IS_IGN_OR_DFL(handler)) {
+    sigAct.sa_handler = CAST_TO_FN_PTR(sa_handler_t, handler);
+  } else {
+    sigAct.sa_flags |= SA_SIGINFO;
+    sigAct.sa_sigaction = CAST_TO_FN_PTR(sa_sigaction_t, handler);
+  }
 
-  if (sigaction(signal_number, &sigAct, &oldSigAct)) {
+  if (sigaction(sig, &sigAct, &oldSigAct)) {
     // -1 means registration failed
     return (void *)-1;
   }
 
-  return CAST_FROM_FN_PTR(void*, oldSigAct.sa_handler);
+  return get_signal_handler(&oldSigAct);
 }
 
-void os::signal_raise(int signal_number) {
-  ::raise(signal_number);
+// Installs the given sigaction handler for the given signal.
+// - sigAct: the new struct sigaction to be filled in and used
+//           for this signal. The caller must provide this as it
+//           may need to be stored/accessed by that caller.
+// - oldSigAct: the old struct sigaction that was associated with
+//              this signal
+// Returns 0 on success and -1 on error.
+int PosixSignals::install_sigaction_signal_handler(struct sigaction* sigAct,
+                                                   struct sigaction* oldSigAct,
+                                                   int sig,
+                                                   sa_sigaction_t handler) {
+  sigfillset(&sigAct->sa_mask);
+  remove_error_signals_from_set(&sigAct->sa_mask);
+  sigAct->sa_sigaction = handler;
+  sigAct->sa_flags = SA_SIGINFO|SA_RESTART;
+#if defined(__APPLE__)
+  // Needed for main thread as XNU (Mac OS X kernel) will only deliver SIGSEGV
+  // (which starts as SIGBUS) on main thread with faulting address inside "stack+guard pages"
+  // if the signal handler declares it will handle it on alternate stack.
+  // Notice we only declare we will handle it on alt stack, but we are not
+  // actually going to use real alt stack - this is just a workaround.
+  // Please see ux_exception.c, method catch_mach_exception_raise for details
+  // link http://www.opensource.apple.com/source/xnu/xnu-2050.18.24/bsd/uxkern/ux_exception.c
+  if (sig == SIGSEGV) {
+    sigAct->sa_flags |= SA_ONSTACK;
+  }
+#endif
+  return sigaction(sig, sigAct, oldSigAct);
 }
 
 // Will be modified when max signal is changed to be dynamic
@@ -849,16 +902,9 @@ int os::sigexitnum_pd() {
   return NSIG;
 }
 
-static void do_signal_check(int signal) {
-  if (!sigismember(&check_signal_done, signal)) {
-    check_signal_handler(signal);
-  }
-}
-
 // This method is a periodic task to check for misbehaving JNI applications
 // under CheckJNI, we can add any periodic checks here
-
-void os::run_periodic_checks() {
+void os::run_periodic_checks(outputStream* st) {
 
   if (check_signals == false) return;
 
@@ -866,24 +912,36 @@ void os::run_periodic_checks() {
   // generation of hs*.log in the event of a crash, debugging
   // such a case can be very challenging, so we absolutely
   // check the following for a good measure:
-  do_signal_check(SIGSEGV);
-  do_signal_check(SIGILL);
-  do_signal_check(SIGFPE);
-  do_signal_check(SIGBUS);
-  do_signal_check(SIGPIPE);
-  do_signal_check(SIGXFSZ);
-  PPC64_ONLY(do_signal_check(SIGTRAP);)
+  bool print_handlers = false;
+
+  print_handlers |= check_signal_handler(SIGSEGV);
+  print_handlers |= check_signal_handler(SIGILL);
+  print_handlers |= check_signal_handler(SIGFPE);
+  print_handlers |= check_signal_handler(SIGBUS);
+  PPC64_ONLY(print_handlers |= check_signal_handler(SIGTRAP);)
 
   // ReduceSignalUsage allows the user to override these handlers
   // see comments at the very top and jvm_md.h
   if (!ReduceSignalUsage) {
-    do_signal_check(SHUTDOWN1_SIGNAL);
-    do_signal_check(SHUTDOWN2_SIGNAL);
-    do_signal_check(SHUTDOWN3_SIGNAL);
-    do_signal_check(BREAK_SIGNAL);
+    print_handlers |= check_signal_handler(SHUTDOWN1_SIGNAL);
+    print_handlers |= check_signal_handler(SHUTDOWN2_SIGNAL);
+    print_handlers |= check_signal_handler(SHUTDOWN3_SIGNAL);
+    print_handlers |= check_signal_handler(BREAK_SIGNAL);
   }
 
-  do_signal_check(PosixSignals::SR_signum);
+  print_handlers |= check_signal_handler(PosixSignals::SR_signum);
+
+  // As we ignore SIGPIPE and SIGXFSZ, and expect other code to potentially
+  // install handlers for them, we don't bother checking them here.
+
+  if (print_handlers) {
+    // If we had a mismatch:
+    // - print all signal handlers. As part of that printout, details will be printed
+    //   about any modified handlers.
+    char buf[O_BUFLEN];
+    os::print_signal_handlers(st, buf, O_BUFLEN);
+    st->print_cr("Consider using jsig library.");
+  }
 }
 
 // Helper function for PosixSignals::print_siginfo_...():
@@ -892,6 +950,32 @@ struct enum_sigcode_desc_t {
   const char* s_name;
   const char* s_desc;
 };
+
+#if defined(LINUX)
+// Additional kernel si_code definitions that are only exported by
+// more recent glibc distributions, so we have to hard-code the values.
+#ifndef BUS_MCEERR_AR // glibc 2.17
+#define BUS_MCEERR_AR 4
+#define BUS_MCEERR_AO 5
+#endif
+
+#ifndef SEGV_PKUERR // glibc 2.27
+#define SEGV_PKUERR 4
+#endif
+
+#ifndef SYS_SECCOMP // glibc 2.28
+#define SYS_SECCOMP 1
+#endif
+
+#ifndef TRAP_BRANCH // glibc 2.30
+#define TRAP_BRANCH 3
+#endif
+
+#ifndef TRAP_HWBKPT // not glibc version specific - gdb related
+#define TRAP_HWBKPT 4
+#endif
+
+#endif // LINUX
 
 static bool get_signal_code_description(const siginfo_t* si, enum_sigcode_desc_t* out) {
 
@@ -906,10 +990,6 @@ static bool get_signal_code_description(const siginfo_t* si, enum_sigcode_desc_t
     { SIGILL,  ILL_PRVREG,   "ILL_PRVREG",   "Privileged register." },
     { SIGILL,  ILL_COPROC,   "ILL_COPROC",   "Coprocessor error." },
     { SIGILL,  ILL_BADSTK,   "ILL_BADSTK",   "Internal stack error." },
-#if defined(IA64) && defined(LINUX)
-    { SIGILL,  ILL_BADIADDR, "ILL_BADIADDR", "Unimplemented instruction address" },
-    { SIGILL,  ILL_BREAK,    "ILL_BREAK",    "Application Break instruction" },
-#endif
     { SIGFPE,  FPE_INTDIV,   "FPE_INTDIV",   "Integer divide by zero." },
     { SIGFPE,  FPE_INTOVF,   "FPE_INTOVF",   "Integer overflow." },
     { SIGFPE,  FPE_FLTDIV,   "FPE_FLTDIV",   "Floating-point divide by zero." },
@@ -920,18 +1000,29 @@ static bool get_signal_code_description(const siginfo_t* si, enum_sigcode_desc_t
     { SIGFPE,  FPE_FLTSUB,   "FPE_FLTSUB",   "Subscript out of range." },
     { SIGSEGV, SEGV_MAPERR,  "SEGV_MAPERR",  "Address not mapped to object." },
     { SIGSEGV, SEGV_ACCERR,  "SEGV_ACCERR",  "Invalid permissions for mapped object." },
+#if defined(LINUX)
+    { SIGSEGV, SEGV_BNDERR,  "SEGV_BNDERR",  "Failed address bound checks." },
+    { SIGSEGV, SEGV_PKUERR,  "SEGV_PKUERR",  "Protection key checking failure." },
+#endif
 #if defined(AIX)
     // no explanation found what keyerr would be
     { SIGSEGV, SEGV_KEYERR,  "SEGV_KEYERR",  "key error" },
 #endif
-#if defined(IA64) && !defined(AIX)
-    { SIGSEGV, SEGV_PSTKOVF, "SEGV_PSTKOVF", "Paragraph stack overflow" },
-#endif
     { SIGBUS,  BUS_ADRALN,   "BUS_ADRALN",   "Invalid address alignment." },
     { SIGBUS,  BUS_ADRERR,   "BUS_ADRERR",   "Nonexistent physical address." },
     { SIGBUS,  BUS_OBJERR,   "BUS_OBJERR",   "Object-specific hardware error." },
+#if defined(LINUX)
+    { SIGBUS,  BUS_MCEERR_AR,"BUS_MCEERR_AR","Hardware memory error consumed on a machine check: action required." },
+    { SIGBUS,  BUS_MCEERR_AO,"BUS_MCEERR_AO","Hardware memory error detected in process but not consumed: action optional." },
+
+    { SIGSYS,  SYS_SECCOMP,  "SYS_SECCOMP",  "Secure computing (seccomp) filter failure." },
+#endif
     { SIGTRAP, TRAP_BRKPT,   "TRAP_BRKPT",   "Process breakpoint." },
     { SIGTRAP, TRAP_TRACE,   "TRAP_TRACE",   "Process trace trap." },
+#if defined(LINUX)
+    { SIGTRAP, TRAP_BRANCH,  "TRAP_BRANCH",  "Process taken branch trap." },
+    { SIGTRAP, TRAP_HWBKPT,  "TRAP_HWBKPT",  "Hardware breakpoint/watchpoint." },
+#endif
     { SIGCHLD, CLD_EXITED,   "CLD_EXITED",   "Child has exited." },
     { SIGCHLD, CLD_KILLED,   "CLD_KILLED",   "Child has terminated abnormally and did not create a core file." },
     { SIGCHLD, CLD_DUMPED,   "CLD_DUMPED",   "Child has terminated abnormally and created a core file." },
@@ -939,13 +1030,14 @@ static bool get_signal_code_description(const siginfo_t* si, enum_sigcode_desc_t
     { SIGCHLD, CLD_STOPPED,  "CLD_STOPPED",  "Child has stopped." },
     { SIGCHLD, CLD_CONTINUED,"CLD_CONTINUED","Stopped child has continued." },
 #ifdef SIGPOLL
+    { SIGPOLL, POLL_IN,      "POLL_IN",      "Data input available." },
     { SIGPOLL, POLL_OUT,     "POLL_OUT",     "Output buffers available." },
     { SIGPOLL, POLL_MSG,     "POLL_MSG",     "Input message available." },
     { SIGPOLL, POLL_ERR,     "POLL_ERR",     "I/O error." },
     { SIGPOLL, POLL_PRI,     "POLL_PRI",     "High priority input available." },
     { SIGPOLL, POLL_HUP,     "POLL_HUP",     "Device disconnected. [Option End]" },
 #endif
-    { -1, -1, NULL, NULL }
+    { -1, -1, nullptr, nullptr }
   };
 
   // Codes valid in any signal context.
@@ -976,11 +1068,11 @@ static bool get_signal_code_description(const siginfo_t* si, enum_sigcode_desc_t
     { SI_EMPTY,     "SI_EMPTY",    "siginfo contains no useful information" },
 #endif
 
-    { -1, NULL, NULL }
+    { -1, nullptr, nullptr }
   };
 
-  const char* s_code = NULL;
-  const char* s_desc = NULL;
+  const char* s_code = nullptr;
+  const char* s_desc = nullptr;
 
   for (int i = 0; t1[i].sig != -1; i ++) {
     if (t1[i].sig == si->si_signo && t1[i].code == si->si_code) {
@@ -990,8 +1082,8 @@ static bool get_signal_code_description(const siginfo_t* si, enum_sigcode_desc_t
     }
   }
 
-  if (s_code == NULL) {
-    for (int i = 0; t2[i].s_code != NULL; i ++) {
+  if (s_code == nullptr) {
+    for (int i = 0; t2[i].s_code != nullptr; i ++) {
       if (t2[i].code == si->si_code) {
         s_code = t2[i].s_code;
         s_desc = t2[i].s_desc;
@@ -999,7 +1091,7 @@ static bool get_signal_code_description(const siginfo_t* si, enum_sigcode_desc_t
     }
   }
 
-  if (s_code == NULL) {
+  if (s_code == nullptr) {
     out->s_name = "unknown";
     out->s_desc = "unknown";
     return false;
@@ -1041,7 +1133,7 @@ static bool is_valid_signal(int sig) {
 
 static const char* get_signal_name(int sig, char* out, size_t outlen) {
 
-  const char* ret = NULL;
+  const char* ret = nullptr;
 
 #ifdef SIGRTMIN
   if (sig >= SIGRTMIN && sig <= SIGRTMAX) {
@@ -1081,8 +1173,16 @@ static const char* get_signal_name(int sig, char* out, size_t outlen) {
 }
 
 void os::print_siginfo(outputStream* os, const void* si0) {
+#ifdef CAN_SHOW_REGISTERS_ON_ASSERT
+  // If we are here because of an assert/guarantee, we suppress
+  // printing the siginfo, because it is only an implementation
+  // detail capturing the context for said assert/guarantee.
+  if (VMError::was_assert_poison_crash(si0)) {
+    return;
+  }
+#endif
 
-  const siginfo_t* const si = (const siginfo_t*) si0;
+  const siginfo_t* const si = (const siginfo_t*)si0;
 
   char buf[20];
   os->print("siginfo:");
@@ -1130,7 +1230,11 @@ void os::print_siginfo(outputStream* os, const void* si0) {
     os->print(", si_addr: " PTR_FORMAT, p2i(si->si_addr));
 #ifdef SIGPOLL
   } else if (sig == SIGPOLL) {
-    os->print(", si_band: %ld", si->si_band);
+    // siginfo_t.si_band is defined as "long", and it is so in most
+    // implementations. But SPARC64 glibc has a bug: si_band is "int".
+    // Cast si_band to "long" to prevent format specifier mismatch.
+    // See: https://sourceware.org/bugzilla/show_bug.cgi?id=23821
+    os->print(", si_band: %ld", (long) si->si_band);
 #endif
   }
 }
@@ -1149,12 +1253,12 @@ bool os::signal_thread(Thread* thread, int sig, const char* reason) {
 }
 
 // Returns:
-// NULL for an invalid signal number
+// null for an invalid signal number
 // "SIG<num>" for a valid but unknown signal number
 // signal name otherwise.
 const char* os::exception_name(int sig, char* buf, size_t size) {
   if (!is_valid_signal(sig)) {
-    return NULL;
+    return nullptr;
   }
   const char* const name = get_signal_name(sig, buf, size);
   if (strcmp(name, "UNKNOWN") == 0) {
@@ -1178,23 +1282,22 @@ int os::get_signal_number(const char* signal_name) {
   return -1;
 }
 
-void set_signal_handler(int sig) {
+static void set_signal_handler(int sig) {
   // Check for overwrite.
   struct sigaction oldAct;
-  sigaction(sig, (struct sigaction*)NULL, &oldAct);
+  sigaction(sig, (struct sigaction*)nullptr, &oldAct);
 
-  void* oldhand = oldAct.sa_sigaction
-                ? CAST_FROM_FN_PTR(void*,  oldAct.sa_sigaction)
-                : CAST_FROM_FN_PTR(void*,  oldAct.sa_handler);
-  if (oldhand != CAST_FROM_FN_PTR(void*, SIG_DFL) &&
-      oldhand != CAST_FROM_FN_PTR(void*, SIG_IGN) &&
-      oldhand != CAST_FROM_FN_PTR(void*, (sa_sigaction_t)javaSignalHandler)) {
+  // Query the current signal handler. Needs to be a separate operation
+  // from installing a new handler since we need to honor AllowUserSignalHandlers.
+  void* oldhand = get_signal_handler(&oldAct);
+  if (!HANDLER_IS_IGN_OR_DFL(oldhand) &&
+      !HANDLER_IS(oldhand, javaSignalHandler)) {
     if (AllowUserSignalHandlers) {
       // Do not overwrite; user takes responsibility to forward to us.
       return;
     } else if (UseSignalChaining) {
       // save the old handler in jvm
-      save_preinstalled_handler(sig, oldAct);
+      chained_handlers.set(sig, &oldAct);
       // libjsig also interposes the sigaction() call below and saves the
       // old sigaction on it own.
     } else {
@@ -1204,46 +1307,36 @@ void set_signal_handler(int sig) {
   }
 
   struct sigaction sigAct;
-  sigfillset(&(sigAct.sa_mask));
-  remove_error_signals_from_set(&(sigAct.sa_mask));
-  sigAct.sa_sigaction = javaSignalHandler;
-  sigAct.sa_flags = SA_SIGINFO|SA_RESTART;
-#if defined(__APPLE__)
-  // Needed for main thread as XNU (Mac OS X kernel) will only deliver SIGSEGV
-  // (which starts as SIGBUS) on main thread with faulting address inside "stack+guard pages"
-  // if the signal handler declares it will handle it on alternate stack.
-  // Notice we only declare we will handle it on alt stack, but we are not
-  // actually going to use real alt stack - this is just a workaround.
-  // Please see ux_exception.c, method catch_mach_exception_raise for details
-  // link http://www.opensource.apple.com/source/xnu/xnu-2050.18.24/bsd/uxkern/ux_exception.c
-  if (sig == SIGSEGV) {
-    sigAct.sa_flags |= SA_ONSTACK;
-  }
-#endif
-
-  // Save flags, which are set by ours
-  assert(sig > 0 && sig < NSIG, "vm signal out of expected range");
-  sigflags[sig] = sigAct.sa_flags;
-
-  int ret = sigaction(sig, &sigAct, &oldAct);
+  int ret = PosixSignals::install_sigaction_signal_handler(&sigAct, &oldAct,
+                                                           sig, javaSignalHandler);
   assert(ret == 0, "check");
 
-  void* oldhand2  = oldAct.sa_sigaction
-                  ? CAST_FROM_FN_PTR(void*, oldAct.sa_sigaction)
-                  : CAST_FROM_FN_PTR(void*, oldAct.sa_handler);
+  // Save handler setup for possible later checking
+  vm_handlers.set(sig, &sigAct);
+
+  bool do_check = true;
+  if (sig == SIGPIPE || sig == SIGXFSZ) {
+    // As we ignore these signals, and expect other code to potentially
+    // install handlers for them, we don't bother checking them.
+    do_check = false;
+  }
+  do_check_signal_periodically[sig] = do_check;
+#ifdef ASSERT
+  void* oldhand2  = get_signal_handler(&oldAct);
   assert(oldhand2 == oldhand, "no concurrent signal handler installation");
+#endif
 }
 
 // install signal handlers for signals that HotSpot needs to
 // handle in order to support Java-level exception handling.
-void install_signal_handlers() {
+static void install_signal_handlers() {
   // signal-chaining
   typedef void (*signal_setting_t)();
-  signal_setting_t begin_signal_setting = NULL;
-  signal_setting_t end_signal_setting = NULL;
+  signal_setting_t begin_signal_setting = nullptr;
+  signal_setting_t end_signal_setting = nullptr;
   begin_signal_setting = CAST_TO_FN_PTR(signal_setting_t,
                                         dlsym(RTLD_DEFAULT, "JVM_begin_signal_setting"));
-  if (begin_signal_setting != NULL) {
+  if (begin_signal_setting != nullptr) {
     end_signal_setting = CAST_TO_FN_PTR(signal_setting_t,
                                         dlsym(RTLD_DEFAULT, "JVM_end_signal_setting"));
     get_signal_action = CAST_TO_FN_PTR(get_signal_t,
@@ -1263,22 +1356,40 @@ void install_signal_handlers() {
   set_signal_handler(SIGFPE);
   PPC64_ONLY(set_signal_handler(SIGTRAP);)
   set_signal_handler(SIGXFSZ);
+  if (!ReduceSignalUsage) {
+    // Install BREAK_SIGNAL's handler in early initialization phase, in
+    // order to reduce the risk that an attach client accidentally forces
+    // HotSpot to quit prematurely.
+    // The actual work for handling BREAK_SIGNAL is performed by the Signal
+    // Dispatcher thread, which is created and started at a much later point,
+    // see os::initialize_jdk_signal_support(). Any BREAK_SIGNAL received
+    // before the Signal Dispatcher thread is started is queued up via the
+    // pending_signals[BREAK_SIGNAL] counter, and will be processed by the
+    // Signal Dispatcher thread in a delayed fashion.
+    //
+    // Also note that HotSpot does NOT support signal chaining for BREAK_SIGNAL.
+    // Applications that require a custom BREAK_SIGNAL handler should run with
+    // -XX:+ReduceSignalUsage. Otherwise if libjsig is used together with
+    // -XX:+ReduceSignalUsage, libjsig will prevent changing BREAK_SIGNAL's
+    // handler to a custom handler.
+    struct sigaction sigAct, oldSigAct;
+    int ret =  PosixSignals::install_sigaction_signal_handler(&sigAct, &oldSigAct,
+                                                              BREAK_SIGNAL, UserHandler);
+    assert(ret == 0, "check");
+  }
 
 #if defined(__APPLE__)
-  // In Mac OS X 10.4, CrashReporter will write a crash log for all 'fatal' signals, including
-  // signals caught and handled by the JVM. To work around this, we reset the mach task
-  // signal handler that's placed on our process by CrashReporter. This disables
-  // CrashReporter-based reporting.
-  //
-  // This work-around is not necessary for 10.5+, as CrashReporter no longer intercedes
-  // on caught fatal signals.
-  //
-  // Additionally, gdb installs both standard BSD signal handlers, and mach exception
-  // handlers. By replacing the existing task exception handler, we disable gdb's mach
+  // lldb (gdb) installs both standard BSD signal handlers, and mach exception
+  // handlers. By replacing the existing task exception handler, we disable lldb's mach
   // exception handling, while leaving the standard BSD signal handlers functional.
+  //
+  // EXC_MASK_BAD_ACCESS needed by all architectures for null ptr checking
+  // EXC_MASK_ARITHMETIC needed by all architectures for div by 0 checking
+  // EXC_MASK_BAD_INSTRUCTION needed by aarch64 to initiate deoptimization
   kern_return_t kr;
   kr = task_set_exception_ports(mach_task_self(),
-                                EXC_MASK_BAD_ACCESS | EXC_MASK_ARITHMETIC,
+                                EXC_MASK_BAD_ACCESS | EXC_MASK_ARITHMETIC
+                                  AARCH64_ONLY(| EXC_MASK_BAD_INSTRUCTION),
                                 MACH_PORT_NULL,
                                 EXCEPTION_STATE_IDENTITY,
                                 MACHINE_THREAD_STATE);
@@ -1330,55 +1441,71 @@ static void print_signal_set_short(outputStream* st, const sigset_t* set) {
   st->print("%s", buf);
 }
 
-void PosixSignals::print_signal_handler(outputStream* st, int sig,
-                                 char* buf, size_t buflen) {
-  struct sigaction sa;
-  sigaction(sig, NULL, &sa);
+static void print_single_signal_handler(outputStream* st,
+                                        const struct sigaction* act,
+                                        char* buf, size_t buflen) {
 
-  // See comment for SA_RESTORER_FLAG_MASK
-  LINUX_ONLY(sa.sa_flags &= SA_RESTORER_FLAG_MASK;)
-
-  st->print("%s: ", os::exception_name(sig, buf, buflen));
-
-  address handler = (sa.sa_flags & SA_SIGINFO)
-    ? CAST_FROM_FN_PTR(address, sa.sa_sigaction)
-    : CAST_FROM_FN_PTR(address, sa.sa_handler);
-
-  if (handler == CAST_FROM_FN_PTR(address, SIG_DFL)) {
+  address handler = get_signal_handler(act);
+  if (HANDLER_IS_DFL(handler)) {
     st->print("SIG_DFL");
-  } else if (handler == CAST_FROM_FN_PTR(address, SIG_IGN)) {
+  } else if (HANDLER_IS_IGN(handler)) {
     st->print("SIG_IGN");
   } else {
-    st->print("[%s]", get_signal_handler_name(handler, buf, buflen));
+    print_signal_handler_name(st, handler, buf, buflen);
   }
 
-  st->print(", sa_mask[0]=");
-  print_signal_set_short(st, &sa.sa_mask);
+  st->print(", mask=");
+  print_signal_set_short(st, &(act->sa_mask));
 
-  address rh = VMError::get_resetted_sighandler(sig);
-  // May be, handler was resetted by VMError?
-  if (rh != NULL) {
-    handler = rh;
-    // See comment for SA_RESTORER_FLAG_MASK
-    sa.sa_flags = VMError::get_resetted_sigflags(sig) LINUX_ONLY(& SA_RESTORER_FLAG_MASK);
-  }
+  st->print(", flags=");
+  int flags = get_sanitized_sa_flags(act);
+  print_sa_flags(st, flags);
+}
 
-  // Print textual representation of sa_flags.
-  st->print(", sa_flags=");
-  print_sa_flags(st, sa.sa_flags);
+// Print established signal handler for this signal.
+// - if this signal handler was installed by us and is chained to a pre-established user handler
+//    it replaced, print that one too.
+// - otherwise, if this signal handler was installed by us and replaced another handler to which we
+//    are not chained (e.g. if chaining is off), print that one too.
+void PosixSignals::print_signal_handler(outputStream* st, int sig,
+                                        char* buf, size_t buflen) {
 
-  // Check: is it our handler?
-  if (handler == CAST_FROM_FN_PTR(address, (sa_sigaction_t)javaSignalHandler) ||
-      handler == CAST_FROM_FN_PTR(address, (sa_sigaction_t)SR_handler)) {
-    // It is our signal handler
-    // check for flags, reset system-used one!
-    if ((int)sa.sa_flags != get_our_sigflags(sig)) {
-      st->print(
-                ", flags was changed from " PTR32_FORMAT ", consider using jsig library",
-                get_our_sigflags(sig));
-    }
+  st->print("%10s: ", os::exception_name(sig, buf, buflen));
+
+  struct sigaction current_act;
+  sigaction(sig, nullptr, &current_act);
+
+  print_single_signal_handler(st, &current_act, buf, buflen);
+
+  sigset_t thread_sig_mask;
+  if (::pthread_sigmask(/* ignored */ SIG_BLOCK, nullptr, &thread_sig_mask) == 0) {
+    st->print(", %s", sigismember(&thread_sig_mask, sig) ? "blocked" : "unblocked");
   }
   st->cr();
+
+  // If we expected to see our own hotspot signal handler but found a different one,
+  //  print a warning (unless the handler replacing it is our own crash handler, which can
+  //  happen if this function is called during error reporting).
+  const struct sigaction* expected_act = vm_handlers.get(sig);
+  if (expected_act != nullptr) {
+    const address current_handler = get_signal_handler(&current_act);
+    if (!(HANDLER_IS(current_handler, VMError::crash_handler_address))) {
+      if (!are_actions_equal(&current_act, expected_act)) {
+        st->print_cr("  *** Handler was modified!");
+        st->print   ("  *** Expected: ");
+        print_single_signal_handler(st, expected_act, buf, buflen);
+        st->cr();
+      }
+    }
+  }
+
+  // If there is a chained handler waiting behind the current one, print it too.
+  const struct sigaction* chained_act = get_chained_signal_action(sig);
+  if (chained_act != nullptr) {
+    st->print("  chained to: ");
+    print_single_signal_handler(st, &current_act, buf, buflen);
+    st->cr();
+  }
 }
 
 void os::print_signal_handlers(outputStream* st, char* buf, size_t buflen) {
@@ -1406,14 +1533,20 @@ void os::print_signal_handlers(outputStream* st, char* buf, size_t buflen) {
 
 bool PosixSignals::is_sig_ignored(int sig) {
   struct sigaction oact;
-  sigaction(sig, (struct sigaction*)NULL, &oact);
-  void* ohlr = oact.sa_sigaction ? CAST_FROM_FN_PTR(void*,  oact.sa_sigaction)
-                                 : CAST_FROM_FN_PTR(void*,  oact.sa_handler);
-  if (ohlr == CAST_FROM_FN_PTR(void*, SIG_IGN)) {
+  sigaction(sig, (struct sigaction*)nullptr, &oact);
+  if (HANDLER_IS_IGN(get_signal_handler(&oact))) {
     return true;
   } else {
     return false;
   }
+}
+
+void* PosixSignals::get_signal_handler_for_signal(int sig) {
+  struct sigaction oact;
+  if (sigaction(sig, (struct sigaction*)nullptr, &oact) == -1) {
+    return nullptr;
+  }
+  return get_signal_handler(&oact);
 }
 
 static void signal_sets_init() {
@@ -1458,7 +1591,7 @@ static void signal_sets_init() {
   if (!ReduceSignalUsage) {
     sigaddset(&vm_sigs, BREAK_SIGNAL);
   }
-  debug_only(signal_sets_initialized = true);
+  DEBUG_ONLY(signal_sets_initialized = true);
 }
 
 // These are signals that are unblocked while a thread is running Java.
@@ -1479,20 +1612,20 @@ void PosixSignals::hotspot_sigmask(Thread* thread) {
 
   //Save caller's signal mask before setting VM signal mask
   sigset_t caller_sigmask;
-  pthread_sigmask(SIG_BLOCK, NULL, &caller_sigmask);
+  pthread_sigmask(SIG_BLOCK, nullptr, &caller_sigmask);
 
   OSThread* osthread = thread->osthread();
   osthread->set_caller_sigmask(caller_sigmask);
 
-  pthread_sigmask(SIG_UNBLOCK, unblocked_signals(), NULL);
+  pthread_sigmask(SIG_UNBLOCK, unblocked_signals(), nullptr);
 
   if (!ReduceSignalUsage) {
     if (thread->is_VM_thread()) {
       // Only the VM thread handles BREAK_SIGNAL ...
-      pthread_sigmask(SIG_UNBLOCK, vm_signals(), NULL);
+      pthread_sigmask(SIG_UNBLOCK, vm_signals(), nullptr);
     } else {
       // ... all other threads block BREAK_SIGNAL
-      pthread_sigmask(SIG_BLOCK, vm_signals(), NULL);
+      pthread_sigmask(SIG_BLOCK, vm_signals(), nullptr);
     }
   }
 }
@@ -1517,25 +1650,19 @@ void PosixSignals::hotspot_sigmask(Thread* thread) {
 //      - sets target osthread state to continue
 //      - sends signal to end the sigsuspend loop in the SR_handler
 //
-//  Note that the SR_lock plays no role in this suspend/resume protocol,
-//  but is checked for NULL in SR_handler as a thread termination indicator.
-//  The SR_lock is, however, used by JavaThread::java_suspend()/java_resume() APIs.
-//
 //  Note that resume_clear_context() and suspend_save_context() are needed
 //  by SR_handler(), so that fetch_frame_from_context() works,
 //  which in part is used by:
 //    - Forte Analyzer: AsyncGetCallTrace()
 //    - StackBanging: get_frame_at_stack_banging_point()
 
-sigset_t SR_sigset;
-
 static void resume_clear_context(OSThread *osthread) {
-  osthread->set_ucontext(NULL);
-  osthread->set_siginfo(NULL);
+  osthread->set_ucontext(nullptr);
+  osthread->set_siginfo(nullptr);
 }
 
-static void suspend_save_context(OSThread *osthread, siginfo_t* siginfo, ucontext_t* context) {
-  osthread->set_ucontext(context);
+static void suspend_save_context(OSThread *osthread, siginfo_t* siginfo, void* ucVoid) {
+  osthread->set_ucontext((ucontext_t*)ucVoid);
   osthread->set_siginfo(siginfo);
 }
 
@@ -1552,115 +1679,132 @@ static void suspend_save_context(OSThread *osthread, siginfo_t* siginfo, ucontex
 //
 // Currently only ever called on the VMThread and JavaThreads (PC sampling)
 //
-static void SR_handler(int sig, siginfo_t* siginfo, ucontext_t* context) {
+static void SR_handler(int sig, siginfo_t* siginfo, void* context) {
 
   // Save and restore errno to avoid confusing native code with EINTR
   // after sigsuspend.
-  int old_errno = errno;
+  ErrnoPreserver ep;
 
   PosixSignals::unblock_error_signals();
 
   Thread* thread = Thread::current_or_null_safe();
-  assert(thread != NULL, "Missing current thread in SR_handler");
 
-  // On some systems we have seen signal delivery get "stuck" until the signal
-  // mask is changed as part of thread termination. Check that the current thread
-  // has not already terminated (via SR_lock()) - else the following assertion
-  // will fail because the thread is no longer a JavaThread as the ~JavaThread
-  // destructor has completed.
-
-  if (thread->SR_lock() == NULL) {
+  // The suspend/resume signal may have been sent from outside the process, deliberately or
+  // accidentally. In that case the receiving thread may not be attached to the VM. We handle
+  // that case by asserting (debug VM) resp. writing a diagnostic message to tty and
+  // otherwise ignoring the stray signal (release VMs).
+  // We print the siginfo as part of the diagnostics, which also contains the sender pid of
+  // the stray signal.
+  if (thread == nullptr) {
+    stringStream ss;
+    ss.print_raw("Non-attached thread received stray SR signal (");
+    os::print_siginfo(&ss, siginfo);
+    ss.print_raw(").");
+    assert(thread != nullptr, "%s.", ss.base());
+    log_warning(os)("%s", ss.base());
     return;
   }
 
-  assert(thread->is_VM_thread() || thread->is_Java_thread(), "Must be VMThread or JavaThread");
+  // On some systems we have seen signal delivery get "stuck" until the signal
+  // mask is changed as part of thread termination. Check that the current thread
+  // has not already terminated, else the osthread may already have been freed.
+  if (thread->has_terminated()) {
+    return;
+  }
 
   OSThread* osthread = thread->osthread();
 
-  os::SuspendResume::State current = osthread->sr.state();
+  SuspendResume::State current = osthread->sr.state();
 
-  if (current == os::SuspendResume::SR_SUSPEND_REQUEST) {
+  if (current == SuspendResume::SR_SUSPEND_REQUEST) {
+    // Only check this on an active suspend request. It is possible to get a late delivered
+    // signal from a cancelled suspend request that hits after the JavaThread destructor
+    // completes, but before the Thread destructor causes `is_terminated()` to be true.
+    assert(thread->is_VM_thread() || thread->is_Java_thread(), "Must be VMThread or JavaThread");
+
     suspend_save_context(osthread, siginfo, context);
 
     // attempt to switch the state, we assume we had a SUSPEND_REQUEST
-    os::SuspendResume::State state = osthread->sr.suspended();
-    if (state == os::SuspendResume::SR_SUSPENDED) {
+    SuspendResume::State state = osthread->sr.suspended();
+    if (state == SuspendResume::SR_SUSPENDED) {
       sigset_t suspend_set;  // signals for sigsuspend()
       sigemptyset(&suspend_set);
 
       // get current set of blocked signals and unblock resume signal
-      pthread_sigmask(SIG_BLOCK, NULL, &suspend_set);
+      pthread_sigmask(SIG_BLOCK, nullptr, &suspend_set);
       sigdelset(&suspend_set, PosixSignals::SR_signum);
 
-      sr_semaphore.signal();
+      sr_semaphore->signal();
 
       // wait here until we are resumed
       while (1) {
         sigsuspend(&suspend_set);
 
-        os::SuspendResume::State result = osthread->sr.running();
-        if (result == os::SuspendResume::SR_RUNNING) {
+        SuspendResume::State result = osthread->sr.running();
+        if (result == SuspendResume::SR_RUNNING) {
           // double check AIX doesn't need this!
-          sr_semaphore.signal();
+          sr_semaphore->signal();
           break;
-        } else if (result != os::SuspendResume::SR_SUSPENDED) {
+        } else if (result != SuspendResume::SR_SUSPENDED) {
           ShouldNotReachHere();
         }
       }
 
-    } else if (state == os::SuspendResume::SR_RUNNING) {
+    } else if (state == SuspendResume::SR_RUNNING) {
       // request was cancelled, continue
     } else {
       ShouldNotReachHere();
     }
 
     resume_clear_context(osthread);
-  } else if (current == os::SuspendResume::SR_RUNNING) {
+  } else if (current == SuspendResume::SR_RUNNING) {
     // request was cancelled, continue
-  } else if (current == os::SuspendResume::SR_WAKEUP_REQUEST) {
+  } else if (current == SuspendResume::SR_WAKEUP_REQUEST) {
     // ignore
   } else {
     // ignore
   }
 
-  errno = old_errno;
 }
 
-int SR_initialize() {
+static int SR_initialize() {
+  int sem_count = 0;
+  sr_semaphore.initialize(sem_count);
+
   struct sigaction act;
   char *s;
   // Get signal number to use for suspend/resume
-  if ((s = ::getenv("_JAVA_SR_SIGNUM")) != 0) {
-    int sig = ::strtol(s, 0, 10);
-    if (sig > MAX2(SIGSEGV, SIGBUS) &&  // See 4355769.
+  if ((s = ::getenv("_JAVA_SR_SIGNUM")) != nullptr) {
+    int sig;
+    bool result = parse_integer(s, &sig);
+    if (result && sig > MAX2(SIGSEGV, SIGBUS) &&  // See 4355769.
         sig < NSIG) {                   // Must be legal signal and fit into sigflags[].
       PosixSignals::SR_signum = sig;
     } else {
-      warning("You set _JAVA_SR_SIGNUM=%d. It must be in range [%d, %d]. Using %d instead.",
-              sig, MAX2(SIGSEGV, SIGBUS)+1, NSIG-1, PosixSignals::SR_signum);
+      warning("You set _JAVA_SR_SIGNUM=%s. It must be a number in range [%d, %d]. Using %d instead.",
+              s, MAX2(SIGSEGV, SIGBUS)+1, NSIG-1, PosixSignals::SR_signum);
     }
   }
 
   assert(PosixSignals::SR_signum > SIGSEGV && PosixSignals::SR_signum > SIGBUS,
          "SR_signum must be greater than max(SIGSEGV, SIGBUS), see 4355769");
 
-  sigemptyset(&SR_sigset);
-  sigaddset(&SR_sigset, PosixSignals::SR_signum);
-
   // Set up signal handler for suspend/resume
   act.sa_flags = SA_RESTART|SA_SIGINFO;
-  act.sa_handler = (void (*)(int)) SR_handler;
+  act.sa_sigaction = SR_handler;
 
-  // SR_signum is blocked by default.
-  pthread_sigmask(SIG_BLOCK, NULL, &act.sa_mask);
+  // SR_signum is blocked when the handler runs.
+  pthread_sigmask(SIG_BLOCK, nullptr, &act.sa_mask);
   remove_error_signals_from_set(&(act.sa_mask));
 
-  if (sigaction(PosixSignals::SR_signum, &act, 0) == -1) {
+  if (sigaction(PosixSignals::SR_signum, &act, nullptr) == -1) {
     return -1;
   }
 
-  // Save signal flag
-  set_our_sigflags(PosixSignals::SR_signum, act.sa_flags);
+  // Save signal setup information for later checking.
+  vm_handlers.set(PosixSignals::SR_signum, &act);
+  do_check_signal_periodically[PosixSignals::SR_signum] = true;
+
   return 0;
 }
 
@@ -1674,10 +1818,10 @@ static int sr_notify(OSThread* osthread) {
 // but this seems the normal response to library errors
 bool PosixSignals::do_suspend(OSThread* osthread) {
   assert(osthread->sr.is_running(), "thread should be running");
-  assert(!sr_semaphore.trywait(), "semaphore has invalid state");
+  assert(!sr_semaphore->trywait(), "semaphore has invalid state");
 
   // mark as suspended and send signal
-  if (osthread->sr.request_suspend() != os::SuspendResume::SR_SUSPEND_REQUEST) {
+  if (osthread->sr.request_suspend() != SuspendResume::SR_SUSPEND_REQUEST) {
     // failed to switch, state wasn't running?
     ShouldNotReachHere();
     return false;
@@ -1689,16 +1833,16 @@ bool PosixSignals::do_suspend(OSThread* osthread) {
 
   // managed to send the signal and switch to SUSPEND_REQUEST, now wait for SUSPENDED
   while (true) {
-    if (sr_semaphore.timedwait(2)) {
+    if (sr_semaphore->timedwait(2)) {
       break;
     } else {
       // timeout
-      os::SuspendResume::State cancelled = osthread->sr.cancel_suspend();
-      if (cancelled == os::SuspendResume::SR_RUNNING) {
+      SuspendResume::State cancelled = osthread->sr.cancel_suspend();
+      if (cancelled == SuspendResume::SR_RUNNING) {
         return false;
-      } else if (cancelled == os::SuspendResume::SR_SUSPENDED) {
+      } else if (cancelled == SuspendResume::SR_SUSPENDED) {
         // make sure that we consume the signal on the semaphore as well
-        sr_semaphore.wait();
+        sr_semaphore->wait();
         break;
       } else {
         ShouldNotReachHere();
@@ -1713,9 +1857,9 @@ bool PosixSignals::do_suspend(OSThread* osthread) {
 
 void PosixSignals::do_resume(OSThread* osthread) {
   assert(osthread->sr.is_suspended(), "thread should be suspended");
-  assert(!sr_semaphore.trywait(), "invalid semaphore state");
+  assert(!sr_semaphore->trywait(), "invalid semaphore state");
 
-  if (osthread->sr.request_wakeup() != os::SuspendResume::SR_WAKEUP_REQUEST) {
+  if (osthread->sr.request_wakeup() != SuspendResume::SR_WAKEUP_REQUEST) {
     // failed to switch to WAKEUP_REQUEST
     ShouldNotReachHere();
     return;
@@ -1723,7 +1867,7 @@ void PosixSignals::do_resume(OSThread* osthread) {
 
   while (true) {
     if (sr_notify(osthread) == 0) {
-      if (sr_semaphore.timedwait(2)) {
+      if (sr_semaphore->timedwait(2)) {
         if (osthread->sr.is_running()) {
           return;
         }
@@ -1736,9 +1880,9 @@ void PosixSignals::do_resume(OSThread* osthread) {
   guarantee(osthread->sr.is_running(), "Must be running!");
 }
 
-void os::SuspendedThreadTask::internal_do_task() {
+void SuspendedThreadTask::internal_do_task() {
   if (PosixSignals::do_suspend(_thread->osthread())) {
-    os::SuspendedThreadTaskContext context(_thread, _thread->osthread()->ucontext());
+    SuspendedThreadTaskContext context(_thread, _thread->osthread()->ucontext());
     do_task(context);
     PosixSignals::do_resume(_thread->osthread());
   }
@@ -1753,12 +1897,12 @@ int PosixSignals::init() {
 
   signal_sets_init();
 
-  install_signal_handlers();
-
-  // Initialize data for jdk.internal.misc.Signal
+  // Initialize data for jdk.internal.misc.Signal and BREAK_SIGNAL's handler.
   if (!ReduceSignalUsage) {
     jdk_misc_signal_init();
   }
+
+  install_signal_handlers();
 
   return JNI_OK;
 }

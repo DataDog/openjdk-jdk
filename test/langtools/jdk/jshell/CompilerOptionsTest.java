@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,31 +26,33 @@
  * @bug 8159635
  * @summary Test setting compiler options
  * @build KullaTesting TestingInputStream
- * @run testng CompilerOptionsTest
+ * @run junit CompilerOptionsTest
  */
 
 import javax.tools.Diagnostic;
-import org.testng.annotations.Test;
-import org.testng.annotations.BeforeMethod;
 import static jdk.jshell.Snippet.Status.VALID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-@Test
 public class CompilerOptionsTest extends KullaTesting {
 
-    @BeforeMethod
+    @BeforeEach
     @Override
     public void setUp() {
-        setUp(b -> b.compilerOptions("-source", "7", "-Xlint:cast,-options"));
+        setUp(b -> b.compilerOptions("-source", "8", "-Xlint:cast,-options"));
     }
 
+    @Test
     public void testLint() {
         assertDeclareWarn1("String s = (String)\"hello\";",
                 new ExpectedDiagnostic("compiler.warn.redundant.cast", 11, 26, 11, -1, -1, Diagnostic.Kind.WARNING));
     }
 
+    @Test
     public void testSourceVersion() {
-        assertEval("import java.util.function.*;", added(VALID));
-        assertDeclareFail("Function<Integer,Integer> f = x -> x*2;",
-                new ExpectedDiagnostic("compiler.err.feature.not.supported.in.source.plural", 32, 32, 32, -1, -1, Diagnostic.Kind.ERROR));
+        assertEval("import java.util.ArrayList;", added(VALID));
+        // Diamond with anonymous classes allowed in 9
+        assertDeclareFail("ArrayList<Integer> list = new ArrayList<>(){};",
+                new ExpectedDiagnostic("compiler.err.cant.apply.diamond.1", 30, 41, 39, -1, -1, Diagnostic.Kind.ERROR));
     }
 }

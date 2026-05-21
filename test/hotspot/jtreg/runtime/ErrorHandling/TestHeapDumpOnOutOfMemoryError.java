@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,9 +23,18 @@
 
 /*
  * @test TestHeapDumpOnOutOfMemoryError
- * @summary Test verifies that -XX:HeapDumpOnOutOfMemoryError dump heap when OutOfMemory is thrown in heap
+ * @summary Test verifies that -XX:HeapDumpOnOutOfMemoryError dumps heap when OutOfMemory is thrown in heap
  * @library /test/lib
+ * @requires vm.flagless
  * @run driver TestHeapDumpOnOutOfMemoryError run heap
+ */
+
+/*
+ * @test TestHeapDumpOnOutOfMemoryError
+ * @summary Test verifies that -XX:HeapDumpOnOutOfMemoryError dumps heap when OutOfMemory is thrown in metaspace.
+ * @library /test/lib
+ * @requires vm.flagless
+ * @run driver/timeout=240 TestHeapDumpOnOutOfMemoryError run metaspace
  */
 
 import jdk.test.lib.Asserts;
@@ -44,7 +53,7 @@ public class TestHeapDumpOnOutOfMemoryError {
 
     public static void main(String[] args) throws Exception {
         if (args.length == 1) {
-             try {
+            try {
                 if (args[0].equals(HEAP_OOME)) {
                     Object[] oa = new Object[Integer.MAX_VALUE];
                     for(int i = 0; i < oa.length; i++) {
@@ -62,11 +71,13 @@ public class TestHeapDumpOnOutOfMemoryError {
             }
         }
         test(args[1]);
+        System.out.println("PASSED");
     }
 
     static void test(String type) throws Exception {
-        String heapdumpFilename = type + ".hprof";
-        ProcessBuilder pb = ProcessTools.createJavaProcessBuilder("-XX:+HeapDumpOnOutOfMemoryError",
+        // Test using %p pid substitution in HeapDumpPath:
+        String heapdumpFilename = type + ".%p.hprof";
+        ProcessBuilder pb = ProcessTools.createLimitedTestJavaProcessBuilder("-XX:+HeapDumpOnOutOfMemoryError",
                 "-XX:HeapDumpPath=" + heapdumpFilename,
                 // Note: When trying to provoke a metaspace OOM we may generate a lot of classes. In debug VMs this
                 //  can cause considerable wait times since:
@@ -79,18 +90,16 @@ public class TestHeapDumpOnOutOfMemoryError {
                 //  MaxMetaspaceSize=16M - ~12-15K classes - ~12sec runtime with all verifications
                 //  MaxMetaspaceSize=16M - ~12-15K classes - VerifyDependencies off - ~3seconds on ppc
                 "-XX:MaxMetaspaceSize=16m",
+                "-Xmx128m",
                 Platform.isDebugBuild() ? "-XX:-VerifyDependencies" : "-Dx",
                 TestHeapDumpOnOutOfMemoryError.class.getName(), type);
 
         OutputAnalyzer output = new OutputAnalyzer(pb.start());
         output.stdoutShouldNotBeEmpty();
-        output.shouldContain("Dumping heap to " + type + ".hprof");
-        File dump = new File(heapdumpFilename);
-        Asserts.assertTrue(dump.exists() && dump.isFile(),
-                "Could not find dump file " + dump.getAbsolutePath());
-
-        HprofParser.parse(new File(heapdumpFilename));
-        System.out.println("PASSED");
+        String expectedHeapdumpFilename = type + "." + output.pid() + ".hprof";
+        output.shouldContain("Dumping heap to " + expectedHeapdumpFilename);
+        File dump = new File(expectedHeapdumpFilename);
+        Asserts.assertTrue(dump.exists() && dump.isFile(), "Expected heap dump file " + dump.getAbsolutePath());
+        HprofParser.parse(new File(expectedHeapdumpFilename));
     }
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,11 @@
 /*
  * @test
  * @summary Test JFR recording controlled via JMX across container boundary.
- * @requires docker.support
+ * @requires container.support
+ * @requires !vm.asan
  * @library /test/lib
  * @modules java.base/jdk.internal.misc
+ *          java.base/jdk.internal.platform
  *          java.management
  *          jdk.jartool/sun.tools.jar
  * @build EventProducer
@@ -54,6 +56,7 @@ import jdk.management.jfr.FlightRecorderMXBean;
 
 import jdk.test.lib.Asserts;
 import jdk.test.lib.Container;
+import jdk.test.lib.Platform;
 import jdk.test.lib.Utils;
 import jdk.test.lib.containers.docker.Common;
 import jdk.test.lib.containers.docker.DockerRunOptions;
@@ -71,11 +74,13 @@ public class TestJFRWithJMX {
     static final AtomicReference<String> ipAddr = new AtomicReference();
 
     public static void main(String[] args) throws Exception {
-        if (!DockerTestUtils.canTestDocker()) {
-            throw new SkippedException("Docker is not supported on this host");
+        DockerTestUtils.checkCanTestDocker();
+
+        if (DockerTestUtils.isPodman() & !Platform.isRoot()) {
+            throw new SkippedException("test cannot be run under rootless podman configuration");
         }
 
-        DockerTestUtils.buildJdkDockerImage(imageName, "Dockerfile-BasicTest", "jdk-docker");
+        DockerTestUtils.buildJdkContainerImage(imageName);
 
         try {
             test();
@@ -215,4 +220,5 @@ public class TestJFRWithJMX {
             }
         }
     }
+
 }

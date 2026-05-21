@@ -1,5 +1,7 @@
 /*
- * Copyright (c) 2018, 2019, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2018, 2022, Red Hat, Inc. All rights reserved.
+ * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
+ * Copyright (c) 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,21 +24,35 @@
  *
  */
 
-#include "precompiled.hpp"
+#include "gc/shared/fullGCForwarding.hpp"
 #include "gc/shared/gcArguments.hpp"
+#include "gc/shared/tlab_globals.hpp"
 #include "gc/shared/workerPolicy.hpp"
 #include "gc/shenandoah/shenandoahArguments.hpp"
+#include "gc/shenandoah/shenandoahCardTable.hpp"
 #include "gc/shenandoah/shenandoahCollectorPolicy.hpp"
+#include "gc/shenandoah/shenandoahGenerationalHeap.hpp"
 #include "gc/shenandoah/shenandoahHeap.inline.hpp"
 #include "gc/shenandoah/shenandoahHeapRegion.hpp"
 #include "runtime/globals_extension.hpp"
 #include "runtime/java.hpp"
 #include "utilities/defaultStream.hpp"
+#include "utilities/powerOfTwo.hpp"
 
 void ShenandoahArguments::initialize() {
-#if !(defined AARCH64 || defined AMD64 || defined IA32)
+#if !(defined AARCH64 || defined AMD64 || defined PPC64 || defined RISCV64)
   vm_exit_during_initialization("Shenandoah GC is not supported on this platform.");
 #endif
+
+  // Shenandoah relies on the object header bits (including the self-forwarded bit
+  // at markWord::self_fwd_mask_in_place) being preserved across monitor inflation,
+  // which only holds with UseObjectMonitorTable.
+  if (!UseObjectMonitorTable) {
+    if (FLAG_IS_CMDLINE(UseObjectMonitorTable)) {
+      vm_exit_during_initialization("Shenandoah requires UseObjectMonitorTable");
+    }
+    FLAG_SET_DEFAULT(UseObjectMonitorTable, true);
+  }
 
 #if 0 // leave this block as stepping stone for future platforms
   log_warning(gc)("Shenandoah GC is not fully supported on this platform:");
@@ -47,23 +63,32 @@ void ShenandoahArguments::initialize() {
 
   FLAG_SET_DEFAULT(ShenandoahSATBBarrier,            false);
   FLAG_SET_DEFAULT(ShenandoahLoadRefBarrier,         false);
-  FLAG_SET_DEFAULT(ShenandoahStoreValEnqueueBarrier, false);
   FLAG_SET_DEFAULT(ShenandoahCASBarrier,             false);
+  FLAG_SET_DEFAULT(ShenandoahCardBarrier,            false);
   FLAG_SET_DEFAULT(ShenandoahCloneBarrier,           false);
 
   FLAG_SET_DEFAULT(ShenandoahVerifyOptoBarriers,     false);
 #endif
-
-  if (UseLargePages && (MaxHeapSize / os::large_page_size()) < ShenandoahHeapRegion::MIN_NUM_REGIONS) {
-    warning("Large pages size (" SIZE_FORMAT "K) is too large to afford page-sized regions, disabling uncommit",
-            os::large_page_size() / K);
-    FLAG_SET_DEFAULT(ShenandoahUncommit, false);
+  if (UseLargePages) {
+    size_t large_page_size = os::large_page_size();
+    if ((align_up(MaxHeapSize, large_page_size) / large_page_size) < ShenandoahHeapRegion::MIN_NUM_REGIONS) {
+      warning("Large pages size (%zuK) is too large to afford page-sized regions, disabling uncommit",
+              os::large_page_size() / K);
+      FLAG_SET_DEFAULT(ShenandoahUncommit, false);
+    }
   }
 
   // Enable NUMA by default. While Shenandoah is not NUMA-aware, enabling NUMA makes
   // storage allocation code NUMA-aware.
   if (FLAG_IS_DEFAULT(UseNUMA)) {
     FLAG_SET_DEFAULT(UseNUMA, true);
+  }
+
+  // We use this as the time period for tracking minimum mutator utilization (MMU).
+  // In generational mode, the MMU is used as a signal to adjust the size of the
+  // young generation.
+  if (FLAG_IS_DEFAULT(GCPauseIntervalMillis)) {
+    FLAG_SET_DEFAULT(GCPauseIntervalMillis, 5000);
   }
 
   // Set up default number of concurrent threads. We want to have cycles complete fast
@@ -110,8 +135,14 @@ void ShenandoahArguments::initialize() {
     }
   }
 
-  if (FLAG_IS_DEFAULT(ParallelRefProcEnabled)) {
-    FLAG_SET_DEFAULT(ParallelRefProcEnabled, true);
+  // Disable support for dynamic number of GC threads. We do not let the runtime
+  // heuristics to misjudge how many threads we need during the heavy concurrent phase
+  // or a GC pause.
+  if (UseDynamicNumberOfGCThreads) {
+    if (FLAG_IS_CMDLINE(UseDynamicNumberOfGCThreads)) {
+      warning("Shenandoah does not support UseDynamicNumberOfGCThreads, disabling");
+    }
+    FLAG_SET_DEFAULT(UseDynamicNumberOfGCThreads, false);
   }
 
   if (ShenandoahRegionSampling && FLAG_IS_DEFAULT(PerfDataMemorySize)) {
@@ -133,7 +164,6 @@ void ShenandoahArguments::initialize() {
   if (ShenandoahVerifyOptoBarriers &&
           (!FLAG_IS_DEFAULT(ShenandoahSATBBarrier)            ||
            !FLAG_IS_DEFAULT(ShenandoahLoadRefBarrier)         ||
-           !FLAG_IS_DEFAULT(ShenandoahStoreValEnqueueBarrier) ||
            !FLAG_IS_DEFAULT(ShenandoahCASBarrier)             ||
            !FLAG_IS_DEFAULT(ShenandoahCloneBarrier)
           )) {
@@ -160,26 +190,35 @@ void ShenandoahArguments::initialize() {
     FLAG_SET_DEFAULT(ClassUnloadingWithConcurrentMark, false);
   }
 
-  // AOT is not supported yet
-  if (UseAOT) {
-    if (!FLAG_IS_DEFAULT(UseAOT)) {
-      warning("Shenandoah does not support AOT at this moment, disabling UseAOT");
-    }
-    FLAG_SET_DEFAULT(UseAOT, false);
-  }
-
   // TLAB sizing policy makes resizing decisions before each GC cycle. It averages
   // historical data, assigning more recent data the weight according to TLABAllocationWeight.
   // Current default is good for generational collectors that run frequent young GCs.
   // With Shenandoah, GC cycles are much less frequent, so we need we need sizing policy
   // to converge faster over smaller number of resizing decisions.
-  if (FLAG_IS_DEFAULT(TLABAllocationWeight)) {
+  if (strcmp(ShenandoahGCMode, "generational") && FLAG_IS_DEFAULT(TLABAllocationWeight)) {
     FLAG_SET_DEFAULT(TLABAllocationWeight, 90);
   }
+  // In generational mode, let TLABAllocationWeight keeps its default value of 35.
+
+  if (GCCardSizeInBytes < ShenandoahMinCardSizeInBytes) {
+    vm_exit_during_initialization(
+      err_msg("GCCardSizeInBytes ( %u ) must be >= %u\n", GCCardSizeInBytes, (unsigned int) ShenandoahMinCardSizeInBytes));
+  }
+
+  // Gen shen does not support any ShenandoahGCHeuristics value except for the default "adaptive"
+  if ((strcmp(ShenandoahGCMode, "generational") == 0)
+      && strcmp(ShenandoahGCHeuristics, "adaptive") != 0) {
+    log_warning(gc)("Ignoring -XX:ShenandoahGCHeuristics input: %s, because generational shenandoah only"
+      " supports adaptive heuristics", ShenandoahGCHeuristics);
+    FLAG_SET_ERGO(ShenandoahGCHeuristics, "adaptive");
+  }
+
+  FullGCForwarding::initialize_flags(MaxHeapSize);
 }
 
 size_t ShenandoahArguments::conservative_max_heap_alignment() {
-  size_t align = ShenandoahMaxRegionSize;
+  static_assert(is_power_of_2(ShenandoahHeapRegion::MAX_REGION_SIZE), "Max region size must be a power of 2.");
+  size_t align = ShenandoahHeapRegion::MAX_REGION_SIZE;
   if (UseLargePages) {
     align = MAX2(align, os::large_page_size());
   }
@@ -187,8 +226,10 @@ size_t ShenandoahArguments::conservative_max_heap_alignment() {
 }
 
 void ShenandoahArguments::initialize_alignments() {
+  CardTable::initialize_card_size();
+
   // Need to setup sizes early to get correct alignments.
-  ShenandoahHeapRegion::setup_sizes(MaxHeapSize);
+  MaxHeapSize = ShenandoahHeapRegion::setup_sizes(MaxHeapSize);
 
   // This is expected by our algorithm for ShenandoahHeap::heap_region_containing().
   size_t align = ShenandoahHeapRegion::region_size_bytes();
@@ -197,8 +238,17 @@ void ShenandoahArguments::initialize_alignments() {
   }
   SpaceAlignment = align;
   HeapAlignment = align;
+
+  if (FLAG_IS_DEFAULT(TLABSize)) {
+    TLABSize = MAX2(ShenandoahHeapRegion::region_size_bytes() / 256, (size_t) 32 * 1024);
+  }
 }
 
 CollectedHeap* ShenandoahArguments::create_heap() {
-  return new ShenandoahHeap(new ShenandoahCollectorPolicy());
+  if (strcmp(ShenandoahGCMode, "generational") != 0) {
+    // Not generational
+    return new ShenandoahHeap(new ShenandoahCollectorPolicy());
+  } else {
+    return new ShenandoahGenerationalHeap(new ShenandoahCollectorPolicy());
+  }
 }

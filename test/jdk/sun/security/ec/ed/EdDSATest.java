@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -49,7 +49,7 @@ import java.security.spec.InvalidKeySpecException;
 import java.security.spec.NamedParameterSpec;
 import java.security.spec.EdDSAParameterSpec;
 import java.util.Arrays;
-import jdk.test.lib.Convert;
+import java.util.HexFormat;
 
 /*
  * @test
@@ -57,7 +57,7 @@ import jdk.test.lib.Convert;
  * @summary Test Signature with variation of serialized EDDSA Keys.
  * @library /test/lib
  * @build jdk.test.lib.Convert
- * @run main EdDSATest
+ * @run main/timeout=480 EdDSATest
  */
 public class EdDSATest {
 
@@ -68,7 +68,7 @@ public class EdDSATest {
     private static final String OID25519 = "OID.1.3.101.112";
     private static final String OIDN448 = "1.3.101.113";
     private static final String OID448 = "OID.1.3.101.113";
-    private static final String PROVIDER = "SunEC";
+    private static final String PROVIDER = System.getProperty("test.provider.name", "SunEC");
     private static final byte[] MSG = "TEST".getBytes();
     private static final SecureRandom S_RND = new SecureRandom(new byte[]{0x1});
 
@@ -349,8 +349,8 @@ public class EdDSATest {
     private static void equals(byte[] actual, byte[] expected) {
         if (!Arrays.equals(actual, expected)) {
             throw new RuntimeException(String.format("Actual array: %s, "
-                    + "Expected array:%s", Convert.byteArrayToHexString(actual),
-                    Convert.byteArrayToHexString(expected)));
+                    + "Expected array:%s", HexFormat.of().withUpperCase().formatHex(actual),
+                    HexFormat.of().withUpperCase().formatHex(expected)));
         }
     }
 }

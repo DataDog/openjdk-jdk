@@ -1,13 +1,12 @@
 /*
  * @test  /nodynamiccopyright/
  * @bug 6911256 6964740 7013420
- * @author Joseph D. Darcy
  * @summary Verify invalid TWR block is not accepted.
  * @compile/fail/ref=TwrOnNonResource.out -XDrawDiagnostics TwrOnNonResource.java
  */
 
 class TwrOnNonResource {
-    public static void main(String... args) {
+    public static void meth() {
         try(TwrOnNonResource aonr = new TwrOnNonResource()) {
             System.out.println(aonr.toString());
         }

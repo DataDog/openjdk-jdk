@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2020 SAP SE. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2022 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,18 +26,12 @@
 #ifndef SHARE_MEMORY_METASPACE_RUNNINGCOUNTERS_HPP
 #define SHARE_MEMORY_METASPACE_RUNNINGCOUNTERS_HPP
 
-#include "memory/allocation.hpp"
-#include "memory/metaspace/counters.hpp"
+#include "memory/allStatic.hpp"
 
 namespace metaspace {
 
 // This class is a convenience interface for accessing global metaspace counters.
-class RunningCounters : public AllStatic {
-
-  static SizeAtomicCounter _used_class_counter;
-  static SizeAtomicCounter _used_nonclass_counter;
-
-public:
+struct RunningCounters : public AllStatic {
 
   // ---- virtual memory -----
 
@@ -64,10 +58,6 @@ public:
   static size_t free_chunks_words();
   static size_t free_chunks_words_class();
   static size_t free_chunks_words_nonclass();
-
-  // Direct access to the counters.
-  static SizeAtomicCounter* used_nonclass_counter()     { return &_used_nonclass_counter; }
-  static SizeAtomicCounter* used_class_counter()        { return &_used_class_counter; }
 
 };
 

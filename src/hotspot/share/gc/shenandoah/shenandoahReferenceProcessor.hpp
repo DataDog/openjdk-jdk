@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2020, Red Hat, Inc. and/or its affiliates.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2021, Red Hat, Inc. and/or its affiliates.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,14 +23,18 @@
  *
  */
 
-#ifndef SHARE_VM_GC_SHENANDOAH_SHENANDOAHREFERENCEPROCESSOR_HPP
-#define SHARE_VM_GC_SHENANDOAH_SHENANDOAHREFERENCEPROCESSOR_HPP
+#ifndef SHARE_GC_SHENANDOAH_SHENANDOAHREFERENCEPROCESSOR_HPP
+#define SHARE_GC_SHENANDOAH_SHENANDOAHREFERENCEPROCESSOR_HPP
 
 #include "gc/shared/referenceDiscoverer.hpp"
+#include "gc/shared/referencePolicy.hpp"
+#include "gc/shared/referenceProcessorStats.hpp"
+#include "gc/shenandoah/shenandoahPhaseTimings.hpp"
 #include "memory/allocation.hpp"
+#include "runtime/atomic.hpp"
 
 class ShenandoahMarkRefsSuperClosure;
-class WorkGang;
+class WorkerThreads;
 
 static const size_t reference_type_count = REF_PHANTOM + 1;
 typedef size_t Counters[reference_type_count];
@@ -69,7 +73,7 @@ typedef size_t Counters[reference_type_count];
  *   be processed (e.g. enqueued in its ReferenceQueue) by the Java ReferenceHandler thread.
  *
  * In order to prevent resurrection by Java threads calling Reference.get() concurrently while we are clearing
- * referents, we employ a special barrier, the native LRB, which returns NULL when the referent is unreachable.
+ * referents, we employ a special barrier, the native LRB, which returns nullptr when the referent is unreachable.
  */
 
 class ShenandoahRefProcThreadLocal : public CHeapObj<mtGC> {
@@ -79,12 +83,10 @@ private:
   Counters _encountered_count;
   Counters _discovered_count;
   Counters _enqueued_count;
+  NONCOPYABLE(ShenandoahRefProcThreadLocal);
 
 public:
   ShenandoahRefProcThreadLocal();
-
-  ShenandoahRefProcThreadLocal(const ShenandoahRefProcThreadLocal&) = delete; // non construction-copyable
-  ShenandoahRefProcThreadLocal& operator=(const ShenandoahRefProcThreadLocal&) = delete; // non copyable
 
   void reset();
 
@@ -126,14 +128,20 @@ public:
 
 class ShenandoahReferenceProcessor : public ReferenceDiscoverer {
 private:
+  static AlwaysClearPolicy _always_clear_policy;
+
   ReferencePolicy* _soft_reference_policy;
 
   ShenandoahRefProcThreadLocal* _ref_proc_thread_locals;
 
-  oop _pending_list;
+  Atomic<oop> _pending_list;
   void* _pending_list_tail; // T*
 
-  volatile uint _iterate_discovered_list_id;
+  Atomic<uint> _iterate_discovered_list_id;
+
+  ReferenceProcessorStats _stats;
+
+  ShenandoahGeneration* _generation;
 
   template <typename T>
   bool is_inactive(oop reference, oop referent, ReferenceType type) const;
@@ -167,7 +175,7 @@ private:
   void clean_discovered_list(T* list);
 
 public:
-  ShenandoahReferenceProcessor(uint max_workers);
+  ShenandoahReferenceProcessor(ShenandoahGeneration* generation, uint max_workers);
 
   void reset_thread_locals();
   void set_mark_closure(uint worker_id, ShenandoahMarkRefsSuperClosure* mark_closure);
@@ -176,11 +184,13 @@ public:
 
   bool discover_reference(oop obj, ReferenceType type) override;
 
-  void process_references(WorkGang* workers, bool concurrent);
+  void process_references(ShenandoahPhaseTimings::Phase phase, WorkerThreads* workers, bool concurrent);
+
+  const ReferenceProcessorStats& reference_process_stats() { return _stats; }
 
   void work();
 
   void abandon_partial_discovery();
 };
 
-#endif // SHARE_VM_GC_SHENANDOAH_SHENANDOAHREFERENCEPROCESSOR_HPP
+#endif // SHARE_GC_SHENANDOAH_SHENANDOAHREFERENCEPROCESSOR_HPP

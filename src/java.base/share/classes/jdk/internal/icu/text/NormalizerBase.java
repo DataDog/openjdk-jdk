@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,7 +44,7 @@ import java.text.Normalizer;
  * <code>normalize</code> transforms Unicode text into an equivalent composed or
  * decomposed form, allowing for easier sorting and searching of text.
  * <code>normalize</code> supports the standard normalization forms described in
- * <a href="http://www.unicode.org/unicode/reports/tr15/" target="unicode">
+ * <a href="https://www.unicode.org/reports/tr15/" target="unicode">
  * Unicode Standard Annex #15 &mdash; Unicode Normalization Forms</a>.
  *
  * Characters with accents or other adornments can be encoded in
@@ -420,10 +420,10 @@ public final class NormalizerBase implements Cloneable {
      * iterator's {@code clone} method does so.
      * @stable ICU 2.8
      */
-    public Object clone() {
+    public NormalizerBase clone() {
         try {
             NormalizerBase copy = (NormalizerBase) super.clone();
-            copy.text = (UCharacterIterator) text.clone();
+            copy.text = text.clone();
             copy.mode = mode;
             copy.options = options;
             copy.norm2 = norm2;

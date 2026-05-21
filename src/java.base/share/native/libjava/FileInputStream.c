@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -73,6 +73,39 @@ Java_java_io_FileInputStream_readBytes(JNIEnv *env, jobject this,
 }
 
 JNIEXPORT jlong JNICALL
+Java_java_io_FileInputStream_length0(JNIEnv *env, jobject this) {
+
+    FD fd;
+    jlong length = jlong_zero;
+
+    fd = getFD(env, this, fis_fd);
+    if (fd == -1) {
+        JNU_ThrowIOException(env, "Stream Closed");
+        return -1;
+    }
+    if ((length = IO_GetLength(fd)) == -1) {
+        JNU_ThrowIOExceptionWithLastError(env, "GetLength failed");
+    }
+    return length;
+}
+
+JNIEXPORT jlong JNICALL
+Java_java_io_FileInputStream_position0(JNIEnv *env, jobject this) {
+    FD fd;
+    jlong ret;
+
+    fd = getFD(env, this, fis_fd);
+    if (fd == -1) {
+        JNU_ThrowIOException(env, "Stream Closed");
+        return -1;
+    }
+    if ((ret = IO_Lseek(fd, 0L, SEEK_CUR)) == -1) {
+        JNU_ThrowIOExceptionWithLastError(env, "Seek failed");
+    }
+    return ret;
+}
+
+JNIEXPORT jlong JNICALL
 Java_java_io_FileInputStream_skip0(JNIEnv *env, jobject this, jlong toSkip) {
     jlong cur = jlong_zero;
     jlong end = jlong_zero;
@@ -107,4 +140,10 @@ Java_java_io_FileInputStream_available0(JNIEnv *env, jobject this) {
     }
     JNU_ThrowIOExceptionWithLastError(env, NULL);
     return 0;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_java_io_FileInputStream_isRegularFile0(JNIEnv *env, jobject this, jobject fdo) {
+    FD fd = getFD(env, this, fis_fd);
+    return IO_IsRegularFile(env, fd);
 }

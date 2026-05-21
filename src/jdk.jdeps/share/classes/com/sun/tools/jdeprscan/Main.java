@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -166,7 +166,7 @@ public class Main implements DiagnosticListener<JavaFileObject> {
             if (forRemoval) {
                 deprList = proc.getDeprecations().stream()
                                .filter(DeprData::isForRemoval)
-                               .collect(toList());
+                               .toList();
             } else {
                 deprList = proc.getDeprecations();
             }
@@ -190,7 +190,7 @@ public class Main implements DiagnosticListener<JavaFileObject> {
                      .filter(name -> !name.endsWith("module-info.class"))
                      .map(s -> s.replaceAll("\\.class$", ""))
                      .map(s -> s.replace(File.separatorChar, '.'))
-                     .collect(toList()));
+                     .toList());
     }
 
     /**
@@ -227,7 +227,7 @@ public class Main implements DiagnosticListener<JavaFileObject> {
                      .filter(name -> !name.endsWith("module-info.class"))
                      .map(s -> s.replaceAll("\\.class$", ""))
                      .map(this::convertModularFileName)
-                     .collect(toList()));
+                     .toList());
     }
 
     /**
@@ -406,7 +406,7 @@ public class Main implements DiagnosticListener<JavaFileObject> {
                 types.values().stream()
                      .flatMap(List::stream)
                      .map(TypeElement::toString)
-                     .collect(toList()));
+                     .toList());
         } else {
             JDKPlatformProvider pp = new JDKPlatformProvider();
             if (StreamSupport.stream(pp.getSupportedPlatformNames().spliterator(),
@@ -414,7 +414,7 @@ public class Main implements DiagnosticListener<JavaFileObject> {
                              .noneMatch(n -> n.equals(release))) {
                 return false;
             }
-            JavaFileManager fm = pp.getPlatform(release, "").getFileManager();
+            JavaFileManager fm = pp.getPlatformTrusted(release).getFileManager();
             List<String> classNames = new ArrayList<>();
             for (JavaFileObject fo : fm.list(StandardLocation.PLATFORM_CLASS_PATH,
                                              "",
@@ -677,7 +677,7 @@ public class Main implements DiagnosticListener<JavaFileObject> {
                 DeprDB db = DeprDB.loadFromList(deprList);
                 List<String> cp = classPath.stream()
                                            .map(File::toString)
-                                           .collect(toList());
+                                           .toList();
                 Scan scan = new Scan(out, err, cp, db, verbose);
 
                 for (String a : args) {

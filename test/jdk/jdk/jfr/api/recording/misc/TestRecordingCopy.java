@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -24,6 +22,7 @@
  */
 package jdk.jfr.api.recording.misc;
 
+import jdk.jfr.FlightRecorder;
 import jdk.jfr.Recording;
 import jdk.jfr.RecordingState;
 import jdk.jfr.consumer.RecordedEvent;
@@ -31,12 +30,14 @@ import jdk.test.lib.Asserts;
 import jdk.test.lib.jfr.Events;
 import jdk.test.lib.jfr.SimpleEvent;
 
+import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.List;
 
 /**
  * @test
  * @summary A simple test for Recording.copy()
- * @key jfr
+ * @requires vm.flagless
  * @requires vm.hasJFR
  * @library /test/lib
  * @run main/othervm jdk.jfr.api.recording.misc.TestRecordingCopy
@@ -79,11 +80,38 @@ public class TestRecordingCopy {
         Asserts.assertEquals(stoppedCopy.getState(), RecordingState.STOPPED);
         assertCopy(stoppedCopy, original);
 
-        // Clean-up
         original.close();
+        int beforeCount  = FlightRecorder.getFlightRecorder().getRecordings().size();
+        Recording closedCopy = original.copy(true);
+        Asserts.assertEquals(closedCopy.getState(), RecordingState.CLOSED);
+        int afterCount = FlightRecorder.getFlightRecorder().getRecordings().size();
+        Asserts.assertEquals(beforeCount, afterCount);
+
+        // Clean-up
         runningCopy.stop();
         runningCopy.close();
         stoppedCopy.close();
+
+        testMemoryCopy();
+    }
+
+    private static void testMemoryCopy() throws Exception {
+        try (Recording memory = new Recording()) {
+            memory.setToDisk(false);
+            memory.enable(SimpleEvent.class);
+            memory.start();
+
+            Recording unstopped = memory.copy(false);
+            unstopped.dump(Paths.get("unstopped-memory.jfr"));
+
+            Recording stopped = memory.copy(true);
+            try {
+                stopped.dump(Paths.get("stopped-memory.jfr"));
+                throw new Exception("Should not be able to dump stopped in memory recording");
+            } catch (IOException ioe) {
+                // As expected
+            }
+        }
     }
 
     /**
@@ -105,7 +133,7 @@ public class TestRecordingCopy {
         Events.hasEvents(recordedEvents);
         Asserts.assertEquals(1, recordedEvents.size(), "Expected exactly one event");
 
-        RecordedEvent re = recordedEvents.get(0);
+        RecordedEvent re = recordedEvents.getFirst();
         Asserts.assertEquals(EVENT_ID, re.getValue("id"));
     }
 

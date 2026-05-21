@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,8 @@
 #define SHARE_RUNTIME_PERFDATA_INLINE_HPP
 
 #include "runtime/perfData.hpp"
+
+#include "utilities/globalCounter.inline.hpp"
 #include "utilities/globalDefinitions.hpp"
 #include "utilities/growableArray.hpp"
 
@@ -37,24 +39,35 @@ inline void PerfDataList::append(PerfData *p) {
   _set->append(p);
 }
 
-inline void PerfDataList::remove(PerfData *p) {
-  _set->remove(p);
-}
-
 inline PerfData* PerfDataList::at(int index) {
   return _set->at(index);
 }
 
-inline int PerfDataManager::count() {
-  return _all->length();
-}
-
 inline bool PerfDataManager::exists(const char* name) {
-  if (_all != NULL) {
+  if (_all != nullptr) {
     return _all->contains(name);
   } else {
     return false;
   }
 }
+
+inline SafePerfTraceTime::SafePerfTraceTime(PerfLongCounter* timerp) : _timerp(timerp) {
+  GlobalCounter::CriticalSection cs(Thread::current());
+  if (!UsePerfData || !PerfDataManager::has_PerfData() || timerp == nullptr) {
+    return;
+  }
+  _t.start();
+}
+
+inline SafePerfTraceTime::~SafePerfTraceTime() {
+  GlobalCounter::CriticalSection cs(Thread::current());
+  if (!UsePerfData || !PerfDataManager::has_PerfData() || !_t.is_active()) {
+    return;
+  }
+
+  _t.stop();
+  _timerp->inc(_t.ticks());
+}
+
 
 #endif // SHARE_RUNTIME_PERFDATA_INLINE_HPP

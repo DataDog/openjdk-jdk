@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,8 +29,6 @@ import java.io.IOException;
 import java.net.URL;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.security.CodeSource;
-import java.security.PermissionCollection;
 import java.util.jar.Manifest;
 
 import jdk.internal.access.JavaLangAccess;
@@ -55,22 +53,28 @@ public class ClassLoaders {
     private static final PlatformClassLoader PLATFORM_LOADER;
     private static final AppClassLoader APP_LOADER;
 
+    // Sets the ServicesCatalog for the specified loader using archived objects.
+    private static void setArchivedServicesCatalog(ClassLoader loader) {
+        ServicesCatalog catalog = ArchivedClassLoaders.get().servicesCatalog(loader);
+        ServicesCatalog.putServicesCatalog(loader, catalog);
+    }
+
     // Creates the built-in class loaders.
     static {
         ArchivedClassLoaders archivedClassLoaders = ArchivedClassLoaders.get();
+        // -Xbootclasspath/a or -javaagent with Boot-Class-Path attribute
+        String append = VM.getSavedProperty("jdk.boot.class.path.append");
+        URLClassPath bootUcp = (append != null && !append.isEmpty())
+                ? new URLClassPath(append, true)
+                : null;
         if (archivedClassLoaders != null) {
-            // assert VM.getSavedProperty("jdk.boot.class.path.append") == null
             BOOT_LOADER = (BootClassLoader) archivedClassLoaders.bootLoader();
+            BOOT_LOADER.setClassPath(bootUcp);
+            setArchivedServicesCatalog(BOOT_LOADER);
             PLATFORM_LOADER = (PlatformClassLoader) archivedClassLoaders.platformLoader();
-            ServicesCatalog catalog = archivedClassLoaders.servicesCatalog(PLATFORM_LOADER);
-            ServicesCatalog.putServicesCatalog(PLATFORM_LOADER, catalog);
+            setArchivedServicesCatalog(PLATFORM_LOADER);
         } else {
-            // -Xbootclasspath/a or -javaagent with Boot-Class-Path attribute
-            String append = VM.getSavedProperty("jdk.boot.class.path.append");
-            URLClassPath ucp = (append != null && !append.isEmpty())
-                    ? new URLClassPath(append, true)
-                    : null;
-            BOOT_LOADER = new BootClassLoader(ucp);
+            BOOT_LOADER = new BootClassLoader(bootUcp);
             PLATFORM_LOADER = new PlatformClassLoader(BOOT_LOADER);
         }
         // A class path is required when no initial module is specified.
@@ -86,8 +90,7 @@ public class ClassLoaders {
         URLClassPath ucp = new URLClassPath(cp, false);
         if (archivedClassLoaders != null) {
             APP_LOADER = (AppClassLoader) archivedClassLoaders.appLoader();
-            ServicesCatalog catalog = archivedClassLoaders.servicesCatalog(APP_LOADER);
-            ServicesCatalog.putServicesCatalog(APP_LOADER, catalog);
+            setArchivedServicesCatalog(APP_LOADER);
             APP_LOADER.setClassPath(ucp);
         } else {
             APP_LOADER = new AppClassLoader(PLATFORM_LOADER, ucp);
@@ -132,7 +135,7 @@ public class ClassLoaders {
 
         @Override
         protected Class<?> loadClassOrNull(String cn, boolean resolve) {
-            return JLA.findBootstrapClassOrNull(this, cn);
+            return JLA.findBootstrapClassOrNull(cn);
         }
     };
 
@@ -165,30 +168,6 @@ public class ClassLoaders {
             super("app", parent, ucp);
         }
 
-        @Override
-        protected Class<?> loadClass(String cn, boolean resolve)
-            throws ClassNotFoundException
-        {
-            // for compatibility reasons, say where restricted package list has
-            // been updated to list API packages in the unnamed module.
-            SecurityManager sm = System.getSecurityManager();
-            if (sm != null) {
-                int i = cn.lastIndexOf('.');
-                if (i != -1) {
-                    sm.checkPackageAccess(cn.substring(0, i));
-                }
-            }
-
-            return super.loadClass(cn, resolve);
-        }
-
-        @Override
-        protected PermissionCollection getPermissions(CodeSource cs) {
-            PermissionCollection perms = super.getPermissions(cs);
-            perms.add(new RuntimePermission("exitVM"));
-            return perms;
-        }
-
         /**
          * Called by the VM to support dynamic additions to the class path
          *
@@ -201,15 +180,9 @@ public class ClassLoaders {
         /**
          * Called by the VM to support define package for AppCDS
          */
+        @Override
         protected Package defineOrCheckPackage(String pn, Manifest man, URL url) {
             return super.defineOrCheckPackage(pn, man, url);
-        }
-
-        /**
-         * Called by the VM, during -Xshare:dump
-         */
-        private void resetArchivedStates() {
-            setClassPath(null);
         }
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -61,17 +61,11 @@
 package jdk.dynalink.beans;
 
 import java.lang.reflect.Modifier;
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
-import jdk.dynalink.internal.AccessControlContextFactory;
 
 /**
  * A utility class to check whether a given class is in a package with restricted access e.g. "sun.*" etc.
  */
 class CheckRestrictedPackage {
-    private static final AccessControlContext NO_PERMISSIONS_CONTEXT =
-            AccessControlContextFactory.createAccessControlContext();
 
     /**
      * Returns true if the class is either not public, or it resides in a package with restricted access.
@@ -92,21 +86,7 @@ class CheckRestrictedPackage {
         final String pkgName = name.substring(0, i);
         final Module module = clazz.getModule();
         if (module != null && !module.isExported(pkgName)) {
-            return true;
-        }
-
-        final SecurityManager sm = System.getSecurityManager();
-        if(sm == null) {
-            // No further restrictions if we don't have a security manager
-            return false;
-        }
-        // Do a package access check from within an access control context with no permissions
-        try {
-            AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-                sm.checkPackageAccess(pkgName);
-                return null;
-            }, NO_PERMISSIONS_CONTEXT);
-        } catch(final SecurityException e) {
+            // Classes in unexported packages of modules are always restricted
             return true;
         }
         return false;

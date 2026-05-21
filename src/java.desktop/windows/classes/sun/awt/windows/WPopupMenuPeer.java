@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -70,6 +70,7 @@ final class WPopupMenuPeer extends WMenuPeer implements PopupMenuPeer {
 
     private native void createMenu(WComponentPeer parent);
 
+    @Override
     @SuppressWarnings("deprecation")
     public void show(Event e) {
         Component origin = (Component)e.target;
@@ -77,7 +78,7 @@ final class WPopupMenuPeer extends WMenuPeer implements PopupMenuPeer {
         if (peer == null) {
             // A failure to map the peer should only happen for a
             // lightweight component, then find the actual native parent from
-            // that component.  The event coorinates are going to have to be
+            // that component.  The event coordinates are going to have to be
             // remapped as well.
             Component nativeOrigin = WToolkit.getNativeContainer(origin);
             e.target = nativeOrigin;

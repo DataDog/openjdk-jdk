@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,22 +25,26 @@
 
 #include <io.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #include <windows.h>
 
+#include "CfgFile.h"
 #include "AppLauncher.h"
 #include "JvmLauncher.h"
 #include "Log.h"
 #include "Dll.h"
+#include "WinApp.h"
 #include "Toolbox.h"
+#include "Executor.h"
 #include "FileUtils.h"
+#include "PackageFile.h"
 #include "UniqueHandle.h"
 #include "ErrorHandling.h"
 #include "WinSysInfo.h"
 #include "WinErrorHandling.h"
 
 
-// AllowSetForegroundWindow
-#pragma comment(lib, "user32")
+// AllowSetForegroundWindow - Requires linking with user32
 
 
 namespace {
@@ -131,26 +135,215 @@ tstring getJvmLibPath(const Jvm& jvm) {
 }
 
 
+void addCfgFileLookupDirForEnvVariable(
+        const PackageFile& pkgFile, AppLauncher& appLauncher,
+        const tstring& envVarName) {
+
+    tstring path;
+    JP_TRY;
+    path = SysInfo::getEnvVariable(envVarName);
+    JP_CATCH_ALL;
+
+    if (!path.empty()) {
+        appLauncher.addCfgFileLookupDir(FileUtils::mkpath() << path
+                << pkgFile.getPackageName());
+    }
+}
+
+
+class RunExecutorWithMsgLoop {
+public:
+    static DWORD apply(const Executor& exec) {
+        RunExecutorWithMsgLoop instance(exec);
+
+        UniqueHandle threadHandle = UniqueHandle(CreateThread(NULL, 0, worker,
+                                    static_cast<LPVOID>(&instance), 0, NULL));
+        if (threadHandle.get() == NULL) {
+            JP_THROW(SysError("CreateThread() failed", CreateThread));
+        }
+
+        MSG msg;
+        BOOL bRet;
+        while((bRet = GetMessage(&msg, instance.hwnd, 0, 0 )) != 0) {
+            if (bRet == -1) {
+                JP_THROW(SysError("GetMessage() failed", GetMessage));
+            } else {
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
+        }
+
+        // Wait for worker thread to terminate to guarantee it will not linger
+        // around after the thread running a message loop terminates.
+        const DWORD res = ::WaitForSingleObject(threadHandle.get(), INFINITE);
+        if (WAIT_FAILED ==  res) {
+            JP_THROW(SysError("WaitForSingleObject() failed",
+                                                        WaitForSingleObject));
+        }
+
+        LOG_TRACE(tstrings::any()
+                            << "Executor worker thread terminated. Exit code="
+                            << instance.exitCode);
+        return instance.exitCode;
+    }
+
+private:
+    RunExecutorWithMsgLoop(const Executor& v): exec(v) {
+        exitCode = 1;
+
+        // Message-only window.
+        hwnd = CreateWindowEx(0, _T("STATIC"), _T(""), 0, 0, 0, 0, 0,
+                              HWND_MESSAGE, NULL, GetModuleHandle(NULL), NULL);
+        if (!hwnd) {
+            JP_THROW(SysError("CreateWindowEx() failed", CreateWindowEx));
+        }
+    }
+
+    static DWORD WINAPI worker(LPVOID param) {
+        static_cast<RunExecutorWithMsgLoop*>(param)->run();
+        return 0;
+    }
+
+    void run() {
+        JP_TRY;
+        exitCode = static_cast<DWORD>(exec.execAndWaitForExit());
+        JP_CATCH_ALL;
+
+        JP_TRY;
+        if (!PostMessage(hwnd, WM_QUIT, 0, 0)) {
+            JP_THROW(SysError("PostMessage(WM_QUIT) failed", PostMessage));
+        }
+        return;
+        JP_CATCH_ALL;
+
+        // All went wrong, PostMessage() failed. Just terminate with error code.
+        exit(1);
+    }
+
+private:
+    const Executor& exec;
+    DWORD exitCode;
+    HWND hwnd;
+};
+
+
+bool needRestartLauncher(AppLauncher& appLauncher, CfgFile& cfgFile) {
+    if (appLauncher.libEnvVariableContainsAppDir()) {
+        return false;
+    }
+
+    std::unique_ptr<CfgFile>(appLauncher.createCfgFile())->swap(cfgFile);
+
+    const CfgFile::Properties& appOptions = cfgFile.getProperties(
+            SectionName::Application);
+
+    const CfgFile::Properties::const_iterator winNorestart = appOptions.find(
+                PropertyName::winNorestart);
+
+    bool result;
+    if (winNorestart != appOptions.end()) {
+        const bool norestart = CfgFile::asBoolean(*winNorestart);
+        LOG_TRACE(tstrings::any() << PropertyName::winNorestart.name() << "="
+                << (norestart ? "true" : "false") << " from config file");
+        result = !norestart;
+    } else {
+        result = true;
+    }
+
+    appLauncher.setCfgFile(&cfgFile);
+
+    return result;
+}
+
+
+void enableConsoleCtrlHandler(bool enable) {
+    if (!SetConsoleCtrlHandler(NULL, enable ? FALSE : TRUE)) {
+        JP_THROW(SysError(tstrings::any() << "SetConsoleCtrlHandler(NULL, "
+                                            << (enable ? "FALSE" : "TRUE")
+                                            << ") failed",
+                                                    SetConsoleCtrlHandler));
+    }
+}
+
+
 void launchApp() {
     // [RT-31061] otherwise UI can be left in back of other windows.
     ::AllowSetForegroundWindow(ASFW_ANY);
 
     const tstring launcherPath = SysInfo::getProcessModulePath();
     const tstring appImageRoot = FileUtils::dirname(launcherPath);
-    const tstring runtimeBinPath = FileUtils::mkpath()
-            << appImageRoot << _T("runtime") << _T("bin");
+    const tstring appDirPath = FileUtils::mkpath() << appImageRoot << _T("app");
 
-    std::unique_ptr<Jvm> jvm(AppLauncher()
-        .setImageRoot(appImageRoot)
+    const PackageFile pkgFile = PackageFile::loadFromAppDir(appDirPath);
+
+    AppLauncher appLauncher = AppLauncher().setImageRoot(appImageRoot)
         .addJvmLibName(_T("bin\\jli.dll"))
-        .setAppDir(FileUtils::mkpath() << appImageRoot << _T("app"))
+        .setAppDir(appDirPath)
+        .setLibEnvVariableName(_T("PATH"))
         .setDefaultRuntimePath(FileUtils::mkpath() << appImageRoot
-                << _T("runtime"))
-        .createJvmLauncher());
+            << _T("runtime"));
 
-    // zip.dll may be loaded by java without full path
+    if (!pkgFile.getPackageName().empty()) {
+        addCfgFileLookupDirForEnvVariable(pkgFile, appLauncher, _T("LOCALAPPDATA"));
+        addCfgFileLookupDirForEnvVariable(pkgFile, appLauncher, _T("APPDATA"));
+    }
+
+    CfgFile dummyCfgFile;
+    const bool restart = needRestartLauncher(appLauncher, dummyCfgFile);
+
+    std::unique_ptr<Jvm> jvm(appLauncher.createJvmLauncher());
+
+    if (restart) {
+        jvm->setEnvVariables();
+
+        jvm = std::unique_ptr<Jvm>();
+
+        UniqueHandle jobHandle(CreateJobObject(NULL, NULL));
+        if (jobHandle.get() == NULL) {
+            JP_THROW(SysError(tstrings::any() << "CreateJobObject() failed",
+                                                            CreateJobObject));
+        }
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION jobInfo = { };
+        jobInfo.BasicLimitInformation.LimitFlags =
+                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
+        if (!SetInformationJobObject(jobHandle.get(),
+                JobObjectExtendedLimitInformation, &jobInfo, sizeof(jobInfo))) {
+            JP_THROW(SysError(tstrings::any() <<
+                                            "SetInformationJobObject() failed",
+                                                    SetInformationJobObject));
+        }
+
+        Executor exec(launcherPath);
+        exec.visible(true).withJobObject(jobHandle.get()).suspended(true).inherit(true);
+        const auto args = SysInfo::getCommandArgs();
+        std::for_each(args.begin(), args.end(), [&exec] (const tstring& arg) {
+            exec.arg(arg);
+        });
+
+        exec.afterProcessCreated([&](HANDLE pid) {
+            //
+            // Ignore Ctrl+C in the current process.
+            // This will prevent child process termination without allowing
+            // it to handle Ctrl+C events.
+            //
+            // Disable the default Ctrl+C handler *after* the child process
+            // has been created as it is inheritable and we want the child
+            // process to have the default handler.
+            //
+            enableConsoleCtrlHandler(false);
+        });
+
+        DWORD exitCode = RunExecutorWithMsgLoop::apply(exec);
+
+        exit(exitCode);
+        return;
+    }
+
+    // zip.dll (and others) may be loaded by java without full path
     // make sure it will look in runtime/bin
+    const tstring runtimeBinPath = FileUtils::dirname(jvm->getPath());
     SetDllDirectory(runtimeBinPath.c_str());
+    LOG_TRACE(tstrings::any() << "SetDllDirectory to: " << runtimeBinPath);
 
     const DllWrapper jliDll(jvm->getPath());
     std::unique_ptr<DllWrapper> splashDll;
@@ -169,114 +362,14 @@ void launchApp() {
 
 #ifndef JP_LAUNCHERW
 
-int __cdecl  wmain() {
-    return AppLauncher::launch(std::nothrow, launchApp);
+int wmain() {
+    return app::launch(std::nothrow, launchApp);
 }
 
 #else
 
-namespace {
-
-class LastErrorGuiLogAppender : public LogAppender {
-public:
-    virtual void append(const LogEvent& v) {
-        JP_TRY;
-
-        const std::wstring msg = (tstrings::any()
-                << AppLauncher::lastErrorMsg()).wstr();
-        MessageBox(0, msg.c_str(),
-            FileUtils::basename(SysInfo::getProcessModulePath()).c_str(),
-            MB_ICONERROR | MB_OK);
-
-        JP_CATCH_ALL;
-    }
-};
-
-
-class Console {
-public:
-    Console() {
-        if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
-            // Failed to connect to parent's console. Create our own.
-            if (!AllocConsole()) {
-                // We already have a console, no need to redirect std I/O.
-                return;
-            }
-        }
-
-        stdoutChannel = std::unique_ptr<Channel>(new Channel(stdout));
-        stderrChannel = std::unique_ptr<Channel>(new Channel(stderr));
-    }
-
-    struct FileCloser {
-        typedef FILE* pointer;
-
-        void operator()(pointer h) {
-            ::fclose(h);
-        }
-    };
-
-    typedef std::unique_ptr<
-        FileCloser::pointer,
-        FileCloser
-    > UniqueFILEHandle;
-
-private:
-    class Channel {
-    public:
-        Channel(FILE* stdFILEHandle): stdFILEHandle(stdFILEHandle) {
-            const char* stdFileName = "CONOUT$";
-            const char* openMode = "w";
-            if (stdFILEHandle == stdin) {
-                stdFileName = "CONIN$";
-                openMode = "r";
-            }
-
-            FILE* fp = 0;
-            freopen_s(&fp, stdFileName, openMode, stdFILEHandle);
-
-            fileHandle = UniqueFILEHandle(fp);
-
-            std::ios_base::sync_with_stdio();
-        }
-
-        virtual ~Channel() {
-            JP_TRY;
-
-            FILE* fp = 0;
-            fileHandle = UniqueFILEHandle(fp);
-            std::ios_base::sync_with_stdio();
-
-            JP_CATCH_ALL;
-        }
-
-    private:
-        UniqueFILEHandle fileHandle;
-        FILE *stdFILEHandle;
-    };
-
-    std::unique_ptr<Channel> stdoutChannel;
-    std::unique_ptr<Channel> stderrChannel;
-};
-
-
-void launchAppW() {
-    std::unique_ptr<Console> console;
-    if (AppLauncher::isWithLogging()) {
-        console = std::unique_ptr<Console>(new Console());
-    }
-
-    launchApp();
-}
-
-} // namespace
-
-
-int __stdcall wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
-    LastErrorGuiLogAppender lastErrorLogAppender;
-    TeeLogAppender logAppender(&AppLauncher::defaultLastErrorLogAppender(),
-            &lastErrorLogAppender);
-    return AppLauncher::launch(std::nothrow, launchAppW, &logAppender);
+int wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
+    return app::wlaunch(std::nothrow, launchApp);
 }
 
 #endif

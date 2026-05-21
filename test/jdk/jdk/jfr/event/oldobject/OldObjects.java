@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -277,5 +275,17 @@ final public class OldObjects {
         if (length > maxLength) {
             throw new RuntimeException("Reference chain max length not respected. Found a chain of length " + length);
         }
+    }
+
+    public static int countChains(List<RecordedEvent> events) throws IOException {
+        int found = 0;
+        for (RecordedEvent e : events) {
+            RecordedObject ro = e.getValue("object");
+            if (ro.getValue("referrer") != null) {
+                found++;
+            }
+        }
+        System.out.println("Found chains: " + found);
+        return found;
     }
 }

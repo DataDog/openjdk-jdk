@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -107,11 +107,16 @@ abstract class Wrap implements GeneralWrap {
                 // }
                 // in do_it method:
                 //return do_itAux();
+                //find an unused name:
+                String scratchName = "$";
+                while (winit.wrapped().contains(scratchName)) {
+                    scratchName += "$";
+                }
                 Wrap waux = new CompoundWrap(
-                        "    private static <Z> Z ", DOIT_METHOD_NAME + "Aux", "() throws Throwable {\n",
-                        wtype, brackets + " ", wname, "_ =\n        ", winit, semi(winit),
-                        "        @SuppressWarnings(\"unchecked\") Z ", wname, "__ = (Z)", wname, "_;\n",
-                        "        return ", wname, "__;\n",
+                        "    private static <" + scratchName + "> " + scratchName +" ", DOIT_METHOD_NAME + "Aux", "() throws java.lang.Throwable {\n",
+                        wtype, brackets + " ", scratchName, "_ =\n        ", winit, semi(winit),
+                        "        @java.lang.SuppressWarnings(\"unchecked\") ", scratchName, " ", scratchName, "__ = (", scratchName, ")", scratchName, "_;\n",
+                        "        return ", scratchName, "__;\n",
                         "}"
                 );
                 components.add(waux);
@@ -545,7 +550,7 @@ abstract class Wrap implements GeneralWrap {
     private static class DoitMethodWrap extends CompoundWrap {
 
         DoitMethodWrap(Wrap w) {
-            super("    public static Object " + DOIT_METHOD_NAME + "() throws Throwable {\n"
+            super("    public static java.lang.Object " + DOIT_METHOD_NAME + "() throws java.lang.Throwable {\n"
                     + "        ", w,
                     "    }\n");
         }

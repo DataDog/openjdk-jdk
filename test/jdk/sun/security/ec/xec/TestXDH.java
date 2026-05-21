@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,19 +23,34 @@
 
 /*
  * @test
- * @bug 8171277 8206915
+ * @bug 8171277 8206915 8368841
  * @summary Test XDH key agreement
  * @library /test/lib
- * @build jdk.test.lib.Convert
  * @run main TestXDH
  */
 
-import java.security.*;
-import java.security.spec.*;
-import javax.crypto.*;
-import java.util.Arrays;
 import java.math.BigInteger;
-import jdk.test.lib.Convert;
+import java.security.InvalidKeyException;
+import java.security.InvalidParameterException;
+import java.security.KeyFactory;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.PublicKey;
+import java.security.PrivateKey;
+import java.security.spec.AlgorithmParameterSpec;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.KeySpec;
+import java.security.spec.NamedParameterSpec;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.X509EncodedKeySpec;
+import java.security.spec.XECPublicKeySpec;
+import java.security.spec.XECPrivateKeySpec;
+import javax.crypto.KeyAgreement;
+import java.util.Arrays;
+import java.util.HexFormat;
+
+import jdk.test.lib.hexdump.ASN1Formatter;
+import jdk.test.lib.hexdump.HexPrinter;
 
 public class TestXDH {
 
@@ -334,10 +349,10 @@ public class TestXDH {
         String b_pub, String result) throws Exception {
 
         KeyFactory kf = KeyFactory.getInstance("XDH");
-        byte[] a_pri_ba = Convert.hexStringToByteArray(a_pri);
+        byte[] a_pri_ba = HexFormat.of().parseHex(a_pri);
         KeySpec privateSpec = new PKCS8EncodedKeySpec(a_pri_ba);
         PrivateKey privateKey = kf.generatePrivate(privateSpec);
-        byte[] b_pub_ba = Convert.hexStringToByteArray(b_pub);
+        byte[] b_pub_ba = HexFormat.of().parseHex(b_pub);
         KeySpec publicSpec = new X509EncodedKeySpec(b_pub_ba);
         PublicKey publicKey = kf.generatePublic(publicSpec);
 
@@ -346,12 +361,11 @@ public class TestXDH {
         ka.doPhase(publicKey, true);
 
         byte[] sharedSecret = ka.generateSecret();
-        byte[] expectedResult = Convert.hexStringToByteArray(result);
+        byte[] expectedResult = HexFormat.of().parseHex(result);
         if (!Arrays.equals(sharedSecret, expectedResult)) {
             throw new RuntimeException("fail: expected=" + result + ", actual="
-                + Convert.byteArrayToHexString(sharedSecret));
+                + HexFormat.of().withUpperCase().formatHex(sharedSecret));
         }
-
     }
 
     private static void runDiffieHellmanTest(String curveName, String a_pri,
@@ -360,30 +374,49 @@ public class TestXDH {
         NamedParameterSpec paramSpec = new NamedParameterSpec(curveName);
         KeyFactory kf = KeyFactory.getInstance("XDH");
         KeySpec privateSpec = new XECPrivateKeySpec(paramSpec,
-            Convert.hexStringToByteArray(a_pri));
+            HexFormat.of().parseHex(a_pri));
         PrivateKey privateKey = kf.generatePrivate(privateSpec);
-        boolean clearHighBit = curveName.equals("X25519");
         KeySpec publicSpec = new XECPublicKeySpec(paramSpec,
-            Convert.hexStringToBigInteger(clearHighBit, b_pub));
+            hexStringToBigInteger(b_pub));
         PublicKey publicKey = kf.generatePublic(publicSpec);
 
         byte[] encodedPrivateKey = privateKey.getEncoded();
         System.out.println("Encoded private: " +
-            Convert.byteArrayToHexString(encodedPrivateKey));
+            HexFormat.of().withUpperCase().formatHex(encodedPrivateKey));
+        System.out.println(HexPrinter.simple()
+                .formatter(ASN1Formatter.formatter())
+                .toString(encodedPrivateKey));
         byte[] encodedPublicKey = publicKey.getEncoded();
         System.out.println("Encoded public: " +
-            Convert.byteArrayToHexString(encodedPublicKey));
-
+            HexFormat.of().withUpperCase().formatHex(encodedPublicKey));
+        System.out.println(HexPrinter.simple()
+                .formatter(ASN1Formatter.formatter())
+                .toString(encodedPublicKey));
         KeyAgreement ka = KeyAgreement.getInstance("XDH");
         ka.init(privateKey);
         ka.doPhase(publicKey, true);
 
         byte[] sharedSecret = ka.generateSecret();
-        byte[] expectedResult = Convert.hexStringToByteArray(result);
+        byte[] expectedResult = HexFormat.of().parseHex(result);
         if (!Arrays.equals(sharedSecret, expectedResult)) {
             throw new RuntimeException("fail: expected=" + result + ", actual="
-                + Convert.byteArrayToHexString(sharedSecret));
+                + HexFormat.of().withUpperCase().formatHex(sharedSecret));
         }
+    }
+
+    /*
+     * Converts a hexidecimal string to the corresponding little-endian
+     * number as a BigInteger
+     */
+    private static BigInteger hexStringToBigInteger(String str) {
+        BigInteger result = BigInteger.ZERO;
+        for (int i = 0; i < str.length() / 2; i++) {
+            int curVal = Character.digit(str.charAt(2 * i), 16);
+            curVal <<= 4;
+            curVal += Character.digit(str.charAt(2 * i + 1), 16);
+            result = result.add(BigInteger.valueOf(curVal).shiftLeft(8 * i));
+        }
+        return result;
     }
 
     /*

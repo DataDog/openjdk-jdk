@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "gc/shared/collectedHeap.hpp"
 #include "memory/universe.hpp"
 #include "runtime/safepoint.hpp"
@@ -31,21 +30,37 @@
 
 #ifdef ASSERT
 
-NoSafepointVerifier::NoSafepointVerifier() : _thread(Thread::current()) {
-  _thread->_no_safepoint_count++;
+NoSafepointVerifier::NoSafepointVerifier(bool active)
+  : _thread(active ? Thread::current() : nullptr),
+    _active(active) {
+  if (!_active) {
+    return;
+  }
+  if (_thread->is_Java_thread()) {
+    JavaThread::cast(_thread)->inc_no_safepoint_count();
+  }
 }
 
 NoSafepointVerifier::~NoSafepointVerifier() {
-  _thread->_no_safepoint_count--;
+  if (!_active) {
+    return;
+  }
+  if (_thread->is_Java_thread()) {
+    JavaThread::cast(_thread)->dec_no_safepoint_count();
+  }
 }
 
 PauseNoSafepointVerifier::PauseNoSafepointVerifier(NoSafepointVerifier* nsv)
     : _nsv(nsv) {
   assert(_nsv->_thread == Thread::current(), "must be");
-  _nsv->_thread->_no_safepoint_count--;
+  if (_nsv->_thread->is_Java_thread()) {
+    JavaThread::cast(_nsv->_thread)->dec_no_safepoint_count();
+  }
 }
 
 PauseNoSafepointVerifier::~PauseNoSafepointVerifier() {
-  _nsv->_thread->_no_safepoint_count++;
+  if (_nsv->_thread->is_Java_thread()) {
+    JavaThread::cast(_nsv->_thread)->inc_no_safepoint_count();
+  }
 }
 #endif // ASSERT

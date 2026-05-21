@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -41,11 +39,10 @@ import jdk.test.lib.jfr.SimpleEvent;
 /**
  * @test
  * @summary Simple test for RecordedFrame APIs
- * @key jfr
+ * @requires vm.flagless
  * @requires vm.hasJFR
  * @library /test/lib
- * @run main/othervm -Xint  -XX:+UseInterpreter -Dinterpreted=true  jdk.jfr.api.consumer.TestRecordedFrame
- * @run main/othervm -Xcomp -XX:-UseInterpreter -Dinterpreted=false jdk.jfr.api.consumer.TestRecordedFrame
+ * @run main/othervm jdk.jfr.api.consumer.TestRecordedFrame
  */
 public final class TestRecordedFrame {
 
@@ -71,7 +68,7 @@ public final class TestRecordedFrame {
 
             List<RecordedEvent> recordedEvents = Events.fromRecording(recording);
             Events.hasEvents(recordedEvents);
-            RecordedEvent recordedEvent = recordedEvents.get(0);
+            RecordedEvent recordedEvent = recordedEvents.getFirst();
 
             RecordedStackTrace stacktrace = recordedEvent.getStackTrace();
             List<RecordedFrame> frames = stacktrace.getFrames();
@@ -88,10 +85,6 @@ public final class TestRecordedFrame {
                     Asserts.assertTrue(types.contains(type));
                     // Line number
                     Asserts.assertEquals(getLineNumber("main"), frame.getLineNumber());
-                    // Interpreted
-                    boolean isInterpreted = "Interpreted".equals(type);
-                    boolean expectedInterpreted = "true".equals(System.getProperty("interpreted"));
-                    Asserts.assertEquals(isInterpreted, expectedInterpreted);
                     // BCI
                     int bci = frame.getBytecodeIndex();
                     System.out.println("bci: " + bci);

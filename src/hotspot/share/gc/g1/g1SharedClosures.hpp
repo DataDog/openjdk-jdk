@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,10 @@
  *
  */
 
-#include "gc/g1/g1CodeBlobClosure.hpp"
+#ifndef SHARE_GC_G1_G1SHAREDCLOSURES_HPP
+#define SHARE_GC_G1_G1SHAREDCLOSURES_HPP
+
+#include "gc/g1/g1NMethodClosure.hpp"
 #include "gc/g1/g1OopClosures.hpp"
 #include "memory/iterator.hpp"
 
@@ -30,32 +33,29 @@ class G1CollectedHeap;
 class G1ParScanThreadState;
 
 // Simple holder object for a complete set of closures used by the G1 evacuation code.
-template <G1Mark Mark>
+template <bool should_mark>
 class G1SharedClosures {
-  static bool needs_strong_processing() {
-    // Request strong code root processing when G1MarkFromRoot is passed in during
-    // concurrent start.
-    return Mark == G1MarkFromRoot;
-  }
 public:
-  G1ParCopyClosure<G1BarrierNone, Mark> _oops;
-  G1ParCopyClosure<G1BarrierCLD,  Mark> _oops_in_cld;
+  G1ParCopyClosure<G1BarrierNone, should_mark> _oops;
+  G1ParCopyClosure<G1BarrierCLD,  should_mark> _oops_in_cld;
   // We do not need (and actually should not) collect oops from nmethods into the
   // optional collection set as we already automatically collect the corresponding
-  // nmethods in the region's strong code roots set. So set G1BarrierNoOptRoots in
+  // nmethods in the region's code roots set. So set G1BarrierNoOptRoots in
   // this closure.
   // If these were present there would be opportunity for multiple threads to try
   // to change this oop* at the same time. Since embedded oops are not necessarily
   // word-aligned, this could lead to word tearing during update and crashes.
-  G1ParCopyClosure<G1BarrierNoOptRoots, Mark> _oops_in_nmethod;
+  G1ParCopyClosure<G1BarrierNoOptRoots, should_mark> _oops_in_nmethod;
 
   G1CLDScanClosure                _clds;
-  G1CodeBlobClosure               _codeblobs;
+  G1NMethodClosure                _nmethods;
 
   G1SharedClosures(G1CollectedHeap* g1h, G1ParScanThreadState* pss, bool process_only_dirty) :
     _oops(g1h, pss),
     _oops_in_cld(g1h, pss),
     _oops_in_nmethod(g1h, pss),
     _clds(&_oops_in_cld, process_only_dirty),
-    _codeblobs(pss->worker_id(), &_oops_in_nmethod, needs_strong_processing()) {}
+    _nmethods(pss->worker_id(), &_oops_in_nmethod, should_mark) {}
 };
+
+#endif // SHARE_GC_G1_G1SHAREDCLOSURES_HPP

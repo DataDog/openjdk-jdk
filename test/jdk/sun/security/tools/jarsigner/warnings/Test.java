@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -143,6 +143,20 @@ public abstract class Test {
     static final String NOT_YET_VALID_CERT_VERIFYING_WARNING
             = "This jar contains entries "
             + "whose signer certificate is not yet valid.";
+
+    static final String WEAK_ALGORITHM_WARNING
+            = "algorithm is considered a security risk. "
+            + "This algorithm will be disabled in a future update.";
+
+    static final String WEAK_KEY_WARNING
+            = "will be disabled in a future update.";
+
+    static final String OUTDATED_KEYSTORE_WARNING1
+            = "uses outdated cryptographic algorithms and will be "
+            + "removed in a future release. Migrate to PKCS12 using:";
+
+    static final String OUTDATED_KEYSTORE_WARNING2
+            = "keytool -importkeystore -srckeystore";
 
     static final String JAR_SIGNED = "jar signed.";
 

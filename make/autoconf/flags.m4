@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -125,19 +125,21 @@ AC_DEFUN([FLAGS_SETUP_MACOSX_VERSION],
 [
   # Additional macosx handling
   if test "x$OPENJDK_TARGET_OS" = xmacosx; then
-    # MACOSX_VERSION_MIN specifies the lowest version of Macosx that the built
+    # The expected format for <version> is either nn.n.n or nn.nn.nn. See
+    # /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/AvailabilityVersions.h
+
+    # MACOSX_VERSION_MIN specifies the lowest version of macOS that the built
     # binaries should be compatible with, even if compiled on a newer version
     # of the OS. It currently has a hard coded value. Setting this also limits
     # exposure to API changes in header files. Bumping this is likely to
     # require code changes to build.
-    MACOSX_VERSION_MIN=10.9.0
+    MACOSX_VERSION_MIN=11.00.00
     MACOSX_VERSION_MIN_NODOTS=${MACOSX_VERSION_MIN//\./}
 
     AC_SUBST(MACOSX_VERSION_MIN)
 
     # Setting --with-macosx-version-max=<version> makes it an error to build or
-    # link to macosx APIs that are newer than the given OS version. The expected
-    # format for <version> is either nn.n.n or nn.nn.nn. See /usr/include/AvailabilityMacros.h.
+    # link to macosx APIs that are newer than the given OS version.
     AC_ARG_WITH([macosx-version-max], [AS_HELP_STRING([--with-macosx-version-max],
         [error on use of newer functionality. @<:@macosx@:>@])],
         [
@@ -209,8 +211,21 @@ AC_DEFUN([FLAGS_SETUP_SYSROOT_FLAGS],
       $1SYSROOT_CFLAGS="--sysroot=[$]$1SYSROOT"
       $1SYSROOT_LDFLAGS="--sysroot=[$]$1SYSROOT"
     elif test "x$TOOLCHAIN_TYPE" = xclang; then
-      $1SYSROOT_CFLAGS="-isysroot [$]$1SYSROOT"
-      $1SYSROOT_LDFLAGS="-isysroot [$]$1SYSROOT"
+      if test "x$OPENJDK_TARGET_OS" = "xlinux"; then
+        # -isysroot has no effect on linux
+        # https://bugs.llvm.org/show_bug.cgi?id=11503
+        $1SYSROOT_CFLAGS="--sysroot=[$]$1SYSROOT"
+        $1SYSROOT_LDFLAGS="--sysroot=[$]$1SYSROOT"
+        if test -d "$DEVKIT_TOOLCHAIN_PATH"; then
+          # In devkits, gcc is not located in the sysroot.
+          # use --gcc-toolchain to let clang find the gcc installation.
+          $1SYSROOT_CFLAGS="[$]$1SYSROOT_CFLAGS --gcc-toolchain=$DEVKIT_TOOLCHAIN_PATH/.."
+          $1SYSROOT_LDFLAGS="[$]$1SYSROOT_LDFLAGS --gcc-toolchain=$DEVKIT_TOOLCHAIN_PATH/.."
+        fi
+      else
+        $1SYSROOT_CFLAGS="-isysroot [$]$1SYSROOT"
+        $1SYSROOT_LDFLAGS="-isysroot [$]$1SYSROOT"
+      fi
     fi
   fi
 
@@ -246,16 +261,21 @@ AC_DEFUN_ONCE([FLAGS_PRE_TOOLCHAIN],
   # The sysroot flags are needed for configure to be able to run the compilers
   FLAGS_SETUP_SYSROOT_FLAGS
 
-  # For xlc, the word size flag is required for correct behavior.
   # For clang/gcc, the flag is only strictly required for reduced builds, but
   # set it always where possible (x86 and ppc).
-  if test "x$TOOLCHAIN_TYPE" = xxlc; then
-    MACHINE_FLAG="-q${OPENJDK_TARGET_CPU_BITS}"
-  elif test "x$TOOLCHAIN_TYPE" = xgcc || test "x$TOOLCHAIN_TYPE" = xclang; then
+  if test "x$TOOLCHAIN_TYPE" = xgcc || test "x$TOOLCHAIN_TYPE" = xclang; then
     if test "x$OPENJDK_TARGET_CPU_ARCH" = xx86 &&
         test "x$OPENJDK_TARGET_CPU" != xx32 ||
         test "x$OPENJDK_TARGET_CPU_ARCH" = xppc; then
       MACHINE_FLAG="-m${OPENJDK_TARGET_CPU_BITS}"
+    fi
+  fi
+
+  if test "x$OPENJDK_TARGET_OS" = xmacosx; then
+    if test "x$OPENJDK_TARGET_CPU" = xaarch64; then
+      MACHINE_FLAG="$MACHINE_FLAG -arch arm64"
+    elif test "x$OPENJDK_TARGET_CPU" = xx86_64; then
+      MACHINE_FLAG="$MACHINE_FLAG -arch x86_64"
     fi
   fi
 
@@ -268,12 +288,13 @@ AC_DEFUN_ONCE([FLAGS_PRE_TOOLCHAIN],
   # FIXME: Don't really know how to do with this, but this was the old behavior
   GLOBAL_CPPFLAGS="$SYSROOT_CFLAGS"
 
-  # FIXME: For compatilibity, export this as EXTRA_CFLAGS for now.
+  # FIXME: For compatibility, export this as EXTRA_CFLAGS for now.
   EXTRA_CFLAGS="$MACHINE_FLAG $USER_CFLAGS"
   EXTRA_CXXFLAGS="$MACHINE_FLAG $USER_CXXFLAGS"
   EXTRA_LDFLAGS="$MACHINE_FLAG $USER_LDFLAGS"
   EXTRA_ASFLAGS="$USER_ASFLAGS"
 
+  AC_SUBST(MACHINE_FLAG)
   AC_SUBST(EXTRA_CFLAGS)
   AC_SUBST(EXTRA_CXXFLAGS)
   AC_SUBST(EXTRA_LDFLAGS)
@@ -297,78 +318,20 @@ AC_DEFUN_ONCE([FLAGS_PRE_TOOLCHAIN],
 
 AC_DEFUN([FLAGS_SETUP_TOOLCHAIN_CONTROL],
 [
-  # COMPILER_TARGET_BITS_FLAG  : option for selecting 32- or 64-bit output
-  # COMPILER_COMMAND_FILE_FLAG : option for passing a command file to the compiler
-  # COMPILER_BINDCMD_FILE_FLAG : option for specifying a file which saves the binder
-  #                              commands produced by the link step (currently AIX only)
-  if test "x$TOOLCHAIN_TYPE" = xxlc; then
-    COMPILER_TARGET_BITS_FLAG="-q"
-    COMPILER_COMMAND_FILE_FLAG="-f"
-    COMPILER_BINDCMD_FILE_FLAG="-bloadmap:"
-  else
-    COMPILER_TARGET_BITS_FLAG="-m"
-    COMPILER_COMMAND_FILE_FLAG="@"
-    COMPILER_BINDCMD_FILE_FLAG=""
-
-    # Check if @file is supported by gcc
-    if test "x$TOOLCHAIN_TYPE" = xgcc; then
-      AC_MSG_CHECKING([if @file is supported by gcc])
-      # Extra emtpy "" to prevent ECHO from interpreting '--version' as argument
-      $ECHO "" "--version" > command.file
-      if $CXX @command.file 2>&AS_MESSAGE_LOG_FD >&AS_MESSAGE_LOG_FD; then
-        AC_MSG_RESULT(yes)
-        COMPILER_COMMAND_FILE_FLAG="@"
-      else
-        AC_MSG_RESULT(no)
-        COMPILER_COMMAND_FILE_FLAG=
-      fi
-      $RM command.file
-    fi
-  fi
-
-  AC_SUBST(COMPILER_TARGET_BITS_FLAG)
-  AC_SUBST(COMPILER_COMMAND_FILE_FLAG)
-  AC_SUBST(COMPILER_BINDCMD_FILE_FLAG)
-
-  # Check that the compiler supports -mX (or -qX on AIX) flags
-  # Set COMPILER_SUPPORTS_TARGET_BITS_FLAG to 'true' if it does
-  FLAGS_COMPILER_CHECK_ARGUMENTS(ARGUMENT: [${COMPILER_TARGET_BITS_FLAG}${OPENJDK_TARGET_CPU_BITS}],
-      IF_TRUE: [COMPILER_SUPPORTS_TARGET_BITS_FLAG=true],
-      IF_FALSE: [COMPILER_SUPPORTS_TARGET_BITS_FLAG=false])
-  AC_SUBST(COMPILER_SUPPORTS_TARGET_BITS_FLAG)
-
   if test "x$TOOLCHAIN_TYPE" = xmicrosoft; then
-    CC_OUT_OPTION=-Fo
-    LD_OUT_OPTION=-out:
-    AR_OUT_OPTION=-out:
-  else
-    # The option used to specify the target .o,.a or .so file.
-    # When compiling, how to specify the to be created object file.
-    CC_OUT_OPTION='-o$(SPACE)'
-    # When linking, how to specify the output
-    LD_OUT_OPTION='-o$(SPACE)'
-    # When archiving, how to specify the destination static archive.
-    if test "x$OPENJDK_TARGET_OS" = xmacosx; then
-      AR_OUT_OPTION='-r -cs$(SPACE)'
-    else
-      AR_OUT_OPTION='-rcs$(SPACE)'
+    if test "x$OPENJDK_TARGET_CPU" != xaarch64; then
+      AS_NON_ASM_EXTENSION_OPTION=-Ta
     fi
   fi
-  AC_SUBST(CC_OUT_OPTION)
-  AC_SUBST(LD_OUT_OPTION)
-  AC_SUBST(AR_OUT_OPTION)
+  AC_SUBST(AS_NON_ASM_EXTENSION_OPTION)
 
   # Generate make dependency files
   if test "x$TOOLCHAIN_TYPE" = xgcc; then
-    C_FLAG_DEPS="-MMD -MF"
+    GENDEPS_FLAGS="-MMD -MF"
   elif test "x$TOOLCHAIN_TYPE" = xclang; then
-    C_FLAG_DEPS="-MMD -MF"
-  elif test "x$TOOLCHAIN_TYPE" = xxlc; then
-    C_FLAG_DEPS="-qmakedep=gcc -MF"
+    GENDEPS_FLAGS="-MMD -MF"
   fi
-  CXX_FLAG_DEPS="$C_FLAG_DEPS"
-  AC_SUBST(C_FLAG_DEPS)
-  AC_SUBST(CXX_FLAG_DEPS)
+  AC_SUBST(GENDEPS_FLAGS)
 ])
 
 AC_DEFUN_ONCE([FLAGS_POST_TOOLCHAIN],
@@ -400,9 +363,12 @@ AC_DEFUN([FLAGS_SETUP_FLAGS],
   FLAGS_SETUP_LDFLAGS
 
   FLAGS_SETUP_ARFLAGS
+  FLAGS_SETUP_LIBFLAGS
   FLAGS_SETUP_STRIPFLAGS
   FLAGS_SETUP_RCFLAGS
+  FLAGS_SETUP_NMFLAGS
 
+  FLAGS_SETUP_SVE
   FLAGS_SETUP_ASFLAGS
   FLAGS_SETUP_ASFLAGS_CPU_DEP([TARGET])
   FLAGS_SETUP_ASFLAGS_CPU_DEP([BUILD], [OPENJDK_BUILD_])
@@ -477,14 +443,14 @@ UTIL_DEFUN_NAMED([FLAGS_CXX_COMPILER_CHECK_ARGUMENTS],
 UTIL_DEFUN_NAMED([FLAGS_COMPILER_CHECK_ARGUMENTS],
     [*ARGUMENT IF_TRUE IF_FALSE PREFIX], [$@],
 [
-  FLAGS_C_COMPILER_CHECK_ARGUMENTS(ARGUMENT: [ARG_ARGUMENT],
+  FLAGS_C_COMPILER_CHECK_ARGUMENTS(ARGUMENT: ARG_ARGUMENT,
       IF_TRUE: [C_COMP_SUPPORTS="yes"],
       IF_FALSE: [C_COMP_SUPPORTS="no"],
-      PREFIX: [ARG_PREFIX])
-  FLAGS_CXX_COMPILER_CHECK_ARGUMENTS(ARGUMENT: [ARG_ARGUMENT],
+      PREFIX: ARG_PREFIX)
+  FLAGS_CXX_COMPILER_CHECK_ARGUMENTS(ARGUMENT: ARG_ARGUMENT,
       IF_TRUE: [CXX_COMP_SUPPORTS="yes"],
       IF_FALSE: [CXX_COMP_SUPPORTS="no"],
-      PREFIX: [ARG_PREFIX])
+      PREFIX: ARG_PREFIX)
 
   AC_MSG_CHECKING([if both ARG_PREFIX[CC] and ARG_PREFIX[CXX] support "ARG_ARGUMENT"])
   supports=no

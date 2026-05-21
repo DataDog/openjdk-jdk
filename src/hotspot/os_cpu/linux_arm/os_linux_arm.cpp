@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,18 +22,16 @@
  *
  */
 
-// no precompiled headers
-#include "jvm.h"
-#include "assembler_arm.inline.hpp"
-#include "classfile/classLoader.hpp"
-#include "classfile/systemDictionary.hpp"
+#include "asm/assembler.inline.hpp"
 #include "classfile/vmSymbols.hpp"
-#include "code/icBuffer.hpp"
 #include "code/vtableStubs.hpp"
+#include "cppstdlib/cstdlib.hpp"
 #include "interpreter/interpreter.hpp"
+#include "jvm.h"
 #include "memory/allocation.inline.hpp"
 #include "nativeInst_arm.hpp"
-#include "os_share_linux.hpp"
+#include "os_linux.hpp"
+#include "os_posix.hpp"
 #include "prims/jniFastGetField.hpp"
 #include "prims/jvm_misc.hpp"
 #include "runtime/arguments.hpp"
@@ -46,6 +44,7 @@
 #include "runtime/safepointMechanism.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/stubRoutines.hpp"
+#include "runtime/threads.hpp"
 #include "runtime/timer.hpp"
 #include "signals_posix.hpp"
 #include "utilities/debug.hpp"
@@ -59,7 +58,6 @@
 # include <signal.h>
 # include <errno.h>
 # include <dlfcn.h>
-# include <stdlib.h>
 # include <stdio.h>
 # include <unistd.h>
 # include <sys/resource.h>
@@ -76,6 +74,13 @@
 # include <asm/ptrace.h>
 
 #define SPELL_REG_SP  "sp"
+
+#ifndef __thumb__
+enum {
+  // Offset to add to frame::_fp when dealing with non-thumb C frames
+  C_frame_offset =  -1,
+};
+#endif
 
 // Don't #define SPELL_REG_FP for thumb because it is not safe to use, so this makes sure we never fetch it.
 #ifndef __thumb__
@@ -126,7 +131,7 @@ intptr_t* os::Linux::ucontext_get_fp(const ucontext_t* uc) {
 
 bool is_safe_for_fp(address pc) {
 #ifdef __thumb__
-  if (CodeCache::find_blob(pc) != NULL) {
+  if (CodeCache::find_blob(pc) != nullptr) {
     return true;
   }
   // For thumb C frames, given an fp we have no idea how to access the frame contents.
@@ -148,15 +153,15 @@ address os::fetch_frame_from_context(const void* ucVoid,
   address epc;
   const ucontext_t* uc = (const ucontext_t*)ucVoid;
 
-  if (uc != NULL) {
+  if (uc != nullptr) {
     epc = os::Posix::ucontext_get_pc(uc);
     if (ret_sp) *ret_sp = os::Linux::ucontext_get_sp(uc);
     if (ret_fp) {
       intptr_t* fp = os::Linux::ucontext_get_fp(uc);
 #ifndef __thumb__
-      if (CodeCache::find_blob(epc) == NULL) {
+      if (CodeCache::find_blob(epc) == nullptr) {
         // It's a C frame. We need to adjust the fp.
-        fp += os::C_frame_offset;
+        fp += C_frame_offset;
       }
 #endif
       // Clear FP when stack walking is dangerous so that
@@ -165,14 +170,14 @@ address os::fetch_frame_from_context(const void* ucVoid,
       // potentially necessary.
       if (!is_safe_for_fp(epc)) {
         // FP unreliable
-        fp = (intptr_t *)NULL;
+        fp = (intptr_t *)nullptr;
       }
       *ret_fp = fp;
     }
   } else {
-    epc = NULL;
-    if (ret_sp) *ret_sp = (intptr_t *)NULL;
-    if (ret_fp) *ret_fp = (intptr_t *)NULL;
+    epc = nullptr;
+    if (ret_sp) *ret_sp = (intptr_t *)nullptr;
+    if (ret_fp) *ret_fp = (intptr_t *)nullptr;
   }
 
   return epc;
@@ -182,7 +187,38 @@ frame os::fetch_frame_from_context(const void* ucVoid) {
   intptr_t* sp;
   intptr_t* fp;
   address epc = fetch_frame_from_context(ucVoid, &sp, &fp);
+  if (!is_readable_pointer(epc)) {
+    // Try to recover from calling into bad memory
+    // Assume new frame has not been set up, the same as
+    // compiled frame stack bang
+    return fetch_compiled_frame_from_context(ucVoid);
+  }
   return frame(sp, fp, epc);
+}
+
+frame os::fetch_compiled_frame_from_context(const void* ucVoid) {
+  const ucontext_t* uc = (const ucontext_t*)ucVoid;
+  // In compiled code, the stack banging is performed before LR
+  // has been saved in the frame.  LR is live, and SP and FP
+  // belong to the caller.
+  intptr_t* fp = os::Linux::ucontext_get_fp(uc);
+  intptr_t* sp = os::Linux::ucontext_get_sp(uc);
+  address pc = (address)(uc->uc_mcontext.arm_lr
+                         - NativeInstruction::instruction_size);
+  return frame(sp, fp, pc);
+}
+
+intptr_t* os::fetch_bcp_from_context(const void* ucVoid) {
+  assert(ucVoid != nullptr, "invariant");
+  const ucontext_t* uc = (const ucontext_t*)ucVoid;
+  assert(os::Posix::ucontext_is_interpreter(uc), "invariant");
+#if (FP_REG_NUM == 11)
+  assert(Rbcp == R7, "expected FP=R11, Rbcp=R7");
+  return (intptr_t*)uc->uc_mcontext.arm_r7;
+#else
+  assert(Rbcp == R11, "expected FP=R7, Rbcp=R11");
+  return (intptr_t*)uc->uc_mcontext.arm_fp; // r11
+#endif
 }
 
 frame os::get_sender_for_C_frame(frame* fr) {
@@ -192,9 +228,9 @@ frame os::get_sender_for_C_frame(frame* fr) {
 #else
   address pc = fr->sender_pc();
   if (! is_safe_for_fp(pc)) {
-    return frame(fr->sender_sp(), (intptr_t *)NULL, pc);
+    return frame(fr->sender_sp(), (intptr_t *)nullptr, pc);
   } else {
-    return frame(fr->sender_sp(), fr->link() + os::C_frame_offset, pc);
+    return frame(fr->sender_sp(), fr->link() + C_frame_offset, pc);
   }
 #endif
 }
@@ -213,7 +249,7 @@ frame os::current_frame() {
 #else
   register intptr_t* fp __asm__ (SPELL_REG_FP);
   // fp is for os::current_frame. We want the fp for our caller.
-  frame myframe((intptr_t*)os::current_stack_pointer(), fp + os::C_frame_offset,
+  frame myframe((intptr_t*)os::current_stack_pointer(), fp + C_frame_offset,
                  CAST_FROM_FN_PTR(address, os::current_frame));
   frame caller_frame = os::get_sender_for_C_frame(&myframe);
 
@@ -236,10 +272,10 @@ extern "C" address check_vfp3_32_fault_instr;
 extern "C" address check_simd_fault_instr;
 extern "C" address check_mp_ext_fault_instr;
 
-address check_vfp_fault_instr = NULL;
-address check_vfp3_32_fault_instr = NULL;
-address check_simd_fault_instr = NULL;
-address check_mp_ext_fault_instr = NULL;
+address check_vfp_fault_instr = nullptr;
+address check_vfp3_32_fault_instr = nullptr;
+address check_simd_fault_instr = nullptr;
+address check_mp_ext_fault_instr = nullptr;
 
 
 bool PosixSignals::pd_hotspot_signal_handler(int sig, siginfo_t* info,
@@ -257,21 +293,17 @@ bool PosixSignals::pd_hotspot_signal_handler(int sig, siginfo_t* info,
     return true;
   }
 
-  address stub = NULL;
-  address pc = NULL;
+  address stub = nullptr;
+  address pc = nullptr;
   bool unsafe_access = false;
 
-  if (info != NULL && uc != NULL && thread != NULL) {
+  if (info != nullptr && uc != nullptr && thread != nullptr) {
     pc = (address) os::Posix::ucontext_get_pc(uc);
 
     // Handle ALL stack overflow variations here
     if (sig == SIGSEGV) {
       address addr = (address) info->si_addr;
 
-      if (StubRoutines::is_safefetch_fault(pc)) {
-        os::Posix::ucontext_set_pc(uc, StubRoutines::continuation_for_safefetch_fault(pc));
-        return true;
-      }
       // check if fault address is within thread stack
       if (thread->is_in_full_stack(addr)) {
         // stack overflow
@@ -279,7 +311,7 @@ bool PosixSignals::pd_hotspot_signal_handler(int sig, siginfo_t* info,
         if (overflow_state->in_stack_yellow_reserved_zone(addr)) {
           overflow_state->disable_stack_yellow_reserved_zone();
           if (thread->thread_state() == _thread_in_Java) {
-            // Throw a stack overflow exception.  Guard pages will be reenabled
+            // Throw a stack overflow exception.  Guard pages will be re-enabled
             // while unwinding the stack.
             stub = SharedRuntime::continuation_for_implicit_exception(thread, pc, SharedRuntime::STACK_OVERFLOW);
           } else {
@@ -288,7 +320,7 @@ bool PosixSignals::pd_hotspot_signal_handler(int sig, siginfo_t* info,
           }
         } else if (overflow_state->in_stack_red_zone(addr)) {
           // Fatal red zone violation.  Disable the guard pages and fall through
-          // to handle_unexpected_exception way down below.
+          // to the exception handling code below.
           overflow_state->disable_stack_red_zone();
           tty->print_raw_cr("An irrecoverable stack overflow has occurred.");
         } else {
@@ -320,21 +352,21 @@ bool PosixSignals::pd_hotspot_signal_handler(int sig, siginfo_t* info,
         // BugId 4454115: A read from a MappedByteBuffer can fault
         // here if the underlying file has been truncated.
         // Do not crash the VM in such a case.
-        CodeBlob* cb = CodeCache::find_blob_unsafe(pc);
-        CompiledMethod* nm = (cb != NULL) ? cb->as_compiled_method_or_null() : NULL;
-        if ((nm != NULL && nm->has_unsafe_access()) || (thread->doing_unsafe_access() && UnsafeCopyMemory::contains_pc(pc))) {
+        CodeBlob* cb = CodeCache::find_blob(pc);
+        nmethod* nm = (cb != nullptr) ? cb->as_nmethod_or_null() : nullptr;
+        if ((nm != nullptr && nm->has_unsafe_access()) ||
+            (thread->doing_unsafe_access() &&
+             UnsafeMemoryAccess::contains_pc(pc))) {
           unsafe_access = true;
         }
       } else if (sig == SIGSEGV &&
                  MacroAssembler::uses_implicit_null_check(info->si_addr)) {
-          // Determination of interpreter/vtable stub/compiled code null exception
-          CodeBlob* cb = CodeCache::find_blob_unsafe(pc);
-          if (cb != NULL) {
-            stub = SharedRuntime::continuation_for_implicit_exception(thread, pc, SharedRuntime::IMPLICIT_NULL);
-          }
-      } else if (sig == SIGILL && *(int *)pc == NativeInstruction::zombie_illegal_instruction) {
-        // Zombie
-        stub = SharedRuntime::get_handle_wrong_method_stub();
+        // Determination of interpreter/vtable stub/compiled code null exception
+        CodeBlob* cb = CodeCache::find_blob(pc);
+        if (cb != nullptr) {
+          stub = SharedRuntime::continuation_for_implicit_exception(
+              thread, pc, SharedRuntime::IMPLICIT_NULL);
+        }
       }
     } else if ((thread->thread_state() == _thread_in_vm ||
                 thread->thread_state() == _thread_in_native) &&
@@ -352,13 +384,13 @@ bool PosixSignals::pd_hotspot_signal_handler(int sig, siginfo_t* info,
     }
   }
 
-  if (unsafe_access && stub == NULL) {
+  if (unsafe_access && stub == nullptr) {
     // it can be an unsafe access and we haven't found
     // any other suitable exception reason,
     // so assume it is an unsafe access.
     address next_pc = pc + Assembler::InstructionSize;
-    if (UnsafeCopyMemory::contains_pc(pc)) {
-      next_pc = UnsafeCopyMemory::page_error_continue_pc(pc);
+    if (UnsafeMemoryAccess::contains_pc(pc)) {
+      next_pc = UnsafeMemoryAccess::page_error_continue_pc(pc);
     }
 #ifdef __thumb__
     if (uc->uc_mcontext.arm_cpsr & PSR_T_BIT) {
@@ -369,7 +401,7 @@ bool PosixSignals::pd_hotspot_signal_handler(int sig, siginfo_t* info,
     stub = SharedRuntime::handle_unsafe_access(thread, next_pc);
   }
 
-  if (stub != NULL) {
+  if (stub != nullptr) {
 #ifdef __thumb__
     if (uc->uc_mcontext.arm_cpsr & PSR_T_BIT) {
       intptr_t p = (intptr_t)pc | 0x1;
@@ -387,7 +419,7 @@ bool PosixSignals::pd_hotspot_signal_handler(int sig, siginfo_t* info,
 #endif
 
     // save all thread context in case we need to restore it
-    if (thread != NULL) thread->set_saved_exception_pc(pc);
+    if (thread != nullptr) thread->set_saved_exception_pc(pc);
 
     os::Posix::ucontext_set_pc(uc, stub);
     return true;
@@ -419,18 +451,14 @@ void os::setup_fpu() {
 #endif
 }
 
-bool os::is_allocatable(size_t bytes) {
-  return true;
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // thread stack
 
 // Minimum usable stack sizes required to get to user code. Space for
 // HotSpot guard pages is added later.
-size_t os::Posix::_compiler_thread_min_stack_allowed = (32 DEBUG_ONLY(+ 4)) * K;
-size_t os::Posix::_java_thread_min_stack_allowed = (32 DEBUG_ONLY(+ 4)) * K;
-size_t os::Posix::_vm_internal_thread_min_stack_allowed = (48 DEBUG_ONLY(+ 4)) * K;
+size_t os::_compiler_thread_min_stack_allowed = (32 DEBUG_ONLY(+ 4)) * K;
+size_t os::_java_thread_min_stack_allowed = (32 DEBUG_ONLY(+ 4)) * K;
+size_t os::_vm_internal_thread_min_stack_allowed = (48 DEBUG_ONLY(+ 4)) * K;
 
 // return default stack size for thr_type
 size_t os::Posix::default_stack_size(os::ThreadType thr_type) {
@@ -443,7 +471,8 @@ size_t os::Posix::default_stack_size(os::ThreadType thr_type) {
 // helper functions for fatal error handler
 
 void os::print_context(outputStream *st, const void *context) {
-  if (context == NULL) return;
+  if (context == nullptr) return;
+
   const ucontext_t *uc = (const ucontext_t*)context;
 
   st->print_cr("Registers:");
@@ -453,50 +482,57 @@ void os::print_context(outputStream *st, const void *context) {
   }
 #define U64_FORMAT "0x%016llx"
   // now print flag register
-  st->print_cr("  %-4s = 0x%08lx", "cpsr",uc->uc_mcontext.arm_cpsr);
-  st->cr();
-
-  intptr_t *sp = (intptr_t *)os::Linux::ucontext_get_sp(uc);
-  st->print_cr("Top of Stack: (sp=" INTPTR_FORMAT ")", p2i(sp));
-  print_hex_dump(st, (address)sp, (address)(sp + 8*sizeof(intptr_t)), sizeof(intptr_t));
-  st->cr();
-
-  // Note: it may be unsafe to inspect memory near pc. For example, pc may
-  // point to garbage if entry point in an nmethod is corrupted. Leave
-  // this at the end, and hope for the best.
-  address pc = os::Posix::ucontext_get_pc(uc);
-  print_instructions(st, pc, Assembler::InstructionSize);
+  uint32_t cpsr = uc->uc_mcontext.arm_cpsr;
+  st->print_cr("  %-4s = 0x%08x", "cpsr", cpsr);
+  // print out instruction set state
+  st->print("isetstate: ");
+  const int isetstate =
+      ((cpsr & (1 << 5))  ? 1 : 0) | // T
+      ((cpsr & (1 << 24)) ? 2 : 0); // J
+  switch (isetstate) {
+  case 0: st->print_cr("ARM"); break;
+  case 1: st->print_cr("Thumb"); break;
+  case 2: st->print_cr("Jazelle"); break;
+  case 3: st->print_cr("ThumbEE"); break;
+  default: ShouldNotReachHere();
+  };
   st->cr();
 }
 
-void os::print_register_info(outputStream *st, const void *context) {
-  if (context == NULL) return;
+void os::print_register_info(outputStream *st, const void *context, int& continuation) {
+  const int register_count = ARM_REGS_IN_CONTEXT;
+  int n = continuation;
+  assert(n >= 0 && n <= register_count, "Invalid continuation value");
+  if (context == nullptr || n == register_count) {
+    return;
+  }
 
   const ucontext_t *uc = (const ucontext_t*)context;
   intx* reg_area = (intx*)&uc->uc_mcontext.arm_r0;
 
-  st->print_cr("Register to memory mapping:");
-  st->cr();
-  for (int r = 0; r < ARM_REGS_IN_CONTEXT; r++) {
-    st->print_cr("  %-3s = " INTPTR_FORMAT, as_Register(r)->name(), reg_area[r]);
-    print_location(st, reg_area[r]);
-    st->cr();
+  while (n < register_count) {
+    // Update continuation with next index before printing location
+    continuation = n + 1;
+    st->print("  %-3s = ", as_Register(n)->name());
+    print_location(st, reg_area[n]);
+    ++n;
   }
-  st->cr();
 }
 
 
+ARMAtomicFuncs::cmpxchg_long_func_t ARMAtomicFuncs::_cmpxchg_long_func = ARMAtomicFuncs::cmpxchg_long_bootstrap;
+ARMAtomicFuncs::load_long_func_t    ARMAtomicFuncs::_load_long_func    = ARMAtomicFuncs::load_long_bootstrap;
+ARMAtomicFuncs::store_long_func_t   ARMAtomicFuncs::_store_long_func   = ARMAtomicFuncs::store_long_bootstrap;
+ARMAtomicFuncs::atomic_add_func_t   ARMAtomicFuncs::_add_func          = ARMAtomicFuncs::add_bootstrap;
+ARMAtomicFuncs::atomic_xchg_func_t  ARMAtomicFuncs::_xchg_func         = ARMAtomicFuncs::xchg_bootstrap;
+ARMAtomicFuncs::cmpxchg_func_t      ARMAtomicFuncs::_cmpxchg_func      = ARMAtomicFuncs::cmpxchg_bootstrap;
 
-typedef int64_t cmpxchg_long_func_t(int64_t, int64_t, volatile int64_t*);
-
-cmpxchg_long_func_t* os::atomic_cmpxchg_long_func = os::atomic_cmpxchg_long_bootstrap;
-
-int64_t os::atomic_cmpxchg_long_bootstrap(int64_t compare_value, int64_t exchange_value, volatile int64_t* dest) {
+int64_t ARMAtomicFuncs::cmpxchg_long_bootstrap(int64_t compare_value, int64_t exchange_value, volatile int64_t* dest) {
   // try to use the stub:
-  cmpxchg_long_func_t* func = CAST_TO_FN_PTR(cmpxchg_long_func_t*, StubRoutines::atomic_cmpxchg_long_entry());
+  cmpxchg_long_func_t func = CAST_TO_FN_PTR(cmpxchg_long_func_t, StubRoutines::atomic_cmpxchg_long_entry());
 
-  if (func != NULL) {
-    os::atomic_cmpxchg_long_func = func;
+  if (func != nullptr) {
+    _cmpxchg_long_func = func;
     return (*func)(compare_value, exchange_value, dest);
   }
   assert(Threads::number_of_threads() == 0, "for bootstrap only");
@@ -506,16 +542,13 @@ int64_t os::atomic_cmpxchg_long_bootstrap(int64_t compare_value, int64_t exchang
     *dest = exchange_value;
   return old_value;
 }
-typedef int64_t load_long_func_t(const volatile int64_t*);
 
-load_long_func_t* os::atomic_load_long_func = os::atomic_load_long_bootstrap;
-
-int64_t os::atomic_load_long_bootstrap(const volatile int64_t* src) {
+int64_t ARMAtomicFuncs::load_long_bootstrap(const volatile int64_t* src) {
   // try to use the stub:
-  load_long_func_t* func = CAST_TO_FN_PTR(load_long_func_t*, StubRoutines::atomic_load_long_entry());
+  load_long_func_t func = CAST_TO_FN_PTR(load_long_func_t, StubRoutines::Arm::atomic_load_long_entry());
 
-  if (func != NULL) {
-    os::atomic_load_long_func = func;
+  if (func != nullptr) {
+    _load_long_func = func;
     return (*func)(src);
   }
   assert(Threads::number_of_threads() == 0, "for bootstrap only");
@@ -524,16 +557,12 @@ int64_t os::atomic_load_long_bootstrap(const volatile int64_t* src) {
   return old_value;
 }
 
-typedef void store_long_func_t(int64_t, volatile int64_t*);
-
-store_long_func_t* os::atomic_store_long_func = os::atomic_store_long_bootstrap;
-
-void os::atomic_store_long_bootstrap(int64_t val, volatile int64_t* dest) {
+void ARMAtomicFuncs::store_long_bootstrap(int64_t val, volatile int64_t* dest) {
   // try to use the stub:
-  store_long_func_t* func = CAST_TO_FN_PTR(store_long_func_t*, StubRoutines::atomic_store_long_entry());
+  store_long_func_t func = CAST_TO_FN_PTR(store_long_func_t, StubRoutines::Arm::atomic_store_long_entry());
 
-  if (func != NULL) {
-    os::atomic_store_long_func = func;
+  if (func != nullptr) {
+    _store_long_func = func;
     return (*func)(val, dest);
   }
   assert(Threads::number_of_threads() == 0, "for bootstrap only");
@@ -541,15 +570,11 @@ void os::atomic_store_long_bootstrap(int64_t val, volatile int64_t* dest) {
   *dest = val;
 }
 
-typedef int32_t  atomic_add_func_t(int32_t add_value, volatile int32_t *dest);
-
-atomic_add_func_t * os::atomic_add_func = os::atomic_add_bootstrap;
-
-int32_t  os::atomic_add_bootstrap(int32_t add_value, volatile int32_t *dest) {
-  atomic_add_func_t * func = CAST_TO_FN_PTR(atomic_add_func_t*,
-                                            StubRoutines::atomic_add_entry());
-  if (func != NULL) {
-    os::atomic_add_func = func;
+int32_t ARMAtomicFuncs::add_bootstrap(int32_t add_value, volatile int32_t *dest) {
+  atomic_add_func_t func = CAST_TO_FN_PTR(atomic_add_func_t,
+                                          StubRoutines::atomic_add_entry());
+  if (func != nullptr) {
+    _add_func = func;
     return (*func)(add_value, dest);
   }
 
@@ -558,15 +583,11 @@ int32_t  os::atomic_add_bootstrap(int32_t add_value, volatile int32_t *dest) {
   return (old_value + add_value);
 }
 
-typedef int32_t  atomic_xchg_func_t(int32_t exchange_value, volatile int32_t *dest);
-
-atomic_xchg_func_t * os::atomic_xchg_func = os::atomic_xchg_bootstrap;
-
-int32_t  os::atomic_xchg_bootstrap(int32_t exchange_value, volatile int32_t *dest) {
-  atomic_xchg_func_t * func = CAST_TO_FN_PTR(atomic_xchg_func_t*,
-                                            StubRoutines::atomic_xchg_entry());
-  if (func != NULL) {
-    os::atomic_xchg_func = func;
+int32_t ARMAtomicFuncs::xchg_bootstrap(int32_t exchange_value, volatile int32_t *dest) {
+  atomic_xchg_func_t func = CAST_TO_FN_PTR(atomic_xchg_func_t,
+                                           StubRoutines::atomic_xchg_entry());
+  if (func != nullptr) {
+    _xchg_func = func;
     return (*func)(exchange_value, dest);
   }
 
@@ -575,16 +596,12 @@ int32_t  os::atomic_xchg_bootstrap(int32_t exchange_value, volatile int32_t *des
   return (old_value);
 }
 
-typedef int32_t cmpxchg_func_t(int32_t, int32_t, volatile int32_t*);
-
-cmpxchg_func_t* os::atomic_cmpxchg_func = os::atomic_cmpxchg_bootstrap;
-
-int32_t os::atomic_cmpxchg_bootstrap(int32_t compare_value, int32_t exchange_value, volatile int32_t* dest) {
+int32_t ARMAtomicFuncs::cmpxchg_bootstrap(int32_t compare_value, int32_t exchange_value, volatile int32_t* dest) {
   // try to use the stub:
-  cmpxchg_func_t* func = CAST_TO_FN_PTR(cmpxchg_func_t*, StubRoutines::atomic_cmpxchg_entry());
+  cmpxchg_func_t func = CAST_TO_FN_PTR(cmpxchg_func_t, StubRoutines::atomic_cmpxchg_entry());
 
-  if (func != NULL) {
-    os::atomic_cmpxchg_func = func;
+  if (func != nullptr) {
+    _cmpxchg_func = func;
     return (*func)(compare_value, exchange_value, dest);
   }
   assert(Threads::number_of_threads() == 0, "for bootstrap only");

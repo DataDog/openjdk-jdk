@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,13 +25,13 @@
 #ifndef SHARE_GC_G1_G1ROOTPROCESSOR_HPP
 #define SHARE_GC_G1_G1ROOTPROCESSOR_HPP
 
+#include "code/nmethod.hpp"
 #include "gc/shared/oopStorageSetParState.hpp"
-#include "gc/shared/strongRootsScope.hpp"
 #include "memory/allocation.hpp"
 #include "runtime/mutex.hpp"
+#include "runtime/threads.hpp"
 
 class CLDClosure;
-class CodeBlobClosure;
 class G1CollectedHeap;
 class G1EvacuationRootClosures;
 class G1GCPhaseTimes;
@@ -49,16 +49,14 @@ class SubTasksDone;
 class G1RootProcessor : public StackObj {
   G1CollectedHeap* _g1h;
   SubTasksDone _process_strong_tasks;
-  StrongRootsScope _srs;
+  NMethodMarkingScope _nmethod_marking_scope;
+  ThreadsClaimTokenScope _threads_claim_token_scope;
+  bool _is_parallel;
   OopStorageSetStrongParState<false, false> _oop_storage_set_strong_par_state;
 
   enum G1H_process_roots_tasks {
-    G1RP_PS_Universe_oops_do,
-    G1RP_PS_Management_oops_do,
     G1RP_PS_ClassLoaderDataGraph_oops_do,
-    G1RP_PS_jvmti_oops_do,
     G1RP_PS_CodeCache_oops_do,
-    AOT_ONLY(G1RP_PS_aot_oops_do COMMA)
     G1RP_PS_refProcessor_oops_do,
     // Leave this one last.
     G1RP_PS_NumElements
@@ -72,12 +70,12 @@ class G1RootProcessor : public StackObj {
                         G1GCPhaseTimes* phase_times,
                         uint worker_id);
 
-  void process_code_cache_roots(CodeBlobClosure* code_closure,
+  void process_code_cache_roots(NMethodClosure* nmethods_closure,
                                 G1GCPhaseTimes* phase_times,
                                 uint worker_id);
 
 public:
-  G1RootProcessor(G1CollectedHeap* g1h, uint n_workers);
+  G1RootProcessor(G1CollectedHeap* g1h, bool is_parallel);
 
   // Apply correct closures from pss to the strongly and weakly reachable roots in the system
   // in a single pass.
@@ -87,15 +85,12 @@ public:
   // Apply oops, clds and blobs to all strongly reachable roots in the system
   void process_strong_roots(OopClosure* oops,
                             CLDClosure* clds,
-                            CodeBlobClosure* blobs);
+                            NMethodClosure* nmethods);
 
   // Apply oops, clds and blobs to strongly and weakly reachable roots in the system
   void process_all_roots(OopClosure* oops,
                          CLDClosure* clds,
-                         CodeBlobClosure* blobs);
-
-  // Number of worker threads used by the root processor.
-  uint n_workers() const;
+                         NMethodClosure* nmethods);
 };
 
 #endif // SHARE_GC_G1_G1ROOTPROCESSOR_HPP

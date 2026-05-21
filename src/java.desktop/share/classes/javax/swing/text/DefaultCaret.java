@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,19 +22,50 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+
 package javax.swing.text;
 
-import java.awt.*;
-import java.awt.event.*;
-import java.awt.datatransfer.*;
-import java.beans.*;
+import java.awt.Color;
+import java.awt.Graphics;
+import java.awt.HeadlessException;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.Toolkit;
+import java.awt.datatransfer.Clipboard;
+import java.awt.datatransfer.ClipboardOwner;
+import java.awt.datatransfer.StringSelection;
+import java.awt.datatransfer.Transferable;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import java.io.*;
-import javax.swing.*;
-import javax.swing.event.*;
-import javax.swing.plaf.*;
+import java.awt.event.FocusEvent;
+import java.awt.event.FocusListener;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
+import java.awt.event.MouseMotionListener;
+import java.beans.PropertyChangeEvent;
+import java.beans.PropertyChangeListener;
+import java.io.IOException;
+import java.io.InvalidObjectException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serial;
 import java.util.EventListener;
+
+import javax.swing.Action;
+import javax.swing.ActionMap;
+import javax.swing.JPasswordField;
+import javax.swing.JRootPane;
+import javax.swing.SwingUtilities;
+import javax.swing.Timer;
+import javax.swing.TransferHandler;
+import javax.swing.UIManager;
+import javax.swing.event.ChangeEvent;
+import javax.swing.event.ChangeListener;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import javax.swing.event.EventListenerList;
+import javax.swing.plaf.TextUI;
+
 import sun.swing.SwingUtilities2;
 
 /**
@@ -222,7 +253,7 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
     }
 
     /**
-     * Gets the text editor component that this caret is
+     * Gets the text editor component that this caret
      * is bound to.
      *
      * @return the component
@@ -336,6 +367,8 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
         }
     }
 
+    private int savedBlinkRate = 0;
+    private boolean isBlinkRateSaved = false;
     // --- FocusListener methods --------------------------
 
     /**
@@ -349,8 +382,21 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
     public void focusGained(FocusEvent e) {
         if (component.isEnabled()) {
             if (component.isEditable()) {
-                setVisible(true);
+                if (isBlinkRateSaved) {
+                    setBlinkRate(savedBlinkRate);
+                    savedBlinkRate = 0;
+                    isBlinkRateSaved = false;
+                }
+            } else {
+                if (getBlinkRate() != 0) {
+                    if (!isBlinkRateSaved) {
+                        savedBlinkRate = getBlinkRate();
+                        isBlinkRateSaved = true;
+                    }
+                    setBlinkRate(0);
+                }
             }
+            setVisible(true);
             setSelectionVisible(true);
             updateSystemSelection();
         }
@@ -422,12 +468,10 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
                 // mouse 1 behavior
                 if(nclicks == 1) {
                     selectedWordEvent = null;
-                } else if(nclicks == 2
-                          && SwingUtilities2.canEventAccessSystemClipboard(e)) {
+                } else if (nclicks == 2) {
                     selectWord(e);
                     selectedWordEvent = null;
-                } else if(nclicks == 3
-                          && SwingUtilities2.canEventAccessSystemClipboard(e)) {
+                } else if (nclicks == 3) {
                     Action a = null;
                     ActionMap map = getComponent().getActionMap();
                     if (map != null) {
@@ -444,8 +488,7 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
                 }
             } else if (SwingUtilities.isMiddleMouseButton(e)) {
                 // mouse 2 behavior
-                if (nclicks == 1 && component.isEditable() && component.isEnabled()
-                    && SwingUtilities2.canEventAccessSystemClipboard(e)) {
+                if (nclicks == 1 && component.isEditable() && component.isEnabled()) {
                     // paste system selection, if it exists
                     JTextComponent c = (JTextComponent) e.getSource();
                     if (c != null) {
@@ -502,8 +545,7 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
             } else {
                 shouldHandleRelease = false;
                 adjustCaretAndFocus(e);
-                if (nclicks == 2
-                    && SwingUtilities2.canEventAccessSystemClipboard(e)) {
+                if (nclicks == 2) {
                     selectWord(e);
                 }
             }
@@ -537,10 +579,10 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
         if ((component != null) && component.isEnabled() &&
                                    component.isRequestFocusEnabled()) {
             if (inWindow) {
-                component.requestFocusInWindow();
+                component.requestFocusInWindow(FocusEvent.Cause.MOUSE_EVENT);
             }
             else {
-                component.requestFocus();
+                component.requestFocus(FocusEvent.Cause.MOUSE_EVENT);
             }
         }
     }
@@ -649,7 +691,25 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
                     // semantics of damage we can't really get around this.
                     damage(r);
                 }
-                g.setColor(component.getCaretColor());
+                if (component.isEditable()) {
+                    g.setColor(component.getCaretColor());
+                } else {
+                    Color caretColor = component.getCaretColor();
+                    if (caretColor == null) {
+                        caretColor = g.getColor();
+                    }
+                    Color bg = component.getBackground();
+                    if (bg == null) {
+                        g.setColor(caretColor);
+                    } else {
+                        int red = (caretColor.getRed() + bg.getRed()) / 2;
+                        int green = (caretColor.getGreen() + bg.getGreen()) / 2;
+                        int blue = (caretColor.getBlue() + bg.getBlue()) / 2;
+                        int alpha = 127;
+                        Color newCaretColor = new Color(red, green, blue, alpha);
+                        g.setColor(newCaretColor);
+                    }
+                }
                 int paintWidth = getCaretWidth(r.height);
                 r.x -= paintWidth  >> 1;
                 g.fillRect(r.x, r.y, paintWidth, r.height);
@@ -840,7 +900,7 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
      *          <code><em>Foo</em>Listener</code>s on this component,
      *          or an empty array if no such
      *          listeners have been added
-     * @exception ClassCastException if <code>listenerType</code>
+     * @throws ClassCastException if <code>listenerType</code>
      *          doesn't specify a class or interface that implements
      *          <code>java.util.EventListener</code>
      *
@@ -1001,16 +1061,28 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
      * @see Caret#setBlinkRate
      */
     public void setBlinkRate(int rate) {
+        if (rate < 0) {
+            throw new IllegalArgumentException("Invalid blink rate: " + rate);
+        }
         if (rate != 0) {
-            if (flasher == null) {
-                flasher = new Timer(rate, handler);
+            if (component != null && component.isEditable()) {
+                if (flasher == null) {
+                    flasher = new Timer(rate, handler);
+                }
+                flasher.setDelay(rate);
+            } else {
+                savedBlinkRate = rate;
+                isBlinkRateSaved = true;
             }
-            flasher.setDelay(rate);
         } else {
             if (flasher != null) {
                 flasher.stop();
                 flasher.removeActionListener(handler);
                 flasher = null;
+            }
+            if ((component == null || component.isEditable()) && isBlinkRateSaved) {
+                savedBlinkRate = 0;
+                isBlinkRateSaved = false;
             }
         }
     }
@@ -1023,6 +1095,9 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
      * @see Caret#getBlinkRate
      */
     public int getBlinkRate() {
+        if (isBlinkRateSaved) {
+            return savedBlinkRate;
+        }
         return (flasher == null) ? 0 : flasher.getDelay();
     }
 
@@ -1227,12 +1302,12 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
 
     Position.Bias guessBiasForOffset(int offset, Position.Bias lastBias,
                                      boolean lastLTR) {
-        // There is an abiguous case here. That if your model looks like:
+        // There is an ambiguous case here. If your model looks like:
         // abAB with the cursor at abB]A (visual representation of
         // 3 forward) deleting could either become abB] or
-        // ab[B. I'ld actually prefer abB]. But, if I implement that
-        // a delete at abBA] would result in aBA] vs a[BA which I
-        // think is totally wrong. To get this right we need to know what
+        // ab[B. I'd actually prefer abB]. But, if I implement that,
+        // a delete at abBA] would result in aBA] vs a[BA which, I
+        // think, is totally wrong. To get this right we need to know what
         // was deleted. And we could get this from the bidi structure
         // in the change event. So:
         // PENDING: base this off what was deleted.
@@ -1334,9 +1409,6 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
     }
 
     private void updateSystemSelection() {
-        if ( ! SwingUtilities2.canCurrentEventAccessSystemClipboard() ) {
-            return;
-        }
         if (this.dot != this.mark && component != null && component.hasFocus()) {
             Clipboard clip = getSystemSelection();
             if (clip != null) {
@@ -1378,8 +1450,6 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
             return component.getToolkit().getSystemSelection();
         } catch (HeadlessException he) {
             // do nothing... there is no system clipboard
-        } catch (SecurityException se) {
-            // do nothing... there is no allowed system clipboard
         }
         return null;
     }
@@ -1522,6 +1592,7 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
 
     // --- serialization ---------------------------------------------
 
+    @Serial
     private void readObject(ObjectInputStream s)
       throws ClassNotFoundException, IOException
     {
@@ -1564,6 +1635,7 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
         }
     }
 
+    @Serial
     private void writeObject(ObjectOutputStream s) throws IOException {
         s.defaultWriteObject();
         s.writeBoolean((dotBias == Position.Bias.Backward));

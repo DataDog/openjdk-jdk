@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -78,7 +78,7 @@ import java.time.DateTimeException;
  * Only the minimum and maximum values are provided.
  * It is possible for there to be invalid values within the outer range.
  * For example, a weird field may have valid values of 1, 2, 4, 6, 7, thus
- * have a range of '1 - 7', despite that fact that values 3 and 5 are invalid.
+ * have a range of '1 - 7', despite the fact that values 3 and 5 are invalid.
  * <p>
  * Instances of this class are not tied to a specific field.
  *
@@ -96,19 +96,19 @@ public final class ValueRange implements Serializable {
     private static final long serialVersionUID = -7317881728594519368L;
 
     /**
-     * The smallest minimum value.
+     * @serial The smallest minimum value.
      */
     private final long minSmallest;
     /**
-     * The largest minimum value.
+     * @serial The largest minimum value.
      */
     private final long minLargest;
     /**
-     * The smallest maximum value.
+     * @serial The smallest maximum value.
      */
     private final long maxSmallest;
     /**
-     * The largest maximum value.
+     * @serial The largest maximum value.
      */
     private final long maxLargest;
 
@@ -393,12 +393,11 @@ public final class ValueRange implements Serializable {
         if (obj == this) {
             return true;
         }
-        if (obj instanceof ValueRange) {
-            ValueRange other = (ValueRange) obj;
-            return minSmallest == other.minSmallest && minLargest == other.minLargest &&
-                   maxSmallest == other.maxSmallest && maxLargest == other.maxLargest;
-        }
-        return false;
+        return (obj instanceof ValueRange other)
+                && minSmallest == other.minSmallest
+                && minLargest == other.minLargest
+                && maxSmallest == other.maxSmallest
+                && maxLargest == other.maxLargest;
     }
 
     /**
@@ -411,7 +410,7 @@ public final class ValueRange implements Serializable {
         long hash = minSmallest + (minLargest << 16) + (minLargest >> 48) +
                 (maxSmallest << 32) + (maxSmallest >> 32) + (maxLargest << 48) +
                 (maxLargest >> 16);
-        return (int) (hash ^ (hash >>> 32));
+        return Long.hashCode(hash);
     }
 
     //-----------------------------------------------------------------------

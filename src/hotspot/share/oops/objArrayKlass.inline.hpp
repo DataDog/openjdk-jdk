@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,22 +25,31 @@
 #ifndef SHARE_OOPS_OBJARRAYKLASS_INLINE_HPP
 #define SHARE_OOPS_OBJARRAYKLASS_INLINE_HPP
 
+#include "oops/objArrayKlass.hpp"
+
 #include "memory/memRegion.hpp"
-#include "memory/iterator.hpp"
 #include "oops/arrayKlass.hpp"
 #include "oops/arrayOop.hpp"
 #include "oops/klass.hpp"
-#include "oops/objArrayKlass.hpp"
 #include "oops/objArrayOop.inline.hpp"
 #include "oops/oop.inline.hpp"
+#include "utilities/devirtualizer.inline.hpp"
 #include "utilities/macros.hpp"
 
 template <typename T, class OopClosureType>
 void ObjArrayKlass::oop_oop_iterate_elements(objArrayOop a, OopClosureType* closure) {
-  T* p         = (T*)a->base();
-  T* const end = p + a->length();
+  oop_oop_iterate_elements_range<T>(a, closure, 0, a->length());
+}
 
-  for (;p < end; p++) {
+// Like oop_oop_iterate but only iterates over a specified range and only used
+// for objArrayOops.
+template <typename T, class OopClosureType>
+void ObjArrayKlass::oop_oop_iterate_elements_range(objArrayOop a, OopClosureType* closure, int start, int end) {
+  T* base        = (T*)a->base();
+  T* p           = base + start;
+  T* const end_p = base + end;
+
+  for (;p < end_p; ++p) {
     Devirtualizer::do_oop(closure, p);
   }
 }
@@ -69,7 +78,7 @@ void ObjArrayKlass::oop_oop_iterate_elements_bounded(
 
 template <typename T, typename OopClosureType>
 void ObjArrayKlass::oop_oop_iterate(oop obj, OopClosureType* closure) {
-  assert (obj->is_array(), "obj must be array");
+  assert(obj->is_array(), "obj must be array");
   objArrayOop a = objArrayOop(obj);
 
   if (Devirtualizer::do_metadata(closure)) {
@@ -95,26 +104,6 @@ void ObjArrayKlass::oop_oop_iterate_bounded(oop obj, OopClosureType* closure, Me
   }
 
   oop_oop_iterate_elements_bounded<T>(a, closure, mr.start(), mr.end());
-}
-
-// Like oop_oop_iterate but only iterates over a specified range and only used
-// for objArrayOops.
-template <typename T, class OopClosureType>
-void ObjArrayKlass::oop_oop_iterate_range(objArrayOop a, OopClosureType* closure, int start, int end) {
-  T* low = (T*)a->base() + start;
-  T* high = (T*)a->base() + end;
-
-  oop_oop_iterate_elements_bounded<T>(a, closure, low, high);
-}
-
-// Placed here to resolve include cycle between objArrayKlass.inline.hpp and objArrayOop.inline.hpp
-template <typename OopClosureType>
-void objArrayOopDesc::oop_iterate_range(OopClosureType* blk, int start, int end) {
-  if (UseCompressedOops) {
-    ((ObjArrayKlass*)klass())->oop_oop_iterate_range<narrowOop>(this, blk, start, end);
-  } else {
-    ((ObjArrayKlass*)klass())->oop_oop_iterate_range<oop>(this, blk, start, end);
-  }
 }
 
 #endif // SHARE_OOPS_OBJARRAYKLASS_INLINE_HPP

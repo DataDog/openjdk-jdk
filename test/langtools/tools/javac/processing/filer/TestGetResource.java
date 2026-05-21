@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
  * @test
  * @bug 6380018 6449798
  * @summary Test Filer.getResource
- * @author  Joseph D. Darcy
  * @library /tools/javac/lib
  * @modules java.compiler
  *          jdk.compiler
@@ -65,10 +64,10 @@ public class TestGetResource extends JavacTestingAbstractProcessor {
                 String phase = options.get("phase");
 
                 if (phase.equals("write")) {
-                    PrintWriter pw =
-                        new PrintWriter(filer.createResource(CLASS_OUTPUT, PKG, RESOURCE_NAME).openWriter());
-                    pw.print(CONTENTS);
-                    pw.close();
+                    try (PrintWriter pw =
+                        new PrintWriter(filer.createResource(CLASS_OUTPUT, PKG, RESOURCE_NAME).openWriter())) {
+                        pw.print(CONTENTS);
+                    }
                 } else if (phase.equals("read")) {
                     String contents = filer.getResource(CLASS_OUTPUT,
                                                        PKG,

@@ -10,11 +10,10 @@
 
             // Check results as part of computation.
             for (int j = 0; j < SPECIES.length(); j++) {
-                Assert.assertEquals(mv.laneIsSet(j), a[i + j] [[TEST_OP]] b[i]);
+                assertEquals(mv.laneIsSet(j), [[TEST_OP]](a[i + j], b[i]));
             }
         }
     }
-
 
     @Test(dataProvider = "$type$CompareOpMaskProvider")
     static void [[TEST]]$vectorteststype$BroadcastMaskedSmokeTest(IntFunction<$type$[]> fa,
@@ -31,7 +30,7 @@
 
             // Check results as part of computation.
             for (int j = 0; j < SPECIES.length(); j++) {
-                Assert.assertEquals(mv.laneIsSet(j), mask[j] && (a[i + j] [[TEST_OP]] b[i]));
+                assertEquals(mv.laneIsSet(j), mask[j] && ([[TEST_OP]](a[i + j], b[i])));
             }
         }
     }
@@ -48,11 +47,10 @@
 
             // Check results as part of computation.
             for (int j = 0; j < SPECIES.length(); j++) {
-                Assert.assertEquals(mv.laneIsSet(j), a[i + j] [[TEST_OP]] ($type$)((long)b[i]));
+                assertEquals(mv.laneIsSet(j), [[TEST_OP]](a[i + j], ($type$)((long)b[i])));
             }
         }
     }
-
 
     @Test(dataProvider = "$type$CompareOpMaskProvider")
     static void [[TEST]]$vectorteststype$BroadcastLongMaskedSmokeTest(IntFunction<$type$[]> fa,
@@ -69,7 +67,7 @@
 
             // Check results as part of computation.
             for (int j = 0; j < SPECIES.length(); j++) {
-                Assert.assertEquals(mv.laneIsSet(j), mask[j] && (a[i + j] [[TEST_OP]] ($type$)((long)b[i])));
+                assertEquals(mv.laneIsSet(j), mask[j] && ([[TEST_OP]](a[i + j], ($type$)((long)b[i]))));
             }
         }
     }

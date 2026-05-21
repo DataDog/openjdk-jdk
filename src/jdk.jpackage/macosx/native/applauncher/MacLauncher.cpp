@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,10 +23,14 @@
  * questions.
  */
 
+#include "app.h"
 #include "AppLauncher.h"
+#include "ErrorHandling.h"
 #include "FileUtils.h"
-#include "UnixSysInfo.h"
+#include "jni.h"
 #include "JvmLauncher.h"
+#include "PackageFile.h"
+#include "UnixSysInfo.h"
 
 
 namespace {
@@ -48,16 +52,36 @@ void initJvmLauncher() {
     const tstring appImageRoot = FileUtils::dirname(FileUtils::dirname(
             FileUtils::dirname(launcherPath)));
 
+    const tstring appDirPath = FileUtils::mkpath() << appImageRoot
+            << _T("Contents/app");
+
+    const PackageFile pkgFile = PackageFile::loadFromAppDir(appDirPath);
+
     // Create JVM launcher and save in global variable.
-    jvmLauncher = AppLauncher()
+    AppLauncher appLauncher = AppLauncher()
         .setImageRoot(appImageRoot)
         .addJvmLibName(_T("Contents/Home/lib/libjli.dylib"))
         // add backup - older version such as JDK11 have it in jli sub-dir
         .addJvmLibName(_T("Contents/Home/lib/jli/libjli.dylib"))
-        .setAppDir(FileUtils::mkpath() << appImageRoot << _T("Contents/app"))
+        .setAppDir(appDirPath)
+        .setLibEnvVariableName(_T("DYLD_LIBRARY_PATH"))
         .setDefaultRuntimePath(FileUtils::mkpath() << appImageRoot
-                << _T("Contents/runtime"))
-        .createJvmLauncher();
+                << _T("Contents/runtime"));
+
+    if (!pkgFile.getPackageName().empty()) {
+        tstring homeDir;
+        JP_TRY;
+        homeDir = SysInfo::getEnvVariable("HOME");
+        JP_CATCH_ALL;
+
+        if (!homeDir.empty()) {
+            appLauncher.addCfgFileLookupDir(FileUtils::mkpath()
+                    << homeDir << "Library/Application Support"
+                    << pkgFile.getPackageName());
+        }
+    }
+
+    jvmLauncher = appLauncher.createJvmLauncher();
 
     // Kick start JVM launching. The function wouldn't return!
     launchJvm();
@@ -66,7 +90,7 @@ void initJvmLauncher() {
 } // namespace
 
 
-int main(int argc, char *argv[]) {
+JNIEXPORT int main(int argc, char *argv[]) {
     if (jvmLauncher) {
         // This is the call from the thread spawned by JVM.
         // Skip initialization phase as we have done this already in the first
@@ -74,10 +98,10 @@ int main(int argc, char *argv[]) {
         // Besides we should ignore main() arguments because these are the
         // arguments passed into JLI_Launch() call and not the arguments with
         // which the launcher was started.
-        return AppLauncher::launch(std::nothrow, launchJvm);
+        return app::launch(std::nothrow, launchJvm);
     }
 
     SysInfo::argc = argc;
     SysInfo::argv = argv;
-    return AppLauncher::launch(std::nothrow, initJvmLauncher);
+    return app::launch(std::nothrow, initJvmLauncher);
 }

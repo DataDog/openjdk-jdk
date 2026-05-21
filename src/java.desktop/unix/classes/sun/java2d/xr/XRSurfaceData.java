@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,10 +36,12 @@ import java.awt.geom.AffineTransform;
 import java.awt.image.ColorModel;
 import java.awt.image.DirectColorModel;
 import java.awt.image.Raster;
+
 import sun.awt.SunHints;
 import sun.awt.SunToolkit;
 import sun.awt.X11ComponentPeer;
 import sun.awt.image.PixelConverter;
+import sun.font.FontManagerNativeLibrary;
 import sun.java2d.InvalidPipeException;
 import sun.java2d.SunGraphics2D;
 import sun.java2d.SurfaceData;
@@ -55,7 +57,6 @@ import sun.java2d.pipe.ShapeDrawPipe;
 import sun.java2d.pipe.TextPipe;
 import sun.java2d.pipe.ValidatePipe;
 import sun.java2d.x11.XSurfaceData;
-import sun.font.FontManagerNativeLibrary;
 
 public abstract class XRSurfaceData extends XSurfaceData {
     X11ComponentPeer peer;
@@ -87,6 +88,7 @@ public abstract class XRSurfaceData extends XSurfaceData {
     public static final SurfaceType
         IntArgbPreX11 = SurfaceType.IntArgbPre.deriveSubType(DESC_INT_ARGB_X11);
 
+    @Override
     public Raster getRaster(int x, int y, int w, int h) {
         throw new InternalError("not implemented yet");
     }
@@ -205,11 +207,11 @@ public abstract class XRSurfaceData extends XSurfaceData {
         return (supportedPaint && supportedCompOp) ? xrtextpipe : null;
     }
 
+    @Override
     protected MaskFill getMaskFill(SunGraphics2D sg2d) {
         AlphaComposite aComp = null;
-        if(sg2d.composite != null
-                && sg2d.composite instanceof AlphaComposite) {
-            aComp = (AlphaComposite) sg2d.composite;
+        if (sg2d.composite instanceof AlphaComposite alphaComposite) {
+            aComp = alphaComposite;
         }
 
         boolean supportedPaint = sg2d.paintState <= SunGraphics2D.PAINT_ALPHACOLOR
@@ -224,6 +226,7 @@ public abstract class XRSurfaceData extends XSurfaceData {
         return (supportedPaint && supportedCompOp) ?  super.getMaskFill(sg2d) : null;
     }
 
+    @Override
     public RenderLoops getRenderLoops(SunGraphics2D sg2d) {
         if (sg2d.paintState <= SunGraphics2D.PAINT_ALPHACOLOR &&
             sg2d.compositeState <= SunGraphics2D.COMP_ALPHA)
@@ -234,6 +237,7 @@ public abstract class XRSurfaceData extends XSurfaceData {
         return super.getRenderLoops(sg2d);
     }
 
+    @Override
     public GraphicsConfiguration getDeviceConfiguration() {
         return graphicsConfig;
     }
@@ -277,7 +281,7 @@ public abstract class XRSurfaceData extends XSurfaceData {
         }
 
         return new XRPixmapSurfaceData
-            (gc, width, height, image, getSurfaceType(gc, transparency),
+            (gc, width, height, image, getPixmapSurfaceType(transparency),
              cm, drawable, transparency,
              XRUtils.getPictureFormatForTransparency(transparency), depth, isTexture);
     }
@@ -291,8 +295,7 @@ public abstract class XRSurfaceData extends XSurfaceData {
         this.solidloops = graphicsConfig.getSolidLoops(sType);
         this.depth = depth;
         initOps(peer, graphicsConfig, depth);
-
-        setBlitProxyKey(gc.getProxyKey());
+        setBlitProxyCache(gc.getSurfaceDataProxyCache());
     }
 
     protected XRSurfaceData(XRBackend renderQueue) {
@@ -344,7 +347,7 @@ public abstract class XRSurfaceData extends XSurfaceData {
     public abstract boolean canSourceSendExposures(int x, int y, int w, int h);
 
     /**
-     * CopyArea is implemented using the "old" X11 GC, therefor clip and
+     * CopyArea is implemented using the "old" X11 GC, therefore clip and
      * needExposures have to be validated against that GC. Pictures and GCs
      * don't share state.
      */
@@ -367,6 +370,7 @@ public abstract class XRSurfaceData extends XSurfaceData {
         }
     }
 
+    @Override
     public boolean copyArea(SunGraphics2D sg2d, int x, int y, int w, int h,
                             int dx, int dy) {
         if (xrpipe == null) {
@@ -393,11 +397,10 @@ public abstract class XRSurfaceData extends XSurfaceData {
     }
 
     /**
-     * Returns the XRender SurfaceType which is able to fullfill the specified
+     * Returns the XRender SurfaceType which is able to fulfill the specified
      * transparency requirement.
      */
-    public static SurfaceType getSurfaceType(XRGraphicsConfig gc,
-                                             int transparency) {
+    public static SurfaceType getPixmapSurfaceType(int transparency) {
         SurfaceType sType = null;
 
         switch (transparency) {
@@ -414,6 +417,7 @@ public abstract class XRSurfaceData extends XSurfaceData {
         return sType;
     }
 
+    @Override
     public void invalidate() {
         if (isValid()) {
             setInvalid();
@@ -545,7 +549,7 @@ public abstract class XRSurfaceData extends XSurfaceData {
         }
     }
 
-    public static class XRWindowSurfaceData extends XRSurfaceData {
+    public static final class XRWindowSurfaceData extends XRSurfaceData {
 
         protected final int scale;
 
@@ -573,10 +577,12 @@ public abstract class XRSurfaceData extends XSurfaceData {
             }
         }
 
+        @Override
         public SurfaceData getReplacement() {
             return peer.getSurfaceData();
         }
 
+        @Override
         public Rectangle getBounds() {
             Rectangle r = peer.getBounds();
             r.x = r.y = 0;
@@ -593,10 +599,12 @@ public abstract class XRSurfaceData extends XSurfaceData {
         /**
          * Returns destination Component associated with this SurfaceData.
          */
+        @Override
         public Object getDestination() {
             return peer.getTarget();
         }
 
+       @Override
        public void invalidate() {
            try {
                SunToolkit.awtLock();
@@ -619,31 +627,35 @@ public abstract class XRSurfaceData extends XSurfaceData {
         }
     }
 
-    public static class XRInternalSurfaceData extends XRSurfaceData {
+    public static final class XRInternalSurfaceData extends XRSurfaceData {
         public XRInternalSurfaceData(XRBackend renderQueue, int pictXid) {
           super(renderQueue);
           this.picture = pictXid;
           this.transformInUse = false;
         }
 
+        @Override
         public boolean canSourceSendExposures(int x, int y, int w, int h) {
             return false;
         }
 
+        @Override
         public Rectangle getBounds() {
             return null;
         }
 
+        @Override
         public Object getDestination() {
             return null;
         }
 
+        @Override
         public SurfaceData getReplacement() {
             return null;
         }
     }
 
-    public static class XRPixmapSurfaceData extends XRSurfaceData {
+    public static final class XRPixmapSurfaceData extends XRSurfaceData {
         Image offscreenImage;
         int width;
         int height;
@@ -677,6 +689,7 @@ public abstract class XRSurfaceData extends XSurfaceData {
             }
         }
 
+        @Override
         public SurfaceData getReplacement() {
             return restoreContents(offscreenImage);
         }
@@ -687,10 +700,12 @@ public abstract class XRSurfaceData extends XSurfaceData {
          * choose loops based on the transparency on the source SD, so it could
          * choose wrong loop (blit instead of blitbg, for example).
          */
+        @Override
         public int getTransparency() {
             return transparency;
         }
 
+        @Override
         public Rectangle getBounds() {
             return new Rectangle(width, height);
         }
@@ -700,6 +715,7 @@ public abstract class XRSurfaceData extends XSurfaceData {
             return (x < 0 || y < 0 || (x + w) > width || (y + h) > height);
         }
 
+        @Override
         public void flush() {
             /*
              * We need to invalidate the surface before disposing the native
@@ -716,6 +732,7 @@ public abstract class XRSurfaceData extends XSurfaceData {
         /**
          * Returns destination Image associated with this SurfaceData.
          */
+        @Override
         public Object getDestination() {
             return offscreenImage;
         }
@@ -735,7 +752,8 @@ public abstract class XRSurfaceData extends XSurfaceData {
         return xgc;
     }
 
-    public static class LazyPipe extends ValidatePipe {
+    public static final class LazyPipe extends ValidatePipe {
+        @Override
         public boolean validate(SunGraphics2D sg2d) {
             XRSurfaceData xsd = (XRSurfaceData) sg2d.surfaceData;
             if (!xsd.isXRDrawableValid()) {

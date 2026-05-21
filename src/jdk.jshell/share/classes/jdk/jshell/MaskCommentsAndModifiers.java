@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,11 +36,11 @@ import java.util.stream.Stream;
  */
 class MaskCommentsAndModifiers {
 
-    private final static Set<String> IGNORED_MODIFIERS =
+    private static final Set<String> IGNORED_MODIFIERS =
             Stream.of( "public", "protected", "private", "static" )
                     .collect( Collectors.toSet() );
 
-    private final static Set<String> ALL_MODIFIERS =
+    private static final Set<String> ALL_MODIFIERS =
             Stream.of(
                     "public", "protected", "private",
                     "static", "abstract", "final",
@@ -107,7 +107,7 @@ class MaskCommentsAndModifiers {
         return openToken;
     }
 
-    /****** private implementation methods ******/
+    //****** private implementation methods ******
 
     /**
      * Read the next character

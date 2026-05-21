@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -79,12 +79,19 @@ public:
   // Called to ensure that processing of the thread is started
   static void start_processing(JavaThread* jt, StackWatermarkKind kind);
 
+  // Returns true if all StackWatermarks have been started.
+  static bool processing_started(JavaThread* jt);
+
   // Called to finish the processing of a thread
   static void finish_processing(JavaThread* jt, void* context, StackWatermarkKind kind);
 
   // The lowest watermark among the watermarks in the set (the first encountered
   // watermark in the set as you unwind frames)
   static uintptr_t lowest_watermark(JavaThread* jt);
+
+  // We are synchronizing a safepoint, so we might want to ensure processing has at least
+  // started, as safepoint operations sometimes assume that is the case
+  static void safepoint_synchronize_begin();
 };
 
 #endif // SHARE_RUNTIME_STACKWATERMARKSET_HPP

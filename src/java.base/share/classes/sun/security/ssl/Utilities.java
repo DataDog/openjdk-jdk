@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,16 +30,17 @@ import java.util.*;
 import java.util.regex.Pattern;
 import javax.net.ssl.*;
 import sun.net.util.IPAddressUtil;
-import sun.security.action.GetPropertyAction;
 
 /**
  * A utility class to share the static methods.
  */
 final class Utilities {
-    static final char[] hexDigits = "0123456789ABCDEF".toCharArray();
     private static final String indent = "  ";
     private static final Pattern lineBreakPatern =
                 Pattern.compile("\\r\\n|\\n|\\r");
+    private static final HexFormat HEX_FORMATTER =
+            HexFormat.of().withUpperCase();
+    static final String LINE_SEP = System.lineSeparator();
 
     /**
      * Puts {@code hostname} into the {@code serverNames} list.
@@ -69,7 +70,7 @@ final class Utilities {
             SNIServerName serverName = sniList.get(i);
             if (serverName.getType() == StandardConstants.SNI_HOST_NAME) {
                 sniList.set(i, sniHostName);
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl")) {
+                if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.SSL)) {
                      SSLLogger.fine(
                         "the previous server name in SNI (" + serverName +
                         ") was replaced with (" + sniHostName + ")");
@@ -83,7 +84,7 @@ final class Utilities {
             sniList.add(sniHostName);
         }
 
-        return Collections.<SNIServerName>unmodifiableList(sniList);
+        return Collections.unmodifiableList(sniList);
     }
 
     /**
@@ -100,34 +101,37 @@ final class Utilities {
      *         not look like a FQDN
      */
     private static SNIHostName rawToSNIHostName(String hostname) {
-        SNIHostName sniHostName = null;
+        // Is it a Fully-Qualified Domain Names (FQDN) ending with a dot?
+        if (hostname != null && hostname.endsWith(".")) {
+            // Remove the ending dot, which is not allowed in SNIHostName.
+            hostname = hostname.substring(0, hostname.length() - 1);
+        }
+
         if (hostname != null && hostname.indexOf('.') > 0 &&
                 !hostname.endsWith(".") &&
                 !IPAddressUtil.isIPv4LiteralAddress(hostname) &&
                 !IPAddressUtil.isIPv6LiteralAddress(hostname)) {
 
             try {
-                sniHostName = new SNIHostName(hostname);
+                return new SNIHostName(hostname);
             } catch (IllegalArgumentException iae) {
                 // don't bother to handle illegal host_name
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl")) {
+                if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.SSL)) {
                      SSLLogger.fine(hostname + "\" " +
                         "is not a legal HostName for  server name indication");
                 }
             }
         }
 
-        return sniHostName;
+        return null;
     }
 
     /**
      * Return the value of the boolean System property propName.
-     *
-     * Note use of privileged action. Do NOT make accessible to applications.
      */
     static boolean getBooleanProperty(String propName, boolean defaultValue) {
         // if set, require value of either true or false
-        String b = GetPropertyAction.privilegedGetProperty(propName);
+        String b = System.getProperty(propName);
         if (b == null) {
             return defaultValue;
         } else if (b.equalsIgnoreCase("false")) {
@@ -147,7 +151,7 @@ final class Utilities {
     static String indent(String source, String prefix) {
         StringBuilder builder = new StringBuilder();
         if (source == null) {
-             builder.append("\n").append(prefix).append("<blank message>");
+             builder.append(LINE_SEP).append(prefix).append("<blank message>");
         } else {
             String[] lines = lineBreakPatern.split(source);
             boolean isFirst = true;
@@ -155,7 +159,7 @@ final class Utilities {
                 if (isFirst) {
                     isFirst = false;
                 } else {
-                    builder.append("\n");
+                    builder.append(LINE_SEP);
                 }
                 builder.append(prefix).append(line);
             }
@@ -164,15 +168,37 @@ final class Utilities {
         return builder.toString();
     }
 
-    static String toHexString(byte b) {
-        return String.valueOf(hexDigits[(b >> 4) & 0x0F]) +
-                String.valueOf(hexDigits[b & 0x0F]);
+    static String wrapText(String text, int maxWidth) {
+        if (text == null || text.isEmpty() || maxWidth <= 0) {
+            return "";
+        }
+        StringBuilder result = new StringBuilder();
+        String[] values = text.split(",\\s*");
+        StringBuilder line = new StringBuilder();
+
+        for (int i = 0; i < values.length; i++) {
+            String value = values[i];
+            // If adding this value would exceed maxWidth
+            if (line.length() > 0) {
+                // +1 for the comma
+                if (line.length() + 1 + value.length() > maxWidth) {
+                    result.append(line).append(LINE_SEP);
+                    line.setLength(0);
+                } else {
+                    line.append(",");
+                }
+            }
+            line.append(value);
+        }
+        // Append any remaining line
+        if (line.length() > 0) {
+            result.append(line);
+        }
+        return result.toString();
     }
 
     static String byte16HexString(int id) {
-        return "0x" +
-                hexDigits[(id >> 12) & 0x0F] + hexDigits[(id >> 8) & 0x0F] +
-                hexDigits[(id >> 4) & 0x0F] + hexDigits[id & 0x0F];
+        return "0x" + HEX_FORMATTER.toHexDigits((short)id);
     }
 
     static String toHexString(byte[] bytes) {
@@ -180,19 +206,7 @@ final class Utilities {
             return "";
         }
 
-        StringBuilder builder = new StringBuilder(bytes.length * 3);
-        boolean isFirst = true;
-        for (byte b : bytes) {
-            if (isFirst) {
-                isFirst = false;
-            } else {
-                builder.append(' ');
-            }
-
-            builder.append(hexDigits[(b >> 4) & 0x0F]);
-            builder.append(hexDigits[b & 0x0F]);
-        }
-        return builder.toString();
+        return HEX_FORMATTER.formatHex(bytes);
     }
 
     static String toHexString(long lv) {
@@ -206,10 +220,8 @@ final class Utilities {
                 builder.append(' ');
             }
 
-            builder.append(hexDigits[(int)(lv & 0x0F)]);
-            lv >>>= 4;
-            builder.append(hexDigits[(int)(lv & 0x0F)]);
-            lv >>>= 4;
+            HEX_FORMATTER.toHexDigits(builder, (byte)lv);
+            lv >>>= 8;
         } while (lv != 0);
         builder.reverse();
 
@@ -242,6 +254,16 @@ final class Utilities {
             i++;
             j--;
         }
+    }
+
+    static <T> boolean contains(T[] array, T item) {
+        for (T t : array) {
+            if (item.equals(t)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void swap(byte[] arr, int i, int j) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,8 @@
 
 package com.sun.media.sound;
 
+import sun.awt.OSInfo;
+
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -34,8 +36,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.ref.WeakReference;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -76,7 +76,7 @@ public final class SoftSynthesizer implements AudioSynthesizer,
         public SoftAudioPusher pusher = null;
         public AudioInputStream jitter_stream = null;
         public SourceDataLine sourceDataLine = null;
-        public volatile long silent_samples = 0;
+        public volatile long silent_samples;
         private int framesize = 0;
         private final WeakReference<AudioInputStream> weak_stream_link;
         private final AudioFloatConverter converter;
@@ -289,12 +289,11 @@ public final class SoftSynthesizer implements AudioSynthesizer,
                     c.current_instrument = null;
                     c.current_director = null;
                 }
-            for (Instrument instrument : instruments) {
+            for (ModelInstrument instrument : instruments) {
                 String pat = patchToString(instrument.getPatch());
-                SoftInstrument softins
-                        = new SoftInstrument((ModelInstrument) instrument);
+                SoftInstrument softins = new SoftInstrument(instrument);
                 inslist.put(pat, softins);
-                loadedlist.put(pat, (ModelInstrument) instrument);
+                loadedlist.put(pat, instrument);
             }
         }
 
@@ -575,25 +574,25 @@ public final class SoftSynthesizer implements AudioSynthesizer,
 
     @Override
     public boolean loadInstrument(Instrument instrument) {
-        if (instrument == null || (!(instrument instanceof ModelInstrument))) {
+        if (!(instrument instanceof ModelInstrument modelInstrument)) {
             throw new IllegalArgumentException("Unsupported instrument: " +
                     instrument);
         }
         List<ModelInstrument> instruments = new ArrayList<>();
-        instruments.add((ModelInstrument)instrument);
+        instruments.add(modelInstrument);
         return loadInstruments(instruments);
     }
 
     @Override
     public void unloadInstrument(Instrument instrument) {
-        if (instrument == null || (!(instrument instanceof ModelInstrument))) {
+        if (!(instrument instanceof ModelInstrument modelInstrument)) {
             throw new IllegalArgumentException("Unsupported instrument: " +
                     instrument);
         }
         if (!isOpen())
             return;
 
-        String pat = patchToString(instrument.getPatch());
+        String pat = patchToString(modelInstrument.getPatch());
         synchronized (control_mutex) {
             for (SoftChannel c: channels)
                 c.current_instrument = null;
@@ -633,15 +632,19 @@ public final class SoftSynthesizer implements AudioSynthesizer,
         }
     }
 
+   static interface RunnableAction<T> {
+        T run();
+   }
+
     @Override
     public Soundbank getDefaultSoundbank() {
         synchronized (SoftSynthesizer.class) {
             if (defaultSoundBank != null)
                 return defaultSoundBank;
 
-            List<PrivilegedAction<InputStream>> actions = new ArrayList<>();
+            List<RunnableAction<InputStream>> actions = new ArrayList<>();
 
-            actions.add(new PrivilegedAction<InputStream>() {
+            actions.add(new RunnableAction<InputStream>() {
                 @Override
                 public InputStream run() {
                     File javahome = new File(System.getProperties()
@@ -677,11 +680,10 @@ public final class SoftSynthesizer implements AudioSynthesizer,
                 }
             });
 
-            actions.add(new PrivilegedAction<InputStream>() {
+            actions.add(new RunnableAction<InputStream>() {
                 @Override
                 public InputStream run() {
-                    if (System.getProperties().getProperty("os.name")
-                            .startsWith("Linux")) {
+                    if (OSInfo.getOSType() == OSInfo.OSType.LINUX) {
 
                         File[] systemSoundFontsDir = new File[] {
                             /* Arch, Fedora, Mageia */
@@ -712,11 +714,10 @@ public final class SoftSynthesizer implements AudioSynthesizer,
                 }
             });
 
-            actions.add(new PrivilegedAction<InputStream>() {
+            actions.add(new RunnableAction<InputStream>() {
                 @Override
                 public InputStream run() {
-                    if (System.getProperties().getProperty("os.name")
-                            .startsWith("Windows")) {
+                    if (OSInfo.getOSType() == OSInfo.OSType.WINDOWS) {
                         File gm_dls = new File(System.getenv("SystemRoot")
                                 + "\\system32\\drivers\\gm.dls");
                         if (gm_dls.isFile()) {
@@ -730,7 +731,7 @@ public final class SoftSynthesizer implements AudioSynthesizer,
                 }
             });
 
-            actions.add(new PrivilegedAction<InputStream>() {
+            actions.add(new RunnableAction<InputStream>() {
                 @Override
                 public InputStream run() {
                     /*
@@ -750,15 +751,13 @@ public final class SoftSynthesizer implements AudioSynthesizer,
                 }
             });
 
-            for (PrivilegedAction<InputStream> action : actions) {
+            for (RunnableAction<InputStream> action : actions) {
                 try {
-                    InputStream is = AccessController.doPrivileged(action);
+                    InputStream is = action.run();
                     if(is == null) continue;
                     Soundbank sbk;
-                    try {
+                    try (is) {
                         sbk = MidiSystem.getSoundbank(new BufferedInputStream(is));
-                    } finally {
-                        is.close();
                     }
                     if (sbk != null) {
                         defaultSoundBank = sbk;
@@ -780,8 +779,8 @@ public final class SoftSynthesizer implements AudioSynthesizer,
                 /*
                  * Save generated soundbank to disk for faster future use.
                  */
-                OutputStream out = AccessController
-                        .doPrivileged((PrivilegedAction<OutputStream>) () -> {
+                OutputStream out =
+                        ((RunnableAction<OutputStream>) () -> {
                             try {
                                 File userhome = new File(System
                                         .getProperty("user.home"), ".gervill");
@@ -799,11 +798,10 @@ public final class SoftSynthesizer implements AudioSynthesizer,
                             } catch (final FileNotFoundException ignored) {
                             }
                             return null;
-                        });
+                        }).run();
                 if (out != null) {
-                    try {
+                    try (out) {
                         ((SF2Soundbank) defaultSoundBank).save(out);
-                        out.close();
                     } catch (final IOException ignored) {
                     }
                 }
@@ -840,11 +838,11 @@ public final class SoftSynthesizer implements AudioSynthesizer,
     public boolean loadAllInstruments(Soundbank soundbank) {
         List<ModelInstrument> instruments = new ArrayList<>();
         for (Instrument ins: soundbank.getInstruments()) {
-            if (ins == null || !(ins instanceof ModelInstrument)) {
+            if (!(ins instanceof ModelInstrument modelInstrument)) {
                 throw new IllegalArgumentException(
                         "Unsupported instrument: " + ins);
             }
-            instruments.add((ModelInstrument)ins);
+            instruments.add(modelInstrument);
         }
         return loadInstruments(instruments);
     }
@@ -869,11 +867,11 @@ public final class SoftSynthesizer implements AudioSynthesizer,
         List<ModelInstrument> instruments = new ArrayList<>();
         for (Patch patch: patchList) {
             Instrument ins = soundbank.getInstrument(patch);
-            if (ins == null || !(ins instanceof ModelInstrument)) {
+            if (!(ins instanceof ModelInstrument modelInstrument)) {
                 throw new IllegalArgumentException(
                         "Unsupported instrument: " + ins);
             }
-            instruments.add((ModelInstrument)ins);
+            instruments.add(modelInstrument);
         }
         return loadInstruments(instruments);
     }
@@ -900,26 +898,23 @@ public final class SoftSynthesizer implements AudioSynthesizer,
     }
 
     private Properties getStoredProperties() {
-        return AccessController
-                .doPrivileged((PrivilegedAction<Properties>) () -> {
-                    Properties p = new Properties();
-                    String notePath = "/com/sun/media/sound/softsynthesizer";
-                    try {
-                        Preferences prefroot = Preferences.userRoot();
-                        if (prefroot.nodeExists(notePath)) {
-                            Preferences prefs = prefroot.node(notePath);
-                            String[] prefs_keys = prefs.keys();
-                            for (String prefs_key : prefs_keys) {
-                                String val = prefs.get(prefs_key, null);
-                                if (val != null) {
-                                    p.setProperty(prefs_key, val);
-                                }
-                            }
-                        }
-                    } catch (final BackingStoreException ignored) {
+        Properties p = new Properties();
+        String notePath = "/com/sun/media/sound/softsynthesizer";
+        try {
+            Preferences prefroot = Preferences.userRoot();
+            if (prefroot.nodeExists(notePath)) {
+                Preferences prefs = prefroot.node(notePath);
+                String[] prefs_keys = prefs.keys();
+                for (String prefs_key : prefs_keys) {
+                    String val = prefs.get(prefs_key, null);
+                    if (val != null) {
+                        p.setProperty(prefs_key, val);
                     }
-                    return p;
-                });
+                }
+            }
+        } catch (final BackingStoreException ignored) {
+        }
+        return p;
     }
 
     @Override
@@ -1116,7 +1111,7 @@ public final class SoftSynthesizer implements AudioSynthesizer,
                         line = testline;
                     } else {
                         // can throw LineUnavailableException,
-                        // IllegalArgumentException, SecurityException
+                        // IllegalArgumentException
                         line = AudioSystem.getSourceDataLine(getFormat());
                     }
                 }
@@ -1127,7 +1122,7 @@ public final class SoftSynthesizer implements AudioSynthesizer,
                     int bufferSize = getFormat().getFrameSize()
                         * (int)(getFormat().getFrameRate() * (latency/1000000f));
                     // can throw LineUnavailableException,
-                    // IllegalArgumentException, SecurityException
+                    // IllegalArgumentException
                     line.open(getFormat(), bufferSize);
 
                     // Remember that we opened that line
@@ -1171,8 +1166,7 @@ public final class SoftSynthesizer implements AudioSynthesizer,
                     weakstream.sourceDataLine = sourceDataLine;
                 }
 
-            } catch (final LineUnavailableException | SecurityException
-                    | IllegalArgumentException e) {
+            } catch (final LineUnavailableException | IllegalArgumentException e) {
                 if (isOpen()) {
                     close();
                 }

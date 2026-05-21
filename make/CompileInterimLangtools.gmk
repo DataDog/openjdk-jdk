@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2014, 2026, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -23,11 +23,11 @@
 # questions.
 #
 
-# This must be the first rule
-default: all
+include MakeFileStart.gmk
 
-include $(SPEC)
-include MakeBase.gmk
+################################################################################
+
+include CopyFiles.gmk
 include JavaCompilation.gmk
 include Modules.gmk
 
@@ -48,12 +48,39 @@ $(BUILDTOOLS_OUTPUTDIR)/gensrc/%.interim/module-info.java: \
 TARGETS += $(patsubst %, $(BUILDTOOLS_OUTPUTDIR)/gensrc/%/module-info.java, \
     $(INTERIM_LANGTOOLS_MODULES))
 
-$(eval $(call SetupCopyFiles, COPY_PREVIEW_FEATURES, \
-    FILES := $(TOPDIR)/src/java.base/share/classes/jdk/internal/PreviewFeature.java, \
-    DEST := $(BUILDTOOLS_OUTPUTDIR)/gensrc/java.base.interim/jdk/internal/, \
-))
+################################################################################
+# Generate interim versions of the ToolProvider.java files for the interim
+# langtools modules, which will allow to load javac from the interim
+# jdk.compiler.
 
-TARGETS += $(COPY_PREVIEW_FEATURES)
+INTERIM_TOOL_PROVIDER_PATTERN := \
+    $(foreach m, $(INTERIM_LANGTOOLS_BASE_MODULES), -e 's/"$m"/"$m.interim"/g')
+
+$(BUILDTOOLS_OUTPUTDIR)/gensrc/java.compiler.interim/javax/tools/ToolProvider.java: \
+    $(TOPDIR)/src/java.compiler/share/classes/javax/tools/ToolProvider.java
+	$(call LogInfo, Generating ToolProvider.java for java.compiler.interim)
+	$(call MakeDir, $(@D))
+	$(SED) $(INTERIM_TOOL_PROVIDER_PATTERN) $< > $@
+
+java.compiler.interim_EXTRA_FILES := \
+    $(BUILDTOOLS_OUTPUTDIR)/gensrc/java.compiler.interim/javax/tools/ToolProvider.java
+
+TARGETS += $(BUILDTOOLS_OUTPUTDIR)/gensrc/java.compiler.interim/javax/tools/ToolProvider.java
+
+################################################################################
+# Create a hybrid PreviewFeature.java that combines constants
+# from the current sources, as those can be used in javac APIs,  and from the
+# bootstrap JDK, as those can be used from bootstrap JDK classfiles.
+
+$(BUILDTOOLS_OUTPUTDIR)/gensrc/java.base.interim/jdk/internal/javac/PreviewFeature.java: \
+    $(TOPDIR)/src/java.base/share/classes/jdk/internal/javac/PreviewFeature.java
+	$(call LogInfo, Generating $@)
+	$(JAVA) $(TOPDIR)/make/langtools/tools/previewfeature/SetupPreviewFeature.java \
+            $(TOPDIR)/src/java.base/share/classes/jdk/internal/javac/PreviewFeature.java \
+            $@
+
+
+TARGETS += $(BUILDTOOLS_OUTPUTDIR)/gensrc/java.base.interim/jdk/internal/javac/PreviewFeature.java
 
 ################################################################################
 # Setup the rules to build interim langtools, which is compiled by the boot
@@ -72,23 +99,34 @@ define SetupInterimModule
           $(TOPDIR)/src/$1/share/classes, \
       EXCLUDES := sun, \
       EXCLUDE_FILES := $(TOPDIR)/src/$1/share/classes/module-info.java \
+          $(TOPDIR)/src/$1/share/classes/javax/tools/ToolProvider.java \
+          $(TOPDIR)/src/$1/share/classes/com/sun/tools/javac/launcher/Main.java \
+          $(TOPDIR)/src/$1/share/classes/com/sun/tools/javac/launcher/MemoryClassLoader.java \
+          $(TOPDIR)/src/$1/share/classes/com/sun/tools/javac/launcher/MemoryContext.java \
+          $(TOPDIR)/src/$1/share/classes/com/sun/tools/javac/launcher/MemoryModuleFinder.java \
+          $(TOPDIR)/src/$1/share/classes/com/sun/tools/javac/launcher/SourceLauncher.java \
           Standard.java, \
-      EXTRA_FILES := $(BUILDTOOLS_OUTPUTDIR)/gensrc/$1.interim/module-info.java, \
-      COPY := .gif .png .xml .css .js .txt javax.tools.JavaCompilerTool, \
+      EXCLUDE_PATTERNS := -files, \
+      EXTRA_FILES := $(BUILDTOOLS_OUTPUTDIR)/gensrc/$1.interim/module-info.java \
+          $($1.interim_EXTRA_FILES), \
+      COPY := .gif .png .xml .css .svg .js .js.template .txt .woff .woff2 javax.tools.JavaCompilerTool, \
       BIN := $(BUILDTOOLS_OUTPUTDIR)/interim_langtools_modules/$1.interim, \
       DISABLED_WARNINGS := module options, \
       JAVAC_FLAGS := \
           --module-path $(BUILDTOOLS_OUTPUTDIR)/interim_langtools_modules \
           $$(INTERIM_LANGTOOLS_ADD_EXPORTS) \
           --patch-module java.base=$(BUILDTOOLS_OUTPUTDIR)/gensrc/java.base.interim \
-          --add-exports java.base/jdk.internal=java.compiler.interim \
-          --add-exports java.base/jdk.internal=jdk.compiler.interim, \
+          --add-exports java.base/jdk.internal.javac=java.compiler.interim \
+          --add-exports java.base/jdk.internal.javac=jdk.compiler.interim \
+          --add-exports jdk.internal.opt/jdk.internal.opt=jdk.compiler.interim \
+          --add-exports jdk.internal.opt/jdk.internal.opt=jdk.javadoc.interim, \
   ))
 
   $1_DEPS_INTERIM := $$(addsuffix .interim, $$(filter \
       $$(INTERIM_LANGTOOLS_BASE_MODULES), $$(call FindTransitiveDepsForModule, $1)))
 
-  $$(BUILD_$1.interim): $$(foreach d, $$($1_DEPS_INTERIM), $$(BUILD_$$d)) $(COPY_PREVIEW_FEATURES)
+  $$(BUILD_$1.interim): $$(foreach d, $$($1_DEPS_INTERIM), $$(BUILD_$$d)) \
+      $(BUILDTOOLS_OUTPUTDIR)/gensrc/java.base.interim/jdk/internal/javac/PreviewFeature.java
 
   TARGETS += $$(BUILD_$1.interim)
 endef
@@ -98,5 +136,19 @@ $(foreach m, $(INTERIM_LANGTOOLS_BASE_MODULES), \
 )
 
 ################################################################################
+# Setup the compilation of the javac server build tool. Technically, this is not
+# really "interim" langtools, but just like it, it is needed henceforth for all
+# java compilation using the interim compiler.
+$(eval $(call SetupJavaCompilation, BUILD_JAVAC_SERVER, \
+    COMPILER := bootjdk, \
+    TARGET_RELEASE := $(TARGET_RELEASE_BOOTJDK), \
+    SRC := $(TOPDIR)/make/langtools/tools, \
+    INCLUDES := javacserver, \
+    BIN := $(BUILDTOOLS_OUTPUTDIR)/langtools_javacserver_classes, \
+))
 
-all: $(TARGETS)
+TARGETS += $(BUILD_JAVAC_SERVER)
+
+################################################################################
+
+include MakeFileEnd.gmk

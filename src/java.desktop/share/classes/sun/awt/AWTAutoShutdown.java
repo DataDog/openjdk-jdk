@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,8 +26,7 @@
 package sun.awt;
 
 import java.awt.AWTEvent;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
+import java.awt.Toolkit;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Map;
@@ -276,7 +275,7 @@ public final class AWTAutoShutdown implements Runnable {
 
     /**
      * Implementation of the Runnable interface.
-     * Incapsulates the blocker thread functionality.
+     * Encapsulates the blocker thread functionality.
      *
      * @see     AWTAutoShutdown#isReadyToShutdown
      */
@@ -319,11 +318,10 @@ public final class AWTAutoShutdown implements Runnable {
             }
         }
         if (!interrupted) {
-            AppContext.stopEventDispatchThreads();
+            Toolkit.getDefaultToolkit().getSystemEventQueue().postEvent(getShutdownEvent());
         }
     }
 
-    @SuppressWarnings("serial")
     static AWTEvent getShutdownEvent() {
         return new AWTEvent(getInstance(), 0) {
         };
@@ -334,15 +332,12 @@ public final class AWTAutoShutdown implements Runnable {
      * the new blocker thread starts.
      */
     private void activateBlockerThread() {
-        AccessController.doPrivileged((PrivilegedAction<Thread>) () -> {
-            String name = "AWT-Shutdown";
-            Thread thread = new Thread(
-                   ThreadGroupUtils.getRootThreadGroup(), this, name, 0, false);
-            thread.setContextClassLoader(null);
-            thread.setDaemon(false);
-            blockerThread = thread;
-            return thread;
-        }).start();
+        String name = "AWT-Shutdown";
+        Thread thread = new Thread(ThreadGroupUtils.getRootThreadGroup(), this, name, 0, false);
+        thread.setContextClassLoader(null);
+        thread.setDaemon(false);
+        blockerThread = thread;
+        thread.start();
         try {
             /* Wait for the blocker thread to start. */
             mainLock.wait();
@@ -364,8 +359,7 @@ public final class AWTAutoShutdown implements Runnable {
     void unregisterPeer(final Object target, final Object peer) {
         synchronized (activationLock) {
             synchronized (mainLock) {
-                if (peerMap.get(target) == peer) {
-                    peerMap.remove(target);
+                if (peerMap.remove(target, peer)) {
                     notifyPeerMapUpdated();
                 }
             }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,11 +37,8 @@ import apple.laf.JRSUIConstants.*;
 
 import com.apple.laf.AquaUtils.RecyclableSingleton;
 import com.apple.laf.AquaUtils.RecyclableSingletonFromDefaultConstructor;
-import sun.security.action.GetPropertyAction;
 
-import static java.security.AccessController.*;
-
-public class AquaUtilControlSize {
+public final class AquaUtilControlSize {
     protected static final String CLIENT_PROPERTY_KEY = "JComponent.sizeVariant";
     protected static final String SYSTEM_PROPERTY_KEY = "swing.component.sizevariant";
 
@@ -73,7 +70,7 @@ public class AquaUtilControlSize {
     }
 
     private static Size getDefaultSize() {
-        final String sizeProperty = doPrivileged(new GetPropertyAction(SYSTEM_PROPERTY_KEY));
+        final String sizeProperty = System.getProperty(SYSTEM_PROPERTY_KEY);
         final JRSUIConstants.Size size = getSizeFromString(sizeProperty);
         if (size != null) return size;
         return JRSUIConstants.Size.REGULAR;
@@ -130,7 +127,7 @@ public class AquaUtilControlSize {
         c.setBorder(derivedBorder);
     }
 
-    protected static class PropertySizeListener implements PropertyChangeListener {
+    protected static final class PropertySizeListener implements PropertyChangeListener {
         @Override
         public void propertyChange(final PropertyChangeEvent evt) {
             final String key = evt.getPropertyName();
@@ -207,7 +204,7 @@ public class AquaUtilControlSize {
         }
     }
 
-    public static class SizeVariant {
+    public static final class SizeVariant {
         Size size = Size.REGULAR;
         Insets insets = new InsetsUIResource(0, 0, 0, 0);
         Insets margins = new InsetsUIResource(0, 0, 0, 0);

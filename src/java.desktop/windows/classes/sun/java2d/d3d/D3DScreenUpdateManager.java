@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,8 +32,6 @@ import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.Window;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.HashMap;
 
@@ -60,7 +58,7 @@ import sun.java2d.windows.WindowsFlags;
  * There are some restrictions to which windows we would use this for.
  * @see #createScreenSurface
  */
-public class D3DScreenUpdateManager extends ScreenUpdateManager
+public final class D3DScreenUpdateManager extends ScreenUpdateManager
     implements Runnable
 {
     /**
@@ -93,22 +91,19 @@ public class D3DScreenUpdateManager extends ScreenUpdateManager
 
     public D3DScreenUpdateManager() {
         done = false;
-        AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            Runnable shutdownRunnable = () -> {
-                done = true;
-                wakeUpUpdateThread();
-            };
-            Thread shutdown = new Thread(
-                    ThreadGroupUtils.getRootThreadGroup(), shutdownRunnable,
-                    "ScreenUpdater", 0, false);
-            shutdown.setContextClassLoader(null);
-            try {
-                Runtime.getRuntime().addShutdownHook(shutdown);
-            } catch (Exception e) {
-                done = true;
-            }
-            return null;
-        });
+        Runnable shutdownRunnable = () -> {
+            done = true;
+            wakeUpUpdateThread();
+        };
+        Thread shutdown = new Thread(
+                ThreadGroupUtils.getRootThreadGroup(), shutdownRunnable,
+                "ScreenUpdater", 0, false);
+        shutdown.setContextClassLoader(null);
+        try {
+            Runtime.getRuntime().addShutdownHook(shutdown);
+        } catch (Exception e) {
+            done = true;
+        }
     }
 
     /**
@@ -123,7 +118,7 @@ public class D3DScreenUpdateManager extends ScreenUpdateManager
      * Note that this method is called from a synchronized block in
      * WComponentPeer, so we don't need to synchronize
      *
-     * Note that we only create a substibute d3dw surface if certain conditions
+     * Note that we only create a substitute d3dw surface if certain conditions
      * are met
      * <ul>
      *  <li>the fake d3d rendering on screen is not disabled via flag
@@ -346,16 +341,13 @@ public class D3DScreenUpdateManager extends ScreenUpdateManager
      */
     private synchronized void startUpdateThread() {
         if (screenUpdater == null) {
-            screenUpdater = AccessController.doPrivileged((PrivilegedAction<Thread>) () -> {
-                String name = "D3D Screen Updater";
-                Thread t = new Thread(
+            String name = "D3D Screen Updater";
+            screenUpdater = new Thread(
                         ThreadGroupUtils.getRootThreadGroup(), this, name,
                         0, false);
-                // REMIND: should it be higher?
-                t.setPriority(Thread.NORM_PRIORITY + 2);
-                t.setDaemon(true);
-                return t;
-            });
+            // REMIND: should it be higher?
+            screenUpdater.setPriority(Thread.NORM_PRIORITY + 2);
+            screenUpdater.setDaemon(true);
             screenUpdater.start();
         } else {
             wakeUpUpdateThread();
@@ -409,6 +401,7 @@ public class D3DScreenUpdateManager extends ScreenUpdateManager
         }
     }
 
+    @Override
     public void run() {
         while (!done) {
             synchronized (runLock) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,31 +21,32 @@
  * questions.
  */
 
-/**
+/*
  * @test
  * @bug 8178077 8232856
  * @summary Check the UI behavior of editing history.
  * @modules
  *     jdk.compiler/com.sun.tools.javac.api
  *     jdk.compiler/com.sun.tools.javac.main
+ *     jdk.jshell/jdk.internal.jshell.tool:open
  *     jdk.jshell/jdk.internal.jshell.tool.resources:open
  *     jdk.jshell/jdk.jshell:open
  * @library /tools/lib
  * @build toolbox.ToolBox toolbox.JarTask toolbox.JavacTask
  * @build Compiler UITesting
  * @compile HistoryUITest.java
- * @run testng HistoryUITest
+ * @run junit HistoryUITest
  */
 
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Test;
 
-@Test
 public class HistoryUITest extends UITesting {
 
     public HistoryUITest() {
         super(true);
     }
 
+    @Test
     public void testPrevNextSnippet() throws Exception {
         doRunTest((inputSink, out) -> {
             inputSink.write("void test1() {\nSystem.err.println(1);\n}\n");
@@ -77,6 +78,7 @@ public class HistoryUITest extends UITesting {
         });
     }
 
+    @Test
     public void testReRun() throws Exception {
         doRunTest((inputSink, out) -> {
             inputSink.write("System.err.println(\"RAN\");\n");

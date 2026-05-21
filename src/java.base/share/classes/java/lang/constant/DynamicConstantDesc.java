@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,13 +36,15 @@ import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
+import jdk.internal.vm.annotation.AOTSafeClassInitializer;
+
 import static java.lang.constant.ConstantDescs.CD_Class;
 import static java.lang.constant.ConstantDescs.CD_VarHandle;
 import static java.lang.constant.ConstantDescs.DEFAULT_NAME;
-import static java.lang.constant.ConstantUtils.EMPTY_CONSTANTDESC;
-import static java.lang.constant.ConstantUtils.validateMemberName;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.joining;
+import static jdk.internal.constant.ConstantUtils.EMPTY_CONSTANTDESC;
+import static jdk.internal.constant.ConstantUtils.validateMemberName;
 
 /**
  * A <a href="package-summary.html#nominal">nominal descriptor</a> for a
@@ -56,22 +58,14 @@ import static java.util.stream.Collectors.joining;
  *
  * @since 12
  */
-public abstract class DynamicConstantDesc<T>
+@AOTSafeClassInitializer // for PrimitiveClassDescImpl
+public abstract non-sealed class DynamicConstantDesc<T>
         implements ConstantDesc {
 
     private final DirectMethodHandleDesc bootstrapMethod;
     private final ConstantDesc[] bootstrapArgs;
     private final String constantName;
     private final ClassDesc constantType;
-
-    private static final Map<MethodHandleDesc, Function<DynamicConstantDesc<?>, ConstantDesc>> canonicalMap
-            = Map.ofEntries(Map.entry(ConstantDescs.BSM_PRIMITIVE_CLASS, DynamicConstantDesc::canonicalizePrimitiveClass),
-                            Map.entry(ConstantDescs.BSM_ENUM_CONSTANT, DynamicConstantDesc::canonicalizeEnum),
-                            Map.entry(ConstantDescs.BSM_NULL_CONSTANT, DynamicConstantDesc::canonicalizeNull),
-                            Map.entry(ConstantDescs.BSM_VARHANDLE_STATIC_FIELD, DynamicConstantDesc::canonicalizeStaticFieldVarHandle),
-                            Map.entry(ConstantDescs.BSM_VARHANDLE_FIELD, DynamicConstantDesc::canonicalizeFieldVarHandle),
-                            Map.entry(ConstantDescs.BSM_VARHANDLE_ARRAY, DynamicConstantDesc::canonicalizeArrayVarHandle)
-    );
 
     /**
      * Creates a nominal descriptor for a dynamic constant.
@@ -96,12 +90,9 @@ public abstract class DynamicConstantDesc<T>
                                   ClassDesc constantType,
                                   ConstantDesc... bootstrapArgs) {
         this.bootstrapMethod = requireNonNull(bootstrapMethod);
-        this.constantName = validateMemberName(requireNonNull(constantName), true);
+        this.constantName = validateMemberName(constantName, true);
         this.constantType = requireNonNull(constantType);
-        this.bootstrapArgs = requireNonNull(bootstrapArgs).clone();
-
-        if (constantName.length() == 0)
-            throw new IllegalArgumentException("Illegal invocation name: " + constantName);
+        this.bootstrapArgs = bootstrapArgs.length == 0 ? EMPTY_CONSTANTDESC : bootstrapArgs.clone();
     }
 
     /**
@@ -137,6 +128,8 @@ public abstract class DynamicConstantDesc<T>
      * format
      * @jvms 4.2.2 Unqualified Names
      */
+    // Do not call this method from the static initialization of java.lang.constant.ConstantDescs
+    // since that can lead to potential deadlock during multi-threaded concurrent execution
     public static<T> ConstantDesc ofCanonical(DirectMethodHandleDesc bootstrapMethod,
                                               String constantName,
                                               ClassDesc constantType,
@@ -259,7 +252,7 @@ public abstract class DynamicConstantDesc<T>
     @SuppressWarnings("unchecked")
     public T resolveConstantDesc(MethodHandles.Lookup lookup) throws ReflectiveOperationException {
         try {
-            MethodHandle bsm = (MethodHandle) bootstrapMethod.resolveConstantDesc(lookup);
+            MethodHandle bsm = bootstrapMethod.resolveConstantDesc(lookup);
             if (bsm.type().parameterCount() < 2 ||
                 !MethodHandles.Lookup.class.isAssignableFrom(bsm.type().parameterType(0))) {
                 throw new BootstrapMethodError(
@@ -281,7 +274,7 @@ public abstract class DynamicConstantDesc<T>
     }
 
     private ConstantDesc tryCanonicalize() {
-        Function<DynamicConstantDesc<?>, ConstantDesc> f = canonicalMap.get(bootstrapMethod);
+        Function<DynamicConstantDesc<?>, ConstantDesc> f = CanonicalMapHolder.CANONICAL_MAP.get(bootstrapMethod);
         if (f != null) {
             try {
                 return f.apply(this);
@@ -357,12 +350,11 @@ public abstract class DynamicConstantDesc<T>
     @Override
     public final boolean equals(Object o) {
         if (this == o) return true;
-        if (!(o instanceof DynamicConstantDesc)) return false;
-        DynamicConstantDesc<?> desc = (DynamicConstantDesc<?>) o;
-        return Objects.equals(bootstrapMethod, desc.bootstrapMethod) &&
-               Arrays.equals(bootstrapArgs, desc.bootstrapArgs) &&
-               Objects.equals(constantName, desc.constantName) &&
-               Objects.equals(constantType, desc.constantType);
+        return (o instanceof DynamicConstantDesc<?> desc)
+                && Objects.equals(bootstrapMethod, desc.bootstrapMethod)
+                && Arrays.equals(bootstrapArgs, desc.bootstrapArgs)
+                && Objects.equals(constantName, desc.constantName)
+                && Objects.equals(constantType, desc.constantType);
     }
 
     @Override
@@ -393,5 +385,16 @@ public abstract class DynamicConstantDesc<T>
         AnonymousDynamicConstantDesc(DirectMethodHandleDesc bootstrapMethod, String constantName, ClassDesc constantType, ConstantDesc... bootstrapArgs) {
             super(bootstrapMethod, constantName, constantType, bootstrapArgs);
         }
+    }
+
+    private static final class CanonicalMapHolder {
+        static final Map<MethodHandleDesc, Function<DynamicConstantDesc<?>, ConstantDesc>> CANONICAL_MAP =
+                Map.ofEntries(
+                    Map.entry(ConstantDescs.BSM_PRIMITIVE_CLASS, DynamicConstantDesc::canonicalizePrimitiveClass),
+                    Map.entry(ConstantDescs.BSM_ENUM_CONSTANT, DynamicConstantDesc::canonicalizeEnum),
+                    Map.entry(ConstantDescs.BSM_NULL_CONSTANT, DynamicConstantDesc::canonicalizeNull),
+                    Map.entry(ConstantDescs.BSM_VARHANDLE_STATIC_FIELD, DynamicConstantDesc::canonicalizeStaticFieldVarHandle),
+                    Map.entry(ConstantDescs.BSM_VARHANDLE_FIELD, DynamicConstantDesc::canonicalizeFieldVarHandle),
+                    Map.entry(ConstantDescs.BSM_VARHANDLE_ARRAY, DynamicConstantDesc::canonicalizeArrayVarHandle));
     }
 }

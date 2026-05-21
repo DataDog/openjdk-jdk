@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,16 +22,16 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "c1/c1_MacroAssembler.hpp"
 #include "c1/c1_Runtime1.hpp"
-#include "classfile/systemDictionary.hpp"
+#include "gc/shared/barrierSet.hpp"
+#include "gc/shared/barrierSetAssembler.hpp"
 #include "gc/shared/collectedHeap.hpp"
+#include "gc/shared/tlab_globals.hpp"
 #include "interpreter/interpreter.hpp"
 #include "oops/arrayOop.hpp"
 #include "oops/markWord.hpp"
 #include "runtime/basicLock.hpp"
-#include "runtime/biasedLocking.hpp"
 #include "runtime/os.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/stubRoutines.hpp"
@@ -41,16 +41,6 @@
 // correct as long as it is not implicitly used in lower layers (the
 // arm [macro]assembler) and used with care in the other C1 specific
 // files.
-
-void C1_MacroAssembler::inline_cache_check(Register receiver, Register iCache) {
-  Label verified;
-  load_klass(Rtemp, receiver);
-  cmp(Rtemp, iCache);
-  b(verified, eq); // jump over alignment no-ops
-  jump(SharedRuntime::get_ic_miss_stub(), relocInfo::runtime_call_type);
-  align(CodeEntryAlignment);
-  bind(verified);
-}
 
 void C1_MacroAssembler::build_frame(int frame_size_in_bytes, int bang_size_in_bytes) {
   assert(bang_size_in_bytes >= frame_size_in_bytes, "stack bang size incorrect");
@@ -63,6 +53,10 @@ void C1_MacroAssembler::build_frame(int frame_size_in_bytes, int bang_size_in_by
   // if this method contains a methodHandle call site
   raw_push(FP, LR);
   sub_slow(SP, SP, frame_size_in_bytes);
+
+  // Insert nmethod entry barrier into frame.
+  BarrierSetAssembler* bs = BarrierSet::barrier_set()->barrier_set_assembler();
+  bs->nmethod_entry_barrier(this);
 }
 
 void C1_MacroAssembler::remove_frame(int frame_size_in_bytes) {
@@ -70,8 +64,8 @@ void C1_MacroAssembler::remove_frame(int frame_size_in_bytes) {
   raw_pop(FP, LR);
 }
 
-void C1_MacroAssembler::verified_entry() {
-  if (C1Breakpoint) {
+void C1_MacroAssembler::verified_entry(bool breakAtEntry) {
+  if (breakAtEntry) {
     breakpoint();
   }
 }
@@ -82,7 +76,7 @@ void C1_MacroAssembler::try_allocate(Register obj, Register obj_end, Register tm
   if (UseTLAB) {
     tlab_allocate(obj, obj_end, tmp1, size_expression, slow_case);
   } else {
-    eden_allocate(obj, obj_end, tmp1, tmp2, size_expression, slow_case);
+    b(slow_case);
   }
 }
 
@@ -90,11 +84,7 @@ void C1_MacroAssembler::try_allocate(Register obj, Register obj_end, Register tm
 void C1_MacroAssembler::initialize_header(Register obj, Register klass, Register len, Register tmp) {
   assert_different_registers(obj, klass, len, tmp);
 
-  if(UseBiasedLocking && !len->is_valid()) {
-    ldr(tmp, Address(klass, Klass::prototype_header_offset()));
-  } else {
-    mov(tmp, (intptr_t)markWord::prototype().value());
-  }
+  mov(tmp, (intptr_t)markWord::prototype().value());
 
   str(tmp, Address(obj, oopDesc::mark_offset_in_bytes()));
   str(klass, Address(obj, oopDesc::klass_offset_in_bytes()));
@@ -162,10 +152,9 @@ void C1_MacroAssembler::allocate_object(Register obj, Register tmp1, Register tm
 
 void C1_MacroAssembler::allocate_array(Register obj, Register len,
                                        Register tmp1, Register tmp2, Register tmp3,
-                                       int header_size, int element_size,
+                                       int header_size_in_bytes, int element_size,
                                        Register klass, Label& slow_case) {
   assert_different_registers(obj, len, tmp1, tmp2, tmp3, klass, Rtemp);
-  const int header_size_in_bytes = header_size * BytesPerWord;
   const int scale_shift = exact_log2(element_size);
   const Register obj_size = Rtemp; // Rtemp should be free at c1 LIR level
 
@@ -187,116 +176,51 @@ void C1_MacroAssembler::allocate_array(Register obj, Register len,
   initialize_object(obj, tmp1, klass, len, tmp2, tmp3, header_size_in_bytes, -1, /* is_tlab_allocated */ UseTLAB);
 }
 
-int C1_MacroAssembler::lock_object(Register hdr, Register obj,
-                                   Register disp_hdr, Register tmp1,
-                                   Label& slow_case) {
-  Label done, fast_lock, fast_lock_done;
+int C1_MacroAssembler::lock_object(Register hdr, Register obj, Register basic_lock, Label& slow_case) {
   int null_check_offset = 0;
 
   const Register tmp2 = Rtemp; // Rtemp should be free at c1 LIR level
-  assert_different_registers(hdr, obj, disp_hdr, tmp1, tmp2);
+  assert_different_registers(hdr, obj, basic_lock, tmp2);
 
-  assert(BasicObjectLock::lock_offset_in_bytes() == 0, "ajust this code");
-  const int obj_offset = BasicObjectLock::obj_offset_in_bytes();
-  const int mark_offset = BasicLock::displaced_header_offset_in_bytes();
+  assert(BasicObjectLock::lock_offset() == 0, "adjust this code");
+  assert(oopDesc::mark_offset_in_bytes() == 0, "Required by atomic instructions");
 
-  str(obj, Address(disp_hdr, obj_offset));
+  // save object being locked into the BasicObjectLock
+  str(obj, Address(basic_lock, BasicObjectLock::obj_offset()));
 
   null_check_offset = offset();
 
   if (DiagnoseSyncOnValueBasedClasses != 0) {
-    load_klass(tmp1, obj);
-    ldr_u32(tmp1, Address(tmp1, Klass::access_flags_offset()));
-    tst(tmp1, JVM_ACC_IS_VALUE_BASED_CLASS);
+    load_klass(tmp2, obj);
+    ldrb(tmp2, Address(tmp2, Klass::misc_flags_offset()));
+    tst(tmp2, KlassFlags::_misc_is_value_based_class);
     b(slow_case, ne);
   }
 
-  if (UseBiasedLocking) {
-    biased_locking_enter(obj, hdr/*scratched*/, tmp1, false, tmp2, done, slow_case);
-  }
+  Register t1 = basic_lock; // Needs saving, probably
+  Register t2 = hdr;        // blow
+  Register t3 = Rtemp;      // blow
 
-  assert(oopDesc::mark_offset_in_bytes() == 0, "Required by atomic instructions");
-
-  // On MP platforms the next load could return a 'stale' value if the memory location has been modified by another thread.
-  // That would be acceptable as ether CAS or slow case path is taken in that case.
-
-  // Must be the first instruction here, because implicit null check relies on it
-  ldr(hdr, Address(obj, oopDesc::mark_offset_in_bytes()));
-
-  tst(hdr, markWord::unlocked_value);
-  b(fast_lock, ne);
-
-  // Check for recursive locking
-  // See comments in InterpreterMacroAssembler::lock_object for
-  // explanations on the fast recursive locking check.
-  // -1- test low 2 bits
-  movs(tmp2, AsmOperand(hdr, lsl, 30));
-  // -2- test (hdr - SP) if the low two bits are 0
-  sub(tmp2, hdr, SP, eq);
-  movs(tmp2, AsmOperand(tmp2, lsr, exact_log2(os::vm_page_size())), eq);
-  // If 'eq' then OK for recursive fast locking: store 0 into a lock record.
-  str(tmp2, Address(disp_hdr, mark_offset), eq);
-  b(fast_lock_done, eq);
-  // else need slow case
-  b(slow_case);
-
-
-  bind(fast_lock);
-  // Save previous object header in BasicLock structure and update the header
-  str(hdr, Address(disp_hdr, mark_offset));
-
-  cas_for_lock_acquire(hdr, disp_hdr, obj, tmp2, slow_case);
-
-  bind(fast_lock_done);
-
-#ifndef PRODUCT
-  if (PrintBiasedLockingStatistics) {
-    cond_atomic_inc32(al, BiasedLocking::fast_path_entry_count_addr());
-  }
-#endif // !PRODUCT
-
-  bind(done);
-
+  fast_lock(obj, t1, t2, t3, 1 /* savemask - save t1 */, slow_case);
+  // Success: fall through
   return null_check_offset;
 }
 
-void C1_MacroAssembler::unlock_object(Register hdr, Register obj,
-                                      Register disp_hdr, Register tmp,
-                                      Label& slow_case) {
-  // Note: this method is not using its 'tmp' argument
+void C1_MacroAssembler::unlock_object(Register hdr, Register obj, Register basic_lock, Label& slow_case) {
+  assert_different_registers(hdr, obj, basic_lock, Rtemp);
 
-  assert_different_registers(hdr, obj, disp_hdr, Rtemp);
-  Register tmp2 = Rtemp;
-
-  assert(BasicObjectLock::lock_offset_in_bytes() == 0, "ajust this code");
-  const int obj_offset = BasicObjectLock::obj_offset_in_bytes();
-  const int mark_offset = BasicLock::displaced_header_offset_in_bytes();
-
-  Label done;
-  if (UseBiasedLocking) {
-    // load object
-    ldr(obj, Address(disp_hdr, obj_offset));
-    biased_locking_exit(obj, hdr, done);
-  }
-
+  assert(BasicObjectLock::lock_offset() == 0, "adjust this code");
   assert(oopDesc::mark_offset_in_bytes() == 0, "Required by atomic instructions");
 
-  // Load displaced header and object from the lock
-  ldr(hdr, Address(disp_hdr, mark_offset));
-  // If hdr is NULL, we've got recursive locking and there's nothing more to do
-  cbz(hdr, done);
+  ldr(obj, Address(basic_lock, BasicObjectLock::obj_offset()));
 
-  if(!UseBiasedLocking) {
-    // load object
-    ldr(obj, Address(disp_hdr, obj_offset));
-  }
+  Register t1 = basic_lock; // Needs saving, probably
+  Register t2 = hdr;        // blow
+  Register t3 = Rtemp;      // blow
 
-  // Restore the object header
-  cas_for_lock_release(disp_hdr, hdr, obj, tmp2, slow_case);
-
-  bind(done);
+  fast_unlock(obj, t1, t2, t3, 1 /* savemask - save t1 */, slow_case);
+  // Success: fall through
 }
-
 
 #ifndef PRODUCT
 

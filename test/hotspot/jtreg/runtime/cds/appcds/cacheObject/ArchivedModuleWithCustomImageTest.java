@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,12 +24,9 @@
 /*
  * @test
  * @summary Test archived module graph with custom runtime image
- * @requires vm.cds.archived.java.heap
+ * @requires vm.cds.write.archived.java.heap
+ * @requires vm.flagless
  * @library /test/jdk/lib/testlibrary /test/lib /test/hotspot/jtreg/runtime/cds/appcds
- * @build sun.hotspot.WhiteBox
- * @compile CheckArchivedModuleApp.java
- * @run driver ClassFileInstaller -jar app.jar CheckArchivedModuleApp
- * @run driver ClassFileInstaller -jar WhiteBox.jar sun.hotspot.WhiteBox
  * @run driver ArchivedModuleWithCustomImageTest
  */
 
@@ -41,6 +38,7 @@ import java.nio.file.Paths;
 import jdk.test.lib.compiler.CompilerUtils;
 import jdk.test.lib.process.OutputAnalyzer;
 import jdk.test.lib.process.ProcessTools;
+import jdk.test.lib.helpers.ClassFileInstaller;
 
 public class ArchivedModuleWithCustomImageTest {
     private static final String JAVA_HOME = System.getProperty("java.home");
@@ -97,8 +95,6 @@ public class ArchivedModuleWithCustomImageTest {
 
     private static void testArchivedModuleUsingImage(Path image)
                             throws Throwable {
-        String wbJar = ClassFileInstaller.getJarPath("WhiteBox.jar");
-        String use_whitebox_jar = "-Xbootclasspath/a:" + wbJar;
         String appJar = ClassFileInstaller.getJarPath("app.jar");
         Path customJava = Paths.get(image.toString(), "bin", "java");
 
@@ -114,27 +110,6 @@ public class ArchivedModuleWithCustomImageTest {
             pbDump, "custom.runtime.image.dump");
         TestCommon.checkDump(output);
 
-        // Test case 1):
-        // test archived module graph objects are used with custome runtime image
-        System.out.println("------------------- Test case 1 -------------------");
-        String[] runCmd = {customJava.toString(),
-                           use_whitebox_jar,
-                           "-XX:SharedArchiveFile=./ArchivedModuleWithCustomImageTest.jsa",
-                           "-cp",
-                           appJar,
-                           "-Xshare:on",
-                           "-XX:+UnlockDiagnosticVMOptions",
-                           "-XX:+WhiteBoxAPI",
-                           "CheckArchivedModuleApp",
-                           "yes",
-                           "yes"};
-        printCommand(runCmd);
-        ProcessBuilder pbRun = new ProcessBuilder();
-        pbRun.command(runCmd);
-        output = TestCommon.executeAndLog(pbRun, "custom.runtime.image.run");
-        output.shouldHaveExitValue(0);
-
-
         // Test case 2):
         // verify --show-module-resolution output
         System.out.println("------------------- Test case 2 -------------------");
@@ -145,7 +120,7 @@ public class ArchivedModuleWithCustomImageTest {
                                    "--show-module-resolution",
                                    "-version"};
         printCommand(showModuleCmd1);
-        pbRun = new ProcessBuilder();
+        ProcessBuilder pbRun = new ProcessBuilder();
         pbRun.command(showModuleCmd1);
         output = TestCommon.executeAndLog(
             pbRun, "custom.runtime.image.showModuleResolution.nocds");
@@ -158,6 +133,7 @@ public class ArchivedModuleWithCustomImageTest {
             customJava.toString(),
             "-XX:SharedArchiveFile=./ArchivedModuleWithCustomImageTest.jsa",
             "-Xshare:on",
+            "-Xlog:cds=off",
             "--show-module-resolution",
             "-version"};
         printCommand(showModuleCmd2);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,8 +38,8 @@ import toolbox.ToolBox;
 
 public class TestRecordLinks  extends JavadocTester {
     public static void main(String... args) throws Exception {
-        TestRecordLinks tester = new TestRecordLinks();
-        tester.runTests(m -> new Object[] { Path.of(m.getName()) });
+        var tester = new TestRecordLinks();
+        tester.runTests();
     }
 
     private final ToolBox tb = new ToolBox();
@@ -82,16 +82,16 @@ public class TestRecordLinks  extends JavadocTester {
                     """,
                 """
                     <div class="block"><a href="#foo()"><code>foo()</code></a>
-                     <a href="JavadocTest.Bar.html" title="class in example"><code>JavadocTest.Bar</code></a></div>
+                    <a href="JavadocTest.Bar.html" title="class in example"><code>JavadocTest.Bar</code></a></div>
                     """);
 
         checkOutput("example/JavadocTest.Bar.html", true,
                 """
-                    <h1 title="Record JavadocTest.Bar" class="title">Record JavadocTest.Bar</h1>
+                    <h1 title="Record Class JavadocTest.Bar" class="title">Record Class JavadocTest.Bar</h1>
                     """,
                 """
                     <div class="block"><a href="#bar()"><code>bar()</code></a>
-                     <a href="JavadocTest.Foo.html" title="class in example"><code>JavadocTest.Foo</code></a></div>
+                    <a href="JavadocTest.Foo.html" title="class in example"><code>JavadocTest.Foo</code></a></div>
                     """);
     }
 }

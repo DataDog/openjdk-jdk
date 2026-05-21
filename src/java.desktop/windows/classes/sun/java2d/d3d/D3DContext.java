@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -106,7 +106,7 @@ final class D3DContext extends BufferedContext {
         return device;
     }
 
-    static class D3DContextCaps extends ContextCapabilities {
+    static final class D3DContextCaps extends ContextCapabilities {
         /**
          * Indicates the presence of pixel shaders (v2.0 or greater).
          * This cap will only be set if the hardware supports the minimum number
@@ -136,7 +136,7 @@ final class D3DContext extends BufferedContext {
 
         @Override
         public String toString() {
-            StringBuffer buf = new StringBuffer(super.toString());
+            StringBuilder buf = new StringBuilder(super.toString());
             if ((caps & CAPS_LCD_SHADER) != 0) {
                 buf.append("CAPS_LCD_SHADER|");
             }

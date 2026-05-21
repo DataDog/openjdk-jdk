@@ -22,18 +22,16 @@
  *
  */
 
-#include "precompiled.hpp"
-#include "gc/epsilon/epsilonMonitoringSupport.hpp"
 #include "gc/epsilon/epsilonHeap.hpp"
+#include "gc/epsilon/epsilonMonitoringSupport.hpp"
 #include "gc/shared/generationCounters.hpp"
 #include "memory/allocation.hpp"
 #include "memory/metaspaceCounters.hpp"
 #include "memory/resourceArea.hpp"
+#include "runtime/perfData.hpp"
 #include "services/memoryService.hpp"
 
 class EpsilonSpaceCounters: public CHeapObj<mtGC> {
-  friend class VMStructs;
-
 private:
   PerfVariable* _capacity;
   PerfVariable* _used;
@@ -72,7 +70,7 @@ public:
   }
 
   ~EpsilonSpaceCounters() {
-    FREE_C_HEAP_ARRAY(char, _name_space);
+    FREE_C_HEAP_ARRAY(_name_space);
   }
 
   inline void update_all(size_t capacity, size_t used) {
@@ -90,8 +88,8 @@ public:
           _heap(heap)
   {};
 
-  virtual void update_all() {
-    _current_size->set_value(_heap->capacity());
+  void update_all() {
+    GenerationCounters::update_capacity(_heap->capacity());
   }
 };
 
@@ -101,6 +99,7 @@ EpsilonMonitoringSupport::EpsilonMonitoringSupport(EpsilonHeap* heap) {
 }
 
 void EpsilonMonitoringSupport::update_counters() {
+  assert(is_ready(), "Must be ready");
   MemoryService::track_memory_usage();
 
   if (UsePerfData) {
@@ -110,7 +109,13 @@ void EpsilonMonitoringSupport::update_counters() {
     _heap_counters->update_all();
     _space_counters->update_all(capacity, used);
     MetaspaceCounters::update_performance_counters();
-    CompressedClassSpaceCounters::update_performance_counters();
   }
 }
 
+bool EpsilonMonitoringSupport::is_ready() {
+  return _ready.load_acquire();
+}
+
+void EpsilonMonitoringSupport::mark_ready() {
+  _ready.release_store(true);
+}

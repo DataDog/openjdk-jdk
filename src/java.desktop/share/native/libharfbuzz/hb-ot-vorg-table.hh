@@ -48,7 +48,7 @@ struct VertOriginMetric
   }
 
   public:
-  HBGlyphID     glyph;
+  HBGlyphID16   glyph;
   FWORD         vertOriginY;
 
   public:
@@ -61,6 +61,7 @@ struct VORG
 
   bool has_data () const { return version.to_int (); }
 
+  HB_ALWAYS_INLINE
   int get_y_origin (hb_codepoint_t glyph) const
   {
     unsigned int i;
@@ -90,7 +91,7 @@ struct VORG
   bool subset (hb_subset_context_t *c) const
   {
     TRACE_SUBSET (this);
-    VORG *vorg_prime = c->serializer->start_embed<VORG> ();
+    auto *vorg_prime = c->serializer->start_embed<VORG> ();
     if (unlikely (!c->serializer->check_success (vorg_prime))) return_trace (false);
 
     auto it =
@@ -117,6 +118,7 @@ struct VORG
   {
     TRACE_SANITIZE (this);
     return_trace (c->check_struct (this) &&
+                  hb_barrier () &&
                   version.major == 1 &&
                   vertYOrigins.sanitize (c));
   }
@@ -125,7 +127,7 @@ struct VORG
   FixedVersion<>version;        /* Version of VORG table. Set to 0x00010000u. */
   FWORD         defaultVertOriginY;
                                 /* The default vertical origin. */
-  SortedArrayOf<VertOriginMetric>
+  SortedArray16Of<VertOriginMetric>
                 vertYOrigins;   /* The array of vertical origins. */
 
   public:

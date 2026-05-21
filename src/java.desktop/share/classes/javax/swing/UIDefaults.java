@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -49,12 +49,8 @@ import java.awt.Color;
 import java.awt.Insets;
 import java.awt.Dimension;
 import java.beans.PropertyChangeListener;
-import java.security.AccessController;
-import java.security.AccessControlContext;
-import java.security.PrivilegedAction;
 
 import sun.reflect.misc.MethodUtil;
-import sun.reflect.misc.ReflectUtil;
 import sun.swing.SwingAccessor;
 import sun.swing.SwingUtilities2;
 
@@ -343,22 +339,17 @@ public class UIDefaults extends Hashtable<Object,Object>
      */
     private static boolean isDesktopResourceBundle(String baseName) {
         Module thisModule = UIDefaults.class.getModule();
-        return AccessController.doPrivileged(new PrivilegedAction<Boolean>() {
-            @Override
-            public Boolean run() {
-                Class<?> c = Class.forName(thisModule, baseName);
-                if (c != null) {
-                    return true;
-                } else {
-                    String resourceName = baseName.replace('.', '/') + ".properties";
-                    try (InputStream in = thisModule.getResourceAsStream(resourceName)) {
-                        return in != null;
-                    } catch (IOException e) {
-                        throw new UncheckedIOException(e);
-                    }
-                }
+        Class<?> c = Class.forName(thisModule, baseName);
+        if (c != null) {
+            return true;
+        } else {
+            String resourceName = baseName.replace('.', '/') + ".properties";
+            try (InputStream in = thisModule.getResourceAsStream(resourceName)) {
+                return in != null;
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
             }
-        });
+        }
     }
 
     /**
@@ -710,7 +701,6 @@ public class UIDefaults extends Hashtable<Object,Object>
         try {
             String className = (String)get(uiClassID);
             if (className != null) {
-                ReflectUtil.checkPackageAccess(className);
 
                 Class<?> cls = (Class)get(className);
                 if (cls == null) {
@@ -1068,7 +1058,6 @@ public class UIDefaults extends Hashtable<Object,Object>
      * @since 1.3
      */
     public static class ProxyLazyValue implements LazyValue {
-        private AccessControlContext acc;
         private String className;
         private String methodName;
         private Object[] args;
@@ -1104,7 +1093,7 @@ public class UIDefaults extends Hashtable<Object,Object>
          * @param c    a <code>String</code> specifying the classname
          *              of the instance to be created on demand
          * @param o    an array of <code>Objects</code> to be passed as
-         *              paramaters to the constructor in class c
+         *              parameters to the constructor in class c
          */
         public ProxyLazyValue(String c, Object[] o) {
             this(c, null, o);
@@ -1120,10 +1109,9 @@ public class UIDefaults extends Hashtable<Object,Object>
          * @param m    a <code>String</code> specifying the static method
          *              to be called on class c
          * @param o    an array of <code>Objects</code> to be passed as
-         *              paramaters to the static method in class c
+         *              parameters to the static method in class c
          */
         public ProxyLazyValue(String c, String m, Object[] o) {
-            acc = AccessController.getContext();
             className = c;
             methodName = m;
             if (o != null) {
@@ -1139,50 +1127,37 @@ public class UIDefaults extends Hashtable<Object,Object>
          * @return the created <code>Object</code>
          */
         public Object createValue(final UIDefaults table) {
-            // In order to pick up the security policy in effect at the
-            // time of creation we use a doPrivileged with the
-            // AccessControlContext that was in place when this was created.
-            if (acc == null && System.getSecurityManager() != null) {
-                throw new SecurityException("null AccessControlContext");
-            }
-            return AccessController.doPrivileged(new PrivilegedAction<Object>() {
-                public Object run() {
-                    try {
-                        Class<?> c;
-                        Object cl;
-                        // See if we should use a separate ClassLoader
-                        if (table == null || !((cl = table.get("ClassLoader"))
-                                               instanceof ClassLoader)) {
-                            cl = Thread.currentThread().
-                                        getContextClassLoader();
-                            if (cl == null) {
-                                // Fallback to the system class loader.
-                                cl = ClassLoader.getSystemClassLoader();
-                            }
-                        }
-                        ReflectUtil.checkPackageAccess(className);
-                        c = Class.forName(className, true, (ClassLoader)cl);
-                        SwingUtilities2.checkAccess(c.getModifiers());
-                        if (methodName != null) {
-                            Class<?>[] types = getClassArray(args);
-                            Method m = c.getMethod(methodName, types);
-                            return MethodUtil.invoke(m, c, args);
-                        } else {
-                            Class<?>[] types = getClassArray(args);
-                            Constructor<?> constructor = c.getConstructor(types);
-                            SwingUtilities2.checkAccess(constructor.getModifiers());
-                            return constructor.newInstance(args);
-                        }
-                    } catch(Exception e) {
-                        // Ideally we would throw an exception, unfortunately
-                        // often times there are errors as an initial look and
-                        // feel is loaded before one can be switched. Perhaps a
-                        // flag should be added for debugging, so that if true
-                        // the exception would be thrown.
+            try {
+                Class<?> c;
+                Object cl;
+                // See if we should use a separate ClassLoader
+                if (table == null || !((cl = table.get("ClassLoader"))
+                                       instanceof ClassLoader)) {
+                    cl = Thread.currentThread().
+                                getContextClassLoader();
+                    if (cl == null) {
+                        // Fallback to the system class loader.
+                        cl = ClassLoader.getSystemClassLoader();
                     }
-                    return null;
                 }
-            }, acc);
+                c = Class.forName(className, true, (ClassLoader)cl);
+                if (methodName != null) {
+                    Class<?>[] types = getClassArray(args);
+                    Method m = c.getMethod(methodName, types);
+                    return MethodUtil.invoke(m, c, args);
+                } else {
+                    Class<?>[] types = getClassArray(args);
+                    Constructor<?> constructor = c.getConstructor(types);
+                    return constructor.newInstance(args);
+                }
+            } catch(Exception e) {
+                // Ideally we would throw an exception, unfortunately
+                // often times there are errors as an initial look and
+                // feel is loaded before one can be switched. Perhaps a
+                // flag should be added for debugging, so that if true
+                // the exception would be thrown.
+            }
+            return null;
         }
 
         /*
@@ -1194,9 +1169,9 @@ public class UIDefaults extends Hashtable<Object,Object>
          */
         private Class<?>[] getClassArray(Object[] args) {
             Class<?>[] types = null;
-            if (args!=null) {
+            if (args != null) {
                 types = new Class<?>[args.length];
-                for (int i = 0; i< args.length; i++) {
+                for (int i = 0; i < args.length; i++) {
                     /* PENDING(ges): At present only the primitive types
                        used are handled correctly; this should eventually
                        handle all primitive types */
@@ -1224,7 +1199,7 @@ public class UIDefaults extends Hashtable<Object,Object>
 
         private String printArgs(Object[] array) {
             String s = "{";
-            if (array !=null) {
+            if (array != null) {
                 for (int i = 0 ; i < array.length-1; i++) {
                     s = s.concat(array[i] + ",");
                 }
@@ -1368,8 +1343,8 @@ public class UIDefaults extends Hashtable<Object,Object>
             return value;
         }
 
-        String composeKey(String key, int reduce, String sufix) {
-            return key.substring(0, key.length() - reduce) + sufix;
+        String composeKey(String key, int reduce, String suffix) {
+            return key.substring(0, key.length() - reduce) + suffix;
         }
 
         String getTextFromProperty(String text) {

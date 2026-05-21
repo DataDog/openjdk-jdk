@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,13 +21,17 @@
  * questions.
  */
 
-#include "precompiled.hpp"
 #include "gc/z/zAddress.inline.hpp"
 #include "gc/z/zForwarding.inline.hpp"
 #include "gc/z/zForwardingAllocator.inline.hpp"
+#include "gc/z/zGeneration.inline.hpp"
 #include "gc/z/zGlobals.hpp"
+#include "gc/z/zHeap.hpp"
 #include "gc/z/zPage.inline.hpp"
-#include "unittest.hpp"
+#include "gc/z/zRangeRegistry.inline.hpp"
+#include "gc/z/zVirtualMemory.inline.hpp"
+#include "runtime/os.hpp"
+#include "zunittest.hpp"
 
 using namespace testing;
 
@@ -37,8 +41,67 @@ using namespace testing;
 
 #define CAPTURE(expression) CAPTURE1(expression)
 
-class ZForwardingTest : public Test {
+class ZForwardingTest : public ZTest {
 public:
+  // Setup and tear down
+  ZHeap*                       _old_heap;
+  ZGenerationOld*              _old_old;
+  ZGenerationYoung*            _old_young;
+  ZAddressReserver             _zaddress_reserver;
+  ZPhysicalMemoryBackingMocker _physical_backing;
+  zoffset                      _page_offset;
+
+  virtual void SetUp() {
+    _old_heap = ZHeap::_heap;
+    ZHeap::_heap = (ZHeap*)os::malloc(sizeof(ZHeap), mtTest);
+
+    _old_old = ZGeneration::_old;
+    _old_young = ZGeneration::_young;
+
+    ZGeneration::_old = &ZHeap::_heap->_old;
+    ZGeneration::_young = &ZHeap::_heap->_young;
+
+    *const_cast<ZGenerationId*>(&ZGeneration::_old->_id) = ZGenerationId::old;
+    *const_cast<ZGenerationId*>(&ZGeneration::_young->_id) = ZGenerationId::young;
+
+    ZGeneration::_old->_seqnum = 1;
+    ZGeneration::_young->_seqnum = 2;
+
+    _zaddress_reserver.SetUp(ZGranuleSize);
+    _page_offset = _zaddress_reserver.registry()->peek_low_address();
+
+    if (_page_offset == zoffset::invalid) {
+      GTEST_SKIP() << "Unable to reserve memory";
+    }
+
+    // Setup backing storage
+    _physical_backing.SetUp(ZGranuleSize);
+
+    size_t committed = _physical_backing()->commit(zbacking_offset(0), ZGranuleSize, 0);
+
+    if (committed != ZGranuleSize) {
+      GTEST_SKIP() << "Unable to commit memory";
+    }
+
+    _physical_backing()->map(ZOffset::address_unsafe(_page_offset), ZGranuleSize, zbacking_offset(0));
+  }
+
+  virtual void TearDown() {
+    os::free(ZHeap::_heap);
+    ZHeap::_heap = _old_heap;
+    ZGeneration::_old = _old_old;
+    ZGeneration::_young = _old_young;
+
+    if (_page_offset != zoffset::invalid) {
+      _physical_backing()->unmap(ZOffset::address_unsafe(_page_offset), ZGranuleSize);
+      _physical_backing()->uncommit(zbacking_offset(0), ZGranuleSize);
+    }
+
+    _physical_backing.TearDown();
+
+    _zaddress_reserver.TearDown();
+  }
+
   // Helper functions
 
   class SequenceToFromIndex : AllStatic {
@@ -85,7 +148,7 @@ public:
       ZForwardingEntry entry = forwarding->find(from_index, &cursor);
       ASSERT_FALSE(entry.populated()) << CAPTURE2(from_index, size);
 
-      forwarding->insert(from_index, from_index, &cursor);
+      forwarding->insert(from_index, zoffset(from_index), &cursor);
     }
 
     // Verify
@@ -113,7 +176,7 @@ public:
       ZForwardingEntry entry = forwarding->find(from_index, &cursor);
       ASSERT_FALSE(entry.populated()) << CAPTURE2(from_index, size);
 
-      forwarding->insert(from_index, from_index, &cursor);
+      forwarding->insert(from_index, zoffset(from_index), &cursor);
     }
 
     // Verify populated even indices
@@ -142,21 +205,26 @@ public:
     }
   }
 
-  static void test(void (*function)(ZForwarding*), uint32_t size) {
+  void test(void (*function)(ZForwarding*), uint32_t size) {
     // Create page
-    const ZVirtualMemory vmem(0, ZPageSizeSmall);
-    const ZPhysicalMemory pmem(ZPhysicalMemorySegment(0, ZPageSizeSmall, true));
-    ZPage page(ZPageTypeSmall, vmem, pmem);
-
-    page.reset();
+    const ZVirtualMemory vmem(zoffset(_page_offset), ZPageSizeSmall);
+    ZPage page(ZPageType::small, ZPageAge::eden, vmem, 0u);
 
     const size_t object_size = 16;
-    const uintptr_t object = page.alloc_object(object_size);
+    const zaddress object = page.alloc_object(object_size);
 
-    ZGlobalSeqNum++;
+    ZGeneration::young()->_seqnum++;
 
-    bool dummy = false;
-    page.mark_object(ZAddress::marked(object), dummy, dummy);
+    ZGeneration::young()->set_phase(ZGeneration::Phase::Mark);
+    ZGeneration::young()->set_phase(ZGeneration::Phase::MarkComplete);
+    ZGeneration::young()->set_phase(ZGeneration::Phase::Relocate);
+
+    //page.mark_object(object, dummy, dummy);
+    {
+      bool dummy = false;
+      const BitMap::idx_t index = page.bit_index(object);
+      page._livemap.set(page._generation_id, index, dummy, dummy);
+    }
 
     const uint32_t live_objects = size;
     const size_t live_bytes = live_objects * object_size;
@@ -168,14 +236,14 @@ public:
     allocator.reset((sizeof(ZForwarding)) + (nentries * sizeof(ZForwardingEntry)));
 
     // Setup forwarding
-    ZForwarding* const forwarding = ZForwarding::alloc(&allocator, &page);
+    ZForwarding* const forwarding = ZForwarding::alloc(&allocator, &page, ZPageAge::survivor1);
 
     // Actual test function
     (*function)(forwarding);
   }
 
   // Run the given function with a few different input values.
-  static void test(void (*function)(ZForwarding*)) {
+  void test(void (*function)(ZForwarding*)) {
     test(function, 1);
     test(function, 2);
     test(function, 3);
@@ -188,18 +256,18 @@ public:
   }
 };
 
-TEST_F(ZForwardingTest, setup) {
+TEST_VM_F(ZForwardingTest, setup) {
   test(&ZForwardingTest::setup);
 }
 
-TEST_F(ZForwardingTest, find_empty) {
+TEST_VM_F(ZForwardingTest, find_empty) {
   test(&ZForwardingTest::find_empty);
 }
 
-TEST_F(ZForwardingTest, find_full) {
+TEST_VM_F(ZForwardingTest, find_full) {
   test(&ZForwardingTest::find_full);
 }
 
-TEST_F(ZForwardingTest, find_every_other) {
+TEST_VM_F(ZForwardingTest, find_every_other) {
   test(&ZForwardingTest::find_every_other);
 }

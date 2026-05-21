@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2025, Oracle and/or its affiliates. All rights reserved.
  */
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
@@ -23,7 +23,6 @@
 
 package com.sun.org.apache.xalan.internal.xsltc.trax;
 
-import com.sun.org.apache.xalan.internal.XalanConstants;
 import com.sun.org.apache.xalan.internal.utils.ObjectFactory;
 import com.sun.org.apache.xalan.internal.xsltc.DOM;
 import com.sun.org.apache.xalan.internal.xsltc.Translet;
@@ -43,11 +42,9 @@ import java.lang.module.ModuleFinder;
 import java.lang.module.ModuleReader;
 import java.lang.module.ModuleReference;
 import java.lang.reflect.InvocationTargetException;
-import java.security.AccessController;
 import java.security.CodeSigner;
 import java.security.CodeSource;
 import java.security.PermissionCollection;
-import java.security.PrivilegedAction;
 import java.security.ProtectionDomain;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -60,7 +57,7 @@ import javax.xml.transform.Templates;
 import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerConfigurationException;
 import javax.xml.transform.URIResolver;
-import jdk.xml.internal.SecuritySupport;
+import jdk.xml.internal.JdkConstants;
 
 
 /**
@@ -68,7 +65,7 @@ import jdk.xml.internal.SecuritySupport;
  * @author G. Todd Millerj
  * @author Jochen Cordes <Jochen.Cordes@t-online.de>
  * @author Santiago Pericas-Geertsen
- * @LastModified: May 2020
+ * @LastModified: Jan 2025
  */
 public final class TemplatesImpl implements Templates, Serializable {
     static final long serialVersionUID = 673094361519270707L;
@@ -149,7 +146,7 @@ public final class TemplatesImpl implements Templates, Serializable {
     /**
      * protocols allowed for external references set by the stylesheet processing instruction, Import and Include element.
      */
-    private transient String _accessExternalStylesheet = XalanConstants.EXTERNAL_ACCESS_DEFAULT;
+    private transient String _accessExternalStylesheet = JdkConstants.EXTERNAL_ACCESS_DEFAULT;
 
     /**
      * @serialField _name String The Name of the main class
@@ -258,19 +255,9 @@ public final class TemplatesImpl implements Templates, Serializable {
      *  if yes then we need to deserialize the URIResolver
      *  Fix for bugzilla bug 22438
      */
-    @SuppressWarnings("unchecked")
     private void  readObject(ObjectInputStream is)
       throws IOException, ClassNotFoundException
     {
-        SecurityManager security = System.getSecurityManager();
-        if (security != null){
-            String temp = SecuritySupport.getSystemProperty(DESERIALIZE_TRANSLET);
-            if (temp == null || !(temp.length()==0 || temp.equalsIgnoreCase("true"))) {
-                ErrorMsg err = new ErrorMsg(ErrorMsg.DESERIALIZE_TRANSLET_ERR);
-                throw new UnsupportedOperationException(err.toString());
-            }
-        }
-
         // We have to read serialized fields first.
         ObjectInputStream.GetField gf = is.readFields();
         _name = (String)gf.get("_name", null);
@@ -440,9 +427,7 @@ public final class TemplatesImpl implements Templates, Serializable {
         Configuration cf = bootLayer.configuration()
                 .resolve(finder, ModuleFinder.of(), Set.of(mn));
 
-        PrivilegedAction<ModuleLayer> pa = () -> bootLayer.defineModules(cf, name -> loader);
-        ModuleLayer layer = AccessController.doPrivileged(pa);
-
+        ModuleLayer layer = bootLayer.defineModules(cf, _ -> loader);
         Module m = layer.findModule(mn).get();
         assert m.getLayer() == layer;
 
@@ -453,6 +438,7 @@ public final class TemplatesImpl implements Templates, Serializable {
      * Defines the translet class and auxiliary classes.
      * Returns a reference to the Class object that defines the main class
      */
+    @SuppressWarnings("removal")
     private void defineTransletClasses()
         throws TransformerConfigurationException {
 
@@ -462,12 +448,8 @@ public final class TemplatesImpl implements Templates, Serializable {
         }
 
         TransletClassLoader loader =
-                AccessController.doPrivileged(new PrivilegedAction<TransletClassLoader>() {
-                public TransletClassLoader run() {
-                    return new TransletClassLoader(ObjectFactory.findClassLoader(),
+                new TransletClassLoader(ObjectFactory.findClassLoader(),
                             _tfactory.getExternalExtensionsMap());
-                }
-            });
 
         try {
             final int classCount = _bytecodes.length;

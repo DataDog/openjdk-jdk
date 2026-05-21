@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,39 +26,88 @@
 #define SHARE_GC_SHARED_TASKQUEUE_INLINE_HPP
 
 #include "gc/shared/taskqueue.hpp"
+
+#include "logging/log.hpp"
+#include "logging/logStream.hpp"
 #include "memory/allocation.inline.hpp"
+#include "memory/resourceArea.hpp"
 #include "oops/oop.inline.hpp"
-#include "runtime/atomic.hpp"
 #include "runtime/orderAccess.hpp"
 #include "utilities/debug.hpp"
+#include "utilities/ostream.hpp"
 #include "utilities/stack.inline.hpp"
 
-template <class T, MEMFLAGS F>
-inline GenericTaskQueueSet<T, F>::GenericTaskQueueSet(uint n) : _n(n) {
+template <class T, MemTag MT>
+inline GenericTaskQueueSet<T, MT>::GenericTaskQueueSet(uint n) : _n(n) {
   typedef T* GenericTaskQueuePtr;
-  _queues = NEW_C_HEAP_ARRAY(GenericTaskQueuePtr, n, F);
+  _queues = NEW_C_HEAP_ARRAY(GenericTaskQueuePtr, n, MT);
   for (uint i = 0; i < n; i++) {
-    _queues[i] = NULL;
+    _queues[i] = nullptr;
   }
 }
 
-template <class T, MEMFLAGS F>
-inline GenericTaskQueueSet<T, F>::~GenericTaskQueueSet() {
-  FREE_C_HEAP_ARRAY(T*, _queues);
+template <class T, MemTag MT>
+inline GenericTaskQueueSet<T, MT>::~GenericTaskQueueSet() {
+  FREE_C_HEAP_ARRAY(_queues);
 }
 
-template<class E, MEMFLAGS F, unsigned int N>
-inline void GenericTaskQueue<E, F, N>::initialize() {
-  _elems = ArrayAllocator<E>::allocate(N, F);
+#if TASKQUEUE_STATS
+template<class T, MemTag MT>
+void GenericTaskQueueSet<T, MT>::print_taskqueue_stats_hdr(outputStream* const st, const char* label) {
+  st->print_cr("GC Task Stats %s", label);
+  st->print("thr "); TaskQueueStats::print_header(1, st); st->cr();
+  st->print("--- "); TaskQueueStats::print_header(2, st); st->cr();
 }
 
-template<class E, MEMFLAGS F, unsigned int N>
-inline GenericTaskQueue<E, F, N>::~GenericTaskQueue() {
-  ArrayAllocator<E>::free(_elems, N);
+template<class T, MemTag MT>
+void GenericTaskQueueSet<T, MT>::print_taskqueue_stats(outputStream* const st, const char* label) {
+  print_taskqueue_stats_hdr(st, label);
+
+  TaskQueueStats totals;
+  const uint n = size();
+  for (uint i = 0; i < n; ++i) {
+    st->print("%3u ", i); queue(i)->stats.print(st); st->cr();
+    totals += queue(i)->stats;
+  }
+  st->print_raw("tot "); totals.print(st); st->cr();
+
+  DEBUG_ONLY(totals.verify());
 }
 
-template<class E, MEMFLAGS F, unsigned int N> inline bool
-GenericTaskQueue<E, F, N>::push(E t) {
+template<class T, MemTag MT>
+void GenericTaskQueueSet<T, MT>::reset_taskqueue_stats() {
+  const uint n = size();
+  for (uint i = 0; i < n; ++i) {
+    queue(i)->stats.reset();
+  }
+}
+
+template <class T, MemTag MT>
+inline void GenericTaskQueueSet<T, MT>::print_and_reset_taskqueue_stats(const char* label) {
+  if (!log_is_enabled(Trace, gc, task, stats)) {
+    return;
+  }
+  Log(gc, task, stats) log;
+  LogStream ls(log.trace());
+
+  print_taskqueue_stats(&ls, label);
+  reset_taskqueue_stats();
+}
+#endif // TASKQUEUE_STATS
+
+template<class E, MemTag MT, unsigned int N>
+inline GenericTaskQueue<E, MT, N>::GenericTaskQueue() :
+  _elems(MallocArrayAllocator<E>::allocate(N, MT)),
+  _last_stolen_queue_id(InvalidQueueId),
+  _seed(17 /* random number */) {}
+
+template<class E, MemTag MT, unsigned int N>
+inline GenericTaskQueue<E, MT, N>::~GenericTaskQueue() {
+  MallocArrayAllocator<E>::free(_elems);
+}
+
+template<class E, MemTag MT, unsigned int N> inline bool
+GenericTaskQueue<E, MT, N>::push(E t) {
   uint localBot = bottom_relaxed();
   assert(localBot < N, "_bottom out of range.");
   idx_t top = age_top_relaxed();
@@ -83,8 +132,8 @@ GenericTaskQueue<E, F, N>::push(E t) {
   return false;                 // Queue is full.
 }
 
-template <class E, MEMFLAGS F, unsigned int N>
-inline bool OverflowTaskQueue<E, F, N>::push(E t) {
+template <class E, MemTag MT, unsigned int N>
+inline bool OverflowTaskQueue<E, MT, N>::push(E t) {
   if (!taskqueue_t::push(t)) {
     overflow_stack()->push(t);
     TASKQUEUE_STATS_ONLY(stats.record_overflow(overflow_stack()->size()));
@@ -92,8 +141,8 @@ inline bool OverflowTaskQueue<E, F, N>::push(E t) {
   return true;
 }
 
-template <class E, MEMFLAGS F, unsigned int N>
-inline bool OverflowTaskQueue<E, F, N>::try_push_to_taskqueue(E t) {
+template <class E, MemTag MT, unsigned int N>
+inline bool OverflowTaskQueue<E, MT, N>::try_push_to_taskqueue(E t) {
   return taskqueue_t::push(t);
 }
 
@@ -103,8 +152,8 @@ inline bool OverflowTaskQueue<E, F, N>::try_push_to_taskqueue(E t) {
 // whenever the queue goes empty which it will do here if this thread
 // gets the last task or in pop_global() if the queue wraps (top == 0
 // and pop_global() succeeds, see pop_global()).
-template<class E, MEMFLAGS F, unsigned int N>
-bool GenericTaskQueue<E, F, N>::pop_local_slow(uint localBot, Age oldAge) {
+template<class E, MemTag MT, unsigned int N>
+bool GenericTaskQueue<E, MT, N>::pop_local_slow(uint localBot, Age oldAge) {
   // This queue was observed to contain exactly one element; either this
   // thread will claim it, or a competing "pop_global".  In either case,
   // the queue will be logically empty afterwards.  Create a new Age value
@@ -120,8 +169,7 @@ bool GenericTaskQueue<E, F, N>::pop_local_slow(uint localBot, Age oldAge) {
   if (localBot == oldAge.top()) {
     // No competing pop_global has yet incremented "top"; we'll try to
     // install new_age, thus claiming the element.
-    Age tempAge = cmpxchg_age(oldAge, newAge);
-    if (tempAge == oldAge) {
+    if (par_set_age(oldAge, newAge)) {
       // We win.
       assert_not_underflow(localBot, age_top_relaxed());
       TASKQUEUE_STATS_ONLY(stats.record_pop_slow());
@@ -136,8 +184,8 @@ bool GenericTaskQueue<E, F, N>::pop_local_slow(uint localBot, Age oldAge) {
   return false;
 }
 
-template<class E, MEMFLAGS F, unsigned int N> inline bool
-GenericTaskQueue<E, F, N>::pop_local(E& t, uint threshold) {
+template<class E, MemTag MT, unsigned int N> inline bool
+GenericTaskQueue<E, MT, N>::pop_local(E& t, uint threshold) {
   uint localBot = bottom_relaxed();
   // This value cannot be N-1.  That can only occur as a result of
   // the assignment to bottom in this method.  If it does, this method
@@ -173,8 +221,8 @@ GenericTaskQueue<E, F, N>::pop_local(E& t, uint threshold) {
   }
 }
 
-template <class E, MEMFLAGS F, unsigned int N>
-bool OverflowTaskQueue<E, F, N>::pop_overflow(E& t)
+template <class E, MemTag MT, unsigned int N>
+bool OverflowTaskQueue<E, MT, N>::pop_overflow(E& t)
 {
   if (overflow_empty()) return false;
   t = overflow_stack()->pop();
@@ -202,8 +250,8 @@ bool OverflowTaskQueue<E, F, N>::pop_overflow(E& t)
 // (3) Owner starts a push, writing elems[bottom].  At the same time, Thief
 // reads elems[oldAge.top].  The owner's bottom == the thief's oldAge.top.
 // (4) Thief will discard the read value, because its cmpxchg of age will fail.
-template<class E, MEMFLAGS F, unsigned int N>
-bool GenericTaskQueue<E, F, N>::pop_global(E& t) {
+template<class E, MemTag MT, unsigned int N>
+typename GenericTaskQueue<E, MT, N>::PopResult GenericTaskQueue<E, MT, N>::pop_global(E& t) {
   Age oldAge = age_relaxed();
 
   // Architectures with non-multi-copy-atomic memory model require a
@@ -224,21 +272,19 @@ bool GenericTaskQueue<E, F, N>::pop_global(E& t) {
   uint localBot = bottom_acquire();
   uint n_elems = clean_size(localBot, oldAge.top());
   if (n_elems == 0) {
-    return false;
+    return PopResult::Empty;
   }
 
   t = _elems[oldAge.top()];
   // Increment top; if it wraps, also increment tag, to distinguish it
   // from any recent _age for the same top() index.
   idx_t new_top = increment_index(oldAge.top());
+  // Don't use bottom, since a pop_local might have decremented it.
+  assert_not_underflow(localBot, new_top);
   idx_t new_tag = oldAge.tag() + ((new_top == 0) ? 1 : 0);
   Age newAge(new_top, new_tag);
-  Age resAge = cmpxchg_age(oldAge, newAge);
-
-  // Note that using "bottom" here might fail, since a pop_local might
-  // have decremented it.
-  assert_not_underflow(localBot, newAge.top());
-  return resAge == oldAge;
+  bool result = par_set_age(oldAge, newAge);
+  return result ? PopResult::Success : PopResult::Contended;
 }
 
 inline int randomParkAndMiller(int *seed0) {
@@ -260,15 +306,15 @@ inline int randomParkAndMiller(int *seed0) {
   return seed;
 }
 
-template<class E, MEMFLAGS F, unsigned int N>
-int GenericTaskQueue<E, F, N>::next_random_queue_id() {
+template<class E, MemTag MT, unsigned int N>
+int GenericTaskQueue<E, MT, N>::next_random_queue_id() {
   return randomParkAndMiller(&_seed);
 }
 
-template<class T, MEMFLAGS F> bool
-GenericTaskQueueSet<T, F>::steal_best_of_2(uint queue_num, E& t) {
+template<class T, MemTag MT>
+typename GenericTaskQueueSet<T, MT>::PopResult GenericTaskQueueSet<T, MT>::steal_best_of_2(uint queue_num, E& t) {
+  T* const local_queue = queue(queue_num);
   if (_n > 2) {
-    T* const local_queue = _queues[queue_num];
     uint k1 = queue_num;
 
     if (local_queue->is_last_stolen_queue_id_valid()) {
@@ -285,21 +331,23 @@ GenericTaskQueueSet<T, F>::steal_best_of_2(uint queue_num, E& t) {
       k2 = local_queue->next_random_queue_id() % _n;
     }
     // Sample both and try the larger.
-    uint sz1 = _queues[k1]->size();
-    uint sz2 = _queues[k2]->size();
+    uint sz1 = queue(k1)->size();
+    uint sz2 = queue(k2)->size();
 
     uint sel_k = 0;
-    bool suc = false;
+    PopResult suc = PopResult::Empty;
 
     if (sz2 > sz1) {
       sel_k = k2;
-      suc = _queues[k2]->pop_global(t);
+      suc = queue(k2)->pop_global(t);
+      TASKQUEUE_STATS_ONLY(local_queue->record_steal_attempt(suc);)
     } else if (sz1 > 0) {
       sel_k = k1;
-      suc = _queues[k1]->pop_global(t);
+      suc = queue(k1)->pop_global(t);
+      TASKQUEUE_STATS_ONLY(local_queue->record_steal_attempt(suc);)
     }
 
-    if (suc) {
+    if (suc == PopResult::Success) {
       local_queue->set_last_stolen_queue_id(sel_k);
     } else {
       local_queue->invalidate_last_stolen_queue_id();
@@ -309,28 +357,41 @@ GenericTaskQueueSet<T, F>::steal_best_of_2(uint queue_num, E& t) {
   } else if (_n == 2) {
     // Just try the other one.
     uint k = (queue_num + 1) % 2;
-    return _queues[k]->pop_global(t);
+    PopResult res = queue(k)->pop_global(t);
+    TASKQUEUE_STATS_ONLY(local_queue->record_steal_attempt(res);)
+    return res;
   } else {
     assert(_n == 1, "can't be zero.");
-    return false;
+    TASKQUEUE_STATS_ONLY(local_queue->record_steal_attempt(PopResult::Empty);)
+    return PopResult::Empty;
   }
 }
 
-template<class T, MEMFLAGS F> bool
-GenericTaskQueueSet<T, F>::steal(uint queue_num, E& t) {
-  for (uint i = 0; i < 2 * _n; i++) {
-    TASKQUEUE_STATS_ONLY(queue(queue_num)->stats.record_steal_attempt());
-    if (steal_best_of_2(queue_num, t)) {
-      TASKQUEUE_STATS_ONLY(queue(queue_num)->stats.record_steal());
+template<class T, MemTag MT>
+bool GenericTaskQueueSet<T, MT>::steal(uint queue_num, E& t) {
+  uint const num_retries = 2 * _n;
+
+  TASKQUEUE_STATS_ONLY(uint contended_in_a_row = 0;)
+  for (uint i = 0; i < num_retries; i++) {
+    PopResult sr = steal_best_of_2(queue_num, t);
+    if (sr == PopResult::Success) {
       return true;
+    } else if (sr == PopResult::Contended) {
+      TASKQUEUE_STATS_ONLY(
+        contended_in_a_row++;
+        queue(queue_num)->stats.record_contended_in_a_row(contended_in_a_row);
+      )
+    } else {
+      assert(sr == PopResult::Empty, "must be");
+      TASKQUEUE_STATS_ONLY(contended_in_a_row = 0;)
     }
   }
   return false;
 }
 
-template<class E, MEMFLAGS F, unsigned int N>
+template<class E, MemTag MT, unsigned int N>
 template<class Fn>
-inline void GenericTaskQueue<E, F, N>::iterate(Fn fn) {
+inline void GenericTaskQueue<E, MT, N>::iterate(Fn fn) {
   uint iters = size();
   uint index = bottom_relaxed();
   for (uint i = 0; i < iters; ++i) {

@@ -21,19 +21,21 @@
  * under the License.
  */
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
- */
-/*
- * $Id: DOMManifest.java 1854026 2019-02-21 09:30:01Z coheigea $
+ * Copyright (c) 2005, 2016, Oracle and/or its affiliates. All rights reserved.
  */
 package org.jcp.xml.dsig.internal.dom;
 
-import javax.xml.crypto.*;
-import javax.xml.crypto.dom.DOMCryptoContext;
-import javax.xml.crypto.dsig.*;
-
 import java.security.Provider;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+import javax.xml.crypto.MarshalException;
+import javax.xml.crypto.XMLCryptoContext;
+import javax.xml.crypto.dom.DOMCryptoContext;
+import javax.xml.crypto.dsig.Manifest;
+import javax.xml.crypto.dsig.Reference;
+import javax.xml.crypto.dsig.XMLSignature;
 
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -107,7 +109,7 @@ public final class DOMManifest extends DOMStructure implements Manifest {
             }
             refs.add(new DOMReference(refElem, context, provider));
             if (secVal && Policy.restrictNumReferences(refs.size())) {
-                String error = "A maxiumum of " + Policy.maxReferences()
+                String error = "A maximum of " + Policy.maxReferences()
                     + " references per Manifest are allowed when"
                     + " secure validation is enabled";
                 throw new MarshalException(error);
@@ -117,6 +119,7 @@ public final class DOMManifest extends DOMStructure implements Manifest {
         this.references = Collections.unmodifiableList(refs);
     }
 
+    @Override
     public String getId() {
         return id;
     }

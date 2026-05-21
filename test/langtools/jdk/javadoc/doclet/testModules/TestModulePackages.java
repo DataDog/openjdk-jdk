@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
 
 /*
  * @test
- * @bug 8178070 8196201 8184205 8246429 8198705
+ * @bug 8178070 8196201 8184205 8246429 8198705 8373526
  * @summary Test packages table in module summary pages
  * @library /tools/lib ../../lib
  * @modules jdk.compiler/com.sun.tools.javac.api
@@ -47,8 +47,8 @@ public class TestModulePackages extends JavadocTester {
     enum ColKind { EXPORTED_TO, OPENED_TO };
 
     public static void main(String... args) throws Exception {
-        TestModulePackages tester = new TestModulePackages();
-        tester.runTests(m -> new Object[] { Paths.get(m.getName()) });
+        var tester = new TestModulePackages();
+        tester.runTests();
     }
 
     private final ToolBox tb;
@@ -57,7 +57,7 @@ public class TestModulePackages extends JavadocTester {
         tb = new ToolBox();
     }
 
-    // @Test: See: https://bugs.openjdk.java.net/browse/JDK-8193107
+    // @Test: See: https://bugs.openjdk.org/browse/JDK-8193107
     public void empty(Path base) throws Exception {
         Path src = base.resolve("src");
         new ModuleBuilder(tb, "m")
@@ -95,7 +95,7 @@ public class TestModulePackages extends JavadocTester {
         checkExit(Exit.OK);
         checkCaption("m", 3, TabKind.EXPORTS);
         checkTableHead("m");
-        checkPackageRow("m", "p", 0, "package-summary-table-tab1 package-summary-table", null, null, "&nbsp;");
+        checkPackageRow("m", "p", 0, "package-summary-table package-summary-table-tab1", null, null, "&nbsp;");
     }
 
     @Test
@@ -118,8 +118,8 @@ public class TestModulePackages extends JavadocTester {
         checkExit(Exit.OK);
         checkCaption("m", 3, TabKind.EXPORTS);
         checkTableHead("m");
-        checkPackageRow("m", "p", 0, "package-summary-table-tab1 package-summary-table", null, null, "&nbsp;");
-        checkPackageRow("m", "q", 1, "package-summary-table-tab1 package-summary-table", null, null, "&nbsp;");
+        checkPackageRow("m", "p", 0, "package-summary-table package-summary-table-tab1", null, null, "&nbsp;");
+        checkPackageRow("m", "q", 1, "package-summary-table package-summary-table-tab1", null, null, "&nbsp;");
     }
 
     @Test
@@ -147,34 +147,46 @@ public class TestModulePackages extends JavadocTester {
         checkCaption("o", 3, TabKind.EXPORTS);
         checkTableHead("m");
         checkTableHead("o");
-        checkPackageRow("m", "p", 0, "package-summary-table-tab1 package-summary-table", null, null, "&nbsp;");
-        checkPackageRow("o", "p", 0, "package-summary-table-tab1 package-summary-table", null, null, "&nbsp;");
+        checkPackageRow("m", "p", 0, "package-summary-table package-summary-table-tab1", null, null, "&nbsp;");
+        checkPackageRow("o", "p", 0, "package-summary-table package-summary-table-tab1", null, null, "&nbsp;");
         checkOutput("m/p/package-summary.html", true,
                 """
-                    <div class="sub-title"><span class="module-label-in-package">Module</span>&nbsp;<a href="../module-summary.html">m</a></div>
+                    <ol class="sub-nav-list">
+                    <li><a href="../module-summary.html" title="Module m">m</a></li>
+                    <li><a href="package-summary.html" title="Package p" class="current-selection">p</a></li>
+                    </ol>
                     """);
         checkOutput("o/p/package-summary.html", true,
                 """
-                    <div class="sub-title"><span class="module-label-in-package">Module</span>&nbsp;<a href="../module-summary.html">o</a></div>
+                    <ol class="sub-nav-list">
+                    <li><a href="../module-summary.html" title="Module o">o</a></li>
+                    <li><a href="package-summary.html" title="Package p" class="current-selection">p</a></li>
+                    </ol>
                     """);
         checkOutput("m/p/C.html", true,
                 """
-                    <div class="sub-title"><span class="module-label-in-type">Module</span>&nbsp;<a href="../module-summary.html">m</a></div>
-                    <div class="sub-title"><span class="package-label-in-type">Package</span>&nbsp;<a href="package-summary.html">p</a></div>
+                    <ol class="sub-nav-list">
+                    <li><a href="../module-summary.html" title="Module m">m</a></li>
+                    <li><a href="package-summary.html" title="Package p">p</a></li>
+                    <li><a href="C.html" title="Class C" class="current-selection">C</a></li>
+                    </ol>
                     """);
         checkOutput("o/p/C.html", true,
                 """
-                    <div class="sub-title"><span class="module-label-in-type">Module</span>&nbsp;<a href="../module-summary.html">o</a></div>
-                    <div class="sub-title"><span class="package-label-in-type">Package</span>&nbsp;<a href="package-summary.html">p</a></div>
+                    <ol class="sub-nav-list">
+                    <li><a href="../module-summary.html" title="Module o">o</a></li>
+                    <li><a href="package-summary.html" title="Package p">p</a></li>
+                    <li><a href="C.html" title="Class C" class="current-selection">C</a></li>
+                    </ol>
                     """);
         checkOutput("type-search-index.js", true,
                 """
                      {"p":"p","m":"m","l":"C"},{"p":"p","m":"o","l":"C"}""");
         checkOutput("member-search-index.js", true,
                 """
-                     {"m":"m","p":"p","c":"C","l":"C()","u":"%3Cinit%3E()"}""",
+                     {"m":"m","p":"p","c":"C","l":"C()","u":"%3Cinit%3E()","k":"3"}""",
                 """
-                     {"m":"o","p":"p","c":"C","l":"C()","u":"%3Cinit%3E()"}""");
+                     {"m":"o","p":"p","c":"C","l":"C()","u":"%3Cinit%3E()","k":"3"}""");
     }
 
     @Test
@@ -201,7 +213,7 @@ public class TestModulePackages extends JavadocTester {
         checkExit(Exit.OK);
         checkCaption("m", 3, TabKind.EXPORTS);
         checkTableHead("m");
-        checkPackageRow("m", "p", 0, "package-summary-table-tab1 package-summary-table", null, null, "&nbsp;");
+        checkPackageRow("m", "p", 0, "package-summary-table package-summary-table-tab1", null, null, "&nbsp;");
 
         javadoc("-d", base.resolve("out-all").toString(),
                 "-quiet",
@@ -213,8 +225,8 @@ public class TestModulePackages extends JavadocTester {
         checkExit(Exit.OK);
         checkCaption("m", 3, TabKind.EXPORTS);
         checkTableHead("m", ColKind.EXPORTED_TO);
-        checkPackageRow("m", "p", 0, "package-summary-table-tab1 package-summary-table", "All Modules", null, "&nbsp;");
-        checkPackageRow("m", "q", 1, "package-summary-table-tab1 package-summary-table",
+        checkPackageRow("m", "p", 0, "package-summary-table package-summary-table-tab1", "All Modules", null, "&nbsp;");
+        checkPackageRow("m", "q", 1, "package-summary-table package-summary-table-tab1",
                 """
                     <a href="../other/module-summary.html">other</a>""", null, "&nbsp;");
     }
@@ -238,7 +250,7 @@ public class TestModulePackages extends JavadocTester {
         checkExit(Exit.OK);
         checkCaption("m", 4, TabKind.EXPORTS);
         checkTableHead("m");
-        checkPackageRow("m", "p", 0, "package-summary-table-tab1 package-summary-table", null, null, "&nbsp;");
+        checkPackageRow("m", "p", 0, "package-summary-table package-summary-table-tab1", null, null, "&nbsp;");
 
         javadoc("-d", base.resolve("out-all").toString(),
                 "-quiet",
@@ -251,8 +263,8 @@ public class TestModulePackages extends JavadocTester {
         checkExit(Exit.OK);
         checkCaption("m", 3, TabKind.EXPORTS, TabKind.CONCEALED);
         checkTableHead("m", ColKind.EXPORTED_TO);
-        checkPackageRow("m", "p", 0, "package-summary-table-tab1 package-summary-table", "All Modules", null, "&nbsp;");
-        checkPackageRow("m", "q", 1, "package-summary-table-tab3 package-summary-table", "None", null, "&nbsp;");
+        checkPackageRow("m", "p", 0, "package-summary-table package-summary-table-tab1", "All Modules", null, "&nbsp;");
+        checkPackageRow("m", "q", 1, "package-summary-table package-summary-table-tab3", "None", null, "&nbsp;");
     }
 
     @Test
@@ -287,8 +299,8 @@ public class TestModulePackages extends JavadocTester {
         checkExit(Exit.OK);
         checkCaption("m", 4, TabKind.EXPORTS, TabKind.OPENS);
         checkTableHead("m", ColKind.EXPORTED_TO, ColKind.OPENED_TO);
-        checkPackageRow("m", "e.all", 0, "package-summary-table-tab1 package-summary-table", "All Modules", "None", "&nbsp;");
-        checkPackageRow("m", "eo", 1, "package-summary-table-tab1 package-summary-table package-summary-table-tab2", "All Modules", "All Modules", "&nbsp;");
+        checkPackageRow("m", "e.all", 0, "package-summary-table package-summary-table-tab1", "All Modules", "None", "&nbsp;");
+        checkPackageRow("m", "eo", 1, "package-summary-table package-summary-table-tab1 package-summary-table-tab2", "All Modules", "All Modules", "&nbsp;");
 
         javadoc("-d", base.resolve("out-all").toString(),
                 "-quiet",
@@ -301,12 +313,12 @@ public class TestModulePackages extends JavadocTester {
         checkExit(Exit.OK);
         checkCaption("m", 4, TabKind.EXPORTS, TabKind.OPENS, TabKind.CONCEALED);
         checkTableHead("m", ColKind.EXPORTED_TO, ColKind.OPENED_TO);
-        checkPackageRow("m", "c", 0, "package-summary-table-tab3 package-summary-table", "None", "None", "&nbsp;");
-        checkPackageRow("m", "e.all", 1, "package-summary-table-tab1 package-summary-table", "All Modules", "None", "&nbsp;");
-        checkPackageRow("m", "e.other", 2, "package-summary-table-tab1 package-summary-table",
+        checkPackageRow("m", "c", 0, "package-summary-table package-summary-table-tab3", "None", "None", "&nbsp;");
+        checkPackageRow("m", "e.all", 1, "package-summary-table package-summary-table-tab1", "All Modules", "None", "&nbsp;");
+        checkPackageRow("m", "e.other", 2, "package-summary-table package-summary-table-tab1",
                 """
                     <a href="../other/module-summary.html">other</a>""", "None", "&nbsp;");
-        checkPackageRow("m", "eo", 3, "package-summary-table-tab1 package-summary-table package-summary-table-tab2", "All Modules", "All Modules", "&nbsp;");
+        checkPackageRow("m", "eo", 3, "package-summary-table package-summary-table-tab1 package-summary-table-tab2", "All Modules", "All Modules", "&nbsp;");
         checkPackageRow("m", "o.all", 4, "package-summary-table package-summary-table-tab2", "None", "All Modules", "&nbsp;");
         checkPackageRow("m", "o.other", 5, "package-summary-table package-summary-table-tab2", "None",
                 """
@@ -470,7 +482,7 @@ public class TestModulePackages extends JavadocTester {
         checkCaption("m", 3, TabKind.OPENS, TabKind.CONCEALED);
         checkTableHead("m", ColKind.OPENED_TO);
         checkPackageRow("m", "p", 0, "package-summary-table package-summary-table-tab2", null, "All Modules", "&nbsp;");
-        checkPackageRow("m", "q", 1, "package-summary-table-tab3 package-summary-table", null, "None", "&nbsp;");
+        checkPackageRow("m", "q", 1, "package-summary-table package-summary-table-tab3", null, "None", "&nbsp;");
     }
 
 

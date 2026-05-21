@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,9 @@
 #ifndef SHARE_C1_C1_GLOBALS_HPP
 #define SHARE_C1_C1_GLOBALS_HPP
 
-#include "c1/c1_globals_pd.hpp"
 #include "runtime/globals_shared.hpp"
 #include "utilities/macros.hpp"
+#include CPU_HEADER(c1_globals)
 //
 // Declare all global flags used by the client compiler.
 //
@@ -35,48 +35,47 @@
                  develop_pd,                                                \
                  product,                                                   \
                  product_pd,                                                \
-                 notproduct,                                                \
                  range,                                                     \
                  constraint)                                                \
                                                                             \
   /* Printing */                                                            \
-  notproduct(bool, PrintC1Statistics, false,                                \
+  develop(bool, PrintC1Statistics, false,                                   \
           "Print Compiler1 statistics" )                                    \
                                                                             \
-  notproduct(bool, PrintInitialBlockList, false,                            \
+  develop(bool, PrintInitialBlockList, false,                               \
           "Print block list of BlockListBuilder")                           \
                                                                             \
-  notproduct(bool, PrintCFG, false,                                         \
+  develop(bool, PrintCFG, false,                                            \
           "Print control flow graph after each change")                     \
                                                                             \
-  notproduct(bool, PrintCFG0, false,                                        \
+  develop(bool, PrintCFG0, false,                                           \
           "Print control flow graph after construction")                    \
                                                                             \
-  notproduct(bool, PrintCFG1, false,                                        \
+  develop(bool, PrintCFG1, false,                                           \
           "Print control flow graph after optimizations")                   \
                                                                             \
-  notproduct(bool, PrintCFG2, false,                                        \
+  develop(bool, PrintCFG2, false,                                           \
           "Print control flow graph before code generation")                \
                                                                             \
-  notproduct(bool, PrintIRDuringConstruction, false,                        \
+  develop(bool, PrintIRDuringConstruction, false,                           \
           "Print IR as it's being constructed (helpful for debugging frontend)")\
                                                                             \
-  notproduct(bool, PrintPhiFunctions, false,                                \
+  develop(bool, PrintPhiFunctions, false,                                   \
           "Print phi functions when they are created and simplified")       \
                                                                             \
-  notproduct(bool, PrintIR, false,                                          \
+  develop(bool, PrintIR, false,                                             \
           "Print full intermediate representation after each change")       \
                                                                             \
-  notproduct(bool, PrintIR0, false,                                         \
+  develop(bool, PrintIR0, false,                                            \
           "Print full intermediate representation after construction")      \
                                                                             \
-  notproduct(bool, PrintIR1, false,                                         \
+  develop(bool, PrintIR1, false,                                            \
           "Print full intermediate representation after optimizations")     \
                                                                             \
-  notproduct(bool, PrintIR2, false,                                         \
+  develop(bool, PrintIR2, false,                                            \
           "Print full intermediate representation before code generation")  \
                                                                             \
-  notproduct(bool, PrintSimpleStubs, false,                                 \
+  develop(bool, PrintSimpleStubs, false,                                    \
           "Print SimpleStubs")                                              \
                                                                             \
   /* C1 optimizations */                                                    \
@@ -132,13 +131,13 @@
           range(0, 128)                                                     \
                                                                             \
   develop(bool, EliminateBlocks, true,                                      \
-          "Eliminate unneccessary basic blocks")                            \
+          "Eliminate unnecessary basic blocks")                            \
                                                                             \
   develop(bool, PrintBlockElimination, false,                               \
           "Print basic block elimination")                                  \
                                                                             \
   develop(bool, EliminateNullChecks, true,                                  \
-          "Eliminate unneccessary null checks")                             \
+          "Eliminate unnecessary null checks")                             \
                                                                             \
   develop(bool, PrintNullCheckElimination, false,                           \
           "Print null check elimination")                                   \
@@ -152,9 +151,6 @@
                                                                             \
   product(bool, InlineSynchronizedMethods, true,                            \
           "Inline synchronized methods")                                    \
-                                                                            \
-  product(bool, InlineNIOCheckIndex, true, DIAGNOSTIC,                      \
-          "Intrinsify java.nio.Buffer.checkIndex")                          \
                                                                             \
   develop(bool, CanonicalizeNodes, true,                                    \
           "Canonicalize graph nodes")                                       \
@@ -191,26 +187,20 @@
           "Percentage of prev. allowed inline size in recursive inlining")  \
           range(0, 100)                                                     \
                                                                             \
-  notproduct(bool, PrintIRWithLIR, false,                                   \
+  develop(bool, PrintIRWithLIR, false,                                      \
           "Print IR instructions with generated LIR")                       \
                                                                             \
-  notproduct(bool, PrintLIRWithAssembly, false,                             \
+  develop(bool, PrintLIRWithAssembly, false,                                \
           "Show LIR instruction with generated assembly")                   \
                                                                             \
   develop(bool, CommentedAssembly, trueInDebug,                             \
           "Show extra info in PrintNMethods output")                        \
-                                                                            \
-  develop(bool, LIRTracePeephole, false,                                    \
-          "Trace peephole optimizer")                                       \
                                                                             \
   develop(bool, LIRTraceExecution, false,                                   \
           "add LIR code which logs the execution of blocks")                \
                                                                             \
   develop_pd(bool, CSEArrayLength,                                          \
           "Create separate nodes for length in array accesses")             \
-                                                                            \
-  develop_pd(bool, TwoOperandLIRForm,                                       \
-          "true if LIR requires src1 and dst to match in binary LIR ops")   \
                                                                             \
   develop(intx, TraceLinearScanLevel, 0,                                    \
           "Debug levels for the linear scan allocator")                     \
@@ -219,11 +209,8 @@
   develop(bool, StressLinearScan, false,                                    \
           "scramble block order used by LinearScan (stress test)")          \
                                                                             \
-  product(bool, TimeLinearScan, false,                                      \
+  develop(bool, TimeLinearScan, false,                                      \
           "detailed timing of LinearScan phases")                           \
-                                                                            \
-  develop(bool, TimeEachLinearScan, false,                                  \
-          "print detailed timing of each LinearScan run")                   \
                                                                             \
   develop(bool, CountLinearScan, false,                                     \
           "collect statistic counters during LinearScan")                   \
@@ -248,17 +235,11 @@
   develop(bool, UseFastNewObjectArray, true,                                \
           "Use fast inlined object array allocation")                       \
                                                                             \
-  develop(bool, UseFastLocking, true,                                       \
-          "Use fast inlined locking code")                                  \
-                                                                            \
   develop(bool, UseSlowPath, false,                                         \
           "For debugging: test slow cases by always using them")            \
                                                                             \
   develop(bool, GenerateArrayStoreCheck, true,                              \
           "Generates code for array store checks")                          \
-                                                                            \
-  develop(bool, DeoptC1, true,                                              \
-          "Use deoptimization in C1")                                       \
                                                                             \
   develop(bool, PrintBailouts, false,                                       \
           "Print bailout and its reason")                                   \
@@ -283,25 +264,6 @@
                                                                             \
   develop(bool, BailoutOnExceptionHandlers, false,                          \
           "bailout of compilation for methods with exception handlers")     \
-                                                                            \
-  develop(bool, InstallMethods, true,                                       \
-          "Install methods at the end of successful compilations")          \
-                                                                            \
-  develop(intx, NMethodSizeLimit, (64*K)*wordSize,                          \
-          "Maximum size of a compiled method.")                             \
-          range(0, max_jint)                                                \
-                                                                            \
-  develop(bool, TraceFPUStack, false,                                       \
-          "Trace emulation of the FPU stack (intel only)")                  \
-                                                                            \
-  develop(bool, TraceFPURegisterUsage, false,                               \
-          "Trace usage of FPU registers at start of blocks (intel only)")   \
-                                                                            \
-  develop(bool, OptimizeUnsafes, true,                                      \
-          "Optimize raw unsafe ops")                                        \
-                                                                            \
-  develop(bool, PrintUnsafeOptimization, false,                             \
-          "Print optimization of raw unsafe ops")                           \
                                                                             \
   develop(intx, InstructionCountCutoff, 37000,                              \
           "If GraphBuilder adds this many instructions, bails out")         \
@@ -328,8 +290,8 @@
   product(bool, C1OptimizeVirtualCallProfiling, true,                       \
           "Use CHA and exact type results at call sites when updating MDOs")\
                                                                             \
-  product(bool, C1UpdateMethodData, trueInTiered,                           \
-          "Update MethodData*s in Tier1-generated code")                    \
+  product(bool, C1UpdateMethodData, true,                                   \
+          "Update MethodData*s in Tier 3 C1 generated code")                \
                                                                             \
   develop(bool, PrintCFGToFile, false,                                      \
           "print control flow graph to a separate file during compilation")

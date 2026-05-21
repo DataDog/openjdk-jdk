@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,8 @@
 
 package java.beans.beancontext;
 
+import java.io.Serial;
+
 /**
  * <p>
  * This event type is used by the
@@ -32,7 +34,15 @@ package java.beans.beancontext;
  * identify the service being revoked.
  * </p>
  */
+
+@SuppressWarnings("removal")
+@Deprecated(since = "23", forRemoval = true)
 public class BeanContextServiceRevokedEvent extends BeanContextEvent {
+
+    /**
+     * Use serialVersionUID from JDK 1.7 for interoperability.
+     */
+    @Serial
     private static final long serialVersionUID = -1295543154724961754L;
 
     /**
@@ -89,11 +99,13 @@ public class BeanContextServiceRevokedEvent extends BeanContextEvent {
 
     /**
      * A {@code Class} reference to the service that is being revoked.
+     *
+     * @serial
      */
     protected Class<?> serviceClass;
 
     /**
-     * {@code true} if current service is being forcibly revoked.
+     * @serial {@code true} if current service is being forcibly revoked.
      */
     private boolean invalidateRefs;
 }

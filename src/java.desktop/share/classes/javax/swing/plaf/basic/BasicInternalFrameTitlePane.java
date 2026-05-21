@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -528,12 +528,7 @@ public class BasicInternalFrameTitlePane extends JComponent
     protected void postClosingEvent(JInternalFrame frame) {
         InternalFrameEvent e = new InternalFrameEvent(
             frame, InternalFrameEvent.INTERNAL_FRAME_CLOSING);
-        // Try posting event, unless there's a SecurityManager.
-        try {
-            Toolkit.getDefaultToolkit().getSystemEventQueue().postEvent(e);
-        } catch (SecurityException se) {
-            frame.dispatchEvent(e);
-        }
+        Toolkit.getDefaultToolkit().getSystemEventQueue().postEvent(e);
     }
 
     /**
@@ -968,7 +963,7 @@ public class BasicInternalFrameTitlePane extends JComponent
     } // end SystemMenuBar
 
 
-    private class NoFocusButton extends JButton {
+    private static class NoFocusButton extends JButton {
         private String uiKey;
         public NoFocusButton(String uiKey, String opacityKey) {
             setFocusPainted(false);

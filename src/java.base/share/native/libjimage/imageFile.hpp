@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2026, Oracle and/or its affiliates. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -203,8 +203,8 @@ public:
 // 'length' less 1 (lower 3 bits of header) of bytes that follow containing the
 // attribute value.  Attribute values present as most significant byte first.
 //
-// Ex. Container offset (ATTRIBUTE_OFFSET) 0x33562 would be represented as 0x22
-// (kind = 4, length = 3), 0x03, 0x35, 0x62.
+// Ex. Container offset (ATTRIBUTE_OFFSET) 0x33562 would be represented as 0x2A
+// (kind = 5, length = 3), 0x03, 0x35, 0x62.
 //
 // An attribute stream is terminated with a header kind of ATTRIBUTE_END (header
 // byte of zero.)
@@ -214,10 +214,10 @@ public:
 // direct indexing. Unspecified values default to zero.
 //
 // Notes:
-//  - Even though ATTRIBUTE_END is used to mark the end of the attribute stream,
-//      streams will contain zero byte values to represent lesser significant bits.
-//      Thus, detecting a zero byte is not sufficient to detect the end of an attribute
-//      stream.
+//  - Even though ATTRIBUTE_END (which might be encoded with a zero byte) is used to
+//      mark the end of the attribute stream, streams will contain zero byte values
+//      in the non-header portion of the attribute data. Thus, detecting a zero byte
+//      is not sufficient to detect the end of an attribute stream.
 //  - ATTRIBUTE_OFFSET represents the number of bytes from the beginning of the region
 //      storing the resources.  Thus, in an image this represents the number of bytes
 //      after the index.
@@ -232,16 +232,32 @@ public:
 //
 class ImageLocation {
 public:
+    // See also src/java.base/share/classes/jdk/internal/jimage/ImageLocation.java
     enum {
         ATTRIBUTE_END,                  // End of attribute stream marker
         ATTRIBUTE_MODULE,               // String table offset of module name
         ATTRIBUTE_PARENT,               // String table offset of resource path parent
         ATTRIBUTE_BASE,                 // String table offset of resource path base
-        ATTRIBUTE_EXTENSION,        // String table offset of resource path extension
+        ATTRIBUTE_EXTENSION,            // String table offset of resource path extension
         ATTRIBUTE_OFFSET,               // Container byte offset of resource
-        ATTRIBUTE_COMPRESSED,       // In image byte size of the compressed resource
-        ATTRIBUTE_UNCOMPRESSED, // In memory byte size of the uncompressed resource
+        ATTRIBUTE_COMPRESSED,           // In-image byte size of the compressed resource
+        ATTRIBUTE_UNCOMPRESSED,         // In-memory byte size of the uncompressed resource
+        ATTRIBUTE_PREVIEW_FLAGS,        // Flags relating to preview mode resources.
         ATTRIBUTE_COUNT                 // Number of attribute kinds
+    };
+
+    // Flag masks for the ATTRIBUTE_PREVIEW_FLAGS attribute. Defined so
+    // that zero is the overwhelmingly common case for normal resources.
+    // See also src/java.base/share/classes/jdk/internal/jimage/ImageLocation.java
+    enum {
+        // Set on a "normal" (non-preview) location if a preview version of
+        // it exists in the same module.
+        FLAGS_HAS_PREVIEW_VERSION = 0x1,
+        // Set on all preview locations in "/modules/xxx/META-INF/preview/..."
+        FLAGS_IS_PREVIEW_VERSION = 0x2,
+        // Set on a preview location if no normal (non-preview) version of
+        // it exists in the same module.
+        FLAGS_IS_PREVIEW_ONLY = 0x4
     };
 
 private:
@@ -300,20 +316,11 @@ public:
     inline const char* get_attribute(u4 kind, const ImageStrings& strings) const {
         return strings.get((u4)get_attribute(kind));
     }
-};
 
-//
-// Manage the image module meta data.
-class ImageModuleData {
-    const ImageFileReader* _image_file; // Source image file
-    Endian* _endian;                    // Endian handler
-
-public:
-    ImageModuleData(const ImageFileReader* image_file);
-    ~ImageModuleData();
-
-    // Return the module in which a package resides.    Returns NULL if not found.
-    const char* package_to_module(const char* package_name);
+    // Retrieve flags from the ATTRIBUTE_PREVIEW_FLAGS attribute.
+    inline u4 get_preview_flags() const {
+        return (u4) get_attribute(ATTRIBUTE_PREVIEW_FLAGS);
+    }
 };
 
 // Image file header, starting at offset 0.
@@ -371,7 +378,12 @@ private:
 
 public:
     ImageFileReaderTable();
-    ~ImageFileReaderTable();
+// ~ImageFileReaderTable()
+// Bug 8166727
+//
+// WARNING: Should never close jimage files.
+//          Threads may still be running during shutdown.
+//
 
     // Return the number of entries.
     inline u4 count() { return _count; }
@@ -384,9 +396,6 @@ public:
 
     // Remove an image entry from the table.
     void remove(ImageFileReader* image);
-
-    // Determine if image entry is in table.
-    bool contains(ImageFileReader* image);
 };
 
 // Manage the image file.
@@ -396,13 +405,14 @@ public:
 // index is then memory mapped to allow load on demand and sharing.  The
 // -XX:+MemoryMapImage flag determines if the entire file is loaded (server use.)
 // An image can be used by Hotspot and multiple reference points in the JDK, thus
-// it is desirable to share a reader.    To accomodate sharing, a share table is
+// it is desirable to share a reader.    To accommodate sharing, a share table is
 // defined (see ImageFileReaderTable in imageFile.cpp)  To track the number of
 // uses, ImageFileReader keeps a use count (_use).  Use is incremented when
 // 'opened' by reference point and decremented when 'closed'.    Use of zero
 // leads the ImageFileReader to be actually closed and discarded.
 class ImageFileReader {
 friend class ImageFileReaderTable;
+friend class PackageFlags;
 private:
     // Manage a number of image files such that an image can be shared across
     // multiple uses (ex. loader.)
@@ -423,7 +433,6 @@ private:
     u4* _offsets_table;  // Location offset table
     u1* _location_bytes; // Location attributes
     u1* _string_bytes;   // String table
-    ImageModuleData *_module_data;       // The ImageModuleData for this image
 
     ImageFileReader(const char* name, bool big_endian);
     ~ImageFileReader();
@@ -443,7 +452,7 @@ public:
         // Image file major version number.
         MAJOR_VERSION = 1,
         // Image file minor version number.
-        MINOR_VERSION = 0
+        MINOR_VERSION = 1
     };
 
     // Locate an image if file already open.
@@ -454,15 +463,6 @@ public:
 
     // Close an image file if the file is not in use elsewhere.
     static void close(ImageFileReader *reader);
-
-    // Return an id for the specifed ImageFileReader.
-    static u8 reader_to_ID(ImageFileReader *reader);
-
-    // Validate the image id.
-    static bool id_check(u8 id);
-
-    // Return an id for the specifed ImageFileReader.
-    static ImageFileReader* id_to_reader(u8 id);
 
     // Open image file for read access.
     bool open();
@@ -555,10 +555,6 @@ public:
         return _endian->get(_offsets_table[index]);
     }
 
-    // Find the location attributes associated with the path.    Returns true if
-    // the location is found, false otherwise.
-    bool find_location(const char* path, ImageLocation& location) const;
-
     // Find the location index and size associated with the path.
     // Returns the location index and size if the location is found,
     // ImageFileReader::NOT_FOUND otherwise.
@@ -572,9 +568,5 @@ public:
 
     // Return the resource for the supplied path.
     void get_resource(ImageLocation& location, u1* uncompressed_data) const;
-
-    // Return the ImageModuleData for this image
-    ImageModuleData * get_image_module_data();
-
 };
 #endif // LIBJIMAGE_IMAGEFILE_HPP

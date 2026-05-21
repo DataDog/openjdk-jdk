@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,8 +34,6 @@ import java.util.StringTokenizer;
 import javax.naming.ldap.Control;
 import javax.naming.NamingException;
 import javax.naming.CommunicationException;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 
 import com.sun.jndi.ldap.pool.PoolCleaner;
 import com.sun.jndi.ldap.pool.Pool;
@@ -60,10 +58,10 @@ public final class LdapPoolManager {
         "com.sun.jndi.ldap.connect.pool.debug";
 
     public static final boolean debug =
-        "all".equalsIgnoreCase(getProperty(DEBUG, null));
+        "all".equalsIgnoreCase(System.getProperty(DEBUG));
 
     public static final boolean trace = debug ||
-        "fine".equalsIgnoreCase(getProperty(DEBUG, null));
+        "fine".equalsIgnoreCase(System.getProperty(DEBUG));
 
     // ---------- System properties for connection pooling
 
@@ -120,16 +118,16 @@ public final class LdapPoolManager {
     private static final Pool[] pools = new Pool[3];
 
     static {
-        maxSize = getInteger(MAX_POOL_SIZE, DEFAULT_MAX_POOL_SIZE);
+        maxSize = Integer.getInteger(MAX_POOL_SIZE, DEFAULT_MAX_POOL_SIZE);
 
-        prefSize = getInteger(PREF_POOL_SIZE, DEFAULT_PREF_POOL_SIZE);
+        prefSize = Integer.getInteger(PREF_POOL_SIZE, DEFAULT_PREF_POOL_SIZE);
 
-        initSize = getInteger(INIT_POOL_SIZE, DEFAULT_INIT_POOL_SIZE);
+        initSize = Integer.getInteger(INIT_POOL_SIZE, DEFAULT_INIT_POOL_SIZE);
 
-        idleTimeout = getLong(POOL_TIMEOUT, DEFAULT_TIMEOUT);
+        idleTimeout = Long.getLong(POOL_TIMEOUT, DEFAULT_TIMEOUT);
 
         // Determine supported authentication mechanisms
-        String str = getProperty(POOL_AUTH, DEFAULT_AUTH_MECHS);
+        String str = System.getProperty(POOL_AUTH, DEFAULT_AUTH_MECHS);
         StringTokenizer parser = new StringTokenizer(str);
         int count = parser.countTokens();
         String mech;
@@ -147,7 +145,7 @@ public final class LdapPoolManager {
         }
 
         // Determine supported protocols
-        str= getProperty(POOL_PROTOCOL, DEFAULT_PROTOCOLS);
+        str = System.getProperty(POOL_PROTOCOL, DEFAULT_PROTOCOLS);
         parser = new StringTokenizer(str);
         count = parser.countTokens();
         String proto;
@@ -163,23 +161,23 @@ public final class LdapPoolManager {
         }
 
         if (idleTimeout > 0) {
-            // Create cleaner to expire idle connections
-            PrivilegedAction<Void> pa = new PrivilegedAction<Void>() {
-                public Void run() {
-                    Thread t = InnocuousThread.newSystemThread(
-                            "LDAP PoolCleaner",
-                            new PoolCleaner(idleTimeout, pools));
-                    assert t.getContextClassLoader() == null;
-                    t.setDaemon(true);
-                    t.start();
-                    return null;
-                }};
-            AccessController.doPrivileged(pa);
+            startCleanerThread();
         }
 
         if (debug) {
             showStats(System.err);
         }
+    }
+
+    private static void startCleanerThread() {
+        // Create cleaner to expire idle connections
+        Thread t = InnocuousThread.newSystemThread(
+                "LDAP PoolCleaner",
+                new PoolCleaner(idleTimeout, pools));
+        assert t.getContextClassLoader() == null;
+        t.setDaemon(true);
+        t.start();
+
     }
 
     // Cannot instantiate one of these
@@ -247,7 +245,8 @@ public final class LdapPoolManager {
         if ((socketFactory != null) &&
              !socketFactory.equals(LdapCtx.DEFAULT_SSL_FACTORY)) {
             try {
-                Class<?> socketFactoryClass = Obj.helper.loadClass(socketFactory);
+                Class<?> socketFactoryClass = Class.forName(socketFactory, true,
+                        Thread.currentThread().getContextClassLoader());
                 Class<?>[] interfaces = socketFactoryClass.getInterfaces();
                 for (int i = 0; i < interfaces.length; i++) {
                     if (interfaces[i].getCanonicalName().equals(COMPARATOR)) {
@@ -393,49 +392,5 @@ public final class LdapPoolManager {
         if (debug) {
             System.err.println("LdapPoolManager: " + msg + o);
         }
-    }
-
-    private static final String getProperty(final String propName,
-        final String defVal) {
-        return AccessController.doPrivileged(
-            new PrivilegedAction<String>() {
-            public String run() {
-                try {
-                    return System.getProperty(propName, defVal);
-                } catch (SecurityException e) {
-                    return defVal;
-                }
-            }
-        });
-    }
-
-    private static final int getInteger(final String propName,
-        final int defVal) {
-        Integer val = AccessController.doPrivileged(
-            new PrivilegedAction<Integer>() {
-            public Integer run() {
-                try {
-                    return Integer.getInteger(propName, defVal);
-                } catch (SecurityException e) {
-                    return defVal;
-                }
-            }
-        });
-        return val.intValue();
-    }
-
-    private static final long getLong(final String propName,
-        final long defVal) {
-        Long val = AccessController.doPrivileged(
-            new PrivilegedAction<Long>() {
-            public Long run() {
-                try {
-                    return Long.getLong(propName, defVal);
-                } catch (SecurityException e) {
-                    return defVal;
-                }
-            }
-        });
-        return val.longValue();
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,7 +36,7 @@ import java.awt.*;
  * @author      Bino George
  */
 @SuppressWarnings("serial") // JDK-implementation class
-public class XCustomCursor extends X11CustomCursor {
+public final class XCustomCursor extends X11CustomCursor {
 
     public XCustomCursor(Image cursor, Point hotSpot, String name)
       throws IndexOutOfBoundsException {
@@ -51,7 +51,7 @@ public class XCustomCursor extends X11CustomCursor {
         // Fix for bug 4212593 The Toolkit.createCustomCursor does not
         //                     check absence of the image of cursor
         // We use XQueryBestCursor which accepts unsigned ints to obtain
-        // the largest cursor size that could be dislpayed
+        // the largest cursor size that could be displayed
         //Dimension d = new Dimension(Math.abs(preferredWidth), Math.abs(preferredHeight));
         Dimension d;
 
@@ -74,6 +74,7 @@ public class XCustomCursor extends X11CustomCursor {
         return d;
     }
 
+    @Override
     protected void createCursor(byte[] xorMask, byte[] andMask,
                                 int width, int height,
                                 int fcolor, int bcolor,

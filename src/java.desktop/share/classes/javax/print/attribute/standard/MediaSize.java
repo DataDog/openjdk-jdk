@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 
 package javax.print.attribute.standard;
 
+import java.io.Serial;
 import java.util.HashMap;
 import java.util.Vector;
 
@@ -55,10 +56,11 @@ public class MediaSize extends Size2DSyntax implements Attribute {
     /**
      * Use serialVersionUID from JDK 1.4 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = -1967958664615414771L;
 
     /**
-     * The media name.
+     * @serial The media name.
      */
     private MediaSizeName mediaName;
 
@@ -241,6 +243,7 @@ public class MediaSize extends Size2DSyntax implements Attribute {
      * @return {@code true} if {@code object} is equivalent to this media size
      *         attribute, {@code false} otherwise
      */
+    @Override
     public boolean equals(Object object) {
         return (super.equals(object) && object instanceof MediaSize);
     }
@@ -255,6 +258,7 @@ public class MediaSize extends Size2DSyntax implements Attribute {
      * @return printing attribute class (category), an instance of class
      *         {@link Class java.lang.Class}
      */
+    @Override
     public final Class<? extends Attribute> getCategory() {
         return MediaSize.class;
     }
@@ -268,6 +272,7 @@ public class MediaSize extends Size2DSyntax implements Attribute {
      *
      * @return attribute category name
      */
+    @Override
     public final String getName() {
         return "media-size";
     }

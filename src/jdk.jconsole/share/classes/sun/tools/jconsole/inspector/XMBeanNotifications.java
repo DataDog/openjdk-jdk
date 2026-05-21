@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -50,7 +50,7 @@ import sun.tools.jconsole.Messages;
 @SuppressWarnings("serial")
 public class XMBeanNotifications extends JTable implements NotificationListener {
 
-    private final static String[] columnNames = {
+    private static final String[] columnNames = {
         Messages.TIME_STAMP,
         Messages.TYPE,
         Messages.USER_DATA,
@@ -63,7 +63,7 @@ public class XMBeanNotifications extends JTable implements NotificationListener 
             new HashMap<ObjectName, XMBeanNotificationsListener>();
     private volatile boolean subscribed;
     private XMBeanNotificationsListener currentListener;
-    public final static String NOTIFICATION_RECEIVED_EVENT =
+    public static final String NOTIFICATION_RECEIVED_EVENT =
             "jconsole.xnotification.received";
     private List<NotificationListener> notificationListenersList;
     private volatile boolean enabled;
@@ -95,6 +95,13 @@ public class XMBeanNotifications extends JTable implements NotificationListener 
         colModel.getColumn(5).setPreferredWidth(50);
         setColumnEditors();
         addKeyListener(new Utils.CopyKeyAdapter());
+    }
+
+    @Override
+    public JToolTip createToolTip() {
+        JToolTip t = super.createToolTip();
+        t.putClientProperty("html.disable", Boolean.TRUE);
+        return t;
     }
 
     // Call on EDT
@@ -180,6 +187,8 @@ public class XMBeanNotifications extends JTable implements NotificationListener 
             renderer =
                     (DefaultTableCellRenderer) super.getCellRenderer(row, column);
         }
+
+        renderer.putClientProperty("html.disable", Boolean.TRUE);
 
         if (cell != null) {
             toolTip = Messages.DOUBLE_CLICK_TO_EXPAND_FORWARD_SLASH_COLLAPSE+
@@ -416,7 +425,7 @@ public class XMBeanNotifications extends JTable implements NotificationListener 
         }
     }
 
-    class UserDataCellRenderer extends DefaultTableCellRenderer {
+    static class UserDataCellRenderer extends DefaultTableCellRenderer {
 
         Component comp;
 
@@ -444,7 +453,7 @@ public class XMBeanNotifications extends JTable implements NotificationListener 
         }
     }
 
-    class UserDataCell {
+    static class UserDataCell {
 
         TableCellRenderer minRenderer;
         UserDataCellRenderer maxRenderer;

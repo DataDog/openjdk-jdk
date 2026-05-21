@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,8 +27,8 @@ import compiler.whitebox.CompilerWhiteBoxTest;
 import jdk.test.lib.Asserts;
 import jdk.test.lib.Platform;
 import jdk.test.lib.Utils;
-import sun.hotspot.code.NMethod;
-import sun.hotspot.cpuinfo.CPUInfo;
+import jdk.test.whitebox.code.NMethod;
+import jdk.test.whitebox.cpuinfo.CPUInfo;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodType;
@@ -36,6 +36,7 @@ import java.lang.reflect.Executable;
 import java.lang.reflect.Method;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
+import java.util.List;
 
 public class BmiIntrinsicBase extends CompilerWhiteBoxTest {
 
@@ -51,7 +52,12 @@ public class BmiIntrinsicBase extends CompilerWhiteBoxTest {
 
     @Override
     protected void test() throws Exception {
-        BmiTestCase bmiTestCase = (BmiTestCase) testCase;
+        BmiTestCase bmiTestCase;
+        if (((BmiTestCase) testCase).getTestCaseX64()) {
+            bmiTestCase = (BmiTestCase_x64) testCase;
+        } else {
+            bmiTestCase = (BmiTestCase) testCase;
+        }
 
         if (!(Platform.isX86() || Platform.isX64())) {
             System.out.println("Unsupported platform, test SKIPPED");
@@ -78,7 +84,7 @@ public class BmiIntrinsicBase extends CompilerWhiteBoxTest {
 
         System.out.println(testCase.name());
 
-        if (TIERED_COMPILATION && TIERED_STOP_AT_LEVEL != CompilerWhiteBoxTest.COMP_LEVEL_MAX || Platform.isEmulatedClient()) {
+        if (TIERED_COMPILATION && TIERED_STOP_AT_LEVEL != CompilerWhiteBoxTest.COMP_LEVEL_MAX) {
             System.out.println("TieredStopAtLevel value (" + TIERED_STOP_AT_LEVEL + ") is too low, test SKIPPED");
             return;
         }
@@ -105,10 +111,14 @@ public class BmiIntrinsicBase extends CompilerWhiteBoxTest {
 
     protected void checkEmittedCode(Executable executable) {
         final byte[] nativeCode = NMethod.get(executable, false).insts;
-        if (!((BmiTestCase) testCase).verifyPositive(nativeCode)) {
-            throw new AssertionError(testCase.name() + "CPU instructions expected not found: " + Utils.toHexString(nativeCode));
+        final byte[] matchInstrPattern = (((BmiTestCase) testCase).getTestCaseX64() && Platform.isX64()) ? ((BmiTestCase_x64) testCase).getInstrPattern_x64() : ((BmiTestCase) testCase).getInstrPattern();
+        boolean use_apx = CPUInfo.hasFeature("apx_f");
+        if (!((BmiTestCase) testCase).verifyPositive(nativeCode, use_apx)) {
+            throw new AssertionError(testCase.name() + " " + "CPU instructions expected not found in nativeCode: " + Utils.toHexString(nativeCode) + " ---- Expected instrPattern: " +
+            Utils.toHexString(matchInstrPattern));
         } else {
-            System.out.println("CPU instructions found, PASSED");
+            System.out.println("CPU instructions found, PASSED, nativeCode: " + Utils.toHexString(nativeCode) + " ---- Expected instrPattern: " +
+            Utils.toHexString(matchInstrPattern));
         }
     }
 
@@ -116,7 +126,11 @@ public class BmiIntrinsicBase extends CompilerWhiteBoxTest {
         private final Method method;
         protected byte[] instrMask;
         protected byte[] instrPattern;
+        protected byte[] instrMaskAPX;
+        protected byte[] instrPatternAPX;
         protected boolean isLongOperation;
+        protected String cpuFlag = "bmi1";
+        protected String vmFlag = "UseBMI1Instructions";
 
         public BmiTestCase(Method method) {
             this.method = method;
@@ -142,8 +156,19 @@ public class BmiIntrinsicBase extends CompilerWhiteBoxTest {
             return false;
         }
 
+        public byte[] getInstrPattern() {
+            return instrPattern;
+        }
+
         protected int countCpuInstructions(byte[] nativeCode) {
             return countCpuInstructions(nativeCode, instrMask, instrPattern);
+        }
+
+        protected int countCpuInstructionsAPX(byte[] nativeCode) {
+            if (instrMaskAPX == null || instrPatternAPX == null) {
+                return 0;
+            }
+            return countCpuInstructions(nativeCode, instrMaskAPX, instrPatternAPX);
         }
 
         public static int countCpuInstructions(byte[] nativeCode, byte[] instrMask, byte[] instrPattern) {
@@ -167,8 +192,12 @@ public class BmiIntrinsicBase extends CompilerWhiteBoxTest {
             return count;
         }
 
-        public boolean verifyPositive(byte[] nativeCode) {
-            final int cnt = countCpuInstructions(nativeCode);
+        public boolean verifyPositive(byte[] nativeCode, boolean use_apx) {
+            int cnt = countCpuInstructions(nativeCode);
+            if (use_apx) {
+                System.out.println("CHECKING APX INST PATTERNS");
+                cnt += countCpuInstructionsAPX(nativeCode);
+            }
             if (Platform.isX86()) {
                 return cnt >= (isLongOperation ? 2 : 1);
             } else {
@@ -177,11 +206,15 @@ public class BmiIntrinsicBase extends CompilerWhiteBoxTest {
         }
 
         protected String getCpuFlag() {
-            return "bmi1";
+            return cpuFlag;
         }
 
         protected String getVMFlag() {
-            return "UseBMI1Instructions";
+            return vmFlag;
+        }
+
+        protected boolean getTestCaseX64() {
+            return false;
         }
     }
 
@@ -191,6 +224,14 @@ public class BmiIntrinsicBase extends CompilerWhiteBoxTest {
 
         protected BmiTestCase_x64(Method method) {
             super(method);
+        }
+
+        public byte[] getInstrPattern_x64() {
+            return instrPattern_x64;
+        }
+
+        protected boolean getTestCaseX64() {
+            return true;
         }
 
         protected int countCpuInstructions(byte[] nativeCode) {

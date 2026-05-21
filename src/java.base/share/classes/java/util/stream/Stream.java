@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -276,7 +276,7 @@ public interface Stream<T> extends BaseStream<T, Stream<T>> {
      *               function to apply to each element which produces a stream
      *               of new values
      * @return the new stream
-     * @see #mapMulti
+     * @see #mapMulti mapMulti
      */
     <R> Stream<R> flatMap(Function<? super T, ? extends Stream<? extends R>> mapper);
 
@@ -296,7 +296,7 @@ public interface Stream<T> extends BaseStream<T, Stream<T>> {
      *               function to apply to each element which produces a stream
      *               of new values
      * @return the new stream
-     * @see #flatMap(Function)
+     * @see #flatMap flatMap
      */
     IntStream flatMapToInt(Function<? super T, ? extends IntStream> mapper);
 
@@ -316,7 +316,7 @@ public interface Stream<T> extends BaseStream<T, Stream<T>> {
      *               function to apply to each element which produces a stream
      *               of new values
      * @return the new stream
-     * @see #flatMap(Function)
+     * @see #flatMap flatMap
      */
     LongStream flatMapToLong(Function<? super T, ? extends LongStream> mapper);
 
@@ -336,10 +336,12 @@ public interface Stream<T> extends BaseStream<T, Stream<T>> {
      *               function to apply to each element which produces a stream
      *               of new values
      * @return the new stream
-     * @see #flatMap(Function)
+     * @see #flatMap flatMap
      */
     DoubleStream flatMapToDouble(Function<? super T, ? extends DoubleStream> mapper);
 
+    // THE EXAMPLES USED IN THE JAVADOC MUST BE IN SYNC WITH THEIR CORRESPONDING
+    // TEST IN test/jdk/java/util/stream/examples/JavadocExamples.java.
     /**
      * Returns a stream consisting of the results of replacing each element of
      * this stream with multiple elements, specifically zero or more elements.
@@ -386,8 +388,8 @@ public interface Stream<T> extends BaseStream<T, Stream<T>> {
      * <pre>{@code
      *     Stream<Number> numbers = ... ;
      *     List<Integer> integers = numbers.<Integer>mapMulti((number, consumer) -> {
-     *             if (number instanceof Integer)
-     *                 consumer.accept((Integer) number);
+     *             if (number instanceof Integer i)
+     *                 consumer.accept(i);
      *         })
      *         .collect(Collectors.toList());
      * }</pre>
@@ -397,8 +399,8 @@ public interface Stream<T> extends BaseStream<T, Stream<T>> {
      * <pre>{@code
      * class C {
      *     static void expandIterable(Object e, Consumer<Object> c) {
-     *         if (e instanceof Iterable) {
-     *             for (Object ie: (Iterable<?>) e) {
+     *         if (e instanceof Iterable<?> elements) {
+     *             for (Object ie : elements) {
      *                 expandIterable(ie, c);
      *             }
      *         } else if (e != null) {
@@ -407,8 +409,8 @@ public interface Stream<T> extends BaseStream<T, Stream<T>> {
      *     }
      *
      *     public static void main(String[] args) {
-     *         Stream<Object> stream = ...;
-     *         Stream<Object> expandedStream = stream.mapMulti(C::expandIterable);
+     *         var nestedList = List.of(1, List.of(2, List.of(3, 4)), 5);
+     *         Stream<Object> expandedStream = nestedList.stream().mapMulti(C::expandIterable);
      *     }
      * }
      * }</pre>
@@ -1000,8 +1002,8 @@ public interface Stream<T> extends BaseStream<T, Stream<T>> {
 
     /**
      * Performs a <a href="package-summary.html#Reduction">reduction</a> on the
-     * elements of this stream, using the provided identity, accumulation and
-     * combining functions.  This is equivalent to:
+     * elements of this stream using the provided identity value, accumulation
+     * function, and combining function.  This is equivalent to:
      * <pre>{@code
      *     U result = identity;
      *     for (T element : this stream)
@@ -1048,6 +1050,57 @@ public interface Stream<T> extends BaseStream<T, Stream<T>> {
     <U> U reduce(U identity,
                  BiFunction<U, ? super T, U> accumulator,
                  BinaryOperator<U> combiner);
+
+    /**
+     * Returns a stream consisting of the results of applying the given
+     * {@link Gatherer} to the elements of this stream.
+     *
+     * <p>This is a <a href="package-summary.html#StreamOps">stateful
+     * intermediate operation</a> that is an
+     * <a href="package-summary.html#Extensibility">extension point</a>.
+     *
+     * <p>Gatherers are highly flexible and can describe a vast array of
+     * possibly stateful operations, with support for short-circuiting, and
+     * parallelization.
+     *
+     * <p>When executed in parallel, multiple intermediate results may be
+     * instantiated, populated, and merged so as to maintain isolation of
+     * mutable data structures.  Therefore, even when executed in parallel
+     * with non-thread-safe data structures (such as {@code ArrayList}), no
+     * additional synchronization is needed for a parallel reduction.
+     *
+     * <p>Implementations are allowed, but not required, to detect consecutive
+     * invocations and compose them into a single, fused, operation. This would
+     * make the first expression below behave like the second:
+     *
+     * <pre>{@code
+     *     var stream1 = Stream.of(...).gather(gatherer1).gather(gatherer2);
+     *     var stream2 = Stream.of(...).gather(gatherer1.andThen(gatherer2));
+     * }</pre>
+     *
+     * @implSpec
+     * The default implementation obtains the {@link #spliterator() spliterator}
+     * of this stream, wraps that spliterator so as to support the semantics
+     * of this operation on traversal, and returns a new stream associated with
+     * the wrapped spliterator.  The returned stream preserves the execution
+     * characteristics of this stream (namely parallel or sequential execution
+     * as per {@link #isParallel()}) but the wrapped spliterator may choose to
+     * not support splitting.  When the returned stream is closed, the close
+     * handlers for both the returned and this stream are invoked.
+     * Implementations of this interface should provide their own
+     * implementation of this method.
+     *
+     * @see Gatherers
+     * @param <R> The element type of the new stream
+     * @param gatherer a gatherer
+     * @return the new stream
+     * @since 24
+     */
+    default <R> Stream<R> gather(Gatherer<? super T, ?, R> gatherer) {
+        return StreamSupport.stream(spliterator(), isParallel())
+                            .gather(gatherer)
+                            .onClose(this::close);
+    }
 
     /**
      * Performs a <a href="package-summary.html#MutableReduction">mutable
@@ -1169,7 +1222,7 @@ public interface Stream<T> extends BaseStream<T, Stream<T>> {
      * {@code UnsupportedOperationException} to be thrown. There are no
      * guarantees on the implementation type or serializability of the returned List.
      *
-     * <p>The returned instance may be <a href="../lang/doc-files/ValueBased.html">value-based</a>.
+     * <p>The returned instance may be <a href="{@docRoot}/java.base/java/lang/doc-files/ValueBased.html">value-based</a>.
      * Callers should make no assumptions about the identity of the returned instances.
      * Identity-sensitive operations on these instances (reference equality ({@code ==}),
      * identity hash code, and synchronization) are unreliable and should be avoided.
@@ -1382,7 +1435,7 @@ public interface Stream<T> extends BaseStream<T, Stream<T>> {
      * @return an empty sequential stream
      */
     public static<T> Stream<T> empty() {
-        return StreamSupport.stream(Spliterators.<T>emptySpliterator(), false);
+        return StreamSupport.stream(Spliterators.emptySpliterator(), false);
     }
 
     /**

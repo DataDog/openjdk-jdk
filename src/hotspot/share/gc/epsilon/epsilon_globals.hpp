@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2017, 2018, Red Hat, Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -36,7 +36,6 @@
                          develop_pd,                                        \
                          product,                                           \
                          product_pd,                                        \
-                         notproduct,                                        \
                          range,                                             \
                          constraint)                                        \
                                                                             \
@@ -64,7 +63,7 @@
           "smaller TLABs until policy catches up.")                         \
                                                                             \
   product(bool, EpsilonElasticTLABDecay, true, EXPERIMENTAL,                \
-          "Use timed decays to shrik TLAB sizes. This conserves memory "    \
+          "Use timed decays to shrink TLAB sizes. This conserves memory "   \
           "for the threads that allocate in bursts of different sizes, "    \
           "for example the small/rare allocations coming after the initial "\
           "large burst.")                                                   \

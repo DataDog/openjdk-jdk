@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,26 +21,29 @@
  * questions.
  */
 
-import java.nio.file.Path;
-import java.io.File;
-import java.util.Map;
 import java.lang.invoke.MethodHandles;
-import jdk.jpackage.test.PackageTest;
-import jdk.jpackage.test.FileAssociations;
+import java.nio.file.Path;
+import java.util.function.Consumer;
+import jdk.internal.util.OperatingSystem;
 import jdk.jpackage.test.AdditionalLauncher;
+import jdk.jpackage.test.Annotations.Parameter;
+import jdk.jpackage.test.Annotations.Test;
+import jdk.jpackage.test.CfgFile;
+import jdk.jpackage.test.ConfigurationTarget;
+import jdk.jpackage.test.FileAssociations;
 import jdk.jpackage.test.JPackageCommand;
 import jdk.jpackage.test.JavaAppDesc;
+import jdk.jpackage.test.PackageTest;
+import jdk.jpackage.test.PackageType;
+import jdk.jpackage.test.RunnablePackageTest.Action;
 import jdk.jpackage.test.TKit;
-import jdk.jpackage.test.Annotations.Test;
-import jdk.jpackage.test.Annotations.Parameter;
-import jdk.jpackage.test.CfgFile;
 
 /**
  * Test --add-launcher parameter. Output of the test should be
  * AddLauncherTest*.* installer. The output installer should provide the
  * same functionality as the default installer (see description of the default
  * installer in SimplePackageTest.java) plus install three extra application
- * launchers.
+ * launchers with unique description ("LauncherName Description").
  */
 
 /*
@@ -48,11 +51,11 @@ import jdk.jpackage.test.CfgFile;
  * @summary jpackage with --add-launcher
  * @key jpackagePlatformPackage
  * @requires (jpackage.test.SQETest != null)
- * @library ../helpers
+ * @library /test/jdk/tools/jpackage/helpers
  * @build jdk.jpackage.test.*
- * @modules jdk.jpackage/jdk.jpackage.internal
- * @compile AddLauncherTest.java
- * @run main/othervm/timeout=360 -Xmx512m jdk.jpackage.test.Main
+ * @compile -Xlint:all -Werror AddLauncherTest.java
+ * @run main/othervm/timeout=1440 -Xmx512m
+ *  jdk.jpackage.test.Main
  *  --jpt-run=AddLauncherTest.test
  */
 
@@ -61,11 +64,11 @@ import jdk.jpackage.test.CfgFile;
  * @summary jpackage with --add-launcher
  * @key jpackagePlatformPackage
  * @requires (jpackage.test.SQETest == null)
- * @library ../helpers
+ * @library /test/jdk/tools/jpackage/helpers
  * @build jdk.jpackage.test.*
- * @modules jdk.jpackage/jdk.jpackage.internal
- * @compile AddLauncherTest.java
- * @run main/othervm/timeout=540 -Xmx512m jdk.jpackage.test.Main
+ * @compile -Xlint:all -Werror AddLauncherTest.java
+ * @run main/othervm/timeout=2160 -Xmx512m
+ *  jdk.jpackage.test.Main
  *  --jpt-run=AddLauncherTest
  */
 
@@ -80,7 +83,8 @@ public class AddLauncherTest {
         PackageTest packageTest = new PackageTest().configureHelloApp();
         packageTest.addInitializer(cmd -> {
             cmd.addArguments("--arguments", "Duke", "--arguments", "is",
-                    "--arguments", "the", "--arguments", "King");
+                    "--arguments", "the", "--arguments", "King",
+                    "--description", "AddLauncherTest Description");
         });
 
         new FileAssociations(
@@ -89,14 +93,17 @@ public class AddLauncherTest {
 
         new AdditionalLauncher("Baz2")
                 .setDefaultArguments()
+                .setProperty("description", "Baz2 Description")
                 .applyTo(packageTest);
 
         new AdditionalLauncher("foo")
                 .setDefaultArguments("yep!")
+                .setProperty("description", "foo Description")
                 .applyTo(packageTest);
 
         new AdditionalLauncher("Bar")
                 .setDefaultArguments("one", "two", "three")
+                .setProperty("description", "Bar Description")
                 .setIcon(GOLDEN_ICON)
                 .applyTo(packageTest);
 
@@ -185,10 +192,14 @@ public class AddLauncherTest {
             cmd.ignoreDefaultRuntime(true); // because of --add-modules
         }
 
+        final String expectedMod = JavaAppDesc.parse(modularAppDesc.toString())
+                .setBundleFileName(null)
+                .setSrcJavaPath(null)
+                .toString();
+
         new AdditionalLauncher("ModularAppLauncher")
-        .addRawProperties(Map.entry("module", JavaAppDesc.parse(
-                modularAppDesc.toString()).setBundleFileName(null).toString()))
-        .addRawProperties(Map.entry("main-jar", ""))
+        .setProperty("module", expectedMod)
+        .setProperty("main-jar", "")
         .applyTo(cmd);
 
         new AdditionalLauncher("NonModularAppLauncher")
@@ -197,8 +208,8 @@ public class AddLauncherTest {
         .setPersistenceHandler((path, properties) -> TKit.createTextFile(path,
                 properties.stream().map(entry -> String.join(" ", entry.getKey(),
                         entry.getValue()))))
-        .addRawProperties(Map.entry("main-class", nonModularAppDesc.className()))
-        .addRawProperties(Map.entry("main-jar", nonModularAppDesc.jarFileName()))
+        .setProperty("main-class", nonModularAppDesc.className())
+        .setProperty("main-jar", nonModularAppDesc.jarFileName())
         .applyTo(cmd);
 
         cmd.executeAndAssertHelloAppImageCreated();
@@ -208,8 +219,6 @@ public class AddLauncherTest {
         String moduleValue = cfg.getValue("Application", "app.mainmodule");
         String mainClass = null;
         String classpath = null;
-        String expectedMod = JavaAppDesc.parse(
-                modularAppDesc.toString()).setBundleFileName(null).toString();
         TKit.assertEquals(expectedMod, moduleValue,
                 String.format("Check value of app.mainmodule=[%s]" +
                 "in ModularAppLauncher cfg file is as expected", expectedMod));
@@ -223,11 +232,65 @@ public class AddLauncherTest {
         TKit.assertEquals(ExpectedCN, mainClass,
                 String.format("Check value of app.mainclass=[%s]" +
                 "in NonModularAppLauncher cfg file is as expected", ExpectedCN));
-        TKit.assertTrue(classpath.startsWith("$APPDIR" + File.separator
-                + nonModularAppDesc.jarFileName()),
+        TKit.assertTrue(classpath.startsWith(Path.of("$APPDIR",
+                nonModularAppDesc.jarFileName()).toString()),
                 "Check app.classpath value in ModularAppLauncher cfg file");
     }
 
-    private final static Path GOLDEN_ICON = TKit.TEST_SRC_ROOT.resolve(Path.of(
+    /**
+     * Test --description option
+     */
+    @Test(ifNotOS = OperatingSystem.MACOS) // Don't run on macOS as launcher description is ignored on this platform
+    @Parameter("true")
+    @Parameter("fase")
+    public void testDescription(boolean withPredefinedAppImage) {
+
+        ConfigurationTarget target;
+        if (TKit.isWindows() || withPredefinedAppImage) {
+            target = new ConfigurationTarget(JPackageCommand.helloAppImage());
+        } else {
+            target = new ConfigurationTarget(new PackageTest().configureHelloApp());
+        }
+
+        target.addInitializer(cmd -> {
+            cmd.setArgumentValue("--name", "Foo").setArgumentValue("--description", "Hello");
+            cmd.setFakeRuntime();
+            cmd.setStandardAsserts(JPackageCommand.StandardAssert.MAIN_LAUNCHER_DESCRIPTION);
+        });
+
+        target.add(new AdditionalLauncher("x"));
+        target.add(new AdditionalLauncher("bye").setProperty("description", "Bye"));
+
+        target.test().ifPresent(test -> {
+            // Make all launchers have shortcuts and thus .desktop files.
+            // Launcher description is recorded in a desktop file and verified automatically.
+            test.mutate(addLinuxShortcuts());
+        });
+
+        target.cmd().ifPresent(withPredefinedAppImage ? JPackageCommand::execute : JPackageCommand::executeAndAssertImageCreated);
+        target.test().ifPresent(test -> {
+            test.run(Action.CREATE_AND_UNPACK);
+        });
+
+        if (withPredefinedAppImage) {
+            new PackageTest().addInitializer(cmd -> {
+                cmd.setArgumentValue("--name", "Bar");
+                // Should not have impact on launcher descriptions, but it does.
+                cmd.setArgumentValue("--description", "Installer");
+            }).usePredefinedAppImage(target.cmd().orElseThrow()).mutate(addLinuxShortcuts()).run(Action.CREATE_AND_UNPACK);
+        }
+    }
+
+    private static Consumer<PackageTest> addLinuxShortcuts() {
+        return test -> {
+            test.forTypes(PackageType.LINUX, () -> {
+                test.addInitializer(cmd -> {
+                    cmd.addArgument("--linux-shortcut");
+                });
+            });
+        };
+    }
+
+    private static final Path GOLDEN_ICON = TKit.TEST_SRC_ROOT.resolve(Path.of(
             "resources", "icon" + TKit.ICON_SUFFIX));
 }

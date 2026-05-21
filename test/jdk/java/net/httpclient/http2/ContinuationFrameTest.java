@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,15 +24,10 @@
 /*
  * @test
  * @summary Test for CONTINUATION frame handling
- * @modules java.base/sun.net.www.http
- *          java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- * @library /test/lib server
+ * @library /test/lib /test/jdk/java/net/httpclient/lib
+ * @build jdk.httpclient.test.lib.http2.Http2TestServer jdk.test.lib.net.SimpleSSLContext
  * @compile ../ReferenceTracker.java
- * @build Http2TestServer
- * @build jdk.test.lib.net.SimpleSSLContext
- * @run testng/othervm ContinuationFrameTest
+ * @run junit/othervm ${test.main.class}
  */
 
 import java.io.IOException;
@@ -51,31 +46,38 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
+
 import jdk.internal.net.http.common.HttpHeadersBuilder;
 import jdk.internal.net.http.frame.ContinuationFrame;
 import jdk.internal.net.http.frame.HeaderFrame;
 import jdk.internal.net.http.frame.HeadersFrame;
 import jdk.internal.net.http.frame.Http2Frame;
+import jdk.httpclient.test.lib.http2.Http2TestServer;
+import jdk.httpclient.test.lib.http2.Http2TestExchange;
+import jdk.httpclient.test.lib.http2.Http2TestExchangeImpl;
+import jdk.httpclient.test.lib.http2.Http2Handler;
+import jdk.httpclient.test.lib.http2.BodyOutputStream;
+import jdk.httpclient.test.lib.http2.Http2TestServerConnection;
+
 import jdk.test.lib.net.SimpleSSLContext;
-import org.testng.annotations.AfterTest;
-import org.testng.annotations.BeforeTest;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import static java.lang.System.out;
 import static java.net.http.HttpClient.Version.HTTP_2;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class ContinuationFrameTest {
 
-    SSLContext sslContext;
-    Http2TestServer http2TestServer;   // HTTP/2 ( h2c )
-    Http2TestServer https2TestServer;  // HTTP/2 ( h2  )
-    String http2URI;
-    String https2URI;
-    String noBodyhttp2URI;
-    String noBodyhttps2URI;
-    final ReferenceTracker TRACKER = ReferenceTracker.INSTANCE;
+    private static final SSLContext sslContext = SimpleSSLContext.findSSLContext();
+    private static Http2TestServer http2TestServer;   // HTTP/2 ( h2c )
+    private static Http2TestServer https2TestServer;  // HTTP/2 ( h2  )
+    private static String http2URI;
+    private static String https2URI;
+    private static String noBodyhttp2URI;
+    private static String noBodyhttps2URI;
+    private final static ReferenceTracker TRACKER = ReferenceTracker.INSTANCE;
 
     /**
      * A function that returns a list of 1) a HEADERS frame ( with an empty
@@ -130,8 +132,7 @@ public class ContinuationFrameTest {
             return frames;
         };
 
-    @DataProvider(name = "variants")
-    public Object[][] variants() {
+    static Object[][] variants() {
         return new Object[][] {
                 { http2URI,        false, oneContinuation },
                 { https2URI,       false, oneContinuation },
@@ -152,7 +153,24 @@ public class ContinuationFrameTest {
 
     static final int ITERATION_COUNT = 20;
 
-    @Test(dataProvider = "variants")
+    static HttpClient sharedClient;
+    HttpClient httpClient(boolean shared) {
+        if (!shared || sharedClient == null) {
+            var client = HttpClient.newBuilder()
+                    .proxy(HttpClient.Builder.NO_PROXY)
+                    .sslContext(sslContext)
+                    .build();
+            if (sharedClient == null) {
+                sharedClient = client;
+            }
+            TRACKER.track(client);
+            return client;
+        }
+        return sharedClient;
+    }
+
+    @ParameterizedTest
+    @MethodSource("variants")
     void test(String uri,
               boolean sameClient,
               BiFunction<Integer,List<ByteBuffer>,List<Http2Frame>> headerFramesSupplier)
@@ -163,11 +181,7 @@ public class ContinuationFrameTest {
         HttpClient client = null;
         for (int i=0; i< ITERATION_COUNT; i++) {
             if (!sameClient || client == null) {
-                client = HttpClient.newBuilder()
-                         .proxy(HttpClient.Builder.NO_PROXY)
-                         .sslContext(sslContext)
-                         .build();
-                TRACKER.track(client);
+                client = httpClient(sameClient);
             }
 
             HttpRequest request = HttpRequest.newBuilder(URI.create(uri))
@@ -182,26 +196,20 @@ public class ContinuationFrameTest {
 
             if(uri.contains("nobody")) {
                 out.println("Got response: " + resp);
-                assertTrue(resp.statusCode() == 204,
-                    "Expected 204, got:" + resp.statusCode());
-                assertEquals(resp.version(), HTTP_2);
+                assertEquals(204, resp.statusCode(), "Expected 204, got:" + resp.statusCode());
+                assertEquals(HTTP_2, resp.version());
                 continue;
             }
             out.println("Got response: " + resp);
             out.println("Got body: " + resp.body());
-            assertTrue(resp.statusCode() == 200,
-                       "Expected 200, got:" + resp.statusCode());
-            assertEquals(resp.body(), "Hello there!");
-            assertEquals(resp.version(), HTTP_2);
+            assertEquals(200, resp.statusCode(), "Expected 200, got:" + resp.statusCode());
+            assertEquals("Hello there!", resp.body());
+            assertEquals(HTTP_2, resp.version());
         }
     }
 
-    @BeforeTest
-    public void setup() throws Exception {
-        sslContext = new SimpleSSLContext().get();
-        if (sslContext == null)
-            throw new AssertionError("Unexpected null sslContext");
-
+    @BeforeAll
+    static void setup() throws Exception {
         http2TestServer = new Http2TestServer("localhost", false, 0);
         http2TestServer.addHandler(new Http2EchoHandler(), "/http2/echo");
         http2TestServer.addHandler(new Http2NoBodyHandler(), "/http2/nobody");
@@ -225,8 +233,9 @@ public class ContinuationFrameTest {
         https2TestServer.start();
     }
 
-    @AfterTest
-    public void teardown() throws Exception {
+    @AfterAll
+    static void teardown() throws Exception {
+        sharedClient = null;
         AssertionError fail = TRACKER.check(500);
         try {
             http2TestServer.stop();
@@ -297,10 +306,11 @@ public class ContinuationFrameTest {
             assert headerFrames.size() > 0;  // there must always be at least 1
 
             if(headerFrames.get(0).getFlag(HeaderFrame.END_STREAM))
-                os.closeInternal();
+                os.markClosed();
 
-            for (Http2Frame f : headerFrames)
-                conn.outputQ.put(f);
+            for (Http2Frame f : headerFrames) {
+                conn.addToOutputQ(f);
+            }
 
             os.goodToGo();
             System.err.println("Sent response headers " + rCode);

@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 1994, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1994, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2025, Alibaba Group Holding Limited. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,13 +33,15 @@ import java.util.Optional;
 
 import jdk.internal.math.FloatingDecimal;
 import jdk.internal.math.DoubleConsts;
+import jdk.internal.math.DoubleToDecimal;
+import jdk.internal.util.DecimalDigits;
 import jdk.internal.vm.annotation.IntrinsicCandidate;
 
 /**
- * The {@code Double} class wraps a value of the primitive type
- * {@code double} in an object. An object of type
- * {@code Double} contains a single field whose type is
- * {@code double}.
+ * The {@code Double} class is the {@linkplain
+ * java.lang##wrapperClass wrapper class} for values of the primitive
+ * type {@code double}. An object of type {@code Double} contains a
+ * single field whose type is {@code double}.
  *
  * <p>In addition, this class provides several methods for converting a
  * {@code double} to a {@code String} and a
@@ -52,9 +55,305 @@ import jdk.internal.vm.annotation.IntrinsicCandidate;
  * use instances for synchronization, or unpredictable behavior may
  * occur. For example, in a future release, synchronization may fail.
  *
- * @author  Lee Boynton
- * @author  Arthur van Hoff
- * @author  Joseph D. Darcy
+ * <h2><a id=equivalenceRelation>Floating-point Equality, Equivalence,
+ * and Comparison</a></h2>
+ *
+ * IEEE 754 floating-point values include finite nonzero values,
+ * signed zeros ({@code +0.0} and {@code -0.0}), signed infinities
+ * ({@linkplain Double#POSITIVE_INFINITY positive infinity} and
+ * {@linkplain Double#NEGATIVE_INFINITY negative infinity}), and
+ * {@linkplain Double#NaN NaN} (not-a-number).
+ *
+ * <p>An <em>equivalence relation</em> on a set of values is a boolean
+ * relation on pairs of values that is reflexive, symmetric, and
+ * transitive. For more discussion of equivalence relations and object
+ * equality, see the {@link Object#equals Object.equals}
+ * specification. An equivalence relation partitions the values it
+ * operates over into sets called <i>equivalence classes</i>.  All the
+ * members of the equivalence class are equal to each other under the
+ * relation. An equivalence class may contain only a single member. At
+ * least for some purposes, all the members of an equivalence class
+ * are substitutable for each other.  In particular, in a numeric
+ * expression equivalent values can be <em>substituted</em> for one
+ * another without changing the result of the expression, meaning
+ * changing the equivalence class of the result of the expression.
+ *
+ * <p>Notably, the built-in {@code ==} operation on floating-point
+ * values is <em>not</em> an equivalence relation. Despite not
+ * defining an equivalence relation, the semantics of the IEEE 754
+ * {@code ==} operator were deliberately designed to meet other needs
+ * of numerical computation. There are two exceptions where the
+ * properties of an equivalence relation are not satisfied by {@code
+ * ==} on floating-point values:
+ *
+ * <ul>
+ *
+ * <li>If {@code v1} and {@code v2} are both NaN, then {@code v1
+ * == v2} has the value {@code false}. Therefore, for two NaN
+ * arguments the <em>reflexive</em> property of an equivalence
+ * relation is <em>not</em> satisfied by the {@code ==} operator.
+ *
+ * <li>If {@code v1} represents {@code +0.0} while {@code v2}
+ * represents {@code -0.0}, or vice versa, then {@code v1 == v2} has
+ * the value {@code true} even though {@code +0.0} and {@code -0.0}
+ * are distinguishable under various floating-point operations. For
+ * example, {@code 1.0/+0.0} evaluates to positive infinity while
+ * {@code 1.0/-0.0} evaluates to <em>negative</em> infinity and
+ * positive infinity and negative infinity are neither equal to each
+ * other nor equivalent to each other. Thus, while a signed zero input
+ * most commonly determines the sign of a zero result, because of
+ * dividing by zero, {@code +0.0} and {@code -0.0} may not be
+ * substituted for each other in general. The sign of a zero input
+ * also has a non-substitutable effect on the result of some math
+ * library methods.
+ *
+ * </ul>
+ *
+ * <p>For ordered comparisons using the built-in comparison operators
+ * ({@code <}, {@code <=}, etc.), NaN values have another anomalous
+ * situation: a NaN is neither less than, nor greater than, nor equal
+ * to any value, including itself. This means the <i>trichotomy of
+ * comparison</i> does <em>not</em> hold.
+ *
+ * <p>To provide the appropriate semantics for {@code equals} and
+ * {@code compareTo} methods, those methods cannot simply be wrappers
+ * around {@code ==} or ordered comparison operations. Instead, {@link
+ * Double#equals equals} uses {@linkplain ##repEquivalence representation
+ * equivalence}, defining NaN arguments to be equal to each other,
+ * restoring reflexivity, and defining {@code +0.0} to <em>not</em> be
+ * equal to {@code -0.0}. For comparisons, {@link Double#compareTo
+ * compareTo} defines a total order where {@code -0.0} is less than
+ * {@code +0.0} and where a NaN is equal to itself and considered
+ * greater than positive infinity.
+ *
+ * <p>The operational semantics of {@code equals} and {@code
+ * compareTo} are expressed in terms of {@linkplain #doubleToLongBits
+ * bit-wise converting} the floating-point values to integral values.
+ *
+ * <p>The <em>natural ordering</em> implemented by {@link #compareTo
+ * compareTo} is {@linkplain Comparable consistent with equals}. That
+ * is, two objects are reported as equal by {@code equals} if and only
+ * if {@code compareTo} on those objects returns zero.
+ *
+ * <p>The adjusted behaviors defined for {@code equals} and {@code
+ * compareTo} allow instances of wrapper classes to work properly with
+ * conventional data structures. For example, defining NaN
+ * values to be {@code equals} to one another allows NaN to be used as
+ * an element of a {@link java.util.HashSet HashSet} or as the key of
+ * a {@link java.util.HashMap HashMap}. Similarly, defining {@code
+ * compareTo} as a total ordering, including {@code +0.0}, {@code
+ * -0.0}, and NaN, allows instances of wrapper classes to be used as
+ * elements of a {@link java.util.SortedSet SortedSet} or as keys of a
+ * {@link java.util.SortedMap SortedMap}.
+ *
+ * <p>Comparing numerical equality to various useful equivalence
+ * relations that can be defined over floating-point values:
+ *
+ * <dl>
+ * <dt><a id=fpNumericalEq></a><dfn>{@index "numerical equality"}</dfn> ({@code ==}
+ * operator): (<em>Not</em> an equivalence relation)</dt>
+ * <dd>Two floating-point values represent the same extended real
+ * number. The extended real numbers are the real numbers augmented
+ * with positive infinity and negative infinity. Under numerical
+ * equality, {@code +0.0} and {@code -0.0} are equal since they both
+ * map to the same real value, 0. A NaN does not map to any real
+ * number and is not equal to any value, including itself.
+ * </dd>
+ *
+ * <dt><dfn>{@index "bit-wise equivalence"}</dfn>:</dt>
+ * <dd>The bits of the two floating-point values are the same. This
+ * equivalence relation for {@code double} values {@code a} and {@code
+ * b} is implemented by the expression
+ * <br>{@code Double.doubleTo}<code><b>Raw</b></code>{@code LongBits(a) == Double.doubleTo}<code><b>Raw</b></code>{@code LongBits(b)}<br>
+ * Under this relation, {@code +0.0} and {@code -0.0} are
+ * distinguished from each other and every bit pattern encoding a NaN
+ * is distinguished from every other bit pattern encoding a NaN.
+ * </dd>
+ *
+ * <dt><dfn><a id=repEquivalence></a>{@index "representation equivalence"}</dfn>:</dt>
+ * <dd>The two floating-point values represent the same IEEE 754
+ * <i>datum</i>. In particular, for {@linkplain #isFinite(double)
+ * finite} values, the sign, {@linkplain Math#getExponent(double)
+ * exponent}, and significand components of the floating-point values
+ * are the same. Under this relation:
+ * <ul>
+ * <li> {@code +0.0} and {@code -0.0} are distinguished from each other.
+ * <li> every bit pattern encoding a NaN is considered equivalent to each other
+ * <li> positive infinity is equivalent to positive infinity; negative
+ *      infinity is equivalent to negative infinity.
+ * </ul>
+ * Expressions implementing this equivalence relation include:
+ * <ul>
+ * <li>{@code Double.doubleToLongBits(a) == Double.doubleToLongBits(b)}
+ * <li>{@code Double.valueOf(a).equals(Double.valueOf(b))}
+ * <li>{@code Double.compare(a, b) == 0}
+ * </ul>
+ * Note that representation equivalence is often an appropriate notion
+ * of equivalence to test the behavior of {@linkplain StrictMath math
+ * libraries}.
+ * </dd>
+ * </dl>
+ *
+ * For two binary floating-point values {@code a} and {@code b}, if
+ * neither of {@code a} and {@code b} is zero or NaN, then the three
+ * relations numerical equality, bit-wise equivalence, and
+ * representation equivalence of {@code a} and {@code b} have the same
+ * {@code true}/{@code false} value. In other words, for binary
+ * floating-point values, the three relations only differ if at least
+ * one argument is zero or NaN.
+ *
+ * <h2><a id=decimalToBinaryConversion>Decimal &harr; Binary Conversion Issues</a></h2>
+ *
+ * Many surprising results of binary floating-point arithmetic trace
+ * back to aspects of decimal to binary conversion and binary to
+ * decimal conversion. While integer values can be exactly represented
+ * in any base, which fractional values can be exactly represented in
+ * a base is a function of the base. For example, in base 10, 1/3 is a
+ * repeating fraction (0.33333....); but in base 3, 1/3 is exactly
+ * 0.1<sub>(3)</sub>, that is 1&nbsp;&times;&nbsp;3<sup>-1</sup>.
+ * Similarly, in base 10, 1/10 is exactly representable as 0.1
+ * (1&nbsp;&times;&nbsp;10<sup>-1</sup>), but in base 2, it is a
+ * repeating fraction (0.0001100110011...<sub>(2)</sub>).
+ *
+ * <p>Values of the {@code float} type have {@value Float#PRECISION}
+ * bits of precision and values of the {@code double} type have
+ * {@value Double#PRECISION} bits of precision. Therefore, since 0.1
+ * is a repeating fraction in base 2 with a four-bit repeat, {@code
+ * 0.1f} != {@code 0.1d}. In more detail, including hexadecimal
+ * floating-point literals:
+ *
+ * <ul>
+ * <li>The exact numerical value of {@code 0.1f} ({@code 0x1.99999a0000000p-4f}) is
+ *     0.100000001490116119384765625.
+ * <li>The exact numerical value of {@code 0.1d} ({@code 0x1.999999999999ap-4d}) is
+ *     0.1000000000000000055511151231257827021181583404541015625.
+ * </ul>
+ *
+ * These are the closest {@code float} and {@code double} values,
+ * respectively, to the numerical value of 0.1.  These results are
+ * consistent with a {@code float} value having the equivalent of 6 to
+ * 9 digits of decimal precision and a {@code double} value having the
+ * equivalent of 15 to 17 digits of decimal precision. (The
+ * equivalent precision varies according to the different relative
+ * densities of binary and decimal values at different points along the
+ * real number line.)
+ *
+ * <p>This representation hazard of decimal fractions is one reason to
+ * use caution when storing monetary values as {@code float} or {@code
+ * double}. Alternatives include:
+ * <ul>
+ * <li>using {@link java.math.BigDecimal BigDecimal} to store decimal
+ * fractional values exactly
+ *
+ * <li>scaling up so the monetary value is an integer &mdash; for
+ * example, multiplying by 100 if the value is denominated in cents or
+ * multiplying by 1000 if the value is denominated in mills &mdash;
+ * and then storing that scaled value in an integer type
+ *
+ *</ul>
+ *
+ * <p>For each finite floating-point value and a given floating-point
+ * type, there is a contiguous region of the real number line which
+ * maps to that value. Under the default round to nearest rounding
+ * policy (JLS {@jls 15.4}), this contiguous region for a value is
+ * typically one {@linkplain Math#ulp ulp} (unit in the last place)
+ * wide and centered around the exactly representable value. (At
+ * exponent boundaries, the region is asymmetrical and larger on the
+ * side with the larger exponent.) For example, for {@code 0.1f}, the
+ * region can be computed as follows:
+ *
+ * <br>// Numeric values listed are exact values
+ * <br>oneTenthApproxAsFloat = 0.100000001490116119384765625;
+ * <br>ulpOfoneTenthApproxAsFloat = Math.ulp(0.1f) = 7.450580596923828125E-9;
+ * <br>// Numeric range that is converted to the float closest to 0.1, _excludes_ endpoints
+ * <br>(oneTenthApproxAsFloat - &frac12;ulpOfoneTenthApproxAsFloat, oneTenthApproxAsFloat + &frac12;ulpOfoneTenthApproxAsFloat) =
+ * <br>(0.0999999977648258209228515625, 0.1000000052154064178466796875)
+ *
+ * <p>In particular, a correctly rounded decimal to binary conversion
+ * of any string representing a number in this range, say by {@link
+ * Float#parseFloat(String)}, will be converted to the same value:
+ *
+ * {@snippet lang="java" :
+ * Float.parseFloat("0.0999999977648258209228515625000001"); // rounds up to oneTenthApproxAsFloat
+ * Float.parseFloat("0.099999998");                          // rounds up to oneTenthApproxAsFloat
+ * Float.parseFloat("0.1");                                  // rounds up to oneTenthApproxAsFloat
+ * Float.parseFloat("0.100000001490116119384765625");        // exact conversion
+ * Float.parseFloat("0.100000005215406417846679687");        // rounds down to oneTenthApproxAsFloat
+ * Float.parseFloat("0.100000005215406417846679687499999");  // rounds down to oneTenthApproxAsFloat
+ * }
+ *
+ * <p>Similarly, an analogous range can be constructed  for the {@code
+ * double} type based on the exact value of {@code double}
+ * approximation to {@code 0.1d} and the numerical value of {@code
+ * Math.ulp(0.1d)} and likewise for other particular numerical values
+ * in the {@code float} and {@code double} types.
+ *
+ * <p>As seen in the above conversions, compared to the exact
+ * numerical value the operation would have without rounding, the same
+ * floating-point value as a result can be:
+ * <ul>
+ * <li>greater than the exact result
+ * <li>equal to the exact result
+ * <li>less than the exact result
+ * </ul>
+ *
+ * A floating-point value doesn't "know" whether it was the result of
+ * rounding up, or rounding down, or an exact operation; it contains
+ * no history of how it was computed. Consequently, the sum of
+ * {@snippet lang="java" :
+ * 0.1f + 0.1f + 0.1f + 0.1f + 0.1f + 0.1f + 0.1f + 0.1f + 0.1f + 0.1f;
+ * // Numerical value of computed sum: 1.00000011920928955078125,
+ * // the next floating-point value larger than 1.0f, equal to Math.nextUp(1.0f).
+ * }
+ * or
+ * {@snippet lang="java" :
+ * 0.1d + 0.1d + 0.1d + 0.1d + 0.1d + 0.1d + 0.1d + 0.1d + 0.1d + 0.1d;
+ * // Numerical value of computed sum: 0.99999999999999988897769753748434595763683319091796875,
+ * // the next floating-point value smaller than 1.0d, equal to Math.nextDown(1.0d).
+ * }
+ *
+ * should <em>not</em> be expected to be exactly equal to 1.0, but
+ * only to be close to 1.0. Consequently, the following code is an
+ * infinite loop:
+ *
+ * {@snippet lang="java" :
+ * double d = 0.0;
+ * while (d != 1.0) { // Surprising infinite loop
+ *   d += 0.1; // Sum never _exactly_ equals 1.0
+ * }
+ * }
+ *
+ * Instead, use an integer loop count for counted loops:
+ *
+ * {@snippet lang="java" :
+ * double d = 0.0;
+ * for (int i = 0; i < 10; i++) {
+ *   d += 0.1;
+ * } // Value of d is equal to Math.nextDown(1.0).
+ * }
+ *
+ * or test against a floating-point limit using ordered comparisons
+ * ({@code <}, {@code <=}, {@code >}, {@code >=}):
+ *
+ * {@snippet lang="java" :
+ *  double d = 0.0;
+ *  while (d <= 1.0) {
+ *    d += 0.1;
+ *  } // Value of d approximately 1.0999999999999999
+ *  }
+ *
+ * While floating-point arithmetic may have surprising results, IEEE
+ * 754 floating-point arithmetic follows a principled design and its
+ * behavior is predictable on the Java platform.
+ *
+ * @jls 4.2.3 Floating-Point Types and Values
+ * @jls 4.2.4 Floating-Point Operations
+ * @jls 15.21.1 Numerical Equality Operators == and !=
+ * @jls 15.20.1 Numerical Comparison Operators {@code <}, {@code <=}, {@code >}, and {@code >=}
+ *
+ * @spec https://standards.ieee.org/ieee/754/6210/
+ *       IEEE Standard for Floating-Point Arithmetic
+ *
  * @since 1.0
  */
 @jdk.internal.ValueBased
@@ -75,9 +374,9 @@ public final class Double extends Number
     public static final double NEGATIVE_INFINITY = -1.0 / 0.0;
 
     /**
-     * A constant holding a Not-a-Number (NaN) value of type
-     * {@code double}. It is equivalent to the value returned by
-     * {@code Double.longBitsToDouble(0x7ff8000000000000L)}.
+     * A constant holding a Not-a-Number (NaN) value of type {@code double}.
+     * It is {@linkplain Double##equivalenceRelation equivalent} to the
+     * value returned by {@code Double.longBitsToDouble(0x7ff8000000000000L)}.
      */
     public static final double NaN = 0.0d / 0.0;
 
@@ -111,32 +410,43 @@ public final class Double extends Number
     public static final double MIN_VALUE = 0x0.0000000000001P-1022; // 4.9e-324
 
     /**
-     * Maximum exponent a finite {@code double} variable may have.
-     * It is equal to the value returned by
-     * {@code Math.getExponent(Double.MAX_VALUE)}.
-     *
-     * @since 1.6
-     */
-    public static final int MAX_EXPONENT = 1023;
-
-    /**
-     * Minimum exponent a normalized {@code double} variable may
-     * have.  It is equal to the value returned by
-     * {@code Math.getExponent(Double.MIN_NORMAL)}.
-     *
-     * @since 1.6
-     */
-    public static final int MIN_EXPONENT = -1022;
-
-    /**
-     * The number of bits used to represent a {@code double} value.
+     * The number of bits used to represent a {@code double} value,
+     * {@value}.
      *
      * @since 1.5
      */
     public static final int SIZE = 64;
 
     /**
-     * The number of bytes used to represent a {@code double} value.
+     * The number of bits in the significand of a {@code double}
+     * value, {@value}.  This is the parameter N in section {@jls
+     * 4.2.3} of <cite>The Java Language Specification</cite>.
+     *
+     * @since 19
+     */
+    public static final int PRECISION = 53;
+
+    /**
+     * Maximum exponent a finite {@code double} variable may have,
+     * {@value}.  It is equal to the value returned by {@code
+     * Math.getExponent(Double.MAX_VALUE)}.
+     *
+     * @since 1.6
+     */
+    public static final int MAX_EXPONENT = (1 << (SIZE - PRECISION - 1)) - 1; // 1023
+
+    /**
+     * Minimum exponent a normalized {@code double} variable may have,
+     * {@value}.  It is equal to the value returned by {@code
+     * Math.getExponent(Double.MIN_NORMAL)}.
+     *
+     * @since 1.6
+     */
+    public static final int MIN_EXPONENT = 1 - MAX_EXPONENT; // -1022
+
+    /**
+     * The number of bytes used to represent a {@code double} value,
+     * {@value}.
      *
      * @since 1.8
      */
@@ -148,8 +458,7 @@ public final class Double extends Number
      *
      * @since 1.1
      */
-    @SuppressWarnings("unchecked")
-    public static final Class<Double>   TYPE = (Class<Double>) Class.getPrimitiveClass("double");
+    public static final Class<Double> TYPE = Class.getPrimitiveClass("double");
 
     /**
      * Returns a string representation of the {@code double}
@@ -173,48 +482,135 @@ public final class Double extends Number
      * {@code "-0.0"} and positive zero produces the result
      * {@code "0.0"}.
      *
-     * <li>If <i>m</i> is greater than or equal to 10<sup>-3</sup> but less
-     * than 10<sup>7</sup>, then it is represented as the integer part of
-     * <i>m</i>, in decimal form with no leading zeroes, followed by
-     * '{@code .}' ({@code '\u005Cu002E'}), followed by one or
-     * more decimal digits representing the fractional part of <i>m</i>.
+     * <li> Otherwise <i>m</i> is positive and finite.
+     * It is converted to a string in two stages:
+     * <ul>
+     * <li> <em>Selection of a decimal</em>:
+     * A well-defined decimal <i>d</i><sub><i>m</i></sub>
+     * is selected to represent <i>m</i>.
+     * This decimal is (almost always) the <em>shortest</em> one that
+     * rounds to <i>m</i> according to the round to nearest
+     * rounding policy of IEEE 754 floating-point arithmetic.
+     * <li> <em>Formatting as a string</em>:
+     * The decimal <i>d</i><sub><i>m</i></sub> is formatted as a string,
+     * either in plain or in computerized scientific notation,
+     * depending on its value.
+     * </ul>
+     * </ul>
+     * </ul>
      *
-     * <li>If <i>m</i> is less than 10<sup>-3</sup> or greater than or
-     * equal to 10<sup>7</sup>, then it is represented in so-called
-     * "computerized scientific notation." Let <i>n</i> be the unique
-     * integer such that 10<sup><i>n</i></sup> &le; <i>m</i> {@literal <}
-     * 10<sup><i>n</i>+1</sup>; then let <i>a</i> be the
-     * mathematically exact quotient of <i>m</i> and
-     * 10<sup><i>n</i></sup> so that 1 &le; <i>a</i> {@literal <} 10. The
-     * magnitude is then represented as the integer part of <i>a</i>,
-     * as a single decimal digit, followed by '{@code .}'
-     * ({@code '\u005Cu002E'}), followed by decimal digits
-     * representing the fractional part of <i>a</i>, followed by the
-     * letter '{@code E}' ({@code '\u005Cu0045'}), followed
-     * by a representation of <i>n</i> as a decimal integer, as
-     * produced by the method {@link Integer#toString(int)}.
+     * <p>A <em>decimal</em> is a number of the form
+     * <i>s</i>&times;10<sup><i>i</i></sup>
+     * for some (unique) integers <i>s</i> &gt; 0 and <i>i</i> such that
+     * <i>s</i> is not a multiple of 10.
+     * These integers are the <em>significand</em> and
+     * the <em>exponent</em>, respectively, of the decimal.
+     * The <em>length</em> of the decimal is the (unique)
+     * positive integer <i>n</i> meeting
+     * 10<sup><i>n</i>-1</sup> &le; <i>s</i> &lt; 10<sup><i>n</i></sup>.
+     *
+     * <p>The decimal <i>d</i><sub><i>m</i></sub> for a finite positive <i>m</i>
+     * is defined as follows:
+     * <ul>
+     * <li>Let <i>R</i> be the set of all decimals that round to <i>m</i>
+     * according to the usual <em>round to nearest</em> rounding policy of
+     * IEEE 754 floating-point arithmetic.
+     * <li>Let <i>p</i> be the minimal length over all decimals in <i>R</i>.
+     * <li>When <i>p</i> &ge; 2, let <i>T</i> be the set of all decimals
+     * in <i>R</i> with length <i>p</i>.
+     * Otherwise, let <i>T</i> be the set of all decimals
+     * in <i>R</i> with length 1 or 2.
+     * <li>Define <i>d</i><sub><i>m</i></sub> as the decimal in <i>T</i>
+     * that is closest to <i>m</i>.
+     * Or if there are two such decimals in <i>T</i>,
+     * select the one with the even significand.
+     * </ul>
+     *
+     * <p>The (uniquely) selected decimal <i>d</i><sub><i>m</i></sub>
+     * is then formatted.
+     * Let <i>s</i>, <i>i</i> and <i>n</i> be the significand, exponent and
+     * length of <i>d</i><sub><i>m</i></sub>, respectively.
+     * Further, let <i>e</i> = <i>n</i> + <i>i</i> - 1 and let
+     * <i>s</i><sub>1</sub>&hellip;<i>s</i><sub><i>n</i></sub>
+     * be the usual decimal expansion of <i>s</i>.
+     * Note that <i>s</i><sub>1</sub> &ne; 0
+     * and <i>s</i><sub><i>n</i></sub> &ne; 0.
+     * Below, the decimal point {@code '.'} is {@code '\u005Cu002E'}
+     * and the exponent indicator {@code 'E'} is {@code '\u005Cu0045'}.
+     * <ul>
+     * <li>Case -3 &le; <i>e</i> &lt; 0:
+     * <i>d</i><sub><i>m</i></sub> is formatted as
+     * <code>0.0</code>&hellip;<code>0</code><!--
+     * --><i>s</i><sub>1</sub>&hellip;<i>s</i><sub><i>n</i></sub>,
+     * where there are exactly -(<i>n</i> + <i>i</i>) zeroes between
+     * the decimal point and <i>s</i><sub>1</sub>.
+     * For example, 123 &times; 10<sup>-4</sup> is formatted as
+     * {@code 0.0123}.
+     * <li>Case 0 &le; <i>e</i> &lt; 7:
+     * <ul>
+     * <li>Subcase <i>i</i> &ge; 0:
+     * <i>d</i><sub><i>m</i></sub> is formatted as
+     * <i>s</i><sub>1</sub>&hellip;<i>s</i><sub><i>n</i></sub><!--
+     * --><code>0</code>&hellip;<code>0.0</code>,
+     * where there are exactly <i>i</i> zeroes
+     * between <i>s</i><sub><i>n</i></sub> and the decimal point.
+     * For example, 123 &times; 10<sup>2</sup> is formatted as
+     * {@code 12300.0}.
+     * <li>Subcase <i>i</i> &lt; 0:
+     * <i>d</i><sub><i>m</i></sub> is formatted as
+     * <i>s</i><sub>1</sub>&hellip;<!--
+     * --><i>s</i><sub><i>n</i>+<i>i</i></sub><code>.</code><!--
+     * --><i>s</i><sub><i>n</i>+<i>i</i>+1</sub>&hellip;<!--
+     * --><i>s</i><sub><i>n</i></sub>,
+     * where there are exactly -<i>i</i> digits to the right of
+     * the decimal point.
+     * For example, 123 &times; 10<sup>-1</sup> is formatted as
+     * {@code 12.3}.
+     * </ul>
+     * <li>Case <i>e</i> &lt; -3 or <i>e</i> &ge; 7:
+     * computerized scientific notation is used to format
+     * <i>d</i><sub><i>m</i></sub>.
+     * Here <i>e</i> is formatted as by {@link Integer#toString(int)}.
+     * <ul>
+     * <li>Subcase <i>n</i> = 1:
+     * <i>d</i><sub><i>m</i></sub> is formatted as
+     * <i>s</i><sub>1</sub><code>.0E</code><i>e</i>.
+     * For example, 1 &times; 10<sup>23</sup> is formatted as
+     * {@code 1.0E23}.
+     * <li>Subcase <i>n</i> &gt; 1:
+     * <i>d</i><sub><i>m</i></sub> is formatted as
+     * <i>s</i><sub>1</sub><code>.</code><i>s</i><sub>2</sub><!--
+     * -->&hellip;<i>s</i><sub><i>n</i></sub><code>E</code><i>e</i>.
+     * For example, 123 &times; 10<sup>-21</sup> is formatted as
+     * {@code 1.23E-19}.
      * </ul>
      * </ul>
-     * How many digits must be printed for the fractional part of
-     * <i>m</i> or <i>a</i>? There must be at least one digit to represent
-     * the fractional part, and beyond that as many, but only as many, more
-     * digits as are needed to uniquely distinguish the argument value from
-     * adjacent values of type {@code double}. That is, suppose that
-     * <i>x</i> is the exact mathematical value represented by the decimal
-     * representation produced by this method for a finite nonzero argument
-     * <i>d</i>. Then <i>d</i> must be the {@code double} value nearest
-     * to <i>x</i>; or if two {@code double} values are equally close
-     * to <i>x</i>, then <i>d</i> must be one of them and the least
-     * significant bit of the significand of <i>d</i> must be {@code 0}.
      *
      * <p>To create localized string representations of a floating-point
      * value, use subclasses of {@link java.text.NumberFormat}.
+     *
+     * @apiNote
+     * This method corresponds to the general functionality of the
+     * convertToDecimalCharacter operation defined in IEEE 754;
+     * however, that operation is defined in terms of specifying the
+     * number of significand digits used in the conversion.
+     * Code to do such a conversion in the Java platform includes
+     * converting the {@code double} to a {@link java.math.BigDecimal
+     * BigDecimal} exactly and then rounding the {@code BigDecimal} to
+     * the desired number of digits; sample code:
+     * {@snippet lang=java :
+     * double d = 0.1;
+     * int digits = 25;
+     * BigDecimal bd = new BigDecimal(d);
+     * String result = bd.round(new MathContext(digits,  RoundingMode.HALF_UP));
+     * // 0.1000000000000000055511151
+     * }
      *
      * @param   d   the {@code double} to be converted.
      * @return a string representation of the argument.
      */
     public static String toString(double d) {
-        return FloatingDecimal.toJavaFormatString(d);
+        return DoubleToDecimal.toString(d);
     }
 
     /**
@@ -290,10 +686,14 @@ public final class Double extends Number
      *     <td>{@code 0x0.0000000000001p-1022}</td>
      * </tbody>
      * </table>
+     *
+     * @apiNote
+     * This method corresponds to the convertToHexCharacter operation
+     * defined in IEEE 754.
+     *
      * @param   d   the {@code double} to be converted.
      * @return a hex string representation of the argument.
      * @since 1.5
-     * @author Joseph D. Darcy
      */
     public static String toHexString(double d) {
         /*
@@ -301,56 +701,80 @@ public final class Double extends Number
          * 7.19.6.1; however, the output of this method is more
          * tightly specified.
          */
-        if (!isFinite(d) )
+        if (!isFinite(d)) {
             // For infinity and NaN, use the decimal output.
             return Double.toString(d);
-        else {
-            // Initialized to maximum size of output.
-            StringBuilder answer = new StringBuilder(24);
-
-            if (Math.copySign(1.0, d) == -1.0)    // value is negative,
-                answer.append("-");                  // so append sign info
-
-            answer.append("0x");
-
-            d = Math.abs(d);
-
-            if(d == 0.0) {
-                answer.append("0.0p0");
-            } else {
-                boolean subnormal = (d < Double.MIN_NORMAL);
-
-                // Isolate significand bits and OR in a high-order bit
-                // so that the string representation has a known
-                // length.
-                long signifBits = (Double.doubleToLongBits(d)
-                                   & DoubleConsts.SIGNIF_BIT_MASK) |
-                    0x1000000000000000L;
-
-                // Subnormal values have a 0 implicit bit; normal
-                // values have a 1 implicit bit.
-                answer.append(subnormal ? "0." : "1.");
-
-                // Isolate the low-order 13 digits of the hex
-                // representation.  If all the digits are zero,
-                // replace with a single 0; otherwise, remove all
-                // trailing zeros.
-                String signif = Long.toHexString(signifBits).substring(3,16);
-                answer.append(signif.equals("0000000000000") ? // 13 zeros
-                              "0":
-                              signif.replaceFirst("0{1,12}$", ""));
-
-                answer.append('p');
-                // If the value is subnormal, use the E_min exponent
-                // value for double; otherwise, extract and report d's
-                // exponent (the representation of a subnormal uses
-                // E_min -1).
-                answer.append(subnormal ?
-                              Double.MIN_EXPONENT:
-                              Math.getExponent(d));
-            }
-            return answer.toString();
         }
+
+        long doubleToLongBits = Double.doubleToLongBits(d);
+        boolean negative = doubleToLongBits < 0;
+
+        if (d == 0.0) {
+            return negative ? "-0x0.0p0" : "0x0.0p0";
+        }
+        d = Math.abs(d);
+        // Check if the value is subnormal (less than the smallest normal value)
+        boolean subnormal = d < Double.MIN_NORMAL;
+
+        // Isolate significand bits and OR in a high-order bit
+        // so that the string representation has a known length.
+        // This ensures we always have 13 hex digits to work with (52 bits / 4 bits per hex digit)
+        long signifBits = doubleToLongBits & DoubleConsts.SIGNIF_BIT_MASK;
+
+        // Calculate the number of trailing zeros in the significand (in groups of 4 bits)
+        // This is used to remove trailing zeros from the hex representation
+        // We limit to 12 because we want to keep at least 1 hex digit (13 total - 12 = 1)
+        // assert 0 <= trailingZeros && trailingZeros <= 12
+        int trailingZeros = Long.numberOfTrailingZeros(signifBits | 1L << 4 * 12) >> 2;
+
+        // Determine the exponent value based on whether the number is subnormal or normal
+        // Subnormal numbers use the minimum exponent, normal numbers use the actual exponent
+        int exp = subnormal ? Double.MIN_EXPONENT : Math.getExponent(d);
+
+        // Calculate the total length of the resulting string:
+        // Sign (optional) + prefix "0x" + implicit bit + "." + hex digits + "p" + exponent
+        int charlen = (negative ? 1 : 0) // sign character
+                + 4 // "0x1." or "0x0."
+                + 13 - trailingZeros // hex digits (13 max, minus trailing zeros)
+                + 1 // "p"
+                + DecimalDigits.stringSize(exp) // exponent
+                ;
+
+        // Create a byte array to hold the result characters
+        byte[] chars = new byte[charlen];
+        int index = 0;
+
+        // Add the sign character if the number is negative
+        if (negative) {  // value is negative
+            chars[index++] = '-';
+        }
+
+        // Add the prefix and the implicit bit ('1' for normal, '0' for subnormal)
+        // Subnormal values have a 0 implicit bit; normal values have a 1 implicit bit.
+        chars[index    ] = '0';      // Hex prefix
+        chars[index + 1] = 'x';  // Hex prefix
+        chars[index + 2] = (byte) (subnormal ? '0' : '1');  // Implicit bit
+        chars[index + 3] = '.';  // Decimal point
+        index += 4;
+
+        // Convert significand to hex digits manually to avoid creating temporary strings
+        // Extract the 13 hex digits (52 bits) from signifBits
+        // We need to extract bits 48-51, 44-47, ..., 0-3 (13 groups of 4 bits)
+        for (int sh = 4 * 12, end = 4 * trailingZeros; sh >= end; sh -= 4) {
+            // Extract 4 bits at a time from left to right
+            // Shift right by sh positions and mask with 0xF
+            // Integer.digits maps values 0-15 to '0'-'f' characters
+            chars[index++] = Integer.digits[((int)(signifBits >> sh)) & 0xF];
+        }
+
+        // Add the exponent indicator
+        chars[index] = 'p';
+
+        // Append the exponent value to the character array
+        // This method writes the decimal representation of exp directly into the byte array
+        DecimalDigits.uncheckedGetCharsLatin1(exp, charlen, chars);
+
+        return String.newStringWithLatin1Bytes(chars);
     }
 
     /**
@@ -436,10 +860,6 @@ public final class Double extends Number
      * Finally, after rounding a {@code Double} object representing
      * this {@code double} value is returned.
      *
-     * <p> To interpret localized string representations of a
-     * floating-point value, use subclasses of {@link
-     * java.text.NumberFormat}.
-     *
      * <p>Note that trailing format specifiers, specifiers that
      * determine the type of a floating-point literal
      * ({@code 1.0f} is a {@code float} value;
@@ -462,7 +882,7 @@ public final class Double extends Number
      * a {@code NumberFormatException} be thrown, the regular
      * expression below can be used to screen the input string:
      *
-     * <pre>{@code
+     * {@snippet lang="java" :
      *  final String Digits     = "(\\p{Digit}+)";
      *  final String HexDigits  = "(\\p{XDigit}+)";
      *  // an exponent is 'e' or 'E' followed by an optionally
@@ -501,19 +921,35 @@ public final class Double extends Number
      *        ")[pP][+-]?" + Digits + "))" +
      *       "[fFdD]?))" +
      *       "[\\x00-\\x20]*");// Optional trailing "whitespace"
-     *
+     *  // @link region substring="Pattern.matches" target ="java.util.regex.Pattern#matches"
      *  if (Pattern.matches(fpRegex, myString))
      *      Double.valueOf(myString); // Will not throw NumberFormatException
+     * // @end
      *  else {
      *      // Perform suitable alternative action
      *  }
-     * }</pre>
+     * }
+     *
+     * @apiNote To interpret localized string representations of a
+     * floating-point value, or string representations that have
+     * non-ASCII digits, use {@link java.text.NumberFormat}. For
+     * example,
+     * {@snippet lang="java" :
+     *     NumberFormat.getInstance(l).parse(s).doubleValue();
+     * }
+     * where {@code l} is the desired locale, or
+     * {@link java.util.Locale#ROOT} if locale insensitive.
+     *
+     * @apiNote
+     * This method corresponds to the convertFromDecimalCharacter and
+     * convertFromHexCharacter operations defined in IEEE 754.
      *
      * @param      s   the string to be parsed.
      * @return     a {@code Double} object holding the value
      *             represented by the {@code String} argument.
      * @throws     NumberFormatException  if the string does not contain a
      *             parsable number.
+     * @see Double##decimalToBinaryConversion Decimal &harr; Binary Conversion Issues
      */
     public static Double valueOf(String s) throws NumberFormatException {
         return new Double(parseDouble(s));
@@ -550,6 +986,7 @@ public final class Double extends Number
      * @throws NumberFormatException if the string does not contain
      *         a parsable {@code double}.
      * @see    java.lang.Double#valueOf(String)
+     * @see    Double##decimalToBinaryConversion Decimal &harr; Binary Conversion Issues
      * @since 1.2
      */
     public static double parseDouble(String s) throws NumberFormatException {
@@ -559,6 +996,10 @@ public final class Double extends Number
     /**
      * Returns {@code true} if the specified number is a
      * Not-a-Number (NaN) value, {@code false} otherwise.
+     *
+     * @apiNote
+     * This method corresponds to the isNaN operation defined in IEEE
+     * 754.
      *
      * @param   v   the value to be tested.
      * @return  {@code true} if the value of the argument is NaN;
@@ -572,12 +1013,17 @@ public final class Double extends Number
      * Returns {@code true} if the specified number is infinitely
      * large in magnitude, {@code false} otherwise.
      *
+     * @apiNote
+     * This method corresponds to the isInfinite operation defined in
+     * IEEE 754.
+     *
      * @param   v   the value to be tested.
      * @return  {@code true} if the value of the argument is positive
      *          infinity or negative infinity; {@code false} otherwise.
      */
+    @IntrinsicCandidate
     public static boolean isInfinite(double v) {
-        return (v == POSITIVE_INFINITY) || (v == NEGATIVE_INFINITY);
+        return Math.abs(v) > MAX_VALUE;
     }
 
     /**
@@ -585,11 +1031,16 @@ public final class Double extends Number
      * value; returns {@code false} otherwise (for NaN and infinity
      * arguments).
      *
+     * @apiNote
+     * This method corresponds to the isFinite operation defined in
+     * IEEE 754.
+     *
      * @param d the {@code double} value to be tested
      * @return {@code true} if the argument is a finite
      * floating-point value, {@code false} otherwise.
      * @since 1.8
      */
+    @IntrinsicCandidate
     public static boolean isFinite(double d) {
         return Math.abs(d) <= Double.MAX_VALUE;
     }
@@ -612,7 +1063,7 @@ public final class Double extends Number
      * {@link #valueOf(double)} is generally a better choice, as it is
      * likely to yield significantly better space and time performance.
      */
-    @Deprecated(since="9", forRemoval = true)
+    @Deprecated(since="9")
     public Double(double value) {
         this.value = value;
     }
@@ -633,7 +1084,7 @@ public final class Double extends Number
      * {@code double} primitive, or use {@link #valueOf(String)}
      * to convert a string to a {@code Double} object.
      */
-    @Deprecated(since="9", forRemoval = true)
+    @Deprecated(since="9")
     public Double(String s) throws NumberFormatException {
         value = parseDouble(s);
     }
@@ -683,6 +1134,7 @@ public final class Double extends Number
      * @jls 5.1.3 Narrowing Primitive Conversion
      * @since 1.1
      */
+    @Override
     public byte byteValue() {
         return (byte)value;
     }
@@ -696,6 +1148,7 @@ public final class Double extends Number
      * @jls 5.1.3 Narrowing Primitive Conversion
      * @since 1.1
      */
+    @Override
     public short shortValue() {
         return (short)value;
     }
@@ -705,9 +1158,14 @@ public final class Double extends Number
      * after a narrowing primitive conversion.
      * @jls 5.1.3 Narrowing Primitive Conversion
      *
+     * @apiNote
+     * This method corresponds to the convertToIntegerTowardZero
+     * operation defined in IEEE 754.
+     *
      * @return  the {@code double} value represented by this object
      *          converted to type {@code int}
      */
+    @Override
     public int intValue() {
         return (int)value;
     }
@@ -716,10 +1174,15 @@ public final class Double extends Number
      * Returns the value of this {@code Double} as a {@code long}
      * after a narrowing primitive conversion.
      *
+     * @apiNote
+     * This method corresponds to the convertToIntegerTowardZero
+     * operation defined in IEEE 754.
+     *
      * @return  the {@code double} value represented by this object
      *          converted to type {@code long}
      * @jls 5.1.3 Narrowing Primitive Conversion
      */
+    @Override
     public long longValue() {
         return (long)value;
     }
@@ -728,11 +1191,16 @@ public final class Double extends Number
      * Returns the value of this {@code Double} as a {@code float}
      * after a narrowing primitive conversion.
      *
+     * @apiNote
+     * This method corresponds to the convertFormat operation defined
+     * in IEEE 754.
+     *
      * @return  the {@code double} value represented by this object
      *          converted to type {@code float}
      * @jls 5.1.3 Narrowing Primitive Conversion
      * @since 1.0
      */
+    @Override
     public float floatValue() {
         return (float)value;
     }
@@ -742,6 +1210,7 @@ public final class Double extends Number
      *
      * @return the {@code double} value represented by this object
      */
+    @Override
     @IntrinsicCandidate
     public double doubleValue() {
         return value;
@@ -782,8 +1251,7 @@ public final class Double extends Number
      * @since 1.8
      */
     public static int hashCode(double value) {
-        long bits = doubleToLongBits(value);
-        return (int)(bits ^ (bits >>> 32));
+        return Long.hashCode(doubleToLongBits(value));
     }
 
     /**
@@ -796,39 +1264,24 @@ public final class Double extends Number
      * the same if and only if the method {@link
      * #doubleToLongBits(double)} returns the identical
      * {@code long} value when applied to each.
+     * In other words, {@linkplain ##repEquivalence representation
+     * equivalence} is used to compare the {@code double} values.
      *
-     * <p>Note that in most cases, for two instances of class
-     * {@code Double}, {@code d1} and {@code d2}, the
-     * value of {@code d1.equals(d2)} is {@code true} if and
-     * only if
+     * @apiNote
+     * This method is defined in terms of {@link
+     * #doubleToLongBits(double)} rather than the {@code ==} operator
+     * on {@code double} values since the {@code ==} operator does
+     * <em>not</em> define an equivalence relation and to satisfy the
+     * {@linkplain Object#equals equals contract} an equivalence
+     * relation must be implemented; see {@linkplain ##equivalenceRelation
+     * this discussion for details of floating-point equality and equivalence}.
      *
-     * <blockquote>
-     *  {@code d1.doubleValue() == d2.doubleValue()}
-     * </blockquote>
-     *
-     * <p>also has the value {@code true}. However, there are two
-     * exceptions:
-     * <ul>
-     * <li>If {@code d1} and {@code d2} both represent
-     *     {@code Double.NaN}, then the {@code equals} method
-     *     returns {@code true}, even though
-     *     {@code Double.NaN==Double.NaN} has the value
-     *     {@code false}.
-     * <li>If {@code d1} represents {@code +0.0} while
-     *     {@code d2} represents {@code -0.0}, or vice versa,
-     *     the {@code equal} test has the value {@code false},
-     *     even though {@code +0.0==-0.0} has the value {@code true}.
-     * </ul>
-     * This definition allows hash tables to operate properly.
-     * @param   obj   the object to compare with.
-     * @return  {@code true} if the objects are the same;
-     *          {@code false} otherwise.
      * @see java.lang.Double#doubleToLongBits(double)
+     * @jls 15.21.1 Numerical Equality Operators == and !=
      */
     public boolean equals(Object obj) {
-        return (obj instanceof Double)
-               && (doubleToLongBits(((Double)obj).value) ==
-                      doubleToLongBits(value));
+        return (obj instanceof Double d) &&
+            (doubleToLongBits(d.value) == doubleToLongBits(value));
     }
 
     /**
@@ -936,13 +1389,13 @@ public final class Double extends Number
      * <p>In all other cases, let <i>s</i>, <i>e</i>, and <i>m</i> be three
      * values that can be computed from the argument:
      *
-     * <blockquote><pre>{@code
+     * {@snippet lang="java" :
      * int s = ((bits >> 63) == 0) ? 1 : -1;
      * int e = (int)((bits >> 52) & 0x7ffL);
      * long m = (e == 0) ?
      *                 (bits & 0xfffffffffffffL) << 1 :
      *                 (bits & 0xfffffffffffffL) | 0x10000000000000L;
-     * }</pre></blockquote>
+     * }
      *
      * Then the floating-point result equals the value of the mathematical
      * expression <i>s</i>&middot;<i>m</i>&middot;2<sup><i>e</i>-1075</sup>.
@@ -975,23 +1428,47 @@ public final class Double extends Number
     public static native double longBitsToDouble(long bits);
 
     /**
-     * Compares two {@code Double} objects numerically.  There
-     * are two ways in which comparisons performed by this method
-     * differ from those performed by the Java language numerical
-     * comparison operators ({@code <, <=, ==, >=, >})
-     * when applied to primitive {@code double} values:
-     * <ul><li>
-     *          {@code Double.NaN} is considered by this method
-     *          to be equal to itself and greater than all other
-     *          {@code double} values (including
-     *          {@code Double.POSITIVE_INFINITY}).
-     * <li>
-     *          {@code 0.0d} is considered by this method to be greater
-     *          than {@code -0.0d}.
+     * Compares two {@code Double} objects numerically.
+     *
+     * This method imposes a total order on {@code Double} objects
+     * with two differences compared to the incomplete order defined by
+     * the Java language numerical comparison operators ({@code <, <=,
+     * ==, >=, >}) on {@code double} values.
+     *
+     * <ul><li> A NaN is <em>unordered</em> with respect to other
+     *          values and unequal to itself under the comparison
+     *          operators.  This method chooses to define {@code
+     *          Double.NaN} to be equal to itself and greater than all
+     *          other {@code double} values (including {@code
+     *          Double.POSITIVE_INFINITY}).
+     *
+     *      <li> Positive zero and negative zero compare equal
+     *      numerically, but are distinct and distinguishable values.
+     *      This method chooses to define positive zero ({@code +0.0d}),
+     *      to be greater than negative zero ({@code -0.0d}).
      * </ul>
-     * This ensures that the <i>natural ordering</i> of
-     * {@code Double} objects imposed by this method is <i>consistent
-     * with equals</i>.
+     *
+     * This ensures that the <i>natural ordering</i> of {@code Double}
+     * objects imposed by this method is <i>consistent with
+     * equals</i>; see {@linkplain ##equivalenceRelation this
+     * discussion for details of floating-point comparison and
+     * ordering}.
+     *
+     * @apiNote
+     * The inclusion of a total order idiom in the Java SE API
+     * predates the inclusion of that functionality in the IEEE 754
+     * standard. The ordering of the totalOrder predicate chosen by
+     * IEEE 754 differs from the total order chosen by this method.
+     * While this method treats all NaN representations as being in
+     * the same equivalence class, the IEEE 754 total order defines an
+     * ordering based on the bit patterns of the NaN among the
+     * different NaN representations. The IEEE 754 order regards
+     * "negative" NaN representations, that is NaN representations
+     * whose sign bit is set, to be less than any finite or infinite
+     * value and less than any "positive" NaN. In addition, the IEEE
+     * order regards all positive NaN values as greater than positive
+     * infinity. See the IEEE 754 standard for full details of its
+     * total ordering.
      *
      * @param   anotherDouble   the {@code Double} to be compared.
      * @return  the value {@code 0} if {@code anotherDouble} is
@@ -1002,8 +1479,10 @@ public final class Double extends Number
      *          {@code Double} is numerically greater than
      *          {@code anotherDouble}.
      *
+     * @jls 15.20.1 Numerical Comparison Operators {@code <}, {@code <=}, {@code >}, and {@code >=}
      * @since   1.2
      */
+    @Override
     public int compareTo(Double anotherDouble) {
         return Double.compare(value, anotherDouble.value);
     }
@@ -1013,9 +1492,15 @@ public final class Double extends Number
      * of the integer value returned is the same as that of the
      * integer that would be returned by the call:
      * <pre>
-     *    new Double(d1).compareTo(new Double(d2))
+     *    Double.valueOf(d1).compareTo(Double.valueOf(d2))
      * </pre>
      *
+     * @apiNote
+     * One idiom to implement {@linkplain ##repEquivalence
+     * representation equivalence} on {@code double} values is
+     * {@snippet lang="java" :
+     * Double.compare(a, b) == 0
+     * }
      * @param   d1        the first {@code double} to compare
      * @param   d2        the second {@code double} to compare
      * @return  the value {@code 0} if {@code d1} is
@@ -1044,6 +1529,9 @@ public final class Double extends Number
     /**
      * Adds two {@code double} values together as per the + operator.
      *
+     * @apiNote This method corresponds to the addition operation
+     * defined in IEEE 754.
+     *
      * @param a the first operand
      * @param b the second operand
      * @return the sum of {@code a} and {@code b}
@@ -1059,6 +1547,10 @@ public final class Double extends Number
      * Returns the greater of two {@code double} values
      * as if by calling {@link Math#max(double, double) Math.max}.
      *
+     * @apiNote
+     * This method corresponds to the maximum operation defined in
+     * IEEE 754.
+     *
      * @param a the first operand
      * @param b the second operand
      * @return the greater of {@code a} and {@code b}
@@ -1072,6 +1564,10 @@ public final class Double extends Number
     /**
      * Returns the smaller of two {@code double} values
      * as if by calling {@link Math#min(double, double) Math.min}.
+     *
+     * @apiNote
+     * This method corresponds to the minimum operation defined in
+     * IEEE 754.
      *
      * @param a the first operand
      * @param b the second operand

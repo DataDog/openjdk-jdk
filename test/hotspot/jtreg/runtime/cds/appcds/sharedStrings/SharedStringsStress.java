@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,20 +25,29 @@
 /*
  * @test
  * @summary Write a lots of shared strings.
- * @requires vm.cds.archived.java.heap
+ * @requires vm.cds.write.mapped.java.heap
  * @library /test/hotspot/jtreg/runtime/cds/appcds /test/lib
  * @build HelloString
- * @run driver/timeout=500 SharedStringsStress
+ * @run driver/timeout=2600 SharedStringsStress
  */
+
+// This test requires the vm.cds.write.mapped.java.heap specifically as it has expectations
+// about using the mechanism for dumping the entire string table, which the streaming solution
+// does not do.
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import jdk.test.lib.cds.CDSOptions;
 import jdk.test.lib.cds.CDSTestUtils;
 import jdk.test.lib.process.OutputAnalyzer;
-import jdk.test.lib.process.ProcessTools;
 
 public class SharedStringsStress {
+    static {
+        // EpsilonGC will run out of memory.
+        CDSOptions.disableRuntimePrefixForEpsilonGC();
+    }
     static String sharedArchiveConfigFile = CDSTestUtils.getOutputDir() + File.separator + "SharedStringsStress_gen.txt";
 
     public static void main(String[] args) throws Exception {
@@ -47,7 +56,10 @@ public class SharedStringsStress {
             out.println("VERSION: 1.0");
             out.println("@SECTION: String");
             out.println("31: shared_test_string_unique_14325");
-            for (int i=0; i<200000; i++) {
+            // Create enough entries to require the shared string
+            // table to split into two levels of Object arrays. See
+            // StringTable::allocate_shared_table() in HotSpot.
+            for (int i=0; i<260000; i++) {
                 String s = "generated_string " + i;
                 out.println(s.length() + ": " + s);
             }
@@ -61,34 +73,18 @@ public class SharedStringsStress {
         String vmOptionsPrefix[] = SharedStringsUtils.getChildVMOptionsPrefix();
         String appJar = JarBuilder.build("SharedStringsStress", "HelloString");
 
-        String test_cases[][] = {
-            // default heap size
-            {},
+        OutputAnalyzer dumpOutput = TestCommon.dump(appJar, TestCommon.list("HelloString"),
+            TestCommon.concat(vmOptionsPrefix,
+                "-XX:SharedArchiveConfigFile=" + sharedArchiveConfigFile,
+                "-Xlog:aot",
+                "-Xlog:gc+region+cds",
+                "-Xlog:gc+region=trace"));
+        TestCommon.checkDump(dumpOutput);
 
-            // Test for handling of heap fragmentation. With sharedArchiveConfigFile, we will dump about
-            // 18MB of shared objects on 64 bit VM (smaller on 32-bit).
-            //
-            // During dump time, an extra copy of these objects are allocated,
-            // so we need about 36MB, plus a few MB for other system data. So 64MB total heap
-            // should be enough.
-            //
-            // The VM should executed a full GC to maximize contiguous free space and
-            // avoid fragmentation.
-            {"-Xmx64m"},
-        };
-
-        for (String[] extra_opts: test_cases) {
-            vmOptionsPrefix = TestCommon.concat(vmOptionsPrefix, extra_opts);
-
-            OutputAnalyzer dumpOutput = TestCommon.dump(appJar, TestCommon.list("HelloString"),
-                TestCommon.concat(vmOptionsPrefix,
-                    "-XX:SharedArchiveConfigFile=" + sharedArchiveConfigFile,
-                    "-Xlog:gc+region+cds",
-                    "-Xlog:gc+region=trace"));
-            TestCommon.checkDump(dumpOutput);
-            OutputAnalyzer execOutput = TestCommon.exec(appJar,
-                TestCommon.concat(vmOptionsPrefix, "HelloString"));
-            TestCommon.checkExec(execOutput);
-        }
+        // We could create up to 26MB of archived heap objects. Run with enough Xms to ensure
+        // SerialGC can accommodate the archived objects during VM start up.
+        OutputAnalyzer execOutput = TestCommon.exec(appJar,
+            TestCommon.concat(vmOptionsPrefix, "-Xlog:aot,cds", "-Xms128m", "HelloString"));
+        TestCommon.checkExec(execOutput);
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2022, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -104,7 +104,7 @@ final class CertificateAuthoritiesExtension {
                 byte[] encodedPrincipal = x500Principal.getEncoded();
                 sizeAccount += encodedPrincipal.length;
                 if (sizeAccount > 0xFFFF) {  // the size limit of this extension
-                    // If there too many trusts CAs such that they exceed the
+                    // If there are too many trusts CAs such that they exceed the
                     // size limit of the extension, enabling this extension
                     // does not really make sense as there is no way to
                     // indicate the peer certificate selection accurately.
@@ -122,8 +122,11 @@ final class CertificateAuthoritiesExtension {
             return authorities;
         }
 
+        // This method will throw IllegalArgumentException if the
+        // X500Principal cannot be parsed.
         X500Principal[] getAuthorities() {
             X500Principal[] principals = new X500Principal[authorities.size()];
+
             int i = 0;
             for (byte[] encoded : authorities) {
                 principals[i++] = new X500Principal(encoded);
@@ -138,8 +141,12 @@ final class CertificateAuthoritiesExtension {
                 "\"certificate authorities\": '['\n{0}']'", Locale.ENGLISH);
             StringBuilder builder = new StringBuilder(512);
             for (byte[] encoded : authorities) {
-                X500Principal principal = new X500Principal(encoded);
-                builder.append(principal.toString());
+                try {
+                    X500Principal principal = new X500Principal(encoded);
+                    builder.append(principal.toString());
+                } catch (IllegalArgumentException iae) {
+                    builder.append("unparseable distinguished name: " + iae);
+                }
                 builder.append("\n");
             }
             Object[] messageFields = {
@@ -185,7 +192,8 @@ final class CertificateAuthoritiesExtension {
             // Is it a supported and enabled extension?
             if (!chc.sslConfig.isAvailable(
                     SSLExtension.CH_CERTIFICATE_AUTHORITIES)) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                             "Ignore unavailable " +
                             "certificate_authorities extension");
@@ -198,7 +206,8 @@ final class CertificateAuthoritiesExtension {
             X509Certificate[] caCerts =
                     chc.sslContext.getX509TrustManager().getAcceptedIssuers();
             if (caCerts.length == 0) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                             "No available certificate authorities");
                 }
@@ -209,9 +218,10 @@ final class CertificateAuthoritiesExtension {
             List<byte[]> encodedCAs =
                     CertificateAuthoritiesSpec.getEncodedAuthorities(caCerts);
             if (encodedCAs.isEmpty()) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.warning(
-                            "The number of CAs exceeds the maximum size" +
+                            "The number of CAs exceeds the maximum size " +
                             "of the certificate_authorities extension");
                 }
 
@@ -263,7 +273,8 @@ final class CertificateAuthoritiesExtension {
             // Is it a supported and enabled extension?
             if (!shc.sslConfig.isAvailable(
                     SSLExtension.CH_CERTIFICATE_AUTHORITIES)) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                             "Ignore unavailable " +
                             "certificate_authorities extension");
@@ -277,7 +288,13 @@ final class CertificateAuthoritiesExtension {
                     new CertificateAuthoritiesSpec(shc, buffer);
 
             // Update the context.
-            shc.peerSupportedAuthorities = spec.getAuthorities();
+            try {
+                shc.peerSupportedAuthorities = spec.getAuthorities();
+            } catch (IllegalArgumentException iae) {
+                shc.conContext.fatal(Alert.DECODE_ERROR, "The distinguished " +
+                        "names of the peer's certificate authorities could " +
+                        "not be parsed", iae);
+            }
             shc.handshakeExtensions.put(
                     SSLExtension.CH_CERTIFICATE_AUTHORITIES, spec);
 
@@ -306,7 +323,8 @@ final class CertificateAuthoritiesExtension {
             // Is it a supported and enabled extension?
             if (!shc.sslConfig.isAvailable(
                     SSLExtension.CR_CERTIFICATE_AUTHORITIES)) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                             "Ignore unavailable " +
                             "certificate_authorities extension");
@@ -319,7 +337,8 @@ final class CertificateAuthoritiesExtension {
             X509Certificate[] caCerts =
                     shc.sslContext.getX509TrustManager().getAcceptedIssuers();
             if (caCerts.length == 0) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                             "No available certificate authorities");
                 }
@@ -330,7 +349,8 @@ final class CertificateAuthoritiesExtension {
             List<byte[]> encodedCAs =
                     CertificateAuthoritiesSpec.getEncodedAuthorities(caCerts);
             if (encodedCAs.isEmpty()) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.warning(
                         "Too many certificate authorities to use " +
                             "the certificate_authorities extension");
@@ -384,7 +404,8 @@ final class CertificateAuthoritiesExtension {
             // Is it a supported and enabled extension?
             if (!chc.sslConfig.isAvailable(
                     SSLExtension.CR_CERTIFICATE_AUTHORITIES)) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                             "Ignore unavailable " +
                             "certificate_authorities extension");
@@ -398,7 +419,13 @@ final class CertificateAuthoritiesExtension {
                     new CertificateAuthoritiesSpec(chc, buffer);
 
             // Update the context.
-            chc.peerSupportedAuthorities = spec.getAuthorities();
+            try {
+                chc.peerSupportedAuthorities = spec.getAuthorities();
+            } catch (IllegalArgumentException iae) {
+                chc.conContext.fatal(Alert.DECODE_ERROR, "The distinguished " +
+                        "names of the peer's certificate authorities could " +
+                        "not be parsed", iae);
+            }
             chc.handshakeExtensions.put(
                     SSLExtension.CR_CERTIFICATE_AUTHORITIES, spec);
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,25 +26,26 @@
 #define SHARE_JFR_UTILITIES_JFRCONCURRENTQUEUE_INLINE_HPP
 
 #include "jfr/utilities/jfrConcurrentQueue.hpp"
+
 #include "jfr/utilities/jfrConcurrentLinkedListHost.inline.hpp"
 #include "jfr/utilities/jfrVersionSystem.inline.hpp"
 
 template <typename NodeType, typename AllocPolicy>
-JfrConcurrentQueue<NodeType, AllocPolicy>::JfrConcurrentQueue() : _list(NULL), _head(), _last(), _tail(), _version_system() {
+JfrConcurrentQueue<NodeType, AllocPolicy>::JfrConcurrentQueue() : _list(nullptr), _head(), _last(), _tail(), _version_system() {
   _head._next = const_cast<NodePtr>(&_tail);
   _last._next = const_cast<NodePtr>(&_tail);
 }
 
 template <typename NodeType, typename AllocPolicy>
 bool JfrConcurrentQueue<NodeType, AllocPolicy>::initialize() {
-  assert(_list == NULL, "invariant");
+  assert(_list == nullptr, "invariant");
   _list = new JfrConcurrentLinkedListHost<JfrConcurrentQueue<NodeType, AllocPolicy>, HeadNode, AllocPolicy>(this);
-  return _list != NULL && _list->initialize();
+  return _list != nullptr && _list->initialize();
 }
 
 template <typename NodeType, typename AllocPolicy>
 inline bool JfrConcurrentQueue<NodeType, AllocPolicy>::is_empty() const {
-  return Atomic::load_acquire(&_head._next) == &_tail;
+  return AtomicAccess::load_acquire(&_head._next) == &_tail;
 }
 
 template <typename NodeType, typename AllocPolicy>
@@ -70,12 +71,12 @@ void JfrConcurrentQueue<NodeType, AllocPolicy>::iterate(Callback& cb) {
 
 template <typename NodeType, typename AllocPolicy>
 inline JfrVersionSystem::Handle JfrConcurrentQueue<NodeType, AllocPolicy>::get_version_handle() {
-  return _version_system.get_handle();
+  return _version_system.get();
 }
 
 template <typename NodeType, typename AllocPolicy>
 bool JfrConcurrentQueue<NodeType, AllocPolicy>::in_list(const NodeType* node) const {
-  assert(node != NULL, "invariant");
+  assert(node != nullptr, "invariant");
   return _list->in_list(node, const_cast<NodePtr>(&_head), &_tail);
 }
 

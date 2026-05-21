@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -48,15 +48,6 @@ import jdk.internal.access.SharedSecrets;
  * {@code RuntimeException}, so it is an unchecked exception
  * that wraps a checked exception.
  *
- * <p>As of release 1.4, this exception has been retrofitted to
- * conform to the general purpose exception-chaining mechanism.  The
- * "undeclared checked exception that was thrown by the invocation
- * handler" that may be provided at construction time and accessed via
- * the {@link #getUndeclaredThrowable()} method is now known as the
- * <i>cause</i>, and may be accessed via the {@link
- * Throwable#getCause()} method, as well as the aforementioned "legacy
- * method."
- *
  * @author      Peter Jones
  * @see         InvocationHandler
  * @since       1.3
@@ -70,7 +61,7 @@ public class UndeclaredThrowableException extends RuntimeException {
      * specified {@code Throwable}.
      *
      * @param   undeclaredThrowable the undeclared checked exception
-     *          that was thrown
+     *          that was thrown, may be {@code null}
      */
     public UndeclaredThrowableException(Throwable undeclaredThrowable) {
         super(null, undeclaredThrowable);  // Disallow initCause
@@ -81,8 +72,8 @@ public class UndeclaredThrowableException extends RuntimeException {
      * specified {@code Throwable} and a detail message.
      *
      * @param   undeclaredThrowable the undeclared checked exception
-     *          that was thrown
-     * @param   s the detail message
+     *          that was thrown, may be {@code null}
+     * @param   s the detail message, may be {@code null}
      */
     public UndeclaredThrowableException(Throwable undeclaredThrowable,
                                         String s)
@@ -94,7 +85,8 @@ public class UndeclaredThrowableException extends RuntimeException {
      * Returns the {@code Throwable} instance wrapped in this
      * {@code UndeclaredThrowableException}, which may be {@code null}.
      *
-     * <p>This method predates the general-purpose exception chaining facility.
+     * @apiNote
+     * This method predates the general-purpose exception chaining facility.
      * The {@link Throwable#getCause()} method is now the preferred means of
      * obtaining this information.
      *

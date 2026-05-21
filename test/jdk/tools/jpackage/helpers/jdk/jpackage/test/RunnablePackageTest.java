@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -41,6 +41,13 @@ public abstract class RunnablePackageTest {
                     .filter(Predicate.not(Action.INITIALIZE::equals))
                     .filter(Predicate.not(Action.FINALIZE::equals))
                     .collect(Collectors.toList()));
+            if (hasAction(Action.PURGE) && (!actionList.contains(Action.PURGE)
+                    && actionList.contains(Action.CREATE))) {
+                // Default action list contains "purge" action meaning
+                // packages are not needed for further processing.
+                // Copy this behavior in custom action list.
+                actionList.add(Action.PURGE);
+            }
         }
         actionList.add(Action.FINALIZE);
 
@@ -49,6 +56,10 @@ public abstract class RunnablePackageTest {
                 actionGroups.toArray(Action[][]::new))));
 
         runActions(actionGroups);
+    }
+
+    public static boolean hasAction(Action a) {
+        return DEFAULT_ACTIONS.contains(a);
     }
 
     protected void runActions(List<Action[]> actions) {
@@ -60,7 +71,7 @@ public abstract class RunnablePackageTest {
     /**
      * Test action.
      */
-    static public enum Action {
+    public static enum Action {
         /**
          * Init test.
          */
@@ -90,6 +101,10 @@ public abstract class RunnablePackageTest {
          */
         UNINSTALL,
         /**
+         * Purge package.
+         */
+        PURGE,
+        /**
          * Finalize test.
          */
         FINALIZE;
@@ -99,7 +114,7 @@ public abstract class RunnablePackageTest {
             return name().toLowerCase().replace('_', '-');
         }
 
-        public final static Action[] CREATE_AND_UNPACK = new Action[] {
+        public static final Action[] CREATE_AND_UNPACK = new Action[] {
             CREATE, UNPACK, VERIFY_INSTALL
         };
     };
@@ -128,7 +143,7 @@ public abstract class RunnablePackageTest {
         return groups;
     }
 
-    private final static List<Action> DEFAULT_ACTIONS;
+    private static final List<Action> DEFAULT_ACTIONS;
 
     static {
         final String propertyName = "action";

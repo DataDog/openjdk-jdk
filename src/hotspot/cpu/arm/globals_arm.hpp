@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,12 +31,14 @@
 //
 
 define_pd_global(bool,  ImplicitNullChecks,       true);  // Generate code for implicit null checks
-define_pd_global(bool,  UncommonNullCast,         true);  // Uncommon-trap NULLs past to check cast
+define_pd_global(bool,  UncommonNullCast,         true);  // Uncommon-trap nulls past to check cast
 define_pd_global(bool,  TrapBasedNullChecks,      false); // Not needed
 
-define_pd_global(uintx, CodeCacheSegmentSize, 64 TIERED_ONLY(+64)); // Tiered compilation has large code-entry alignment.
-define_pd_global(intx,  CodeEntryAlignment,       16);
-define_pd_global(intx,  OptoLoopAlignment,        16);
+define_pd_global(bool,  DelayCompilerStubsGeneration, false); // No need - only few compiler's stubs
+
+define_pd_global(size_t, CodeCacheSegmentSize,     64);
+define_pd_global(uint,   CodeEntryAlignment,       16);
+define_pd_global(intx,   OptoLoopAlignment,        16);
 
 #define DEFAULT_STACK_YELLOW_PAGES (2)
 #define DEFAULT_STACK_RED_PAGES (1)
@@ -53,7 +55,8 @@ define_pd_global(intx,  StackRedPages,            DEFAULT_STACK_RED_PAGES);
 define_pd_global(intx,  StackShadowPages,         DEFAULT_STACK_SHADOW_PAGES);
 define_pd_global(intx,  StackReservedPages,       DEFAULT_STACK_RESERVED_PAGES);
 
-define_pd_global(intx,  InlineFrequencyCount,     50);
+define_pd_global(bool, VMContinuations, false);
+
 #if  defined(COMPILER1) || defined(COMPILER2)
 define_pd_global(intx,  InlineSmallCode,          1500);
 #endif
@@ -72,7 +75,6 @@ define_pd_global(intx, InitArrayShortSize, 8*BytesPerLong);
 
 #define ARCH_FLAGS(develop,     \
                    product,     \
-                   notproduct,  \
                    range,       \
                    constraint)
 

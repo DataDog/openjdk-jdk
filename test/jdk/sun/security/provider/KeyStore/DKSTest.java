@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,25 +22,44 @@
  */
 
 /*
- * see ./DKSTest.sh
+ * @test
+ * @bug 8007755 8374808
+ * @library /test/lib
+ * @summary Support the logical grouping of keystores
  */
 
-import java.io.*;
-import java.net.*;
-import java.security.*;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.URI;
+import java.nio.file.Paths;
+import java.security.DomainLoadStoreParameter;
 import java.security.KeyStore;
-import java.security.cert.*;
+import java.security.UnrecoverableKeyException;
 import java.security.cert.Certificate;
-import java.util.*;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import jdk.test.lib.process.ProcessTools;
+import jdk.test.lib.process.OutputAnalyzer;
 
 // Load and store entries in domain keystores
 
 public class DKSTest {
 
     private static final String TEST_SRC = System.getProperty("test.src");
-    private static final String USER_DIR = System.getProperty("user.dir");
-    private static final String CERT = TEST_SRC + "/../../pkcs12/trusted.pem";
-    private static final String CONFIG = "file://" + TEST_SRC + "/domains.cfg";
+    private static final String USER_DIR = System.getProperty("user.dir", ".");
+    private static final String CERT = Paths.get(
+            TEST_SRC, "..", "..", "pkcs12", "trusted.pem").toAbsolutePath().toString();
+    private static final String CONFIG = Paths.get(
+            TEST_SRC, "domains.cfg").toUri().toString();
     private static final Map<String, KeyStore.ProtectionParameter> PASSWORDS =
         new HashMap<String, KeyStore.ProtectionParameter>() {{
             put("keystore",
@@ -70,6 +89,18 @@ public class DKSTest {
         }};
 
     public static void main(String[] args) throws Exception {
+        if (args.length == 0) {
+            // Environment variable and system properties referred in domains.cfg used by this Test.
+            ProcessBuilder pb = ProcessTools.createTestJavaProcessBuilder(List.of(
+                    "-Dtest.src=" + TEST_SRC , "-Duser.dir=" + USER_DIR, "DKSTest", "run"));
+            pb.environment().putAll(System.getenv());
+            pb.environment().put("KEYSTORE_PWD", "test12");
+            pb.environment().put("TRUSTSTORE_PWD", "changeit");
+            OutputAnalyzer output = ProcessTools.executeProcess(pb);
+            output.shouldHaveExitValue(0);
+            output.outputTo(System.out);
+            return;
+        }
         /*
          * domain keystore: keystores with wrong passwords
          */
@@ -185,17 +216,26 @@ public class DKSTest {
             new KeyStore.TrustedCertificateEntry(cert), null);
     }
 
-    private static void checkEntries(KeyStore keystore, int expected)
+    private static void checkEntries(KeyStore keystore, int expectedCount)
         throws Exception {
-        int i = 0;
+        int currCount = 0;
         for (String alias : Collections.list(keystore.aliases())) {
             System.out.print(".");
-            i++;
+            currCount++;
+
+            // check creation date and instant
+            if(!keystore.getCreationDate(alias).equals(
+                    Date.from(keystore.getCreationInstant(alias)))
+            ){
+                throw new RuntimeException(
+                        "Creation Date is not the same as Instant timestamp");
+            }
         }
         System.out.println();
-        if (expected != i) {
+        // Check if current count is expected
+        if (expectedCount != currCount) {
             throw new Exception("Error: unexpected entry count in keystore: " +
-                "loaded=" + i + ", expected=" + expected);
+                "loaded=" + currCount + ", expected=" + expectedCount);
         }
     }
 

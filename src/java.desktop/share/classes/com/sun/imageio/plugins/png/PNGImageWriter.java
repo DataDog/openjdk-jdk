@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,17 +26,19 @@
 package com.sun.imageio.plugins.png;
 
 import java.awt.Rectangle;
+import java.awt.image.BufferedImage;
 import java.awt.image.IndexColorModel;
 import java.awt.image.Raster;
-import java.awt.image.WritableRaster;
 import java.awt.image.RenderedImage;
 import java.awt.image.SampleModel;
+import java.awt.image.WritableRaster;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.Locale;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
+
 import javax.imageio.IIOException;
 import javax.imageio.IIOImage;
 import javax.imageio.ImageTypeSpecifier;
@@ -46,6 +48,9 @@ import javax.imageio.metadata.IIOMetadata;
 import javax.imageio.spi.ImageWriterSpi;
 import javax.imageio.stream.ImageOutputStream;
 import javax.imageio.stream.ImageOutputStreamImpl;
+
+import static java.nio.charset.StandardCharsets.ISO_8859_1;
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 final class CRC {
 
@@ -140,13 +145,6 @@ final class ChunkStream extends ImageOutputStreamImpl {
         // Return to end of chunk and flush to minimize buffering
         stream.seek(pos);
         stream.flushBefore(pos);
-    }
-
-    @Override
-    @SuppressWarnings("deprecation")
-    protected void finalize() throws Throwable {
-        // Empty finalizer (for improved performance; no need to call
-        // super.finalize() in this case)
     }
 }
 
@@ -278,13 +276,6 @@ final class IDATOutputStream extends ImageOutputStreamImpl {
             def.end();
         }
     }
-
-    @Override
-    @SuppressWarnings("deprecation")
-    protected void finalize() throws Throwable {
-        // Empty finalizer (for improved performance; no need to call
-        // super.finalize() in this case)
-    }
 }
 
 
@@ -318,7 +309,7 @@ final class PNGImageWriteParam extends ImageWriteParam {
      * <p> The default implementation resets the compression quality
      * to <code>0.5F</code>.
      *
-     * @exception IllegalStateException if the compression mode is not
+     * @throws IllegalStateException if the compression mode is not
      * <code>MODE_EXPLICIT</code>.
      */
     @Override
@@ -801,15 +792,14 @@ public final class PNGImageWriter extends ImageWriter {
             cs.writeBytes(languageIter.next());
             cs.writeByte(0);
 
-
-            cs.write(translatedKeywordIter.next().getBytes("UTF8"));
+            cs.write(translatedKeywordIter.next().getBytes(UTF_8));
             cs.writeByte(0);
 
             String text = textIter.next();
             if (compressed) {
-                cs.write(deflate(text.getBytes("UTF8")));
+                cs.write(deflate(text.getBytes(UTF_8)));
             } else {
-                cs.write(text.getBytes("UTF8"));
+                cs.write(text.getBytes(UTF_8));
             }
             cs.finish();
         }
@@ -824,7 +814,7 @@ public final class PNGImageWriter extends ImageWriter {
             ChunkStream cs = new ChunkStream(PNGImageReader.zTXt_TYPE, stream);
             String keyword = keywordIter.next();
             if (keyword.length() > 79) {
-                throw new IIOException("tEXt keyword is longer than 79");
+                throw new IIOException("zTXt keyword is longer than 79");
             }
             cs.writeBytes(keyword);
             cs.writeByte(0);
@@ -833,7 +823,7 @@ public final class PNGImageWriter extends ImageWriter {
             cs.writeByte(compressionMethod);
 
             String text = textIter.next();
-            cs.write(deflate(text.getBytes("ISO-8859-1")));
+            cs.write(deflate(text.getBytes(ISO_8859_1)));
             cs.finish();
         }
     }
@@ -916,17 +906,28 @@ public final class PNGImageWriter extends ImageWriter {
 
         int bitDepth = metadata.IHDR_bitDepth;
         for (int row = minY + yOffset; row < minY + height; row += ySkip) {
-            Rectangle rect = new Rectangle(minX, row, width, 1);
-            Raster ras = image.getData(rect);
+            Raster ras;
+            if (image instanceof BufferedImage bi) {
+                // Use the raster directly (no copy).
+                ras = bi.getRaster();
+            } else if (image.getNumXTiles() == 1 && image.getNumYTiles() == 1 &&
+                       image.getTileWidth() == width && image.getTileHeight() == height) {
+                // Use the single tile directly (no copy).
+                ras = image.getTile(image.getMinTileX(), image.getMinTileY());
+            } else {
+                // Make a copy of the raster data.
+                Rectangle rect = new Rectangle(minX, row, width, 1);
+                ras = image.getData(rect);
+            }
+
             if (sourceBands != null) {
-                ras = ras.createChild(minX, row, width, 1, minX, row,
-                                      sourceBands);
+                ras = ras.createChild(minX, row, width, 1, minX, row, sourceBands);
             }
 
             ras.getPixels(minX, row, width, 1, samples);
 
             if (image.getColorModel().isAlphaPremultiplied()) {
-                WritableRaster wr = ras.createCompatibleWritableRaster();
+                WritableRaster wr = ras.createCompatibleWritableRaster(minX, row, width, 1);
                 wr.setPixels(wr.getMinX(), wr.getMinY(),
                              wr.getWidth(), wr.getHeight(),
                              samples);

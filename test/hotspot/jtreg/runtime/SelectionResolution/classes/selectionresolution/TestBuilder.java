@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,10 +23,10 @@
 
 package selectionresolution;
 
-import jdk.internal.org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Opcodes;
 
-import static jdk.internal.org.objectweb.asm.Opcodes.ACC_PUBLIC;
-import static jdk.internal.org.objectweb.asm.Opcodes.ACC_STATIC;
+import static org.objectweb.asm.Opcodes.ACC_PUBLIC;
+import static org.objectweb.asm.Opcodes.ACC_STATIC;
 
 class TestBuilder extends Builder {
     private final ClassConstruct testClass;
@@ -36,7 +36,7 @@ class TestBuilder extends Builder {
         super(testcase);
 
         // Make a public class Test that contains all our test methods
-        testClass = new Clazz("Test", null, -1, ACC_PUBLIC);
+        testClass = new Clazz("Test", null, ACC_PUBLIC, -1);
 
         // Add a main method
         mainMethod = testClass.addMethod("main", "([Ljava/lang/String;)V", ACC_PUBLIC + ACC_STATIC);

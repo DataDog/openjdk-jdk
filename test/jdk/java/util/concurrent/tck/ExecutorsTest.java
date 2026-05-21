@@ -35,9 +35,6 @@
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
-import java.security.AccessControlContext;
-import java.security.AccessControlException;
-import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
@@ -90,7 +87,7 @@ public class ExecutorsTest extends JSR166TestCase {
      */
     public void testNewCachedThreadPool3() {
         try {
-            ExecutorService e = Executors.newCachedThreadPool(null);
+            ExecutorService unused = Executors.newCachedThreadPool(null);
             shouldThrow();
         } catch (NullPointerException success) {}
     }
@@ -124,7 +121,7 @@ public class ExecutorsTest extends JSR166TestCase {
      */
     public void testNewSingleThreadExecutor3() {
         try {
-            ExecutorService e = Executors.newSingleThreadExecutor(null);
+            ExecutorService unused = Executors.newSingleThreadExecutor(null);
             shouldThrow();
         } catch (NullPointerException success) {}
     }
@@ -172,7 +169,7 @@ public class ExecutorsTest extends JSR166TestCase {
      */
     public void testNewFixedThreadPool3() {
         try {
-            ExecutorService e = Executors.newFixedThreadPool(2, null);
+            ExecutorService unused = Executors.newFixedThreadPool(2, null);
             shouldThrow();
         } catch (NullPointerException success) {}
     }
@@ -182,7 +179,7 @@ public class ExecutorsTest extends JSR166TestCase {
      */
     public void testNewFixedThreadPool4() {
         try {
-            ExecutorService e = Executors.newFixedThreadPool(0);
+            ExecutorService unused = Executors.newFixedThreadPool(0);
             shouldThrow();
         } catch (IllegalArgumentException success) {}
     }
@@ -204,7 +201,8 @@ public class ExecutorsTest extends JSR166TestCase {
      */
     public void testUnconfigurableExecutorServiceNPE() {
         try {
-            ExecutorService e = Executors.unconfigurableExecutorService(null);
+            ExecutorService unused =
+                Executors.unconfigurableExecutorService(null);
             shouldThrow();
         } catch (NullPointerException success) {}
     }
@@ -214,7 +212,8 @@ public class ExecutorsTest extends JSR166TestCase {
      */
     public void testUnconfigurableScheduledExecutorServiceNPE() {
         try {
-            ExecutorService e = Executors.unconfigurableScheduledExecutorService(null);
+            ExecutorService unused =
+                Executors.unconfigurableScheduledExecutorService(null);
             shouldThrow();
         } catch (NullPointerException success) {}
     }
@@ -231,7 +230,7 @@ public class ExecutorsTest extends JSR166TestCase {
                     await(proceed);
                 }};
             long startTime = System.nanoTime();
-            Future f = p.schedule(Executors.callable(task, Boolean.TRUE),
+            Future<?> f = p.schedule(Executors.callable(task, Boolean.TRUE),
                                   timeoutMillis(), MILLISECONDS);
             assertFalse(f.isDone());
             proceed.countDown();
@@ -255,7 +254,7 @@ public class ExecutorsTest extends JSR166TestCase {
                     await(proceed);
                 }};
             long startTime = System.nanoTime();
-            Future f = p.schedule(Executors.callable(task, Boolean.TRUE),
+            Future<?> f = p.schedule(Executors.callable(task, Boolean.TRUE),
                                   timeoutMillis(), MILLISECONDS);
             assertFalse(f.isDone());
             proceed.countDown();
@@ -281,7 +280,7 @@ public class ExecutorsTest extends JSR166TestCase {
                     await(proceed);
                 }};
             long startTime = System.nanoTime();
-            Future f = p.schedule(Executors.callable(task, Boolean.TRUE),
+            Future<?> f = p.schedule(Executors.callable(task, Boolean.TRUE),
                                   timeoutMillis(), MILLISECONDS);
             assertFalse(f.isDone());
             proceed.countDown();
@@ -304,21 +303,24 @@ public class ExecutorsTest extends JSR166TestCase {
             Executors.newScheduledThreadPool(2),
         };
 
-        final Runnable sleeper = new CheckedInterruptedRunnable() {
+        final CountDownLatch done = new CountDownLatch(1);
+
+        final Runnable sleeper = new CheckedRunnable() {
             public void realRun() throws InterruptedException {
-                delay(LONG_DELAY_MS);
+                done.await(LONG_DELAY_MS, MILLISECONDS);
             }};
 
         List<Thread> threads = new ArrayList<>();
         for (final ExecutorService executor : executors) {
             threads.add(newStartedThread(new CheckedRunnable() {
                 public void realRun() {
-                    Future future = executor.submit(sleeper);
+                    Future<?> future = executor.submit(sleeper);
                     assertFutureTimesOut(future);
                 }}));
         }
         for (Thread thread : threads)
             awaitTermination(thread);
+        done.countDown();
         for (ExecutorService executor : executors)
             joinPool(executor);
     }
@@ -336,9 +338,7 @@ public class ExecutorsTest extends JSR166TestCase {
                     Thread current = Thread.currentThread();
                     assertFalse(current.isDaemon());
                     assertTrue(current.getPriority() <= Thread.NORM_PRIORITY);
-                    SecurityManager s = System.getSecurityManager();
-                    assertSame(current.getThreadGroup(),
-                               (s == null) ? egroup : s.getThreadGroup());
+                    assertSame(current.getThreadGroup(), egroup);
                     assertTrue(current.getName().endsWith("thread-1"));
                 } catch (SecurityException ok) {
                     // Also pass if not allowed to change setting
@@ -355,26 +355,23 @@ public class ExecutorsTest extends JSR166TestCase {
     /**
      * ThreadPoolExecutor using privilegedThreadFactory has
      * specified group, priority, daemon status, name,
-     * access control context and context class loader
+     * and context class loader
      */
+    @SuppressWarnings("removal")
     public void testPrivilegedThreadFactory() throws Exception {
         final CountDownLatch done = new CountDownLatch(1);
         Runnable r = new CheckedRunnable() {
             public void realRun() throws Exception {
                 final ThreadGroup egroup = Thread.currentThread().getThreadGroup();
                 final ClassLoader thisccl = Thread.currentThread().getContextClassLoader();
-                final AccessControlContext thisacc = AccessController.getContext();
                 Runnable r = new CheckedRunnable() {
                     public void realRun() {
                         Thread current = Thread.currentThread();
                         assertFalse(current.isDaemon());
                         assertTrue(current.getPriority() <= Thread.NORM_PRIORITY);
-                        SecurityManager s = System.getSecurityManager();
-                        assertSame(current.getThreadGroup(),
-                                   (s == null) ? egroup : s.getThreadGroup());
+                        assertSame(current.getThreadGroup(), egroup);
                         assertTrue(current.getName().endsWith("thread-1"));
                         assertSame(thisccl, current.getContextClassLoader());
-                        assertEquals(thisacc, AccessController.getContext());
                         done.countDown();
                     }};
                 ExecutorService e = Executors.newSingleThreadExecutor(Executors.privilegedThreadFactory());
@@ -384,166 +381,14 @@ public class ExecutorsTest extends JSR166TestCase {
                 }
             }};
 
-        runWithPermissions(r,
-                           new RuntimePermission("getClassLoader"),
-                           new RuntimePermission("setContextClassLoader"),
-                           new RuntimePermission("modifyThread"));
-    }
-
-    boolean haveCCLPermissions() {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null) {
-            try {
-                sm.checkPermission(new RuntimePermission("setContextClassLoader"));
-                sm.checkPermission(new RuntimePermission("getClassLoader"));
-            } catch (AccessControlException e) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    void checkCCL() {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null) {
-            sm.checkPermission(new RuntimePermission("setContextClassLoader"));
-            sm.checkPermission(new RuntimePermission("getClassLoader"));
-        }
-    }
-
-    class CheckCCL implements Callable<Object> {
-        public Object call() {
-            checkCCL();
-            return null;
-        }
-    }
-
-    /**
-     * Without class loader permissions, creating
-     * privilegedCallableUsingCurrentClassLoader throws ACE
-     */
-    public void testCreatePrivilegedCallableUsingCCLWithNoPrivs() {
-        Runnable r = new CheckedRunnable() {
-            public void realRun() throws Exception {
-                if (System.getSecurityManager() == null)
-                    return;
-                try {
-                    Executors.privilegedCallableUsingCurrentClassLoader(new NoOpCallable());
-                    shouldThrow();
-                } catch (AccessControlException success) {}
-            }};
-
-        runWithoutPermissions(r);
-    }
-
-    /**
-     * With class loader permissions, calling
-     * privilegedCallableUsingCurrentClassLoader does not throw ACE
-     */
-    public void testPrivilegedCallableUsingCCLWithPrivs() throws Exception {
-        Runnable r = new CheckedRunnable() {
-            public void realRun() throws Exception {
-                Executors.privilegedCallableUsingCurrentClassLoader
-                    (new NoOpCallable())
-                    .call();
-            }};
-
-        runWithPermissions(r,
-                           new RuntimePermission("getClassLoader"),
-                           new RuntimePermission("setContextClassLoader"));
-    }
-
-    /**
-     * Without permissions, calling privilegedCallable throws ACE
-     */
-    public void testPrivilegedCallableWithNoPrivs() throws Exception {
-        // Avoid classloader-related SecurityExceptions in swingui.TestRunner
-        Executors.privilegedCallable(new CheckCCL());
-
-        Runnable r = new CheckedRunnable() {
-            public void realRun() throws Exception {
-                if (System.getSecurityManager() == null)
-                    return;
-                Callable task = Executors.privilegedCallable(new CheckCCL());
-                try {
-                    task.call();
-                    shouldThrow();
-                } catch (AccessControlException success) {}
-            }};
-
-        runWithoutPermissions(r);
-
-        // It seems rather difficult to test that the
-        // AccessControlContext of the privilegedCallable is used
-        // instead of its caller.  Below is a failed attempt to do
-        // that, which does not work because the AccessController
-        // cannot capture the internal state of the current Policy.
-        // It would be much more work to differentiate based on,
-        // e.g. CodeSource.
-
-//         final AccessControlContext[] noprivAcc = new AccessControlContext[1];
-//         final Callable[] task = new Callable[1];
-
-//         runWithPermissions
-//             (new CheckedRunnable() {
-//                 public void realRun() {
-//                     if (System.getSecurityManager() == null)
-//                         return;
-//                     noprivAcc[0] = AccessController.getContext();
-//                     task[0] = Executors.privilegedCallable(new CheckCCL());
-//                     try {
-//                         AccessController.doPrivileged(new PrivilegedAction<Void>() {
-//                                                           public Void run() {
-//                                                               checkCCL();
-//                                                               return null;
-//                                                           }}, noprivAcc[0]);
-//                         shouldThrow();
-//                     } catch (AccessControlException success) {}
-//                 }});
-
-//         runWithPermissions
-//             (new CheckedRunnable() {
-//                 public void realRun() throws Exception {
-//                     if (System.getSecurityManager() == null)
-//                         return;
-//                     // Verify that we have an underprivileged ACC
-//                     try {
-//                         AccessController.doPrivileged(new PrivilegedAction<Void>() {
-//                                                           public Void run() {
-//                                                               checkCCL();
-//                                                               return null;
-//                                                           }}, noprivAcc[0]);
-//                         shouldThrow();
-//                     } catch (AccessControlException success) {}
-
-//                     try {
-//                         task[0].call();
-//                         shouldThrow();
-//                     } catch (AccessControlException success) {}
-//                 }},
-//              new RuntimePermission("getClassLoader"),
-//              new RuntimePermission("setContextClassLoader"));
-    }
-
-    /**
-     * With permissions, calling privilegedCallable succeeds
-     */
-    public void testPrivilegedCallableWithPrivs() throws Exception {
-        Runnable r = new CheckedRunnable() {
-            public void realRun() throws Exception {
-                Executors.privilegedCallable(new CheckCCL()).call();
-            }};
-
-        runWithPermissions(r,
-                           new RuntimePermission("getClassLoader"),
-                           new RuntimePermission("setContextClassLoader"));
+        r.run();
     }
 
     /**
      * callable(Runnable) returns null when called
      */
     public void testCallable1() throws Exception {
-        Callable c = Executors.callable(new NoOpRunnable());
+        Callable<?> c = Executors.callable(new NoOpRunnable());
         assertNull(c.call());
     }
 
@@ -551,7 +396,7 @@ public class ExecutorsTest extends JSR166TestCase {
      * callable(Runnable, result) returns result when called
      */
     public void testCallable2() throws Exception {
-        Callable c = Executors.callable(new NoOpRunnable(), one);
+        Callable<?> c = Executors.callable(new NoOpRunnable(), one);
         assertSame(one, c.call());
     }
 
@@ -559,7 +404,7 @@ public class ExecutorsTest extends JSR166TestCase {
      * callable(PrivilegedAction) returns its result when called
      */
     public void testCallable3() throws Exception {
-        Callable c = Executors.callable(new PrivilegedAction() {
+        Callable<?> c = Executors.callable(new PrivilegedAction() {
                 public Object run() { return one; }});
         assertSame(one, c.call());
     }
@@ -568,7 +413,7 @@ public class ExecutorsTest extends JSR166TestCase {
      * callable(PrivilegedExceptionAction) returns its result when called
      */
     public void testCallable4() throws Exception {
-        Callable c = Executors.callable(new PrivilegedExceptionAction() {
+        Callable<?> c = Executors.callable(new PrivilegedExceptionAction() {
                 public Object run() { return one; }});
         assertSame(one, c.call());
     }
@@ -578,7 +423,7 @@ public class ExecutorsTest extends JSR166TestCase {
      */
     public void testCallableNPE1() {
         try {
-            Callable c = Executors.callable((Runnable) null);
+            Callable<?> unused = Executors.callable((Runnable) null);
             shouldThrow();
         } catch (NullPointerException success) {}
     }
@@ -588,7 +433,7 @@ public class ExecutorsTest extends JSR166TestCase {
      */
     public void testCallableNPE2() {
         try {
-            Callable c = Executors.callable((Runnable) null, one);
+            Callable<?> unused = Executors.callable((Runnable) null, one);
             shouldThrow();
         } catch (NullPointerException success) {}
     }
@@ -598,7 +443,7 @@ public class ExecutorsTest extends JSR166TestCase {
      */
     public void testCallableNPE3() {
         try {
-            Callable c = Executors.callable((PrivilegedAction) null);
+            Callable<?> unused = Executors.callable((PrivilegedAction) null);
             shouldThrow();
         } catch (NullPointerException success) {}
     }
@@ -608,7 +453,7 @@ public class ExecutorsTest extends JSR166TestCase {
      */
     public void testCallableNPE4() {
         try {
-            Callable c = Executors.callable((PrivilegedExceptionAction) null);
+            Callable<?> unused = Executors.callable((PrivilegedExceptionAction) null);
             shouldThrow();
         } catch (NullPointerException success) {}
     }
@@ -640,8 +485,19 @@ public class ExecutorsTest extends JSR166TestCase {
     }
 
     /**
+     * privilegedCallable
+     */
+    @SuppressWarnings("removal")
+    public void testPrivilegedCallable() throws Exception {
+        Callable<String> c = () -> "";
+        Callable<String> priv = Executors.privilegedCallable(c);
+        assertEquals("", priv.call());
+    }
+
+    /**
      * privilegedCallable(callable).toString() contains toString of wrapped task
      */
+    @SuppressWarnings("removal")
     public void testPrivilegedCallable_toString() {
         if (testImplementationDetails) {
             Callable<String> c = () -> "";
@@ -656,6 +512,7 @@ public class ExecutorsTest extends JSR166TestCase {
      * privilegedCallableUsingCurrentClassLoader(callable).toString()
      * contains toString of wrapped task
      */
+    @SuppressWarnings("removal")
     public void testPrivilegedCallableUsingCurrentClassLoader_toString() {
         if (testImplementationDetails) {
             Callable<String> c = () -> "";

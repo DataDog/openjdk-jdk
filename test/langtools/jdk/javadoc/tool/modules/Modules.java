@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -112,7 +112,7 @@ public class Modules extends ModuleTestBase {
                 javafile.toString());
 
         assertMessagePresent("error: cannot access module-info");
-        assertMessageNotPresent("error - fatal error encountered");
+        assertMessageNotPresent("error: fatal error encountered");
 
     }
 
@@ -534,7 +534,7 @@ public class Modules extends ModuleTestBase {
                 "--module", "MIA",
                 "--expand-requires", "all");
 
-        assertMessagePresent("javadoc: error - module MIA not found");
+        assertMessagePresent("error: module MIA not found");
     }
 
     @Test
@@ -556,7 +556,7 @@ public class Modules extends ModuleTestBase {
                 "--module", "M,N,L,MIA,O,P",
                 "--expand-requires", "all");
 
-        assertMessagePresent("javadoc: error - module MIA not found");
+        assertMessagePresent("error: module MIA not found");
     }
 
     @Test
@@ -670,6 +670,37 @@ public class Modules extends ModuleTestBase {
         checkPackagesIncluded("p");
         checkTypesIncluded("p.C");
         checkTypesIncluded("p.P");
+    }
+
+    @Test
+    public void testImportModules(Path base) throws Exception {
+        Path src = base.resolve("src");
+        Path mod = Paths.get(src.toString(), "m1");
+        tb.writeJavaFiles(mod,
+                """
+                import module m1;
+                module m1 {
+                    exports p;
+                    uses Service;
+                    provides Service with ServiceImpl;
+                }
+                """,
+                """
+                package p;
+                public interface Service {
+                }
+                """,
+                """
+                package p;
+                public class ServiceImpl implements Service {
+                }
+                """);
+        execTask("--module-source-path", src.toString(),
+                 "--module", "m1");
+        checkModulesSpecified("m1");
+        checkPackagesIncluded("p");
+        checkTypesIncluded("p.Service");
+        checkTypesIncluded("p.ServiceImpl");
     }
 
 }

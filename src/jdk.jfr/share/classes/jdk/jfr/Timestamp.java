@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,18 +46,18 @@ public @interface Timestamp {
      * The unit for the difference, measured in milliseconds, between the current
      * time and midnight, January 1, 1970 UTC.
      */
-    public final static String MILLISECONDS_SINCE_EPOCH = "MILLISECONDS_SINCE_EPOCH";
+    public static final String MILLISECONDS_SINCE_EPOCH = "MILLISECONDS_SINCE_EPOCH";
 
     /**
      * The unit for the number of ticks that have transpired since some arbitrary
      * starting date.
      */
-    public final static String TICKS = "TICKS";
+    public static final String TICKS = "TICKS";
 
     /**
      * Unit for the time stamp.
      *
-     * @return time stamp unit, not {@code null}
+     * @return time stamp unit, default {@code MILLISECONDS_SINCE_EPOCH}
      */
     String value() default Timestamp.MILLISECONDS_SINCE_EPOCH;
 }

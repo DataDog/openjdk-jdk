@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,16 +26,13 @@ package javax.swing.text;
 
 import com.sun.beans.util.Cache;
 
-import java.security.AccessController;
-import java.security.PrivilegedAction;
-
 import java.beans.JavaBean;
 import java.beans.BeanProperty;
 import java.beans.Transient;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.Enumeration;
-import java.util.Vector;
 
 import java.util.concurrent.*;
 
@@ -52,11 +49,7 @@ import java.awt.font.TextAttribute;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 
-import java.awt.print.Printable;
-import java.awt.print.PrinterException;
-
 import javax.print.PrintService;
-import javax.print.attribute.PrintRequestAttributeSet;
 
 import java.text.*;
 import java.text.AttributedCharacterIterator.Attribute;
@@ -68,9 +61,6 @@ import javax.swing.plaf.*;
 import javax.accessibility.*;
 
 import javax.print.attribute.*;
-
-import sun.awt.AppContext;
-
 
 import sun.swing.PrintingStatus;
 import sun.swing.SwingUtilities2;
@@ -676,7 +666,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      * component's {@code TransferHandler}.
      *
      * @param b whether or not to enable automatic drag handling
-     * @exception HeadlessException if
+     * @throws HeadlessException if
      *            <code>b</code> is <code>true</code> and
      *            <code>GraphicsEnvironment.isHeadless()</code>
      *            returns <code>true</code>
@@ -1104,22 +1094,16 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
         return getKeymapTable().get(nm);
     }
 
-    private static HashMap<String,Keymap> getKeymapTable() {
-        synchronized (KEYMAP_TABLE) {
-            AppContext appContext = AppContext.getAppContext();
-            @SuppressWarnings("unchecked")
-            HashMap<String,Keymap> keymapTable =
-                (HashMap<String,Keymap>)appContext.get(KEYMAP_TABLE);
-            if (keymapTable == null) {
-                keymapTable = new HashMap<String,Keymap>(17);
-                appContext.put(KEYMAP_TABLE, keymapTable);
-                //initialize default keymap
-                Keymap binding = addKeymap(DEFAULT_KEYMAP, null);
-                binding.setDefaultAction(new
-                                         DefaultEditorKit.DefaultKeyTypedAction());
-            }
-            return keymapTable;
+    private static HashMap<String,Keymap> keymapTable;
+
+    private static synchronized HashMap<String,Keymap> getKeymapTable() {
+        if (keymapTable == null) {
+            keymapTable = new HashMap<String,Keymap>(17);
+            //initialize default keymap
+            Keymap binding = addKeymap(DEFAULT_KEYMAP, null);
+            binding.setDefaultAction(new DefaultEditorKit.DefaultKeyTypedAction());
         }
+        return keymapTable;
     }
 
     /**
@@ -1134,7 +1118,6 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      * has been added to the <code>java.beans</code> package.
      * Please see {@link java.beans.XMLEncoder}.
      */
-    @SuppressWarnings("serial") // Same-version serialization only
     public static class KeyBinding {
 
         /**
@@ -1198,7 +1181,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
         Hashtable<String, Action> h = new Hashtable<String, Action>();
         for (Action a : actions) {
             String value = (String)a.getValue(Action.NAME);
-            h.put((value!=null ? value:""), a);
+            h.put((value != null ? value : ""), a);
         }
         for (KeyBinding binding : bindings) {
             Action a = h.get(binding.actionName);
@@ -1362,7 +1345,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      * @param offs the offset &ge; 0
      * @param len the length &ge; 0
      * @return the text
-     * @exception BadLocationException if the offset or length are invalid
+     * @throws BadLocationException if the offset or length are invalid
      */
     public String getText(int offs, int len) throws BadLocationException {
         return getDocument().getText(offs, len);
@@ -1380,7 +1363,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      * @return the coordinates as a rectangle, with (r.x, r.y) as the location
      *   in the coordinate system, or null if the component does
      *   not yet have a positive size.
-     * @exception BadLocationException if the given position does not
+     * @throws BadLocationException if the given position does not
      *   represent a valid location in the associated document
      * @see TextUI#modelToView
      *
@@ -1404,7 +1387,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      * @return the coordinates as a rectangle, with (r.x, r.y) as the location
      *   in the coordinate system, or null if the component does
      *   not yet have a positive size.
-     * @exception BadLocationException if the given position does not
+     * @throws BadLocationException if the given position does not
      *   represent a valid location in the associated document
      * @see TextUI#modelToView2D
      *
@@ -1549,7 +1532,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      * an exception is thrown.
      *
      * @param pos the position
-     * @exception    IllegalArgumentException if the value supplied
+     * @throws    IllegalArgumentException if the value supplied
      *               for <code>position</code> is less than zero or greater
      *               than the component's text length
      * @see #setCaretPosition
@@ -1621,7 +1604,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      *   of documents (such as html for example) might be
      *   able to make use of this information; if non-<code>null</code>,
      *   it is added as a property of the document
-     * @exception IOException as thrown by the stream being
+     * @throws IOException as thrown by the stream being
      *  used to initialize
      * @see EditorKit#createDefaultDocument
      * @see #setDocument
@@ -1647,7 +1630,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      * text.
      *
      * @param out the output stream
-     * @exception IOException on any I/O error
+     * @throws IOException on any I/O error
      */
     public void write(Writer out) throws IOException {
         Document doc = getDocument();
@@ -1661,7 +1644,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
     public void removeNotify() {
         super.removeNotify();
         if (getFocusedComponent() == this) {
-            AppContext.getAppContext().remove(FOCUSED_COMPONENT);
+            focusedComponent = null;
         }
     }
 
@@ -1676,7 +1659,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      * an exception is thrown.
      *
      * @param position the position
-     * @exception    IllegalArgumentException if the value supplied
+     * @throws    IllegalArgumentException if the value supplied
      *               for <code>position</code> is less than zero or greater
      *               than the component's text length
      */
@@ -1747,7 +1730,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      * use <code>DocumentListener</code>.
      *
      * @return the text
-     * @exception NullPointerException if the document is <code>null</code>
+     * @throws NullPointerException if the document is <code>null</code>
      * @see #setText
      */
     public String getText() {
@@ -1767,7 +1750,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      * <code>null</code> or the document empty, returns <code>null</code>.
      *
      * @return the text
-     * @exception IllegalArgumentException if the selection doesn't
+     * @throws IllegalArgumentException if the selection doesn't
      *  have a valid mapping into the document for some reason
      * @see #setText
      */
@@ -2017,7 +2000,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      * @param direction less than zero to scroll up/left, greater than
      *   zero for down/right
      * @return the "unit" increment for scrolling in the specified direction
-     * @exception IllegalArgumentException for an invalid orientation
+     * @throws IllegalArgumentException for an invalid orientation
      * @see JScrollBar#setUnitIncrement
      */
     public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction) {
@@ -2047,7 +2030,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      * @param direction less than zero to scroll up/left, greater than zero
      *  for down/right
      * @return the "block" increment for scrolling in the specified direction
-     * @exception IllegalArgumentException for an invalid orientation
+     * @throws IllegalArgumentException for an invalid orientation
      * @see JScrollBar#setBlockIncrement
      */
     public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction) {
@@ -2128,8 +2111,6 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      * @return {@code true}, unless printing is canceled by the user
      * @throws PrinterException if an error in the print system causes the job
      *         to be aborted
-     * @throws SecurityException if this thread is not allowed to
-     *                           initiate a print job request
      *
      * @see #print(MessageFormat, MessageFormat, boolean, PrintService, PrintRequestAttributeSet, boolean)
      *
@@ -2158,8 +2139,6 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      * @return {@code true}, unless printing is canceled by the user
      * @throws PrinterException if an error in the print system causes the job
      *         to be aborted
-     * @throws SecurityException if this thread is not allowed to
-     *                           initiate a print job request
      *
      * @see #print(MessageFormat, MessageFormat, boolean, PrintService, PrintRequestAttributeSet, boolean)
      * @see java.text.MessageFormat
@@ -2270,8 +2249,6 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      * @return {@code true}, unless printing is canceled by the user
      * @throws PrinterException if an error in the print system causes the job
      *         to be aborted
-     * @throws SecurityException if this thread is not allowed to
-     *                           initiate a print job request
      *
      * @see #getPrintable
      * @see java.text.MessageFormat
@@ -3306,8 +3283,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
 
             // Fixes bug 4487492
             Document doc = JTextComponent.this.getDocument();
-            if (doc != null && doc instanceof StyledDocument) {
-                StyledDocument sDoc = (StyledDocument)doc;
+            if (doc instanceof StyledDocument sDoc) {
                 int offset = startIndex;
                 int length = endIndex - startIndex;
                 sDoc.setCharacterAttributes(offset, length, as, true);
@@ -3692,7 +3668,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
 
         /**
          * Returns the <code>Rectangle</code> enclosing the text between
-         * two indicies.
+         * two indices.
          *
          * @param startIndex the start index in the text
          * @param endIndex the end index in the text
@@ -3807,6 +3783,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
 
     // --- serialization ---------------------------------------------
 
+    @Serial
     private void readObject(ObjectInputStream s)
         throws IOException, ClassNotFoundException
     {
@@ -3962,7 +3939,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
 
     /**
      * Maps from class name to Boolean indicating if
-     * <code>processInputMethodEvent</code> has been overriden.
+     * <code>processInputMethodEvent</code> has been overridden.
      */
     private static Cache<Class<?>,Boolean> METHOD_OVERRIDDEN
             = new Cache<Class<?>,Boolean>(Cache.Kind.WEAK, Cache.Kind.STRONG) {
@@ -3978,17 +3955,12 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
             if (get(type.getSuperclass())) {
                 return Boolean.TRUE;
             }
-            return AccessController.doPrivileged(
-                    new PrivilegedAction<Boolean>() {
-                        public Boolean run() {
-                            try {
-                                type.getDeclaredMethod("processInputMethodEvent", InputMethodEvent.class);
-                                return Boolean.TRUE;
-                            } catch (NoSuchMethodException exception) {
-                                return Boolean.FALSE;
-                            }
-                        }
-                    });
+            try {
+                type.getDeclaredMethod("processInputMethodEvent", InputMethodEvent.class);
+                return Boolean.TRUE;
+            } catch (NoSuchMethodException exception) {
+                return Boolean.FALSE;
+            }
         }
     };
 
@@ -4074,8 +4046,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
 
                         ((JTextComponent)comp).replaceSelection(data);
                         return true;
-                    } catch (UnsupportedFlavorException ufe) {
-                    } catch (IOException ioe) {
+                    } catch (UnsupportedFlavorException | IOException e) {
                     }
                 }
             }
@@ -4104,13 +4075,14 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
         }
     }
 
+    private static JTextComponent focusedComponent;
+
     /**
      * Returns the JTextComponent that most recently had focus. The returned
      * value may currently have focus.
      */
     static final JTextComponent getFocusedComponent() {
-        return (JTextComponent)AppContext.getAppContext().
-            get(FOCUSED_COMPONENT);
+        return focusedComponent;
     }
 
     @SuppressWarnings("deprecation")
@@ -4124,9 +4096,6 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
         }
         return modifiers;
     }
-
-    private static final Object KEYMAP_TABLE =
-        new StringBuilder("JTextComponent_KeymapTable");
 
     //
     // member variables used for on-the-spot input method
@@ -4214,14 +4183,14 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
             }
             KeyStroke[] retValue = null;
             // Determine local bindings first.
-            Vector<KeyStroke> keyStrokes = null;
+            ArrayList<KeyStroke> keyStrokes = null;
             for (Enumeration<KeyStroke> keys = bindings.keys(); keys.hasMoreElements();) {
                 KeyStroke key = keys.nextElement();
                 if (bindings.get(key) == a) {
                     if (keyStrokes == null) {
-                        keyStrokes = new Vector<KeyStroke>();
+                        keyStrokes = new ArrayList<KeyStroke>();
                     }
-                    keyStrokes.addElement(key);
+                    keyStrokes.add(key);
                 }
             }
             // See if the parent has any.
@@ -4240,12 +4209,12 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
                     }
                     if (rCount > 0 && rCount < pStrokes.length) {
                         if (keyStrokes == null) {
-                            keyStrokes = new Vector<KeyStroke>();
+                            keyStrokes = new ArrayList<>();
                         }
                         for (int counter = pStrokes.length - 1; counter >= 0;
                              counter--) {
                             if (pStrokes[counter] != null) {
-                                keyStrokes.addElement(pStrokes[counter]);
+                                keyStrokes.add(pStrokes[counter]);
                             }
                         }
                     }
@@ -4256,7 +4225,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
                         else {
                             retValue = new KeyStroke[keyStrokes.size() +
                                                     pStrokes.length];
-                            keyStrokes.copyInto(retValue);
+                            keyStrokes.toArray(retValue);
                             System.arraycopy(pStrokes, 0, retValue,
                                         keyStrokes.size(), pStrokes.length);
                             keyStrokes = null;
@@ -4265,8 +4234,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
                 }
             }
             if (keyStrokes != null) {
-                retValue = new KeyStroke[keyStrokes.size()];
-                keyStrokes.copyInto(retValue);
+                retValue = keyStrokes.toArray(new KeyStroke[0]);
             }
             return retValue;
         }
@@ -4322,7 +4290,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
      * Action is returned, if not and the KeyStroke represents a
      * KeyTyped event and the Keymap has a defaultAction,
      * <code>DefaultActionKey</code> is returned.
-     * <p>KeymapActionMap is then able to transate the object passed in
+     * <p>KeymapActionMap is then able to translate the object passed in
      * to either message the Keymap, or message its default implementation.
      */
     static class KeymapWrapper extends InputMap {
@@ -4459,9 +4427,6 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
         }
     }
 
-    private static final Object FOCUSED_COMPONENT =
-        new StringBuilder("JTextComponent_FocusedComponent");
-
     /**
      * The default keymap that will be shared by all
      * <code>JTextComponent</code> instances unless they
@@ -4514,8 +4479,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
 
         // --- FocusListener methods -----------------------------------
         public void focusGained(FocusEvent fe) {
-            AppContext.getAppContext().put(FOCUSED_COMPONENT,
-                                           fe.getSource());
+            focusedComponent = (JTextComponent)fe.getSource();
         }
 
         public void focusLost(FocusEvent fe) {
@@ -5108,7 +5072,7 @@ public abstract class JTextComponent extends JComponent implements Scrollable, A
     //
     // Runnable class for invokeLater() to set caret position later.
     //
-    private class DoSetCaretPosition implements Runnable {
+    private static class DoSetCaretPosition implements Runnable {
         JTextComponent host;
         Position newPos;
 

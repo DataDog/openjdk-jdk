@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,10 +23,11 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include "jni_tools.h"
-#include "jvmti_tools.h"
-#include "Injector.h"
-#include "agent_common.h"
+#include <atomic>
+#include "jni_tools.hpp"
+#include "jvmti_tools.hpp"
+#include "Injector.hpp"
+#include "agent_common.hpp"
 
 #define PASSED 0
 
@@ -58,15 +59,17 @@ static int vm_mode = VM_MODE_COMPILED;
 static int bci_mode = BCI_MODE_EMCP;
 static int sync_freq = 0;
 
-static jclass profile_klass = NULL;
-static jfieldID count_field = NULL;
+static jclass profile_klass = nullptr;
+static jfieldID count_field = nullptr;
 
 /* test objects */
 static int max_classes;
-static char** names = NULL;
-static jvmtiClassDefinition* old_class_def = NULL;
-static jvmtiClassDefinition* new_class_def = NULL;
+static char** names = nullptr;
+static jvmtiClassDefinition* old_class_def = nullptr;
+static jvmtiClassDefinition* new_class_def = nullptr;
 static int classCount = 0;
+/* lock to access classCount */
+static jrawMonitorID classLoadLock = nullptr;
 static int newFlag = NSK_FALSE;
 
 /* ========================================================================== */
@@ -96,53 +99,64 @@ ClassFileLoadHook(jvmtiEnv *jvmti_env, JNIEnv *jni_env,
         jint *new_class_data_len, unsigned char** new_class_data) {
     jint name_len;
 
-    if (name != NULL && classCount < max_classes &&
-            class_being_redefined == NULL &&
+    if (name != nullptr &&
+            class_being_redefined == nullptr &&
             (strcmp(name, PROFILE_CLASS_NAME) != 0) &&
             (strncmp(name, package_name, package_name_length) == 0)) {
-        NSK_DISPLAY1("ClassFileLoadHook: %s\n", name);
-        name_len = (jint) strlen(name) + 1;
-        if (!NSK_JVMTI_VERIFY(jvmti_env->Allocate(name_len, (unsigned char**) &names[classCount]))) {
+        if (!NSK_JVMTI_VERIFY(jvmti_env->RawMonitorEnter(classLoadLock))) {
             nsk_jvmti_setFailStatus();
             return;
         }
-        memcpy(names[classCount], name, name_len);
-        if (!NSK_JVMTI_VERIFY(jvmti_env->Allocate(class_data_len, (unsigned char**)
-                &old_class_def[classCount].class_bytes))) {
-            nsk_jvmti_setFailStatus();
-            return;
+        // use while instead of if to exit the block on error
+        while (classCount < max_classes) {
+            NSK_DISPLAY1("ClassFileLoadHook: %s\n", name);
+            name_len = (jint)strlen(name) + 1;
+            if (!NSK_JVMTI_VERIFY(jvmti_env->Allocate(name_len, (unsigned char**)& names[classCount]))) {
+                nsk_jvmti_setFailStatus();
+                break;
+            }
+            memcpy(names[classCount], name, name_len);
+            if (!NSK_JVMTI_VERIFY(jvmti_env->Allocate(class_data_len, (unsigned char**)
+                    & old_class_def[classCount].class_bytes))) {
+                nsk_jvmti_setFailStatus();
+                break;
+            }
+            memcpy((unsigned char*)old_class_def[classCount].class_bytes,
+                class_data, class_data_len);
+            old_class_def[classCount].class_byte_count = class_data_len;
+            classCount++;
+            break;
         }
-        memcpy((unsigned char*) old_class_def[classCount].class_bytes,
-            class_data, class_data_len);
-        old_class_def[classCount].class_byte_count = class_data_len;
-        classCount++;
+        if (!NSK_JVMTI_VERIFY(jvmti_env->RawMonitorExit(classLoadLock))) {
+            nsk_jvmti_setFailStatus();
+        }
     }
 }
 
-static int CompiledMethodLoadEventsCount = 0;
+static std::atomic<int> CompiledMethodLoadEventsCount(0);
 
 static void JNICALL
 CompiledMethodLoad(jvmtiEnv *jvmti_env, jmethodID method,
         jint code_size, const void* code_addr, jint map_length,
         const jvmtiAddrLocationMap* map, const void* compile_info) {
-    char *name = NULL;
-    char *signature = NULL;
+    char *name = nullptr;
+    char *signature = nullptr;
 
     CompiledMethodLoadEventsCount++;
 
-    if (!NSK_JVMTI_VERIFY(jvmti_env->GetMethodName(method, &name, &signature, NULL))) {
+    if (!NSK_JVMTI_VERIFY(jvmti_env->GetMethodName(method, &name, &signature, nullptr))) {
         nsk_jvmti_setFailStatus();
         return;
     }
     NSK_DISPLAY3("CompiledMethodLoad event: %s%s (0x%p)\n",
         name, signature, code_addr);
-    if (name != NULL)
+    if (name != nullptr)
         jvmti_env->Deallocate((unsigned char*)name);
-    if (signature != NULL)
+    if (signature != nullptr)
         jvmti_env->Deallocate((unsigned char*)signature);
 }
 
-static int SingleStepEventsCount = 0;
+static std::atomic<int> SingleStepEventsCount(0);
 
 static void JNICALL
 SingleStep(jvmtiEnv *jvmti_env, JNIEnv* jni_env, jthread thread,
@@ -151,7 +165,7 @@ SingleStep(jvmtiEnv *jvmti_env, JNIEnv* jni_env, jthread thread,
     SingleStepEventsCount++;
 }
 
-static int ExceptionEventsCount = 0;
+static std::atomic<int> ExceptionEventsCount(0);
 
 static void JNICALL
 Exception(jvmtiEnv *jvmti_env, JNIEnv *jni_env, jthread thread,
@@ -161,20 +175,20 @@ Exception(jvmtiEnv *jvmti_env, JNIEnv *jni_env, jthread thread,
     if (sync_freq && ((ExceptionEventsCount % sync_freq) == 0)) {
 
         if (nsk_getVerboseMode()) {
-            jclass klass = NULL;
-            char *signature = NULL;
+            jclass klass = nullptr;
+            char *signature = nullptr;
 
-            if (!NSK_JNI_VERIFY(jni_env, (klass = jni_env->GetObjectClass(exception)) != NULL)) {
+            if (!NSK_JNI_VERIFY(jni_env, (klass = jni_env->GetObjectClass(exception)) != nullptr)) {
                 nsk_jvmti_setFailStatus();
                 return;
             }
-            if (!NSK_JVMTI_VERIFY(jvmti_env->GetClassSignature(klass, &signature, NULL))) {
+            if (!NSK_JVMTI_VERIFY(jvmti_env->GetClassSignature(klass, &signature, nullptr))) {
                 nsk_jvmti_setFailStatus();
                 return;
             }
             NSK_DISPLAY2("Exception event %d: %s\n",
-                ExceptionEventsCount, signature);
-            if (signature != NULL)
+                ExceptionEventsCount.load(), signature);
+            if (signature != nullptr)
                 jvmti_env->Deallocate((unsigned char*)signature);
         }
 
@@ -182,11 +196,11 @@ Exception(jvmtiEnv *jvmti_env, JNIEnv *jni_env, jthread thread,
                 new_class_def : old_class_def))
             nsk_jvmti_setFailStatus();
 
-        NSK_DISPLAY1("SingleStepEventsCount: %d\n", SingleStepEventsCount);
+        NSK_DISPLAY1("SingleStepEventsCount: %d\n", SingleStepEventsCount.load());
         if (vm_mode == VM_MODE_MIXED) {
             if (!NSK_JVMTI_VERIFY(jvmti_env->SetEventNotificationMode(
                     ((newFlag) ? JVMTI_DISABLE : JVMTI_ENABLE),
-                    JVMTI_EVENT_SINGLE_STEP, NULL)))
+                    JVMTI_EVENT_SINGLE_STEP, nullptr)))
                 nsk_jvmti_setFailStatus();
         }
 
@@ -203,16 +217,16 @@ Exception(jvmtiEnv *jvmti_env, JNIEnv *jni_env, jthread thread,
 
 /* ========================================================================== */
 
-static jrawMonitorID waitLock = NULL;
+static jrawMonitorID waitLock = nullptr;
 
 static int prepare(jvmtiEnv* jvmti, JNIEnv* jni) {
     int i;
 
-    if (!NSK_JVMTI_VERIFY(jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, NULL)))
+    if (!NSK_JVMTI_VERIFY(jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, nullptr)))
         return NSK_FALSE;
 
     if (vm_mode != VM_MODE_COMPILED) {
-        if (!NSK_JVMTI_VERIFY(jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_SINGLE_STEP, NULL)))
+        if (!NSK_JVMTI_VERIFY(jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_SINGLE_STEP, nullptr)))
             return NSK_FALSE;
     }
 
@@ -221,27 +235,27 @@ static int prepare(jvmtiEnv* jvmti, JNIEnv* jni) {
 
     for (i = 0; i < classCount; i++) {
         NSK_DISPLAY1("Find class: %s\n", names[i]);
-        if (!NSK_JNI_VERIFY(jni, (old_class_def[i].klass = jni->FindClass(names[i])) != NULL))
+        if (!NSK_JNI_VERIFY(jni, (old_class_def[i].klass = jni->FindClass(names[i])) != nullptr))
             return NSK_FALSE;
 
         if (!NSK_JNI_VERIFY(jni, (old_class_def[i].klass = (jclass)
-                jni->NewGlobalRef(old_class_def[i].klass)) != NULL))
+                jni->NewGlobalRef(old_class_def[i].klass)) != nullptr))
             return NSK_FALSE;
     }
 
     if (bci_mode != BCI_MODE_EMCP) {
         NSK_DISPLAY1("Find class: %s\n", PROFILE_CLASS_NAME);
-        if (!NSK_JNI_VERIFY(jni, (profile_klass = jni->FindClass(PROFILE_CLASS_NAME)) != NULL))
+        if (!NSK_JNI_VERIFY(jni, (profile_klass = jni->FindClass(PROFILE_CLASS_NAME)) != nullptr))
             return NSK_FALSE;
 
         if (!NSK_JNI_VERIFY(jni, (profile_klass = (jclass)
-                jni->NewGlobalRef(profile_klass)) != NULL))
+                jni->NewGlobalRef(profile_klass)) != nullptr))
             return NSK_FALSE;
 
         if (!NSK_JNI_VERIFY(jni, (count_field =
                 jni->GetStaticFieldID(profile_klass,
                                       (bci_mode == BCI_MODE_CALL) ? "callCount" : "allocCount",
-                                      "I")) != NULL))
+                                      "I")) != nullptr))
             return NSK_FALSE;
 
         if (!NSK_JVMTI_VERIFY(jvmti->Allocate(classCount * sizeof(jvmtiClassDefinition),
@@ -259,7 +273,7 @@ static int prepare(jvmtiEnv* jvmti, JNIEnv* jni) {
     }
 
     if (sync_freq) {
-        if (!NSK_JVMTI_VERIFY(jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_EXCEPTION, NULL)))
+        if (!NSK_JVMTI_VERIFY(jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_EXCEPTION, nullptr)))
             return NSK_FALSE;
     }
 
@@ -304,7 +318,7 @@ agentProc(jvmtiEnv* jvmti, JNIEnv* jni, void* arg) {
         return;
 
     if (sync_freq) {
-        if (!NSK_JVMTI_VERIFY(jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_EXCEPTION, NULL)))
+        if (!NSK_JVMTI_VERIFY(jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_EXCEPTION, nullptr)))
             nsk_jvmti_setFailStatus();
     } else {
 
@@ -315,11 +329,11 @@ agentProc(jvmtiEnv* jvmti, JNIEnv* jni, void* arg) {
                     new_class_def : old_class_def))
                 nsk_jvmti_setFailStatus();
 
-            NSK_DISPLAY1("SingleStepEventsCount: %d\n", SingleStepEventsCount);
+            NSK_DISPLAY1("SingleStepEventsCount: %d\n", SingleStepEventsCount.load());
             if (vm_mode == VM_MODE_MIXED) {
                 if (!NSK_JVMTI_VERIFY(jvmti->SetEventNotificationMode(
                         (((i % 2) == 0) ? JVMTI_DISABLE : JVMTI_ENABLE),
-                        JVMTI_EVENT_SINGLE_STEP, NULL)))
+                        JVMTI_EVENT_SINGLE_STEP, nullptr)))
                     nsk_jvmti_setFailStatus();
             }
 
@@ -334,7 +348,7 @@ agentProc(jvmtiEnv* jvmti, JNIEnv* jni, void* arg) {
     }
 
     if (vm_mode != VM_MODE_COMPILED) {
-        if (!NSK_JVMTI_VERIFY(jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_SINGLE_STEP, NULL)))
+        if (!NSK_JVMTI_VERIFY(jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_SINGLE_STEP, nullptr)))
             nsk_jvmti_setFailStatus();
     }
 
@@ -346,7 +360,7 @@ agentProc(jvmtiEnv* jvmti, JNIEnv* jni, void* arg) {
 
 /** Agent library initialization. */
 jint Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
-    jvmtiEnv* jvmti = NULL;
+    jvmtiEnv* jvmti = nullptr;
     jvmtiCapabilities caps;
     jvmtiEventCallbacks callbacks;
     const char* optValue;
@@ -374,7 +388,7 @@ jint Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
 
     package_name = nsk_jvmti_findOptionStringValue("package",
         DEFAULT_PACKAGE_NAME);
-    if (!NSK_VERIFY(package_name != NULL))
+    if (!NSK_VERIFY(package_name != nullptr))
         return JNI_ERR;
     NSK_DISPLAY1("package: %s\n", package_name);
 
@@ -389,7 +403,7 @@ jint Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
     NSK_DISPLAY1("classes: %d\n", max_classes);
 
     optValue = nsk_jvmti_findOptionValue("mode");
-    if (optValue != NULL) {
+    if (optValue != nullptr) {
         if (strcmp(optValue, "compiled") == 0)
             vm_mode = VM_MODE_COMPILED;
         else if (strcmp(optValue, "interpreted") == 0)
@@ -403,7 +417,7 @@ jint Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
     }
 
     optValue = nsk_jvmti_findOptionValue("bci");
-    if (optValue != NULL) {
+    if (optValue != nullptr) {
         if (strcmp(optValue, "emcp") == 0)
             bci_mode = BCI_MODE_EMCP;
         else if (strcmp(optValue, "call") == 0)
@@ -423,7 +437,7 @@ jint Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
 
     /* create JVMTI environment */
     if (!NSK_VERIFY((jvmti =
-            nsk_jvmti_createJVMTIEnv(jvm, reserved)) != NULL))
+            nsk_jvmti_createJVMTIEnv(jvm, reserved)) != nullptr))
         return JNI_ERR;
 
     /* allocate tables for classes */
@@ -432,6 +446,9 @@ jint Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
 
     if (!NSK_JVMTI_VERIFY(jvmti->Allocate(max_classes * sizeof(jvmtiClassDefinition),
             (unsigned char**) &old_class_def)))
+        return JNI_ERR;
+
+    if (!NSK_JVMTI_VERIFY(jvmti->CreateRawMonitor("classLoadLock", &classLoadLock)))
         return JNI_ERR;
 
     /* add capabilities */
@@ -447,7 +464,7 @@ jint Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
     if (!NSK_JVMTI_VERIFY(jvmti->AddCapabilities(&caps)))
         return JNI_ERR;
 
-    if (!NSK_VERIFY(nsk_jvmti_setAgentProc(agentProc, NULL)))
+    if (!NSK_VERIFY(nsk_jvmti_setAgentProc(agentProc, nullptr)))
         return JNI_ERR;
 
     /* set event callbacks */
@@ -464,9 +481,9 @@ jint Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
         return JNI_ERR;
 
     /* enable events */
-    if (!NSK_JVMTI_VERIFY(jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, NULL)))
+    if (!NSK_JVMTI_VERIFY(jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, nullptr)))
         return JNI_ERR;
-    if (!NSK_JVMTI_VERIFY(jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_LOAD, NULL)))
+    if (!NSK_JVMTI_VERIFY(jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_LOAD, nullptr)))
         return JNI_ERR;
 
     return JNI_OK;

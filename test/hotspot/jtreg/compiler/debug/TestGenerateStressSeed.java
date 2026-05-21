@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,18 +26,22 @@ package compiler.debug;
 import java.nio.file.Paths;
 import jdk.test.lib.process.OutputAnalyzer;
 import jdk.test.lib.process.ProcessTools;
-import jdk.test.lib.Asserts;
 
 /*
  * @test
- * @bug 8252219
+ * @key stress randomness
+ * @bug 8252219 8256535 8325478
  * @requires vm.compiler2.enabled
+ * @requires vm.flagless
  * @summary Tests that using a stress option without -XX:StressSeed=N generates
  *          and logs a random seed.
  * @library /test/lib /
  * @run driver compiler.debug.TestGenerateStressSeed StressLCM
  * @run driver compiler.debug.TestGenerateStressSeed StressGCM
  * @run driver compiler.debug.TestGenerateStressSeed StressIGVN
+ * @run driver compiler.debug.TestGenerateStressSeed StressCCP
+ * @run driver compiler.debug.TestGenerateStressSeed StressMacroExpansion
+ * @run driver compiler.debug.TestGenerateStressSeed StressMacroElimination
  */
 
 public class TestGenerateStressSeed {
@@ -57,7 +61,8 @@ public class TestGenerateStressSeed {
                 "-Xcomp", "-XX:-TieredCompilation", "-XX:+UnlockDiagnosticVMOptions",
                 "-XX:CompileOnly=" + className + "::sum", "-XX:+" + stressOpt,
                 "-XX:+LogCompilation", "-XX:LogFile=" + log, className, "10"};
-            ProcessTools.createJavaProcessBuilder(procArgs).start().waitFor();
+            new OutputAnalyzer(ProcessTools.createLimitedTestJavaProcessBuilder(procArgs).start())
+                .shouldHaveExitValue(0);
             new OutputAnalyzer(Paths.get(log))
                 .shouldContain("stress_test seed");
         } else {

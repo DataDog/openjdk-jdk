@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -124,7 +124,7 @@ writeNewObjectArray(JNIEnv *env, PacketOutputStream *out,
         } else {
 
             array = JNI_FUNC_PTR(env,NewObjectArray)(env, size, componentClass, 0);
-            if (JNI_FUNC_PTR(env,ExceptionOccurred)(env)) {
+            if (JNI_FUNC_PTR(env,ExceptionCheck)(env)) {
                 JNI_FUNC_PTR(env,ExceptionClear)(env);
                 array = NULL;
             }
@@ -188,7 +188,7 @@ writeNewPrimitiveArray(JNIEnv *env, PacketOutputStream *out,
                 break;
         }
 
-        if (JNI_FUNC_PTR(env,ExceptionOccurred)(env)) {
+        if (JNI_FUNC_PTR(env,ExceptionCheck)(env)) {
             JNI_FUNC_PTR(env,ExceptionClear)(env);
             array = NULL;
         }
@@ -227,7 +227,7 @@ newInstance(PacketInputStream *in, PacketOutputStream *out)
     error = classSignature(arrayClass, &signature, NULL);
     if ( error != JVMTI_ERROR_NONE ) {
         outStream_setError(out, map2jdwpError(error));
-        return JNI_FALSE;
+        return JNI_TRUE;
     }
     componentSignature = componentTypeSignature(signature);
 

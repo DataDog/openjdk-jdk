@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,10 @@
  */
 package jdk.incubator.vector;
 
+import jdk.internal.vm.annotation.ForceInline;
+
+import java.lang.foreign.MemorySegment;
+
 import java.nio.ByteOrder;
 import java.util.function.IntUnaryOperator;
 
@@ -31,11 +35,6 @@ import java.util.function.IntUnaryOperator;
  * Interface for managing all vectors of the same combination
  * of <a href="Vector.html#ETYPE">element type</a> ({@code ETYPE})
  * and {@link VectorShape shape}.
- *
- * @apiNote
- * User code should not implement this interface.  A future release of
- * this type may restrict implementations to be members of the same
- * package.
  *
  * @implNote
  * The string representation of an instance of this interface will
@@ -53,7 +52,7 @@ import java.util.function.IntUnaryOperator;
  * @param <E> the boxed version of {@code ETYPE},
  *           the element type of a vector
  */
-public interface VectorSpecies<E> {
+public sealed interface VectorSpecies<E> permits AbstractSpecies {
     /**
      * Returns the primitive element type of vectors of this
      * species.
@@ -149,10 +148,36 @@ public interface VectorSpecies<E> {
      * @return the largest multiple of the vector length not greater
      *         than the given length
      * @throws IllegalArgumentException if the {@code length} is
-               negative and the result would overflow to a positive value
+     *         negative and the result would overflow to a positive value
      * @see Math#floorMod(int, int)
      */
     int loopBound(int length);
+
+    /**
+     * Loop control function which returns the largest multiple of
+     * {@code VLENGTH} that is less than or equal to the given
+     * {@code length} value.
+     * Here, {@code VLENGTH} is the result of {@code this.length()},
+     * and {@code length} is interpreted as a number of lanes.
+     * The resulting value {@code R} satisfies this inequality:
+     * <pre>{@code R <= length < R+VLENGTH}
+     * </pre>
+     * <p> Specifically, this method computes
+     * {@code length - floorMod(length, VLENGTH)}, where
+     * {@link Math#floorMod(long,int) floorMod} computes a remainder
+     * value by rounding its quotient toward negative infinity.
+     * As long as {@code VLENGTH} is a power of two, then the result
+     * is also equal to {@code length & ~(VLENGTH - 1)}.
+     *
+     * @param length the input length
+     * @return the largest multiple of the vector length not greater
+     *         than the given length
+     * @throws IllegalArgumentException if the {@code length} is
+     *         negative and the result would overflow to a positive value
+     * @see Math#floorMod(long, int)
+     * @since 19
+     */
+    long loopBound(long length);
 
     /**
      * Returns a mask of this species where only
@@ -170,6 +195,24 @@ public interface VectorSpecies<E> {
      * @see VectorMask#indexInRange(int, int)
      */
     VectorMask<E> indexInRange(int offset, int limit);
+
+    /**
+     * Returns a mask of this species where only
+     * the lanes at index N such that the adjusted index
+     * {@code N+offset} is in the range {@code [0..limit-1]}
+     * are set.
+     *
+     * <p>
+     * This method returns the value of the expression
+     * {@code maskAll(true).indexInRange(offset, limit)}
+     *
+     * @param offset the starting index
+     * @param limit the upper-bound (exclusive) of index range
+     * @return a mask with out-of-range lanes unset
+     * @see VectorMask#indexInRange(long, long)
+     * @since 19
+     */
+    VectorMask<E> indexInRange(long offset, long limit);
 
     /**
      * Checks that this species has the given element type,
@@ -224,7 +267,7 @@ public interface VectorSpecies<E> {
      * viewed as measuring the proportion of "dropped input bits"
      * which must be deleted from the input in order for the result to
      * fit in the output vector.  It is also the <em>part limit</em>,
-     * a upper exclusive limit on the {@code part} parameter to a
+     * an upper exclusive limit on the {@code part} parameter to a
      * method that would transform the input species to the output
      * species.
      *
@@ -296,6 +339,7 @@ public interface VectorSpecies<E> {
      * @see #withLanes(Class)
      * @see #withShape(VectorShape)
      */
+    @ForceInline
     static <E> VectorSpecies<E> of(Class<E> elementType, VectorShape shape) {
         LaneType laneType = LaneType.of(elementType);
         return AbstractSpecies.findSpecies(elementType, laneType, shape);
@@ -321,6 +365,7 @@ public interface VectorSpecies<E> {
      *         or if the given type is not a valid {@code ETYPE}
      * @see VectorSpecies#ofPreferred(Class)
      */
+    @ForceInline
     static <E> VectorSpecies<E> ofLargestShape(Class<E> etype) {
         return VectorSpecies.of(etype, VectorShape.largestShapeFor(etype));
     }
@@ -342,7 +387,7 @@ public interface VectorSpecies<E> {
      * <li>{@linkplain Vector#reinterpretShape(VectorSpecies, int) Reinterpretation casts}
      * between vectors of preferred species will neither truncate
      * lanes nor fill them with default values.
-     * <li>For any particular element type, some platform might possibly
+     * <li>For any particular element type, some platform might
      * provide a {@linkplain #ofLargestShape(Class) larger vector shape}
      * that (as a trade-off) does not support all possible element types.
      * </ul>
@@ -364,6 +409,7 @@ public interface VectorSpecies<E> {
      * @see VectorShape#preferredShape()
      * @see VectorSpecies#ofLargestShape(Class)
      */
+    @ForceInline
     public static <E> VectorSpecies<E> ofPreferred(Class<E> etype) {
         return of(etype, VectorShape.preferredShape());
     }
@@ -386,6 +432,7 @@ public interface VectorSpecies<E> {
      *         if the given {@code elementType} argument is not
      *         a valid vector {@code ETYPE}
      */
+    @ForceInline
     static int elementSize(Class<?> elementType) {
         return LaneType.of(elementType).elementSize;
     }
@@ -412,7 +459,7 @@ public interface VectorSpecies<E> {
      * Returns a vector of this species
      * where lane elements are initialized
      * from the given array at the given offset.
-     * The array must be of the the correct {@code ETYPE}.
+     * The array must be of the correct {@code ETYPE}.
      *
      * Equivalent to
      * {@code IntVector.fromArray(this,a,offset)}
@@ -433,31 +480,31 @@ public interface VectorSpecies<E> {
     // Defined when ETYPE is known.
 
     /**
-     * Loads a vector of this species from a byte array starting
-     * at an offset.
+     * Loads a vector of this species from a {@linkplain MemorySegment memory segment}
+     * starting at an offset into the memory segment.
      * Bytes are composed into primitive lane elements according
      * to the specified byte order.
      * The vector is arranged into lanes according to
      * <a href="Vector.html#lane-order">memory ordering</a>.
      * <p>
      * Equivalent to
-     * {@code IntVector.fromByteArray(this,a,offset,bo)}
-     * or an equivalent {@code fromByteArray} method,
+     * {@code IntVector.fromMemorySegment(this,ms,offset,bo)},
      * on the vector type corresponding to
      * this species.
      *
-     * @param a a byte array
-     * @param offset the index of the first byte to load
+     * @param ms the memory segment
+     * @param offset the offset into the memory segment
      * @param bo the intended byte order
-     * @return a vector of the given species filled from the byte array
+     * @return a vector of the given species filled from the memory segment
      * @throws IndexOutOfBoundsException
      *         if {@code offset+N*ESIZE < 0}
      *         or {@code offset+(N+1)*ESIZE > a.length}
      *         for any lane {@code N} in the vector
-     * @see IntVector#fromByteArray(VectorSpecies,byte[],int,ByteOrder)
-     * @see FloatVector#fromByteArray(VectorSpecies,byte[],int,ByteOrder)
+     * @see IntVector#fromMemorySegment(VectorSpecies, java.lang.foreign.MemorySegment, long, java.nio.ByteOrder)
+     * @see FloatVector#fromMemorySegment(VectorSpecies, java.lang.foreign.MemorySegment, long, java.nio.ByteOrder)
+     * @since 19
      */
-    Vector<E> fromByteArray(byte[] a, int offset, ByteOrder bo);
+    Vector<E> fromMemorySegment(MemorySegment ms, long offset, ByteOrder bo);
 
     /**
      * Returns a mask of this species
@@ -496,7 +543,7 @@ public interface VectorSpecies<E> {
      *
      * <p> This method returns the value of this expression:
      * {@code EVector.broadcast(this, (ETYPE)e)}, where
-     * {@code EVector} is the vector class specific to the
+     * {@code EVector} is the vector class specific to
      * the {@code ETYPE} of this species.
      * The {@code long} value must be accurately representable
      * by {@code ETYPE}, so that {@code e==(long)(ETYPE)e}.

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2016, the original author or authors.
+ * Copyright (c) 2002-2020, the original author(s).
  *
  * This software is distributable under the BSD license. See the terms of the
  * BSD license in the documentation provided with this software.
@@ -22,8 +22,9 @@ import java.util.function.Supplier;
  * @author <a href="mailto:gnodet@gmail.com">Guillaume Nodet</a>
  * @since 2.0
  */
-public final class Log
-{
+public final class Log {
+//    private static final Logger logger = Logger.getLogger("org.jline");
+
     public static void trace(final Object... messages) {
 //        log(Level.FINEST, messages);
     }
@@ -72,8 +73,7 @@ public final class Log
                 }
             }
             out.print("]");
-        }
-        else {
+        } else {
             out.print(message);
         }
     }
@@ -83,11 +83,10 @@ public final class Log
 //        ByteArrayOutputStream baos = new ByteArrayOutputStream();
 //        PrintStream ps = new PrintStream(baos);
 //        for (int i = 0; i < messages.length; i++) {
-//            // Special handling for the last message if its a throwable, render its stack on the next line
+//            // Special handling for the last message if it's a throwable, render its stack on the next line
 //            if (i + 1 == messages.length && messages[i] instanceof Throwable) {
 //                cause = (Throwable) messages[i];
-//            }
-//            else {
+//            } else {
 //                render(ps, messages[i]);
 //            }
 //        }
@@ -110,7 +109,6 @@ public final class Log
 //    }
 //
 //    static void logr(final Level level, final Supplier<LogRecord> record) {
-//        Logger logger = Logger.getLogger("org.jline");
 //        if (logger.isLoggable(level)) {
 //            // inform record of the logger-name
 //            LogRecord tmp = record.get();
@@ -120,8 +118,6 @@ public final class Log
 //    }
 //
 //    static boolean isEnabled(Level level) {
-//        Logger logger = Logger.getLogger("org.jline");
 //        return logger.isLoggable(level);
 //    }
-
 }

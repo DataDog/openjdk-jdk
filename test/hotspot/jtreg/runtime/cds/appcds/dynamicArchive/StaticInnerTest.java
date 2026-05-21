@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,11 +31,13 @@
  * @requires vm.cds
  * @library /test/lib /test/hotspot/jtreg/runtime/cds/appcds
  *          /test/hotspot/jtreg/runtime/cds/appcds/dynamicArchive/test-classes
- * @build StaticInnerApp sun.hotspot.WhiteBox LambdaVerification
- * @run driver ClassFileInstaller -jar static_inner_app.jar StaticInnerApp HelloStaticInner HelloStaticInner$InnerHello
- * @run driver ClassFileInstaller sun.hotspot.WhiteBox
+ * @build StaticInnerApp jdk.test.whitebox.WhiteBox LambdaVerification
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller -jar static_inner_app.jar StaticInnerApp HelloStaticInner HelloStaticInner$InnerHello
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run main/othervm -XX:+UnlockDiagnosticVMOptions -XX:+WhiteBoxAPI -Xbootclasspath/a:. StaticInnerTest
  */
+
+import jdk.test.lib.helpers.ClassFileInstaller;
 
 public class StaticInnerTest extends DynamicArchiveTestBase {
     public static void main(String[] args) throws Exception {
@@ -51,7 +53,7 @@ public class StaticInnerTest extends DynamicArchiveTestBase {
             "-Xlog:class+load=info,class+nestmates=trace,cds+dynamic=info",
             "-cp", appJar, mainClass, "dump")
             .assertNormalExit(output -> {
-                output.shouldContain("Archiving hidden HelloStaticInner$InnerHello$$Lambda$")
+                output.shouldContain("Archiving hidden HelloStaticInner$InnerHello$$Lambda")
                       .shouldHaveExitValue(0);
             });
 
@@ -61,7 +63,7 @@ public class StaticInnerTest extends DynamicArchiveTestBase {
             .assertNormalExit(output -> {
                 output.shouldHaveExitValue(0)
                       .shouldContain("HelloStaticInner source: shared objects file (top)")
-                      .shouldMatch(".class.load. HelloStaticInner[$]InnerHello[$][$]Lambda[$].*/0x.*source:.*shared.*objects.*file.*(top)");
+                      .shouldMatch(".class.load. HelloStaticInner[$]InnerHello[$][$]Lambda.*/0x.*source:.*shared.*objects.*file.*(top)");
             });
     }
 }

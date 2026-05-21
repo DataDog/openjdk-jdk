@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -161,6 +161,7 @@ public class ClassWriter extends ClassFile {
 
     /** Construct a class writer, given an options table.
      */
+    @SuppressWarnings("this-escape")
     protected ClassWriter(Context context) {
         context.put(classWriterKey, this);
 
@@ -195,7 +196,7 @@ public class ClassWriter extends ClassFile {
         extraAttributeHooks = extraAttributeHooks.prepend(addExtraAttributes);
     }
 
-/******************************************************************
+/* ****************************************************************
  * Diagnostics: dump generated class names and modifiers
  ******************************************************************/
 
@@ -231,12 +232,12 @@ public class ClassWriter extends ClassFile {
         return sbuf.toString();
     }
     //where
-        private final static String[] flagName = {
+        private static final String[] flagName = {
             "PUBLIC", "PRIVATE", "PROTECTED", "STATIC", "FINAL",
             "SUPER", "VOLATILE", "TRANSIENT", "NATIVE", "INTERFACE",
             "ABSTRACT", "STRICTFP"};
 
-/******************************************************************
+/* ****************************************************************
  * Output routines
  ******************************************************************/
 
@@ -258,7 +259,7 @@ public class ClassWriter extends ClassFile {
         buf.elems[adr+3] = (byte)((x      ) & 0xFF);
     }
 
-/******************************************************************
+/* ****************************************************************
  * Writing the Constant Pool
  ******************************************************************/
 
@@ -276,7 +277,7 @@ public class ClassWriter extends ClassFile {
         }
     }
 
-/******************************************************************
+/* ****************************************************************
  * Writing Attributes
  ******************************************************************/
 
@@ -328,7 +329,7 @@ public class ClassWriter extends ClassFile {
         int alenIdx = writeAttr(attributeName);
         ClassSymbol enclClass = c.owner.enclClass();
         MethodSymbol enclMethod =
-            (c.owner.type == null // local to init block
+            ((c.owner.flags() & BLOCK) != 0 // local to init block
              || c.owner.kind != MTH) // or member init
             ? null
             : ((MethodSymbol)c.owner).originalEnclosingMethod();
@@ -378,7 +379,7 @@ public class ClassWriter extends ClassFile {
     /**
      * Write method parameter names attribute.
      */
-    int writeMethodParametersAttr(MethodSymbol m) {
+    int writeMethodParametersAttr(MethodSymbol m, boolean writeParamNames) {
         MethodType ty = m.externalType(types).asMethodType();
         final int allparams = ty.argtypes.size();
         if (m.params != null && allparams != 0) {
@@ -389,7 +390,10 @@ public class ClassWriter extends ClassFile {
                 final int flags =
                     ((int) s.flags() & (FINAL | SYNTHETIC | MANDATED)) |
                     ((int) m.flags() & SYNTHETIC);
-                databuf.appendChar(poolWriter.putName(s.name));
+                if (writeParamNames)
+                    databuf.appendChar(poolWriter.putName(s.name));
+                else
+                    databuf.appendChar(0);
                 databuf.appendChar(flags);
             }
             // Now write the real parameters
@@ -397,7 +401,10 @@ public class ClassWriter extends ClassFile {
                 final int flags =
                     ((int) s.flags() & (FINAL | SYNTHETIC | MANDATED)) |
                     ((int) m.flags() & SYNTHETIC);
-                databuf.appendChar(poolWriter.putName(s.name));
+                if (writeParamNames)
+                    databuf.appendChar(poolWriter.putName(s.name));
+                else
+                    databuf.appendChar(0);
                 databuf.appendChar(flags);
             }
             // Now write the captured locals
@@ -405,7 +412,10 @@ public class ClassWriter extends ClassFile {
                 final int flags =
                     ((int) s.flags() & (FINAL | SYNTHETIC | MANDATED)) |
                     ((int) m.flags() & SYNTHETIC);
-                databuf.appendChar(poolWriter.putName(s.name));
+                if (writeParamNames)
+                    databuf.appendChar(poolWriter.putName(s.name));
+                else
+                    databuf.appendChar(0);
                 databuf.appendChar(flags);
             }
             endAttr(attrIndex);
@@ -470,7 +480,7 @@ public class ClassWriter extends ClassFile {
         return attrCount;
     }
 
-/**********************************************************************
+/* ********************************************************************
  * Writing Java-language annotations (aka metadata, attributes)
  **********************************************************************/
 
@@ -639,8 +649,16 @@ public class ClassWriter extends ClassFile {
         databuf.appendChar(poolWriter.putDescriptor(c.type));
         databuf.appendChar(c.values.length());
         for (Pair<Symbol.MethodSymbol,Attribute> p : c.values) {
+            checkAnnotationArraySizeInternal(p);
             databuf.appendChar(poolWriter.putName(p.fst.name));
             p.snd.accept(awriter);
+        }
+    }
+
+    private void checkAnnotationArraySizeInternal(Pair<Symbol.MethodSymbol, Attribute> p) {
+        if (p.snd instanceof Attribute.Array arrAttr &&
+                arrAttr.values.length > ClassFile.MAX_ANNOTATIONS) {
+            log.error(Errors.AnnotationArrayTooLarge(p.fst.owner));
         }
     }
 
@@ -731,7 +749,7 @@ public class ClassWriter extends ClassFile {
         }
     }
 
-/**********************************************************************
+/* ********************************************************************
  * Writing module attributes
  **********************************************************************/
 
@@ -813,7 +831,7 @@ public class ClassWriter extends ClassFile {
         return 1;
     }
 
-/**********************************************************************
+/* ********************************************************************
  * Writing Objects
  **********************************************************************/
 
@@ -824,7 +842,7 @@ public class ClassWriter extends ClassFile {
         databuf.appendChar(poolWriter.innerClasses.size());
         for (ClassSymbol inner : poolWriter.innerClasses) {
             inner.markAbstractIfNeeded(types);
-            char flags = (char) adjustFlags(inner.flags_field);
+            int flags = adjustFlags(inner.flags_field);
             if ((flags & INTERFACE) != 0) flags |= ABSTRACT; // Interfaces are always ABSTRACT
             flags &= ~STRICTFP; //inner classes should not have the strictfp flag set.
             if (dumpInnerClassModifiers) {
@@ -912,11 +930,11 @@ public class ClassWriter extends ClassFile {
     /** Write "PermittedSubclasses" attribute.
      */
     int writePermittedSubclassesIfNeeded(ClassSymbol csym) {
-        if (csym.permitted.nonEmpty()) {
+        if (csym.getPermittedSubclasses().nonEmpty()) {
             int alenIdx = writeAttr(names.PermittedSubclasses);
-            databuf.appendChar(csym.permitted.size());
-            for (Symbol c : csym.permitted) {
-                databuf.appendChar(poolWriter.putClass((ClassSymbol) c));
+            databuf.appendChar(csym.getPermittedSubclasses().size());
+            for (Type t : csym.getPermittedSubclasses()) {
+                databuf.appendChar(poolWriter.putClass((ClassSymbol) t.tsym));
             }
             endAttr(alenIdx);
             return 1;
@@ -928,6 +946,15 @@ public class ClassWriter extends ClassFile {
      */
     void writeBootstrapMethods() {
         int alenIdx = writeAttr(names.BootstrapMethods);
+        int lastBootstrapMethods;
+        do {
+            lastBootstrapMethods = poolWriter.bootstrapMethods.size();
+            for (BsmKey bsmKey : java.util.List.copyOf(poolWriter.bootstrapMethods.keySet())) {
+                for (LoadableConstant arg : bsmKey.staticArgs) {
+                    poolWriter.putConstant(arg);
+                }
+            }
+        } while (lastBootstrapMethods < poolWriter.bootstrapMethods.size());
         databuf.appendChar(poolWriter.bootstrapMethods.size());
         for (BsmKey bsmKey : poolWriter.bootstrapMethods.keySet()) {
             //write BSM handle
@@ -1004,15 +1031,37 @@ public class ClassWriter extends ClassFile {
             endAttr(alenIdx);
             acount++;
         }
-        if (target.hasMethodParameters() && (options.isSet(PARAMETERS) || m.isConstructor() && (m.flags_field & RECORD) != 0)) {
-            if (!m.isLambdaMethod()) // Per JDK-8138729, do not emit parameters table for lambda bodies.
-                acount += writeMethodParametersAttr(m);
+        if (target.hasMethodParameters()) {
+            if (!m.isLambdaMethod()) { // Per JDK-8138729, do not emit parameters table for lambda bodies.
+                boolean requiresParamNames = requiresParamNames(m);
+                if (requiresParamNames || requiresParamFlags(m))
+                    acount += writeMethodParametersAttr(m, requiresParamNames);
+            }
         }
         acount += writeMemberAttrs(m, false);
         if (!m.isLambdaMethod())
             acount += writeParameterAttrs(m.params);
         acount += writeExtraAttributes(m);
         endAttrs(acountIdx, acount);
+    }
+
+    private boolean requiresParamNames(MethodSymbol m) {
+        if (options.isSet(PARAMETERS))
+            return true;
+        if (m.isConstructor() && (m.flags_field & RECORD) != 0)
+            return true;
+        return false;
+    }
+
+    private boolean requiresParamFlags(MethodSymbol m) {
+        if (!m.extraParams.isEmpty()) {
+            return m.extraParams.stream().anyMatch(p -> (p.flags_field & (SYNTHETIC | MANDATED)) != 0);
+        }
+        if (m.params != null) {
+            // parameter is stored in params for Enum#valueOf(name)
+            return m.params.stream().anyMatch(p -> (p.flags_field & (SYNTHETIC | MANDATED)) != 0);
+        }
+        return false;
     }
 
     /** Write code attribute of method.
@@ -1632,7 +1681,7 @@ public class ClassWriter extends ClassFile {
         acount += writeExtraAttributes(c);
 
         poolbuf.appendInt(JAVA_MAGIC);
-        if (preview.isEnabled()) {
+        if (preview.isEnabled() && preview.usesPreview(c.sourcefile)) {
             poolbuf.appendChar(ClassFile.PREVIEW_MINOR_VERSION);
         } else {
             poolbuf.appendChar(target.minorVersion);
@@ -1697,6 +1746,10 @@ public class ClassWriter extends ClassFile {
     int adjustFlags(final long flags) {
         int result = (int)flags;
 
+        // Elide strictfp bit in class files
+        if (target.obsoleteAccStrict())
+            result &= ~STRICTFP;
+
         if ((flags & BRIDGE) != 0)
             result |= ACC_BRIDGE;
         if ((flags & VARARGS) != 0)
@@ -1707,12 +1760,6 @@ public class ClassWriter extends ClassFile {
     }
 
     long getLastModified(FileObject filename) {
-        long mod = 0;
-        try {
-            mod = filename.getLastModified();
-        } catch (SecurityException e) {
-            throw new AssertionError("CRT: couldn't get source file modification date: " + e.getMessage());
-        }
-        return mod;
+        return filename.getLastModified();
     }
 }

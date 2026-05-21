@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2026, Oracle and/or its affiliates. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,6 +30,7 @@
  */
 
 #include "jni.h"
+#include "jvm.h"
 #include "imageDecompressor.hpp"
 #include "endian.hpp"
 #ifdef WIN32
@@ -57,24 +58,14 @@ static ZipInflateFully_t ZipInflateFully        = NULL;
  * @return the address of the entry point or NULL
  */
 static void* findEntry(const char* name) {
-    void *addr = NULL;
-#ifdef WIN32
-    HMODULE handle = GetModuleHandle("zip.dll");
-    if (handle == NULL) {
-      handle = LoadLibrary("zip.dll");
-    }
-    if (handle == NULL) {
-      return NULL;
-    }
-    addr = (void*) GetProcAddress(handle, name);
-    return addr;
-#else
-    addr = dlopen(JNI_LIB_PREFIX "zip" JNI_LIB_SUFFIX, RTLD_GLOBAL|RTLD_LAZY);
+    void *addr = JVM_LoadZipLibrary();
     if (addr == NULL) {
         return NULL;
     }
-    addr = dlsym(addr, name);
-    return addr;
+#ifdef WIN32
+    return (void*) GetProcAddress(static_cast<HMODULE>(addr), name);
+#else
+    return dlsym(addr, name);
 #endif
 }
 
@@ -92,10 +83,6 @@ void ImageDecompressor::image_decompressor_init() {
         _decompressors[0] = new ZipDecompressor("zip");
         _decompressors[1] = new SharedStringDecompressor("compact-cp");
     }
-}
-
-void ImageDecompressor::image_decompressor_close() {
-    delete[] _decompressors;
 }
 
 /*
@@ -120,11 +107,11 @@ ImageDecompressor* ImageDecompressor::get_decompressor(const char * decompressor
 u8 ImageDecompressor::getU8(u1* ptr, Endian *endian) {
     u8 ret;
     if (endian->is_big_endian()) {
-        ret = (u8)ptr[0] << 56 | (u8)ptr[1] << 48 | (u8)ptr[2]<<40 | (u8)ptr[3]<<32 |
-                ptr[4]<<24 | ptr[5]<<16 | ptr[6]<<8 | ptr[7];
+        ret = (u8)ptr[0] << 56 | (u8)ptr[1] << 48 | (u8)ptr[2] << 40 | (u8)ptr[3] << 32 |
+                (u8)ptr[4] << 24 | (u8)ptr[5] << 16 | (u8)ptr[6] << 8 | (u8)ptr[7];
     } else {
-        ret = ptr[0] | ptr[1]<<8 | ptr[2]<<16 | ptr[3]<<24 | (u8)ptr[4]<<32 |
-                (u8)ptr[5]<<40 | (u8)ptr[6]<<48 | (u8)ptr[7]<<56;
+        ret = (u8)ptr[0] | (u8)ptr[1] << 8 | (u8)ptr[2] << 16 | (u8)ptr[3] << 24 |
+                (u8)ptr[4] << 32 | (u8)ptr[5] << 40 | (u8)ptr[6] << 48 | (u8)ptr[7] << 56;
     }
     return ret;
 }
@@ -132,9 +119,9 @@ u8 ImageDecompressor::getU8(u1* ptr, Endian *endian) {
 u4 ImageDecompressor::getU4(u1* ptr, Endian *endian) {
     u4 ret;
     if (endian->is_big_endian()) {
-        ret = ptr[0] << 24 | ptr[1]<<16 | (ptr[2]<<8) | ptr[3];
+        ret = (u4)ptr[0] << 24 | (u4)ptr[1] << 16 | (u4)ptr[2] << 8 | (u4)ptr[3];
     } else {
-        ret = ptr[0] | ptr[1]<<8 | (ptr[2]<<16) | ptr[3]<<24;
+        ret = (u4)ptr[0] | (u4)ptr[1] << 8 | (u4)ptr[2] << 16 | (u4)ptr[3] << 24;
     }
     return ret;
 }

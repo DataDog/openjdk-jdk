@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,12 +23,9 @@
 
 /* @test
  * @summary Binary data and view tests for byte buffers
- * @bug 8159257
- * @run testng ByteBufferViews
+ * @bug 8159257 8258955
+ * @run junit ByteBufferViews
  */
-
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
@@ -46,8 +43,15 @@ import java.util.function.IntFunction;
 import java.util.function.IntUnaryOperator;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
-import static org.testng.Assert.*;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.TestInstance.Lifecycle;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class ByteBufferViews {
     static final int SIZE = 32;
@@ -127,14 +131,15 @@ public class ByteBufferViews {
 
     // Creates a cross product of test arguments for
     // buffer allocator functions and buffer view functions
-    static Object[][] product(List<? extends Map.Entry<String, ?>> la,
-                              List<? extends Map.Entry<String, ?>> lb) {
+    static Stream<Arguments> product(List<? extends Map.Entry<String, ?>> la,
+                                     List<? extends Map.Entry<String, ?>> lb) {
         return la.stream().flatMap(lae -> lb.stream().
-                map(lbe -> List.of(
-                        lae.getKey() + " -> " + lbe.getKey(),
-                        lae.getValue(),
-                        lbe.getValue()).toArray()
-                )).toArray(Object[][]::new);
+                                   map(lbe -> Arguments.of
+                                       (
+                                        lae.getKey() + " -> " + lbe.getKey(),
+                                        lae.getValue(),
+                                        lbe.getValue())
+                                       ));
     }
 
     static void assertValues(int i, Object bValue, Object bbValue, ByteBuffer bb) {
@@ -167,13 +172,17 @@ public class ByteBufferViews {
     }
 
 
-    @DataProvider
-    public static Object[][] shortViewProvider() {
+    public static Stream<Arguments> shortBufferViews() {
         List<Map.Entry<String, Function<ByteBuffer, ShortBuffer>>> bfs = List.of(
                 Map.entry("bb.asShortBuffer()",
                           bb -> bb.asShortBuffer()),
                 Map.entry("bb.asShortBuffer().slice()",
                           bb -> bb.asShortBuffer().slice()),
+                Map.entry("bb.asShortBuffer().slice(index,length)",
+                          bb -> { var sb = bb.asShortBuffer();
+                                  sb =  sb.slice(1, sb.limit() - 1);
+                                  bb.position(bb.position() + 2);
+                                  return sb; }),
                 Map.entry("bb.asShortBuffer().slice().duplicate()",
                           bb -> bb.asShortBuffer().slice().duplicate())
         );
@@ -181,7 +190,8 @@ public class ByteBufferViews {
         return product(BYTE_BUFFER_FUNCTIONS, bfs);
     }
 
-    @Test(dataProvider = "shortViewProvider")
+    @ParameterizedTest
+    @MethodSource("shortBufferViews")
     public void testShortGet(String desc, IntFunction<ByteBuffer> fbb,
                              Function<ByteBuffer, ShortBuffer> fbi) {
         ByteBuffer bb = allocate(fbb);
@@ -208,7 +218,8 @@ public class ByteBufferViews {
 
     }
 
-    @Test(dataProvider = "shortViewProvider")
+    @ParameterizedTest
+    @MethodSource("shortBufferViews")
     public void testShortPut(String desc, IntFunction<ByteBuffer> fbb,
                              Function<ByteBuffer, ShortBuffer> fbi) {
         ByteBuffer bbfilled = allocate(fbb);
@@ -266,13 +277,17 @@ public class ByteBufferViews {
         }
     }
 
-    @DataProvider
-    public static Object[][] charViewProvider() {
+    public static Stream<Arguments> charBufferViews() {
         List<Map.Entry<String, Function<ByteBuffer, CharBuffer>>> bfs = List.of(
                 Map.entry("bb.asCharBuffer()",
                           bb -> bb.asCharBuffer()),
                 Map.entry("bb.asCharBuffer().slice()",
                           bb -> bb.asCharBuffer().slice()),
+                Map.entry("bb.asCharBuffer().slice(index,length)",
+                          bb -> { var cb = bb.asCharBuffer();
+                                  cb =  cb.slice(1, cb.limit() - 1);
+                                  bb.position(bb.position() + 2);
+                                  return cb; }),
                 Map.entry("bb.asCharBuffer().slice().duplicate()",
                           bb -> bb.asCharBuffer().slice().duplicate())
         );
@@ -280,7 +295,8 @@ public class ByteBufferViews {
         return product(BYTE_BUFFER_FUNCTIONS, bfs);
     }
 
-    @Test(dataProvider = "charViewProvider")
+    @ParameterizedTest
+    @MethodSource("charBufferViews")
     public void testCharGet(String desc, IntFunction<ByteBuffer> fbb,
                             Function<ByteBuffer, CharBuffer> fbi) {
         ByteBuffer bb = allocate(fbb);
@@ -307,7 +323,8 @@ public class ByteBufferViews {
 
     }
 
-    @Test(dataProvider = "charViewProvider")
+    @ParameterizedTest
+    @MethodSource("charBufferViews")
     public void testCharPut(String desc, IntFunction<ByteBuffer> fbb,
                             Function<ByteBuffer, CharBuffer> fbi) {
         ByteBuffer bbfilled = allocate(fbb);
@@ -358,13 +375,17 @@ public class ByteBufferViews {
     }
 
 
-    @DataProvider
-    public static Object[][] intViewProvider() {
+    public static Stream<Arguments> intBufferViews() {
         List<Map.Entry<String, Function<ByteBuffer, IntBuffer>>> bfs = List.of(
                 Map.entry("bb.asIntBuffer()",
                           bb -> bb.asIntBuffer()),
                 Map.entry("bb.asIntBuffer().slice()",
                           bb -> bb.asIntBuffer().slice()),
+                Map.entry("bb.asIntBuffer().slice(index,length)",
+                          bb -> { var ib = bb.asIntBuffer();
+                                  ib =  ib.slice(1, ib.limit() - 1);
+                                  bb.position(bb.position() + 4);
+                                  return ib; }),
                 Map.entry("bb.asIntBuffer().slice().duplicate()",
                           bb -> bb.asIntBuffer().slice().duplicate())
         );
@@ -372,7 +393,8 @@ public class ByteBufferViews {
         return product(BYTE_BUFFER_FUNCTIONS, bfs);
     }
 
-    @Test(dataProvider = "intViewProvider")
+    @ParameterizedTest
+    @MethodSource("intBufferViews")
     public void testIntGet(String desc, IntFunction<ByteBuffer> fbb,
                            Function<ByteBuffer, IntBuffer> fbi) {
         ByteBuffer bb = allocate(fbb);
@@ -399,7 +421,8 @@ public class ByteBufferViews {
 
     }
 
-    @Test(dataProvider = "intViewProvider")
+    @ParameterizedTest
+    @MethodSource("intBufferViews")
     public void testIntPut(String desc, IntFunction<ByteBuffer> fbb,
                            Function<ByteBuffer, IntBuffer> fbi) {
         ByteBuffer bbfilled = allocate(fbb);
@@ -460,13 +483,17 @@ public class ByteBufferViews {
     }
 
 
-    @DataProvider
-    public static Object[][] longViewProvider() {
+    public static Stream<Arguments> longBufferViews() {
         List<Map.Entry<String, Function<ByteBuffer, LongBuffer>>> bfs = List.of(
                 Map.entry("bb.asLongBuffer()",
                           bb -> bb.asLongBuffer()),
                 Map.entry("bb.asLongBuffer().slice()",
                           bb -> bb.asLongBuffer().slice()),
+                Map.entry("bb.asLongBuffer().slice(index,length)",
+                          bb -> { var lb = bb.asLongBuffer();
+                                  lb =  lb.slice(1, lb.limit() - 1);
+                                  bb.position(bb.position() + 8);
+                                  return lb; }),
                 Map.entry("bb.asLongBuffer().slice().duplicate()",
                           bb -> bb.asLongBuffer().slice().duplicate())
         );
@@ -474,7 +501,8 @@ public class ByteBufferViews {
         return product(BYTE_BUFFER_FUNCTIONS, bfs);
     }
 
-    @Test(dataProvider = "longViewProvider")
+    @ParameterizedTest
+    @MethodSource("longBufferViews")
     public void testLongGet(String desc, IntFunction<ByteBuffer> fbb,
                             Function<ByteBuffer, LongBuffer> fbi) {
         ByteBuffer bb = allocate(fbb);
@@ -501,7 +529,8 @@ public class ByteBufferViews {
 
     }
 
-    @Test(dataProvider = "longViewProvider")
+    @ParameterizedTest
+    @MethodSource("longBufferViews")
     public void testLongPut(String desc, IntFunction<ByteBuffer> fbb,
                             Function<ByteBuffer, LongBuffer> fbi) {
         ByteBuffer bbfilled = allocate(fbb);
@@ -567,14 +596,17 @@ public class ByteBufferViews {
         }
     }
 
-
-    @DataProvider
-    public static Object[][] floatViewProvider() {
+    public static Stream<Arguments> floatBufferViews() {
         List<Map.Entry<String, Function<ByteBuffer, FloatBuffer>>> bfs = List.of(
                 Map.entry("bb.asFloatBuffer()",
                           bb -> bb.asFloatBuffer()),
                 Map.entry("bb.asFloatBuffer().slice()",
                           bb -> bb.asFloatBuffer().slice()),
+                Map.entry("bb.asFloatBuffer().slice(index,length)",
+                        bb -> { var fb = bb.asFloatBuffer();
+                            fb =  fb.slice(1, fb.limit() - 1);
+                            bb.position(bb.position() + 4);
+                            return fb; }),
                 Map.entry("bb.asFloatBuffer().slice().duplicate()",
                           bb -> bb.asFloatBuffer().slice().duplicate())
         );
@@ -582,7 +614,8 @@ public class ByteBufferViews {
         return product(BYTE_BUFFER_FUNCTIONS, bfs);
     }
 
-    @Test(dataProvider = "floatViewProvider")
+    @ParameterizedTest
+    @MethodSource("floatBufferViews")
     public void testFloatGet(String desc, IntFunction<ByteBuffer> fbb,
                              Function<ByteBuffer, FloatBuffer> fbi) {
         ByteBuffer bb = allocate(fbb);
@@ -609,7 +642,8 @@ public class ByteBufferViews {
 
     }
 
-    @Test(dataProvider = "floatViewProvider")
+    @ParameterizedTest
+    @MethodSource("floatBufferViews")
     public void testFloatPut(String desc, IntFunction<ByteBuffer> fbb,
                              Function<ByteBuffer, FloatBuffer> fbi) {
         ByteBuffer bbfilled = allocate(fbb);
@@ -659,15 +693,17 @@ public class ByteBufferViews {
         return Float.intBitsToFloat(getIntFromBytes(bb, i));
     }
 
-
-
-    @DataProvider
-    public static Object[][] doubleViewProvider() {
+    public static Stream<Arguments> doubleBufferViews() {
         List<Map.Entry<String, Function<ByteBuffer, DoubleBuffer>>> bfs = List.of(
                 Map.entry("bb.asDoubleBuffer()",
                           bb -> bb.asDoubleBuffer()),
                 Map.entry("bb.asDoubleBuffer().slice()",
                           bb -> bb.asDoubleBuffer().slice()),
+                Map.entry("bb.asDoubleBuffer().slice(index,length)",
+                        bb -> { var db = bb.asDoubleBuffer();
+                            db =  db.slice(1, db.limit() - 1);
+                            bb.position(bb.position() + 8);
+                            return db; }),
                 Map.entry("bb.asDoubleBuffer().slice().duplicate()",
                           bb -> bb.asDoubleBuffer().slice().duplicate())
         );
@@ -675,7 +711,7 @@ public class ByteBufferViews {
         return product(BYTE_BUFFER_FUNCTIONS, bfs);
     }
 
-    @Test(dataProvider = "doubleViewProvider")
+    @MethodSource("doubleBufferViews")
     public void testDoubleGet(String desc, IntFunction<ByteBuffer> fbb,
                               Function<ByteBuffer, DoubleBuffer> fbi) {
         ByteBuffer bb = allocate(fbb);
@@ -702,7 +738,8 @@ public class ByteBufferViews {
 
     }
 
-    @Test(dataProvider = "doubleViewProvider")
+    @ParameterizedTest
+    @MethodSource("doubleBufferViews")
     public void testDoublePut(String desc, IntFunction<ByteBuffer> fbb,
                               Function<ByteBuffer, DoubleBuffer> fbi) {
         ByteBuffer bbfilled = allocate(fbb);

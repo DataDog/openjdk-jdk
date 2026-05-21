@@ -22,16 +22,49 @@
  */
 
 /*
- * @test
+ * @test id=G1
  * @bug 8241486
  * @summary G1/Z give warning when using LoopStripMiningIter and turn off LoopStripMiningIter (0)
+ * @requires vm.flagless
  * @requires vm.flavor == "server" & !vm.graal.enabled
- * @requires vm.gc.G1 & vm.gc.Shenandoah & vm.gc.Z & vm.gc.Epsilon
+ * @requires vm.gc.G1
  * @library /test/lib
- * @modules java.base/jdk.internal.misc
- *          java.management
- * @run driver TestNoWarningLoopStripMiningIterSet
+ * @run driver TestNoWarningLoopStripMiningIterSet G1
  */
+
+/*
+ * @test id=Shenandoah
+ * @bug 8241486
+ * @summary G1/Z give warning when using LoopStripMiningIter and turn off LoopStripMiningIter (0)
+ * @requires vm.flagless
+ * @requires vm.flavor == "server" & !vm.graal.enabled
+ * @requires vm.gc.Shenandoah
+ * @library /test/lib
+ * @run driver TestNoWarningLoopStripMiningIterSet Shenandoah
+ */
+
+/*
+ * @test id=Z
+ * @bug 8241486
+ * @summary G1/Z give warning when using LoopStripMiningIter and turn off LoopStripMiningIter (0)
+ * @requires vm.flagless
+ * @requires vm.flavor == "server" & !vm.graal.enabled
+ * @requires vm.gc.Z
+ * @library /test/lib
+ * @run driver TestNoWarningLoopStripMiningIterSet Z
+ */
+
+/*
+ * @test id=Epsilon
+ * @bug 8241486
+ * @summary G1/Z give warning when using LoopStripMiningIter and turn off LoopStripMiningIter (0)
+ * @requires vm.flagless
+ * @requires vm.flavor == "server" & !vm.graal.enabled
+ * @requires vm.gc.Epsilon
+ * @library /test/lib
+ * @run driver TestNoWarningLoopStripMiningIterSet Epsilon
+ */
+
 
 import jdk.test.lib.Asserts;
 import jdk.test.lib.process.ProcessTools;
@@ -50,7 +83,7 @@ public class TestNoWarningLoopStripMiningIterSet {
         System.arraycopy(args, 0, cmds, 1, args.length);
         cmds[args.length + 1] = "-XX:+PrintFlagsFinal";
         cmds[args.length + 2] = "-version";
-        ProcessBuilder pb = ProcessTools.createJavaProcessBuilder(cmds);
+        ProcessBuilder pb = ProcessTools.createLimitedTestJavaProcessBuilder(cmds);
         OutputAnalyzer output = new OutputAnalyzer(pb.start());
         output.shouldHaveExitValue(0);
 
@@ -61,11 +94,10 @@ public class TestNoWarningLoopStripMiningIterSet {
     }
 
     public static void main(String[] args) throws Exception {
-        for (String gc : List.of("-XX:+UseG1GC", "-XX:+UseZGC", "-XX:+UseShenandoahGC", "-XX:+UseEpsilonGC")) {
-            testWith(output -> output.shouldNotContain(CLSOffLSMGreaterZero), "should have CLS and LSM enabled", true, 100, "-XX:LoopStripMiningIter=100", gc);
-            testWith(output -> output.shouldContain(CLSOffLSMGreaterZero), "should have CLS and LSM disabled", false, 0, "-XX:-UseCountedLoopSafepoints", "-XX:LoopStripMiningIter=100", gc);
-            testWith(output -> output.shouldContain(CLSOnLSMEqualZero), "should have CLS and LSM enabled", true, 1, "-XX:LoopStripMiningIter=0", gc);
-            testWith(output -> output.shouldNotContain(CLSOnLSMEqualZero), "should have CLS and LSM disabled", false, 0, "-XX:-UseCountedLoopSafepoints", "-XX:LoopStripMiningIter=0", gc);
-        }
+        String gc = "-XX:+Use" + args[0] + "GC";
+        testWith(output -> output.shouldNotContain(CLSOffLSMGreaterZero), "should have CLS and LSM enabled", true, 100, "-XX:LoopStripMiningIter=100", gc);
+        testWith(output -> output.shouldContain(CLSOffLSMGreaterZero), "should have CLS and LSM disabled", false, 0, "-XX:-UseCountedLoopSafepoints", "-XX:LoopStripMiningIter=100", gc);
+        testWith(output -> output.shouldContain(CLSOnLSMEqualZero), "should have CLS and LSM enabled", true, 1, "-XX:LoopStripMiningIter=0", gc);
+        testWith(output -> output.shouldNotContain(CLSOnLSMEqualZero), "should have CLS and LSM disabled", false, 0, "-XX:-UseCountedLoopSafepoints", "-XX:LoopStripMiningIter=0", gc);
     }
 }

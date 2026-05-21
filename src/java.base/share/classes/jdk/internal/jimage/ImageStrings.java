@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,7 +33,34 @@ package jdk.internal.jimage;
  * to the jimage file provided by the shipped JDK by tools running on JDK 8.
  */
 public interface ImageStrings {
-    public String get(int offset);
+    // String offset constants are useful for efficient classification
+    // of location entries without string comparison.
+    // They are validated during initialization of ImageStringsWriter.
+    //
+    // Adding new strings (with larger offsets) is possible without changing
+    // the jimage version number, but any change to existing strings must be
+    // accompanied by a jimage version number change.
 
-    public int add(final String string);
+    /** Fixed offset for the empty string in the strings table. */
+    int EMPTY_STRING_OFFSET = 0;
+    /** Fixed offset for the string "class" in the strings table. */
+    int CLASS_STRING_OFFSET = 1;
+    /** Fixed offset for the string "modules" in the strings table. */
+    int MODULES_STRING_OFFSET = 7;
+    /** Fixed offset for the string "packages" in the strings table. */
+    int PACKAGES_STRING_OFFSET = 15;
+
+    String get(int offset);
+
+    int add(final String string);
+
+    /**
+     * If there's a string at {@code offset} matching in full a substring of
+     * {@code string} starting at {@code stringOffset}, return the length
+     * of that string. Otherwise returns -1. Optional operation.
+     */
+    default int match(int offset, String string, int stringOffset) {
+        throw new UnsupportedOperationException();
+    }
+
 }

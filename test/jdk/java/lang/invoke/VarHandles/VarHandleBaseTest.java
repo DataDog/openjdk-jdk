@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,11 +36,18 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 import static java.util.stream.Collectors.toList;
-import static org.testng.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 abstract class VarHandleBaseTest {
     static final int ITERS = Integer.getInteger("iters", 1);
-    static final int WEAK_ATTEMPTS = Integer.getInteger("weakAttempts", 10);
+
+    // More resilience for Weak* tests. These operations may spuriously
+    // fail, and so we do several attempts with delay on failure.
+    // Be mindful of worst-case total time on test, which would be at
+    // roughly (delay*attempts) milliseconds.
+    //
+    static final int WEAK_ATTEMPTS = Integer.getInteger("weakAttempts", 100);
+    static final int WEAK_DELAY_MS = Math.max(1, Integer.getInteger("weakDelay", 1));
 
     interface ThrowingRunnable {
         void run() throws Throwable;
@@ -68,6 +75,14 @@ abstract class VarHandleBaseTest {
 
     static void checkIOOBE(Object message, ThrowingRunnable r) {
         checkWithThrowable(IndexOutOfBoundsException.class, message, r);
+    }
+
+    static void checkAIOOBE(ThrowingRunnable r) {
+        checkWithThrowable(ArrayIndexOutOfBoundsException.class, null, r);
+    }
+
+    static void checkAIOOBE(Object message, ThrowingRunnable r) {
+        checkWithThrowable(ArrayIndexOutOfBoundsException.class, message, r);
     }
 
     static void checkASE(ThrowingRunnable r) {
@@ -121,16 +136,7 @@ abstract class VarHandleBaseTest {
     static void checkWithThrowable(Class<? extends Throwable> re,
                                    Object message,
                                    ThrowingRunnable r) {
-        Throwable _e = null;
-        try {
-            r.run();
-        }
-        catch (Throwable e) {
-            _e = e;
-        }
-        message = message == null ? "" : message + ". ";
-        assertNotNull(_e, String.format("%sNo throwable thrown. Expected %s", message, re));
-        assertTrue(re.isInstance(_e), String.format("%sIncorrect throwable thrown, %s. Expected %s", message, _e, re));
+        assertThrows(re, r::run, message == null ? null : message.toString());
     }
 
 
@@ -260,11 +266,11 @@ abstract class VarHandleBaseTest {
     }
 
     private static MethodHandle bind(VarHandle vh, MethodHandle mh, MethodType emt) {
-        assertEquals(mh.type(), emt.insertParameterTypes(0, VarHandle.class),
+        assertEquals(emt.insertParameterTypes(0, VarHandle.class), mh.type(),
                      "MethodHandle type differs from access mode type");
 
         MethodHandleInfo info = MethodHandles.lookup().revealDirect(mh);
-        assertEquals(info.getMethodType(), emt,
+        assertEquals(emt, info.getMethodType(),
                      "MethodHandleInfo method type differs from access mode type");
 
         return mh.bindTo(vh);
@@ -455,39 +461,49 @@ abstract class VarHandleBaseTest {
         for (TestAccessMode accessMode : testAccessModes()) {
             MethodType amt = vh.accessModeType(accessMode.toAccessMode());
 
-            assertEquals(amt.parameterList().subList(0, pts.size()), pts);
+            assertEquals(pts, amt.parameterList().subList(0, pts.size()));
         }
 
         for (TestAccessMode testAccessMode : testAccessModesOfType(TestAccessType.GET)) {
             MethodType mt = vh.accessModeType(testAccessMode.toAccessMode());
-            assertEquals(mt.returnType(), vh.varType());
-            assertEquals(mt.parameterList(), pts);
+            assertEquals(vh.varType(), mt.returnType());
+            assertEquals(pts, mt.parameterList());
         }
 
         for (TestAccessMode testAccessMode : testAccessModesOfType(TestAccessType.SET)) {
             MethodType mt = vh.accessModeType(testAccessMode.toAccessMode());
-            assertEquals(mt.returnType(), void.class);
-            assertEquals(mt.parameterType(mt.parameterCount() - 1), vh.varType());
+            assertEquals(void.class, mt.returnType());
+            assertEquals(vh.varType(), mt.parameterType(mt.parameterCount() - 1));
         }
 
         for (TestAccessMode testAccessMode : testAccessModesOfType(TestAccessType.COMPARE_AND_SET)) {
             MethodType mt = vh.accessModeType(testAccessMode.toAccessMode());
-            assertEquals(mt.returnType(), boolean.class);
-            assertEquals(mt.parameterType(mt.parameterCount() - 1), vh.varType());
-            assertEquals(mt.parameterType(mt.parameterCount() - 2), vh.varType());
+            assertEquals(boolean.class, mt.returnType());
+            assertEquals(vh.varType(), mt.parameterType(mt.parameterCount() - 1));
+            assertEquals(vh.varType(), mt.parameterType(mt.parameterCount() - 2));
         }
 
         for (TestAccessMode testAccessMode : testAccessModesOfType(TestAccessType.COMPARE_AND_EXCHANGE)) {
             MethodType mt = vh.accessModeType(testAccessMode.toAccessMode());
-            assertEquals(mt.returnType(), vh.varType());
-            assertEquals(mt.parameterType(mt.parameterCount() - 1), vh.varType());
-            assertEquals(mt.parameterType(mt.parameterCount() - 2), vh.varType());
+            assertEquals(vh.varType(), mt.returnType());
+            assertEquals(vh.varType(), mt.parameterType(mt.parameterCount() - 1));
+            assertEquals(vh.varType(), mt.parameterType(mt.parameterCount() - 2));
         }
 
         for (TestAccessMode testAccessMode : testAccessModesOfType(TestAccessType.GET_AND_SET, TestAccessType.GET_AND_ADD)) {
             MethodType mt = vh.accessModeType(testAccessMode.toAccessMode());
-            assertEquals(mt.returnType(), vh.varType());
-            assertEquals(mt.parameterType(mt.parameterCount() - 1), vh.varType());
+            assertEquals(vh.varType(), mt.returnType());
+            assertEquals(vh.varType(), mt.parameterType(mt.parameterCount() - 1));
+        }
+    }
+
+    static void weakDelay() {
+        try {
+            if (WEAK_DELAY_MS > 0) {
+                Thread.sleep(WEAK_DELAY_MS);
+            }
+        } catch (InterruptedException ie) {
+            // Do nothing.
         }
     }
 }

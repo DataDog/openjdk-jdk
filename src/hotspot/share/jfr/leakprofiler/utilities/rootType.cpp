@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,29 +22,27 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "gc/shared/oopStorage.hpp"
 #include "gc/shared/oopStorageSet.hpp"
 #include "jfr/leakprofiler/utilities/rootType.hpp"
 #include "utilities/debug.hpp"
+#include "utilities/enumIterator.hpp"
 
 OopStorage* OldObjectRoot::system_oop_storage(System system) {
   int val = int(system);
   if (val >= _strong_oop_storage_set_first && val <= _strong_oop_storage_set_last) {
-    int index = val - _strong_oop_storage_set_first;
-    int i = 0;
-    for (OopStorageSet::Iterator it = OopStorageSet::strong_iterator(); !it.is_end(); ++it, ++i) {
-      if (i == index) {
-        return *it;
-      }
-    }
+    using StrongId = OopStorageSet::StrongId;
+    using Underlying = std::underlying_type_t<StrongId>;
+    auto first = static_cast<Underlying>(EnumRange<StrongId>().first());
+    auto id = static_cast<StrongId>(first + (val - _strong_oop_storage_set_first));
+    return OopStorageSet::storage(id);
   }
-  return NULL;
+  return nullptr;
 }
 
 const char* OldObjectRoot::system_description(System system) {
   OopStorage* oop_storage = system_oop_storage(system);
-  if (oop_storage != NULL) {
+  if (oop_storage != nullptr) {
     return oop_storage->name();
   }
   switch (system) {
@@ -58,8 +56,6 @@ const char* OldObjectRoot::system_description(System system) {
       return "Class Loader Data";
     case _code_cache:
       return "Code Cache";
-    case _aot:
-      return "AOT";
 #if INCLUDE_JVMCI
     case _jvmci:
       return "JVMCI";
@@ -67,7 +63,7 @@ const char* OldObjectRoot::system_description(System system) {
     default:
       ShouldNotReachHere();
   }
-  return NULL;
+  return nullptr;
 }
 
 const char* OldObjectRoot::type_description(Type type) {
@@ -87,5 +83,5 @@ const char* OldObjectRoot::type_description(Type type) {
     default:
       ShouldNotReachHere();
   }
-  return NULL;
+  return nullptr;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -69,9 +69,7 @@ Java_sun_nio_ch_WindowsSelectorImpl_00024SubSelector_poll0(JNIEnv *env, jobject 
     static struct timeval zerotime = {0, 0};
     int read_count = 0, write_count = 0, except_count = 0;
 
-#ifdef _WIN64
     int resultbuf[FD_SETSIZE + 1];
-#endif
 
     if (timeout == 0) {
         tv = &zerotime;
@@ -99,8 +97,7 @@ Java_sun_nio_ch_WindowsSelectorImpl_00024SubSelector_poll0(JNIEnv *env, jobject 
            readfds->fd_array[read_count] = fds[i].fd;
            read_count++;
         }
-        if (fds[i].events & (POLLOUT | POLLCONN))
-        {
+        if (fds[i].events & POLLOUT) {
            writefds->fd_array[write_count] = fds[i].fd;
            write_count++;
         }
@@ -122,7 +119,6 @@ Java_sun_nio_ch_WindowsSelectorImpl_00024SubSelector_poll0(JNIEnv *env, jobject 
     /* Return selected sockets. */
     /* Each Java array consists of sockets count followed by sockets list */
 
-#ifdef _WIN64
     resultbuf[0] = readfds->fd_count;
     for (i = 0; i < (int)readfds->fd_count; i++) {
         resultbuf[i + 1] = (int)readfds->fd_array[i];
@@ -143,15 +139,7 @@ Java_sun_nio_ch_WindowsSelectorImpl_00024SubSelector_poll0(JNIEnv *env, jobject 
     }
     (*env)->SetIntArrayRegion(env, returnExceptFds, 0,
                               exceptfds->fd_count + 1, resultbuf);
-#else
-    (*env)->SetIntArrayRegion(env, returnReadFds, 0,
-                              readfds->fd_count + 1, (jint *)readfds);
 
-    (*env)->SetIntArrayRegion(env, returnWriteFds, 0,
-                              writefds->fd_count + 1, (jint *)writefds);
-    (*env)->SetIntArrayRegion(env, returnExceptFds, 0,
-                              exceptfds->fd_count + 1, (jint *)exceptfds);
-#endif
     return 0;
 }
 
@@ -189,20 +177,4 @@ Java_sun_nio_ch_WindowsSelectorImpl_resetWakeupSocket0(JNIEnv *env, jclass this,
     } else {
         recv(scinFd, bytes, WAKEUP_SOCKET_BUF_SIZE, 0);
     }
-}
-
-JNIEXPORT jboolean JNICALL
-Java_sun_nio_ch_WindowsSelectorImpl_discardUrgentData(JNIEnv* env, jobject this,
-                                                      jint s)
-{
-    char data[8];
-    jboolean discarded = JNI_FALSE;
-    int n;
-    do {
-        n = recv(s, (char*)&data, sizeof(data), MSG_OOB);
-        if (n > 0) {
-            discarded = JNI_TRUE;
-        }
-    } while (n > 0);
-    return discarded;
 }

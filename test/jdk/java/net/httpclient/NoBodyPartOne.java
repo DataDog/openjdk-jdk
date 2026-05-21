@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,19 +25,14 @@
  * @test
  * @bug 8161157
  * @summary Test response body handlers/subscribers when there is no body
- * @library /test/lib http2/server
- * @build jdk.test.lib.net.SimpleSSLContext
- * @modules java.base/sun.net.www.http
- *          java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- * @run testng/othervm
+ * @library /test/lib /test/jdk/java/net/httpclient/lib
+ * @build jdk.test.lib.net.SimpleSSLContext jdk.httpclient.test.lib.http2.Http2TestServer
+ * @run junit/othervm
  *      -Djdk.internal.httpclient.debug=true
  *      -Djdk.httpclient.HttpClient.log=all
- *      NoBodyPartOne
+ *      ${test.main.class}
  */
 
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -47,71 +42,92 @@ import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandler;
 import java.net.http.HttpResponse.BodyHandlers;
-import org.testng.annotations.Test;
-import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
 
+import static java.net.http.HttpClient.Version.HTTP_3;
+import static java.nio.charset.StandardCharsets.UTF_8;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+
+// @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+// is inherited from the super class
 public class NoBodyPartOne extends AbstractNoBody {
 
-    @Test(dataProvider = "variants")
+    @ParameterizedTest
+    @MethodSource("variants")
     public void testAsString(String uri, boolean sameClient) throws Exception {
         printStamp(START, "testAsString(\"%s\", %s)", uri, sameClient);
         HttpClient client = null;
         for (int i=0; i< ITERATION_COUNT; i++) {
-            if (!sameClient || client == null)
-                client = newHttpClient();
-
-            HttpRequest req = HttpRequest.newBuilder(URI.create(uri))
-                                         .PUT(BodyPublishers.ofString(SIMPLE_STRING))
-                                         .build();
-            BodyHandler<String> handler = i % 2 == 0 ? BodyHandlers.ofString()
-                                                     : BodyHandlers.ofString(UTF_8);
-            HttpResponse<String> response = client.send(req, handler);
-            String body = response.body();
-            assertEquals(body, "");
+            if (!sameClient || client == null) {
+                client = newHttpClient(sameClient);
+                if (!sameClient && version(uri) == HTTP_3) {
+                    headRequest(client);
+                }
+            }
+            try (var cl = new CloseableClient(client, sameClient)) {
+                HttpRequest req = newRequestBuilder(uri)
+                        .PUT(BodyPublishers.ofString(SIMPLE_STRING))
+                        .build();
+                BodyHandler<String> handler = i % 2 == 0 ? BodyHandlers.ofString()
+                        : BodyHandlers.ofString(UTF_8);
+                HttpResponse<String> response = client.send(req, handler);
+                String body = response.body();
+                assertEquals("", body);
+            }
         }
-        // We have created many clients here. Try to speed up their release.
-        if (!sameClient) System.gc();
     }
 
-    @Test(dataProvider = "variants")
+    @ParameterizedTest
+    @MethodSource("variants")
     public void testAsFile(String uri, boolean sameClient) throws Exception {
         printStamp(START, "testAsFile(\"%s\", %s)", uri, sameClient);
         HttpClient client = null;
         for (int i=0; i< ITERATION_COUNT; i++) {
-            if (!sameClient || client == null)
-                client = newHttpClient();
+            if (!sameClient || client == null) {
+                client = newHttpClient(sameClient);
+                if (!sameClient && version(uri) == HTTP_3) {
+                    headRequest(client);
+                }
+            }
 
-            HttpRequest req = HttpRequest.newBuilder(URI.create(uri))
-                                         .PUT(BodyPublishers.ofString(SIMPLE_STRING))
-                                         .build();
-            Path p = Paths.get("NoBody_testAsFile.txt");
-            HttpResponse<Path> response = client.send(req, BodyHandlers.ofFile(p));
-            Path bodyPath = response.body();
-            assertTrue(Files.exists(bodyPath));
-            assertEquals(Files.size(bodyPath), 0);
+            try (var cl = new CloseableClient(client, sameClient)) {
+                HttpRequest req = newRequestBuilder(uri)
+                        .PUT(BodyPublishers.ofString(SIMPLE_STRING))
+                        .build();
+                Path p = Paths.get("NoBody_testAsFile.txt");
+                HttpResponse<Path> response = client.send(req, BodyHandlers.ofFile(p));
+                Path bodyPath = response.body();
+                assertEquals(200, response.statusCode());
+                assertTrue(Files.exists(bodyPath));
+                assertEquals(0, Files.size(bodyPath), Files.readString(bodyPath));
+            }
         }
-        // We have created many clients here. Try to speed up their release.
-        if (!sameClient) System.gc();
     }
 
-    @Test(dataProvider = "variants")
+    @ParameterizedTest
+    @MethodSource("variants")
     public void testAsByteArray(String uri, boolean sameClient) throws Exception {
         printStamp(START, "testAsByteArray(\"%s\", %s)", uri, sameClient);
         HttpClient client = null;
         for (int i=0; i< ITERATION_COUNT; i++) {
-            if (!sameClient || client == null)
-                client = newHttpClient();
+            if (!sameClient || client == null) {
+                client = newHttpClient(sameClient);
+                if (!sameClient && version(uri) == HTTP_3) {
+                    headRequest(client);
+                }
+            }
 
-            HttpRequest req = HttpRequest.newBuilder(URI.create(uri))
-                                         .PUT(BodyPublishers.ofString(SIMPLE_STRING))
-                                         .build();
-            HttpResponse<byte[]> response = client.send(req, BodyHandlers.ofByteArray());
-            byte[] body = response.body();
-            assertEquals(body.length, 0);
+            try (var cl = new CloseableClient(client, sameClient)) {
+                HttpRequest req = newRequestBuilder(uri)
+                        .PUT(BodyPublishers.ofString(SIMPLE_STRING))
+                        .build();
+                HttpResponse<byte[]> response = client.send(req, BodyHandlers.ofByteArray());
+                byte[] body = response.body();
+                assertEquals(0, body.length);
+            }
         }
-        // We have created many clients here. Try to speed up their release.
-        if (!sameClient) System.gc();
     }
 }

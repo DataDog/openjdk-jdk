@@ -35,12 +35,15 @@
 
 package java.util.concurrent;
 
+import jdk.internal.invoke.MhUtil;
+
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.locks.LockSupport;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiConsumer;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
@@ -159,8 +162,8 @@ import static java.util.concurrent.Flow.Subscription;
  *     (this.subscription = subscription).request(1);
  *   }
  *   public void onNext(S item) {
- *     subscription.request(1);
  *     submit(function.apply(item));
+ *     subscription.request(1);
  *   }
  *   public void onError(Throwable ex) { closeExceptionally(ex); }
  *   public void onComplete() { close(); }
@@ -175,11 +178,11 @@ public class SubmissionPublisher<T> implements Publisher<T>,
     /*
      * Most mechanics are handled by BufferedSubscription. This class
      * mainly tracks subscribers and ensures sequentiality, by using
-     * built-in synchronization locks across public methods. Using
-     * built-in locks works well in the most typical case in which
-     * only one thread submits items. We extend this idea in
-     * submission methods by detecting single-ownership to reduce
-     * producer-consumer synchronization strength.
+     * locks across public methods, to ensure thread-safety in the
+     * presence of multiple sources and maintain acquire-release
+     * ordering around user operations. However, we also track whether
+     * there is only a single source, and if so streamline some buffer
+     * operations by avoiding some atomics.
      */
 
     /** The largest possible power of two array size. */
@@ -203,22 +206,6 @@ public class SubmissionPublisher<T> implements Publisher<T>,
             (n >= BUFFER_CAPACITY_LIMIT) ? BUFFER_CAPACITY_LIMIT : n + 1;
     }
 
-    // default Executor setup; nearly the same as CompletableFuture
-
-    /**
-     * Default executor -- ForkJoinPool.commonPool() unless it cannot
-     * support parallelism.
-     */
-    private static final Executor ASYNC_POOL =
-        (ForkJoinPool.getCommonPoolParallelism() > 1) ?
-        ForkJoinPool.commonPool() : new ThreadPerTaskExecutor();
-
-    /** Fallback if ForkJoinPool.commonPool() cannot support parallelism */
-    private static final class ThreadPerTaskExecutor implements Executor {
-        ThreadPerTaskExecutor() {}      // prevent access constructor creation
-        public void execute(Runnable r) { new Thread(r).start(); }
-    }
-
     /**
      * Clients (BufferedSubscriptions) are maintained in a linked list
      * (via their "next" fields). This works well for publish loops.
@@ -234,6 +221,8 @@ public class SubmissionPublisher<T> implements Publisher<T>,
      */
     BufferedSubscription<T> clients;
 
+    /** Lock for exclusion across multiple sources */
+    final ReentrantLock lock;
     /** Run status, updated only within locks */
     volatile boolean closed;
     /** Set true on first call to subscribe, to initialize possible owner */
@@ -274,6 +263,7 @@ public class SubmissionPublisher<T> implements Publisher<T>,
             throw new NullPointerException();
         if (maxBufferCapacity <= 0)
             throw new IllegalArgumentException("capacity must be positive");
+        this.lock = new ReentrantLock();
         this.executor = executor;
         this.onNextHandler = handler;
         this.maxBufferCapacity = roundCapacity(maxBufferCapacity);
@@ -302,15 +292,13 @@ public class SubmissionPublisher<T> implements Publisher<T>,
 
     /**
      * Creates a new SubmissionPublisher using the {@link
-     * ForkJoinPool#commonPool()} for async delivery to subscribers
-     * (unless it does not support a parallelism level of at least two,
-     * in which case, a new Thread is created to run each task), with
+     * ForkJoinPool#commonPool()} for async delivery to subscribers, with
      * maximum buffer capacity of {@link Flow#defaultBufferSize}, and no
      * handler for Subscriber exceptions in method {@link
      * Flow.Subscriber#onNext(Object) onNext}.
      */
     public SubmissionPublisher() {
-        this(ASYNC_POOL, Flow.defaultBufferSize(), null);
+        this(ForkJoinPool.asyncCommonPool(), Flow.defaultBufferSize(), null);
     }
 
     /**
@@ -337,13 +325,15 @@ public class SubmissionPublisher<T> implements Publisher<T>,
      */
     public void subscribe(Subscriber<? super T> subscriber) {
         if (subscriber == null) throw new NullPointerException();
+        ReentrantLock lock = this.lock;
         int max = maxBufferCapacity; // allocate initial array
         Object[] array = new Object[max < INITIAL_CAPACITY ?
                                     max : INITIAL_CAPACITY];
         BufferedSubscription<T> subscription =
             new BufferedSubscription<T>(subscriber, executor, onNextHandler,
                                         array, max);
-        synchronized (this) {
+        lock.lock();
+        try {
             if (!subscribed) {
                 subscribed = true;
                 owner = Thread.currentThread();
@@ -378,6 +368,8 @@ public class SubmissionPublisher<T> implements Publisher<T>,
                     pred = b;
                 b = next;
             }
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -390,7 +382,9 @@ public class SubmissionPublisher<T> implements Publisher<T>,
         if (item == null) throw new NullPointerException();
         int lag = 0;
         boolean complete, unowned;
-        synchronized (this) {
+        ReentrantLock lock = this.lock;
+        lock.lock();
+        try {
             Thread t = Thread.currentThread(), o;
             BufferedSubscription<T> b = clients;
             if ((unowned = ((o = owner) != t)) && o != null)
@@ -421,6 +415,8 @@ public class SubmissionPublisher<T> implements Publisher<T>,
                 if (retries != null || cleanMe)
                     lag = retryOffer(item, nanos, onDrop, retries, lag, cleanMe);
             }
+        } finally {
+            lock.unlock();
         }
         if (complete)
             throw new IllegalStateException("Closed");
@@ -604,19 +600,25 @@ public class SubmissionPublisher<T> implements Publisher<T>,
     /**
      * Unless already closed, issues {@link
      * Flow.Subscriber#onComplete() onComplete} signals to current
-     * subscribers, and disallows subsequent attempts to publish.
-     * Upon return, this method does <em>NOT</em> guarantee that all
-     * subscribers have yet completed.
+     * subscribers, and disallows subsequent attempts to publish. To
+     * ensure uniform ordering among subscribers, this method may
+     * await completion of in-progress offers.  Upon return, this
+     * method does <em>NOT</em> guarantee that all subscribers have
+     * yet completed.
      */
     public void close() {
+        ReentrantLock lock = this.lock;
         if (!closed) {
             BufferedSubscription<T> b;
-            synchronized (this) {
+            lock.lock();
+            try {
                 // no need to re-check closed here
                 b = clients;
                 clients = null;
                 owner = null;
                 closed = true;
+            } finally {
+                lock.unlock();
             }
             while (b != null) {
                 BufferedSubscription<T> next = b.next;
@@ -641,9 +643,11 @@ public class SubmissionPublisher<T> implements Publisher<T>,
     public void closeExceptionally(Throwable error) {
         if (error == null)
             throw new NullPointerException();
+        ReentrantLock lock = this.lock;
         if (!closed) {
             BufferedSubscription<T> b;
-            synchronized (this) {
+            lock.lock();
+            try {
                 b = clients;
                 if (!closed) {  // don't clobber racing close
                     closedException = error;
@@ -651,6 +655,8 @@ public class SubmissionPublisher<T> implements Publisher<T>,
                     owner = null;
                     closed = true;
                 }
+            } finally {
+                lock.unlock();
             }
             while (b != null) {
                 BufferedSubscription<T> next = b.next;
@@ -688,7 +694,9 @@ public class SubmissionPublisher<T> implements Publisher<T>,
      */
     public boolean hasSubscribers() {
         boolean nonEmpty = false;
-        synchronized (this) {
+        ReentrantLock lock = this.lock;
+        lock.lock();
+        try {
             for (BufferedSubscription<T> b = clients; b != null;) {
                 BufferedSubscription<T> next = b.next;
                 if (b.isClosed()) {
@@ -700,6 +708,8 @@ public class SubmissionPublisher<T> implements Publisher<T>,
                     break;
                 }
             }
+        } finally {
+            lock.unlock();
         }
         return nonEmpty;
     }
@@ -710,9 +720,15 @@ public class SubmissionPublisher<T> implements Publisher<T>,
      * @return the number of current subscribers
      */
     public int getNumberOfSubscribers() {
-        synchronized (this) {
-            return cleanAndCount();
+        int n;
+        ReentrantLock lock = this.lock;
+        lock.lock();
+        try {
+            n = cleanAndCount();
+        } finally {
+            lock.unlock();
         }
+        return n;
     }
 
     /**
@@ -742,7 +758,9 @@ public class SubmissionPublisher<T> implements Publisher<T>,
      */
     public List<Subscriber<? super T>> getSubscribers() {
         ArrayList<Subscriber<? super T>> subs = new ArrayList<>();
-        synchronized (this) {
+        ReentrantLock lock = this.lock;
+        lock.lock();
+        try {
             BufferedSubscription<T> pred = null, next;
             for (BufferedSubscription<T> b = clients; b != null; b = next) {
                 next = b.next;
@@ -758,6 +776,8 @@ public class SubmissionPublisher<T> implements Publisher<T>,
                     pred = b;
                 }
             }
+        } finally {
+            lock.unlock();
         }
         return subs;
     }
@@ -771,8 +791,11 @@ public class SubmissionPublisher<T> implements Publisher<T>,
      */
     public boolean isSubscribed(Subscriber<? super T> subscriber) {
         if (subscriber == null) throw new NullPointerException();
+        boolean subscribed = false;
+        ReentrantLock lock = this.lock;
         if (!closed) {
-            synchronized (this) {
+            lock.lock();
+            try {
                 BufferedSubscription<T> pred = null, next;
                 for (BufferedSubscription<T> b = clients; b != null; b = next) {
                     next = b.next;
@@ -783,14 +806,16 @@ public class SubmissionPublisher<T> implements Publisher<T>,
                         else
                             pred.next = next;
                     }
-                    else if (subscriber.equals(b.subscriber))
-                        return true;
+                    else if (subscribed = subscriber.equals(b.subscriber))
+                        break;
                     else
                         pred = b;
                 }
+            } finally {
+                lock.unlock();
             }
         }
-        return false;
+        return subscribed;
     }
 
     /**
@@ -803,7 +828,9 @@ public class SubmissionPublisher<T> implements Publisher<T>,
     public long estimateMinimumDemand() {
         long min = Long.MAX_VALUE;
         boolean nonEmpty = false;
-        synchronized (this) {
+        ReentrantLock lock = this.lock;
+        lock.lock();
+        try {
             BufferedSubscription<T> pred = null, next;
             for (BufferedSubscription<T> b = clients; b != null; b = next) {
                 int n; long d;
@@ -822,6 +849,8 @@ public class SubmissionPublisher<T> implements Publisher<T>,
                     pred = b;
                 }
             }
+        } finally {
+            lock.unlock();
         }
         return nonEmpty ? min : 0;
     }
@@ -834,7 +863,9 @@ public class SubmissionPublisher<T> implements Publisher<T>,
      */
     public int estimateMaximumLag() {
         int max = 0;
-        synchronized (this) {
+        ReentrantLock lock = this.lock;
+        lock.lock();
+        try {
             BufferedSubscription<T> pred = null, next;
             for (BufferedSubscription<T> b = clients; b != null; b = next) {
                 int n;
@@ -852,6 +883,8 @@ public class SubmissionPublisher<T> implements Publisher<T>,
                     pred = b;
                 }
             }
+        } finally {
+            lock.unlock();
         }
         return max;
     }
@@ -999,7 +1032,6 @@ public class SubmissionPublisher<T> implements Publisher<T>,
      * assignment coding style. Also, all methods and fields have
      * default visibility to simplify usage by callers.
      */
-    @SuppressWarnings("serial")
     @jdk.internal.vm.annotation.Contended
     static final class BufferedSubscription<T>
         implements Subscription, ForkJoinPool.ManagedBlocker {
@@ -1012,7 +1044,7 @@ public class SubmissionPublisher<T> implements Publisher<T>,
         final Subscriber<? super T> subscriber;
         final BiConsumer<? super Subscriber<? super T>, ? super Throwable> onNextHandler;
         Executor executor;                 // null on error
-        Thread waiter;                     // blocked producer thread
+        volatile Thread waiter;            // blocked producer thread
         Throwable pendingError;            // holds until onError issued
         BufferedSubscription<T> next;      // used only by publisher
         BufferedSubscription<T> nextRetry; // used only by publisher
@@ -1458,19 +1490,13 @@ public class SubmissionPublisher<T> implements Publisher<T>,
         static final VarHandle QA;
 
         static {
-            try {
-                MethodHandles.Lookup l = MethodHandles.lookup();
-                CTL = l.findVarHandle(BufferedSubscription.class, "ctl",
-                                      int.class);
-                DEMAND = l.findVarHandle(BufferedSubscription.class, "demand",
-                                         long.class);
-                QA = MethodHandles.arrayElementVarHandle(Object[].class);
-            } catch (ReflectiveOperationException e) {
-                throw new ExceptionInInitializerError(e);
-            }
+            MethodHandles.Lookup l = MethodHandles.lookup();
+            CTL = MhUtil.findVarHandle(l, "ctl", int.class);
+            DEMAND = MhUtil.findVarHandle(l, "demand", long.class);
+            QA = MethodHandles.arrayElementVarHandle(Object[].class);
 
             // Reduce the risk of rare disastrous classloading in first call to
-            // LockSupport.park: https://bugs.openjdk.java.net/browse/JDK-8074773
+            // LockSupport.park: https://bugs.openjdk.org/browse/JDK-8074773
             Class<?> ensureLoaded = LockSupport.class;
         }
     }

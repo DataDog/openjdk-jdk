@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,26 +29,27 @@
  * @modules java.base/jdk.internal.misc
  *          java.management
  *
- * @build sun.hotspot.WhiteBox compiler.codecache.stress.Helper compiler.codecache.stress.TestCaseImpl
- * @run driver ClassFileInstaller sun.hotspot.WhiteBox
+ * @build jdk.test.whitebox.WhiteBox compiler.codecache.stress.Helper compiler.codecache.stress.TestCaseImpl
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run main/othervm -Xbootclasspath/a:. -XX:+UnlockDiagnosticVMOptions
  *                   -XX:+WhiteBoxAPI
  *                   -XX:CompileCommand=dontinline,compiler.codecache.stress.Helper$TestCase::method
  *                   -XX:+SegmentedCodeCache
  *                   -XX:ReservedCodeCacheSize=16M
  *                   -XX:CodeCacheMinBlockLength=1
+ *                   -XX:CICompilerCount=2
  *                   compiler.codecache.stress.ReturnBlobToWrongHeapTest
  */
 
 package compiler.codecache.stress;
 
-import sun.hotspot.code.BlobType;
+import jdk.test.whitebox.code.BlobType;
 
 import java.util.ArrayList;
 
 public class ReturnBlobToWrongHeapTest {
-    private static final long largeBlobSize = Helper.WHITE_BOX.getUintxVMFlag("ReservedCodeCacheSize") >> 6;
-    private static final long codeCacheMinBlockLength = Helper.WHITE_BOX.getUintxVMFlag("CodeCacheMinBlockLength");
+    private static final long largeBlobSize = Helper.WHITE_BOX.getSizeTVMFlag("ReservedCodeCacheSize") >> 6;
+    private static final long codeCacheMinBlockLength = Helper.WHITE_BOX.getSizeTVMFlag("CodeCacheMinBlockLength");
     private static final BlobType[] BLOB_TYPES = BlobType.getAvailable().toArray(new BlobType[0]);
 
     // Allocate blob in first code heap (the code heap with index 0).

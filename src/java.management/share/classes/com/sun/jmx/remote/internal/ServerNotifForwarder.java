@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,10 +29,6 @@ import com.sun.jmx.remote.security.NotificationAccessController;
 import com.sun.jmx.remote.util.ClassLogger;
 import com.sun.jmx.remote.util.EnvHelp;
 import java.io.IOException;
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.PrivilegedActionException;
-import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -85,29 +81,16 @@ public class ServerNotifForwarder {
 
         checkState();
 
-        // Explicitly check MBeanPermission for addNotificationListener
-        //
-        checkMBeanPermission(name, "addNotificationListener");
         if (notificationAccessController != null) {
             notificationAccessController.addNotificationListener(
                 connectionId, name, getSubject());
         }
-        try {
-            boolean instanceOf =
-            AccessController.doPrivileged(
-                    new PrivilegedExceptionAction<Boolean>() {
-                        public Boolean run() throws InstanceNotFoundException {
-                            return mbeanServer.isInstanceOf(name, broadcasterClass);
-                        }
-            });
-            if (!instanceOf) {
-                throw new IllegalArgumentException("The specified MBean [" +
-                    name + "] is not a " +
-                    "NotificationBroadcaster " +
-                    "object.");
-            }
-        } catch (PrivilegedActionException e) {
-            throw (InstanceNotFoundException) extractException(e);
+        boolean instanceOf = mbeanServer.isInstanceOf(name, broadcasterClass);
+        if (!instanceOf) {
+            throw new IllegalArgumentException("The specified MBean [" +
+                name + "] is not a " +
+                "NotificationBroadcaster " +
+                "object.");
         }
 
         final Integer id = getListenerID();
@@ -120,9 +103,7 @@ public class ServerNotifForwarder {
                                             name.getKeyPropertyList());
             } catch (MalformedObjectNameException mfoe) {
                 // impossible, but...
-                IOException ioe = new IOException(mfoe.getMessage());
-                ioe.initCause(mfoe);
-                throw ioe;
+                throw new IOException(mfoe.getMessage(), mfoe);
             }
         }
 
@@ -135,7 +116,7 @@ public class ServerNotifForwarder {
                 set = Collections.singleton(idaf);
             else {
                 if (set.size() == 1)
-                    set = new HashSet<IdAndFilter>(set);
+                    set = new HashSet<>(set);
                 set.add(idaf);
             }
             listenerMap.put(nn, set);
@@ -155,22 +136,31 @@ public class ServerNotifForwarder {
 
         checkState();
 
-        // Explicitly check MBeanPermission for removeNotificationListener
-        //
-        checkMBeanPermission(name, "removeNotificationListener");
         if (notificationAccessController != null) {
             notificationAccessController.removeNotificationListener(
                 connectionId, name, getSubject());
         }
 
+        // 6238731: set the default domain if no domain is set.
+        ObjectName nn = name;
+        if (name.getDomain() == null || name.getDomain().isEmpty()) {
+            try {
+                nn = ObjectName.getInstance(mbeanServer.getDefaultDomain(),
+                                            name.getKeyPropertyList());
+            } catch (MalformedObjectNameException mfoe) {
+                // impossible, but...
+                throw new IOException(mfoe.getMessage(), mfoe);
+            }
+        }
+
         Exception re = null;
         for (int i = 0 ; i < listenerIDs.length ; i++) {
             try {
-                removeNotificationListener(name, listenerIDs[i]);
+                removeNotificationListener(nn, listenerIDs[i]);
             } catch (Exception e) {
                 // Give back the first exception
                 //
-                if (re != null) {
+                if (re == null) {
                     re = e;
                 }
             }
@@ -344,9 +334,8 @@ public class ServerNotifForwarder {
     //----------------
     // PRIVATE METHODS
     //----------------
-
     private Subject getSubject() {
-        return Subject.getSubject(AccessController.getContext());
+        return Subject.current();
     }
 
     private void checkState() throws IOException {
@@ -364,53 +353,11 @@ public class ServerNotifForwarder {
     }
 
     /**
-     * Explicitly check the MBeanPermission for
-     * the current access control context.
-     */
-    public final void checkMBeanPermission(
-            final ObjectName name, final String actions)
-            throws InstanceNotFoundException, SecurityException {
-        checkMBeanPermission(mbeanServer,name,actions);
-    }
-
-    static void checkMBeanPermission(
-            final MBeanServer mbs, final ObjectName name, final String actions)
-            throws InstanceNotFoundException, SecurityException {
-
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null) {
-            AccessControlContext acc = AccessController.getContext();
-            ObjectInstance oi;
-            try {
-                oi = AccessController.doPrivileged(
-                    new PrivilegedExceptionAction<ObjectInstance>() {
-                        public ObjectInstance run()
-                        throws InstanceNotFoundException {
-                            return mbs.getObjectInstance(name);
-                        }
-                });
-            } catch (PrivilegedActionException e) {
-                throw (InstanceNotFoundException) extractException(e);
-            }
-            String classname = oi.getClassName();
-            MBeanPermission perm = new MBeanPermission(
-                classname,
-                null,
-                name,
-                actions);
-            sm.checkPermission(perm, acc);
-        }
-    }
-
-    /**
      * Check if the caller has the right to get the following notifications.
      */
     private boolean allowNotificationEmission(ObjectName name,
                                               TargetedNotification tn) {
         try {
-            if (checkNotificationEmission) {
-                checkMBeanPermission(name, "addNotificationListener");
-            }
             if (notificationAccessController != null) {
                 notificationAccessController.fetchNotification(
                         connectionId, name, tn.getNotification(), getSubject());
@@ -431,17 +378,6 @@ public class ServerNotifForwarder {
             }
             return false;
         }
-    }
-
-    /**
-     * Iterate until we extract the real exception
-     * from a stack of PrivilegedActionExceptions.
-     */
-    private static Exception extractException(Exception e) {
-        while (e instanceof PrivilegedActionException) {
-            e = ((PrivilegedActionException)e).getException();
-        }
-        return e;
     }
 
     private static class IdAndFilter {
@@ -485,11 +421,11 @@ public class ServerNotifForwarder {
     private final long connectionTimeout;
 
     private static int listenerCounter = 0;
-    private final static int[] listenerCounterLock = new int[0];
+    private static final int[] listenerCounterLock = new int[0];
 
     private NotificationBuffer notifBuffer;
     private final Map<ObjectName, Set<IdAndFilter>> listenerMap =
-            new HashMap<ObjectName, Set<IdAndFilter>>();
+            new HashMap<>();
 
     private boolean terminated = false;
     private final int[] terminationLock = new int[0];

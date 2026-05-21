@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
  * @test
  * @bug 8020675
  * @summary make sure there is no fatal error if a class is loaded from an invalid jar file which is in the bootclasspath
+ * @requires vm.flagless
  * @library /test/lib
  * @modules java.base/jdk.internal.misc
  *          java.management
@@ -39,9 +40,16 @@ import jdk.test.lib.process.OutputAnalyzer;
 public class LoadClassNegative {
 
   public static void main(String args[]) throws Exception {
-    String bootCP = "-Xbootclasspath/a:" + System.getProperty("test.src")
-                       + File.separator + "dummy.jar";
-    ProcessBuilder pb = ProcessTools.createJavaProcessBuilder(
+
+    // Create an empty file in the scratch directory
+    final String filename = "empty.jar";
+    File emptyJar = new File(filename);
+    emptyJar.createNewFile();
+
+    // Explicitly tell to use it for class loading
+    String bootCP = "-Xbootclasspath/a:" + emptyJar.getAbsolutePath();
+
+    ProcessBuilder pb = ProcessTools.createLimitedTestJavaProcessBuilder(
         bootCP,
         "TestForName");
 

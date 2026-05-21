@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,14 +22,14 @@
  */
 
 /*
- * @test
+ * @test id=Z
  * @key stress randomness
  * @requires vm.gc.Z
  * @bug 8237859
  * @summary A LoadP node has a wrong control input (too early) which results in an out-of-bounds read of an object array with ZGC.
  *
  * @run main/othervm -XX:+UseZGC compiler.loopopts.TestRangeCheckPredicatesControl
- * @run main/othervm -XX:+UseZGC -XX:+UnlockDiagnosticVMOptions -XX:+StressGCM compiler.loopopts.TestRangeCheckPredicatesControl
+ * @run main/othervm -XX:+UseZGC -XX:+UnlockDiagnosticVMOptions -XX:+IgnoreUnrecognizedVMOptions -XX:+StressGCM compiler.loopopts.TestRangeCheckPredicatesControl
  */
 
 package compiler.loopopts;

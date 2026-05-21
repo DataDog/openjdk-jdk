@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,45 +25,26 @@
 #ifndef SHARE_OOPS_INSTANCEKLASS_INLINE_HPP
 #define SHARE_OOPS_INSTANCEKLASS_INLINE_HPP
 
-#include "classfile/javaClasses.hpp"
-#include "classfile/vmSymbols.hpp"
-#include "memory/iterator.hpp"
-#include "memory/resourceArea.hpp"
 #include "oops/instanceKlass.hpp"
+
+#include "memory/memRegion.hpp"
+#include "oops/fieldInfo.inline.hpp"
 #include "oops/klass.inline.hpp"
 #include "oops/oop.inline.hpp"
-#include "runtime/atomic.hpp"
-#include "utilities/debug.hpp"
+#include "runtime/atomicAccess.hpp"
+#include "utilities/devirtualizer.inline.hpp"
 #include "utilities/globalDefinitions.hpp"
-#include "utilities/macros.hpp"
-
-inline InstanceKlass* InstanceKlass::unsafe_anonymous_host() const {
-  InstanceKlass** hk = adr_unsafe_anonymous_host();
-  if (hk == NULL) {
-    assert(!is_unsafe_anonymous(), "Unsafe anonymous classes have host klasses");
-    return NULL;
-  } else {
-    assert(*hk != NULL, "host klass should always be set if the address is not null");
-    assert(is_unsafe_anonymous(), "Only unsafe anonymous classes have host klasses");
-    return *hk;
-  }
-}
-
-inline void InstanceKlass::set_unsafe_anonymous_host(const InstanceKlass* host) {
-  assert(is_unsafe_anonymous(), "not unsafe anonymous");
-  const InstanceKlass** addr = (const InstanceKlass **)adr_unsafe_anonymous_host();
-  assert(addr != NULL, "no reversed space");
-  if (addr != NULL) {
-    *addr = host;
-  }
-}
 
 inline intptr_t* InstanceKlass::start_of_itable()   const { return (intptr_t*)start_of_vtable() + vtable_length(); }
 inline intptr_t* InstanceKlass::end_of_itable()     const { return start_of_itable() + itable_length(); }
 
-inline int InstanceKlass::itable_offset_in_words() const { return start_of_itable() - (intptr_t*)this; }
-
 inline oop InstanceKlass::static_field_base_raw() { return java_mirror(); }
+
+inline Symbol* InstanceKlass::field_name(int index) const { return field(index).name(constants()); }
+inline Symbol* InstanceKlass::field_signature(int index) const { return field(index).signature(constants()); }
+
+inline int InstanceKlass::java_fields_count() const { return FieldInfoStream::num_java_fields(fieldinfo_stream()); }
+inline int InstanceKlass::total_fields_count() const { return FieldInfoStream::num_total_fields(fieldinfo_stream()); }
 
 inline OopMapBlock* InstanceKlass::start_of_nonstatic_oop_maps() const {
   return (OopMapBlock*)(start_of_itable() + itable_length());
@@ -74,59 +55,20 @@ inline Klass** InstanceKlass::end_of_nonstatic_oop_maps() const {
                    nonstatic_oop_map_count());
 }
 
-inline Klass* volatile* InstanceKlass::adr_implementor() const {
+inline InstanceKlass* volatile* InstanceKlass::adr_implementor() const {
   if (is_interface()) {
-    return (Klass* volatile*)end_of_nonstatic_oop_maps();
+    return (InstanceKlass* volatile*)end_of_nonstatic_oop_maps();
   } else {
-    return NULL;
-  }
-}
-
-inline InstanceKlass** InstanceKlass::adr_unsafe_anonymous_host() const {
-  if (is_unsafe_anonymous()) {
-    InstanceKlass** adr_impl = (InstanceKlass**)adr_implementor();
-    if (adr_impl != NULL) {
-      return adr_impl + 1;
-    } else {
-      return (InstanceKlass **)end_of_nonstatic_oop_maps();
-    }
-  } else {
-    return NULL;
-  }
-}
-
-inline address InstanceKlass::adr_fingerprint() const {
-  if (has_stored_fingerprint()) {
-    InstanceKlass** adr_host = adr_unsafe_anonymous_host();
-    if (adr_host != NULL) {
-      return (address)(adr_host + 1);
-    }
-
-    Klass* volatile* adr_impl = adr_implementor();
-    if (adr_impl != NULL) {
-      return (address)(adr_impl + 1);
-    }
-
-    return (address)end_of_nonstatic_oop_maps();
-  } else {
-    return NULL;
+    return nullptr;
   }
 }
 
 inline ObjArrayKlass* InstanceKlass::array_klasses_acquire() const {
-  return Atomic::load_acquire(&_array_klasses);
+  return AtomicAccess::load_acquire(&_array_klasses);
 }
 
 inline void InstanceKlass::release_set_array_klasses(ObjArrayKlass* k) {
-  Atomic::release_store(&_array_klasses, k);
-}
-
-inline jmethodID* InstanceKlass::methods_jmethod_ids_acquire() const {
-  return Atomic::load_acquire(&_methods_jmethod_ids);
-}
-
-inline void InstanceKlass::release_set_methods_jmethod_ids(jmethodID* jmeths) {
-  Atomic::release_store(&_methods_jmethod_ids, jmeths);
+  AtomicAccess::release_store(&_array_klasses, k);
 }
 
 // The iteration over the oops in objects is a hot path in the GC code.
@@ -135,7 +77,7 @@ inline void InstanceKlass::release_set_methods_jmethod_ids(jmethodID* jmeths) {
 
 template <typename T, class OopClosureType>
 ALWAYSINLINE void InstanceKlass::oop_oop_iterate_oop_map(OopMapBlock* map, oop obj, OopClosureType* closure) {
-  T* p         = (T*)obj->obj_field_addr<T>(map->offset());
+  T* p         = obj->field_addr<T>(map->offset());
   T* const end = p + map->count();
 
   for (; p < end; ++p) {
@@ -145,7 +87,7 @@ ALWAYSINLINE void InstanceKlass::oop_oop_iterate_oop_map(OopMapBlock* map, oop o
 
 template <typename T, class OopClosureType>
 ALWAYSINLINE void InstanceKlass::oop_oop_iterate_oop_map_reverse(OopMapBlock* map, oop obj, OopClosureType* closure) {
-  T* const start = (T*)obj->obj_field_addr<T>(map->offset());
+  T* const start = obj->field_addr<T>(map->offset());
   T*       p     = start + map->count();
 
   while (start < p) {
@@ -156,7 +98,7 @@ ALWAYSINLINE void InstanceKlass::oop_oop_iterate_oop_map_reverse(OopMapBlock* ma
 
 template <typename T, class OopClosureType>
 ALWAYSINLINE void InstanceKlass::oop_oop_iterate_oop_map_bounded(OopMapBlock* map, oop obj, OopClosureType* closure, MemRegion mr) {
-  T* p   = (T*)obj->obj_field_addr<T>(map->offset());
+  T* p   = obj->field_addr<T>(map->offset());
   T* end = p + map->count();
 
   T* const l   = (T*)mr.start();
@@ -234,18 +176,6 @@ ALWAYSINLINE void InstanceKlass::oop_oop_iterate_bounded(oop obj, OopClosureType
   }
 
   oop_oop_iterate_oop_maps_bounded<T>(obj, closure, mr);
-}
-
-inline instanceOop InstanceKlass::allocate_instance(oop java_class, TRAPS) {
-  Klass* k = java_lang_Class::as_Klass(java_class);
-  if (k == NULL) {
-    ResourceMark rm(THREAD);
-    THROW_(vmSymbols::java_lang_InstantiationException(), NULL);
-  }
-  InstanceKlass* ik = cast(k);
-  ik->check_valid_for_instantiation(false, CHECK_NULL);
-  ik->initialize(CHECK_NULL);
-  return ik->allocate_instance(THREAD);
 }
 
 #endif // SHARE_OOPS_INSTANCEKLASS_INLINE_HPP

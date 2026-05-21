@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,9 @@
 
 package sun.nio.ch;
 
+import java.util.concurrent.locks.LockSupport;
+import jdk.internal.access.JavaLangAccess;
+import jdk.internal.access.SharedSecrets;
 
 // Signalling operations on native threads
 //
@@ -36,20 +39,63 @@ package sun.nio.ch;
 // On systems that do not require this type of signalling, the current() method
 // always returns -1 and the signal(long) method has no effect.
 
-
 public class NativeThread {
+    private static final JavaLangAccess JLA = SharedSecrets.getJavaLangAccess();
+
+    private NativeThread() { }
+
+    /**
+     * Returns the Thread to signal the current thread.
+     *
+     * The first use of this method on a platform thread will capture the thread's
+     * native thread ID.
+     */
+    public static Thread threadToSignal() {
+        Thread t = Thread.currentThread();
+        if (!t.isVirtual() && JLA.nativeThreadID(t) == 0) {
+            JLA.setThreadNativeID(current0());
+        }
+        return t;
+    }
+
+    /**
+     * Signals the given thread. For a platform thread it sends a signal to the thread.
+     * For a virtual thread it just unparks it.
+     * @throws IllegalStateException if the thread is a platform thread that hasn't set its native ID
+     */
+    public static void signal(Thread thread) {
+        if (thread.isVirtual()) {
+            LockSupport.unpark(thread);
+        } else {
+            long id = JLA.nativeThreadID(thread);
+            if (id == 0)
+                throw new IllegalStateException("Native thread ID not set");
+            signal0(id);
+        }
+    }
+
+    /**
+     * Return true if the operating system supports pending signals. If a signal is sent
+     * to a thread but cannot be delivered immediately then it will be delivered when the
+     * thread is in the appropriate state.
+     */
+    static boolean supportPendingSignals() {
+        return supportPendingSignals0();
+    }
+
+    private static native boolean supportPendingSignals0();
 
     // Returns an opaque token representing the native thread underlying the
     // invoking Java thread.  On systems that do not require signalling, this
-    // method always returns -1.
+    // method always returns 0.
     //
-    public static native long current();
+    private static native long current0();
 
     // Signals the given native thread so as to release it from a blocking I/O
     // operation.  On systems that do not require signalling, this method has
     // no effect.
     //
-    public static native void signal(long nt);
+    private static native void signal0(long tid);
 
     private static native void init();
 

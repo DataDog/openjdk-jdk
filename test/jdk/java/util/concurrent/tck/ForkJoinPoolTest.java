@@ -31,9 +31,6 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static java.util.concurrent.TimeUnit.NANOSECONDS;
-
 import java.security.PrivilegedAction;
 import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
@@ -41,6 +38,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -51,12 +49,18 @@ import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.Future;
 import java.util.concurrent.RecursiveTask;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 
 import junit.framework.Test;
 import junit.framework.TestSuite;
+
+import static java.util.concurrent.TimeUnit.*;
 
 public class ForkJoinPoolTest extends JSR166TestCase {
     public static void main(String[] args) {
@@ -375,7 +379,7 @@ public class ForkJoinPoolTest extends JSR166TestCase {
             p.shutdown();
             assertTrue(p.isShutdown());
             try {
-                ForkJoinTask<Integer> f = p.submit(new FibTask(8));
+                ForkJoinTask<Integer> unused = p.submit(new FibTask(8));
                 shouldThrow();
             } catch (RejectedExecutionException success) {}
         }
@@ -404,10 +408,10 @@ public class ForkJoinPoolTest extends JSR166TestCase {
         final CountDownLatch done = new CountDownLatch(1);
         SubFJP p = new SubFJP();
         try (PoolCleaner cleaner = cleaner(p)) {
-            ForkJoinTask a = p.submit(awaiter(done));
-            ForkJoinTask b = p.submit(awaiter(done));
-            ForkJoinTask c = p.submit(awaiter(done));
-            ForkJoinTask r = p.pollSubmission();
+            ForkJoinTask<?> a = p.submit(awaiter(done));
+            ForkJoinTask<?> b = p.submit(awaiter(done));
+            ForkJoinTask<?> c = p.submit(awaiter(done));
+            ForkJoinTask<?> r = p.pollSubmission();
             assertTrue(r == a || r == b || r == c);
             assertFalse(r.isDone());
             done.countDown();
@@ -421,13 +425,13 @@ public class ForkJoinPoolTest extends JSR166TestCase {
         final CountDownLatch done = new CountDownLatch(1);
         SubFJP p = new SubFJP();
         try (PoolCleaner cleaner = cleaner(p)) {
-            ForkJoinTask a = p.submit(awaiter(done));
-            ForkJoinTask b = p.submit(awaiter(done));
-            ForkJoinTask c = p.submit(awaiter(done));
-            ArrayList<ForkJoinTask> al = new ArrayList();
+            ForkJoinTask<?> a = p.submit(awaiter(done));
+            ForkJoinTask<?> b = p.submit(awaiter(done));
+            ForkJoinTask<?> c = p.submit(awaiter(done));
+            ArrayList<ForkJoinTask<?>> al = new ArrayList<>();
             p.drainTasksTo(al);
             assertTrue(al.size() > 0);
-            for (ForkJoinTask r : al) {
+            for (ForkJoinTask<?> r : al) {
                 assertTrue(r == a || r == b || r == c);
                 assertFalse(r.isDone());
             }
@@ -482,6 +486,57 @@ public class ForkJoinPoolTest extends JSR166TestCase {
         }
     }
 
+    public void testCancellationExceptionInGet() throws Exception {
+        final ExecutorService e = new ForkJoinPool(1);
+        try (var cleaner = cleaner(e)) {
+            assertCancellationExceptionFrom(
+                e::submit,
+                f -> () -> f.get(1000, TimeUnit.SECONDS)
+            );
+            assertCancellationExceptionFrom(
+                e::submit,
+                f -> f::get
+            );
+            assertCancellationExceptionFrom(
+                c -> e.submit(() -> { try { c.call(); } catch (Exception ex) { throw new RuntimeException(ex); } }),
+                f -> () -> f.get(1000, TimeUnit.SECONDS)
+            );
+            assertCancellationExceptionFrom(
+                c -> e.submit(() -> { try { c.call(); } catch (Exception ex) { throw new RuntimeException(ex); } }),
+                f -> f::get
+            );
+        }
+    }
+
+    private void assertCancellationExceptionFrom(
+            Function<Callable<Void>, Future<?>> createTask,
+            Function<Future<?>, Callable<?>> getResult) throws Exception {
+        final var t = new AtomicReference<Thread>();
+        final var c = new CountDownLatch(1); // Only used to induce WAITING state (never counted down)
+        final var task = createTask.apply(() -> {
+            try {
+                t.set(Thread.currentThread());
+                c.await();
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();;
+            }
+            return null;
+        });
+        Thread taskThread;
+        while((taskThread = t.get()) == null || taskThread.getState() != Thread.State.WAITING) {
+            if (Thread.interrupted())
+                throw new InterruptedException();
+            Thread.onSpinWait();
+        }
+        task.cancel(true);
+        try {
+            getResult.apply(task).call();
+        } catch (CancellationException ce) {
+            return; // Success
+        }
+        shouldThrow();
+    }
+
     /**
      * Completed submit(runnable, result) returns result
      */
@@ -499,51 +554,51 @@ public class ForkJoinPoolTest extends JSR166TestCase {
      * A submitted privileged action runs to completion
      */
     public void testSubmitPrivilegedAction() throws Exception {
-        final Callable callable = Executors.callable(new PrivilegedAction() {
+        final Callable<Object> callable = Executors.callable(new PrivilegedAction<Object>() {
                 public Object run() { return TEST_STRING; }});
         Runnable r = new CheckedRunnable() {
         public void realRun() throws Exception {
             ExecutorService e = new ForkJoinPool(1);
             try (PoolCleaner cleaner = cleaner(e)) {
-                Future future = e.submit(callable);
+                Future<Object> future = e.submit(callable);
                 assertSame(TEST_STRING, future.get());
             }
         }};
 
-        runWithPermissions(r, new RuntimePermission("modifyThread"));
+        r.run();
     }
 
     /**
      * A submitted privileged exception action runs to completion
      */
     public void testSubmitPrivilegedExceptionAction() throws Exception {
-        final Callable callable =
-            Executors.callable(new PrivilegedExceptionAction() {
+        final Callable<Object> callable =
+            Executors.callable(new PrivilegedExceptionAction<Object>() {
                 public Object run() { return TEST_STRING; }});
         Runnable r = new CheckedRunnable() {
         public void realRun() throws Exception {
             ExecutorService e = new ForkJoinPool(1);
             try (PoolCleaner cleaner = cleaner(e)) {
-                Future future = e.submit(callable);
+                Future<Object> future = e.submit(callable);
                 assertSame(TEST_STRING, future.get());
             }
         }};
 
-        runWithPermissions(r, new RuntimePermission("modifyThread"));
+        r.run();
     }
 
     /**
      * A submitted failed privileged exception action reports exception
      */
     public void testSubmitFailedPrivilegedExceptionAction() throws Exception {
-        final Callable callable =
-            Executors.callable(new PrivilegedExceptionAction() {
+        final Callable<Object> callable =
+            Executors.callable(new PrivilegedExceptionAction<Object>() {
                 public Object run() { throw new IndexOutOfBoundsException(); }});
         Runnable r = new CheckedRunnable() {
         public void realRun() throws Exception {
             ExecutorService e = new ForkJoinPool(1);
             try (PoolCleaner cleaner = cleaner(e)) {
-                Future future = e.submit(callable);
+                Future<Object> future = e.submit(callable);
                 try {
                     future.get();
                     shouldThrow();
@@ -553,7 +608,7 @@ public class ForkJoinPoolTest extends JSR166TestCase {
             }
         }};
 
-        runWithPermissions(r, new RuntimePermission("modifyThread"));
+        r.run();
     }
 
     /**
@@ -563,7 +618,7 @@ public class ForkJoinPoolTest extends JSR166TestCase {
         ExecutorService e = new ForkJoinPool(1);
         try (PoolCleaner cleaner = cleaner(e)) {
             try {
-                Future<?> future = e.submit((Runnable) null);
+                Future<?> unused = e.submit((Runnable) null);
                 shouldThrow();
             } catch (NullPointerException success) {}
         }
@@ -576,7 +631,7 @@ public class ForkJoinPoolTest extends JSR166TestCase {
         ExecutorService e = new ForkJoinPool(1);
         try (PoolCleaner cleaner = cleaner(e)) {
             try {
-                Future<String> future = e.submit((Callable) null);
+                Future<String> unused = e.submit((Callable<String>) null);
                 shouldThrow();
             } catch (NullPointerException success) {}
         }
@@ -588,7 +643,7 @@ public class ForkJoinPoolTest extends JSR166TestCase {
     public void testInterruptedSubmit() throws InterruptedException {
         final CountDownLatch submitted    = new CountDownLatch(1);
         final CountDownLatch quittingTime = new CountDownLatch(1);
-        final Callable<Void> awaiter = new CheckedCallable<Void>() {
+        final Callable<Void> awaiter = new CheckedCallable<>() {
             public Void realCall() throws InterruptedException {
                 assertTrue(quittingTime.await(2*LONG_DELAY_MS, MILLISECONDS));
                 return null;
@@ -616,11 +671,27 @@ public class ForkJoinPoolTest extends JSR166TestCase {
         ForkJoinPool p = new ForkJoinPool(1);
         try (PoolCleaner cleaner = cleaner(p)) {
             try {
-                p.submit(new Callable() {
+                p.submit(new Callable<Object>() {
                         public Object call() { throw new ArithmeticException(); }})
                     .get();
                 shouldThrow();
             } catch (ExecutionException success) {
+                assertTrue(success.getCause() instanceof ArithmeticException);
+            }
+        }
+    }
+
+    /**
+     * invoke throws a RuntimeException if task throws unchecked exception
+     */
+    public void testInvokeUncheckedException() throws Throwable {
+        ForkJoinPool p = new ForkJoinPool(1);
+        try (PoolCleaner cleaner = cleaner(p)) {
+            try {
+                p.invoke(ForkJoinTask.adapt(new Callable<Object>() {
+                        public Object call() { throw new ArithmeticException(); }}));
+                shouldThrow();
+            } catch (RuntimeException success) {
                 assertTrue(success.getCause() instanceof ArithmeticException);
             }
         }

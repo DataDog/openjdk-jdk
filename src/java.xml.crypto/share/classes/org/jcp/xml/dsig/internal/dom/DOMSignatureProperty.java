@@ -21,18 +21,19 @@
  * under the License.
  */
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
- */
-/*
- * $Id: DOMSignatureProperty.java 1854026 2019-02-21 09:30:01Z coheigea $
+ * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
  */
 package org.jcp.xml.dsig.internal.dom;
 
-import javax.xml.crypto.*;
-import javax.xml.crypto.dom.DOMCryptoContext;
-import javax.xml.crypto.dsig.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
-import java.util.*;
+import javax.xml.crypto.MarshalException;
+import javax.xml.crypto.XMLStructure;
+import javax.xml.crypto.dom.DOMCryptoContext;
+import javax.xml.crypto.dsig.SignatureProperty;
+import javax.xml.crypto.dsig.XMLSignature;
 
 import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
@@ -120,14 +121,17 @@ public final class DOMSignatureProperty extends DOMStructure
         }
     }
 
+    @Override
     public List<XMLStructure> getContent() {
         return content;
     }
 
+    @Override
     public String getId() {
         return id;
     }
 
+    @Override
     public String getTarget() {
         return target;
     }
@@ -169,7 +173,7 @@ public final class DOMSignatureProperty extends DOMStructure
 
         @SuppressWarnings("unchecked")
         List<XMLStructure> ospContent = osp.getContent();
-        return equalsContent(ospContent) &&
+        return equalsContent(content, ospContent) &&
                 target.equals(osp.getTarget()) && idsEqual;
     }
 
@@ -185,30 +189,4 @@ public final class DOMSignatureProperty extends DOMStructure
         return result;
     }
 
-    private boolean equalsContent(List<XMLStructure> otherContent) {
-        int osize = otherContent.size();
-        if (content.size() != osize) {
-            return false;
-        }
-        for (int i = 0; i < osize; i++) {
-            XMLStructure oxs = otherContent.get(i);
-            XMLStructure xs = content.get(i);
-            if (oxs instanceof javax.xml.crypto.dom.DOMStructure) {
-                if (!(xs instanceof javax.xml.crypto.dom.DOMStructure)) {
-                    return false;
-                }
-                Node onode = ((javax.xml.crypto.dom.DOMStructure)oxs).getNode();
-                Node node = ((javax.xml.crypto.dom.DOMStructure)xs).getNode();
-                if (!DOMUtils.nodesEqual(node, onode)) {
-                    return false;
-                }
-            } else {
-                if (!(xs.equals(oxs))) {
-                    return false;
-                }
-            }
-        }
-
-        return true;
-    }
 }

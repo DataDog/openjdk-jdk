@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,18 +21,41 @@
  * questions.
  */
 
-import java.awt.*;
-import java.awt.event.*;
+import java.awt.Button;
+import java.awt.Canvas;
+import java.awt.Choice;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.Helper;
+import java.awt.List;
+import java.awt.Point;
+import java.awt.Robot;
+import java.awt.Scrollbar;
+import java.awt.TextField;
+import java.awt.Toolkit;
+import java.awt.Window;
+import java.awt.event.InputEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.peer.ComponentPeer;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import javax.swing.*;
+
+import javax.swing.JFrame;
+import javax.swing.SwingUtilities;
+import javax.swing.WindowConstants;
 
 import sun.awt.AWTAccessor;
 import sun.awt.EmbeddedFrame;
-import java.io.*;
+import sun.awt.OSInfo;
 import test.java.awt.regtesthelpers.Util;
 
 /**
@@ -150,6 +173,7 @@ public abstract class OverlappingTestBase {
                     frame.getContentPane().setBackground(AWT_BACKGROUND_COLOR);
                     frame.setSize(size, size);
                     frame.setUndecorated(true);
+                    frame.setLocationRelativeTo(null);
                     frame.setVisible(true);
                     frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
                     p[0] = frame.getLocation();
@@ -213,7 +237,7 @@ public abstract class OverlappingTestBase {
         try {
             Class definition = Class.forName("java.awt." + className);
             Constructor constructor = definition.getConstructor(new Class[]{String.class});
-            java.awt.Component component = (java.awt.Component) constructor.newInstance(new Object[]{"AWT Component " + className});
+            Component component = (Component) constructor.newInstance(new Object[]{"AWT Component " + className});
             addAwtControl(container, component);
         } catch (Exception ex) {
             System.err.println(ex.getMessage());
@@ -238,22 +262,25 @@ public abstract class OverlappingTestBase {
                 embedder.setBackground(Color.RED);
                 embedder.setPreferredSize(new Dimension(150, 150));
                 container.add(embedder);
+                if (container instanceof Window) {
+                    ((Window) container).setLocationRelativeTo(null);
+                }
                 container.setVisible(true); // create peer
 
                 long frameWindow = 0;
                 String getWindowMethodName = null;
                 String eframeClassName = null;
                 if (Toolkit.getDefaultToolkit().getClass().getName().contains("XToolkit")) {
-                    java.awt.Helper.addExports("sun.awt.X11", OverlappingTestBase.class.getModule());
+                    Helper.addExports("sun.awt.X11", OverlappingTestBase.class.getModule());
                     getWindowMethodName = "getWindow";
                     eframeClassName = "sun.awt.X11.XEmbeddedFrame";
                 }else if (Toolkit.getDefaultToolkit().getClass().getName().contains(".WToolkit")) {
-                    java.awt.Helper.addExports("sun.awt.windows", OverlappingTestBase.class.getModule());
+                    Helper.addExports("sun.awt.windows", OverlappingTestBase.class.getModule());
                     getWindowMethodName = "getHWnd";
                     eframeClassName = "sun.awt.windows.WEmbeddedFrame";
                 }else if (isMac) {
-                    java.awt.Helper.addExports("sun.lwawt", OverlappingTestBase.class.getModule());
-                    java.awt.Helper.addExports("sun.lwawt.macosx", OverlappingTestBase.class.getModule());
+                    Helper.addExports("sun.lwawt", OverlappingTestBase.class.getModule());
+                    Helper.addExports("sun.lwawt.macosx", OverlappingTestBase.class.getModule());
                     eframeClassName = "sun.lwawt.macosx.CViewEmbeddedFrame";
                 }
 
@@ -280,6 +307,7 @@ public abstract class OverlappingTestBase {
                 EmbeddedFrame eframe = (EmbeddedFrame) eframeCtor.newInstance(frameWindow);
                 setupControl(eframe);
                 eframe.setSize(new Dimension(150, 150));
+                eframe.setLocationRelativeTo(null);
                 eframe.setVisible(true);
 //                System.err.println(eframe.getSize());
             } catch (Exception ex) {
@@ -355,10 +383,9 @@ public abstract class OverlappingTestBase {
     protected String failMessage = "The LW component did not received the click.";
 
     private static boolean isValidForPixelCheck(Component component) {
-        if ((component instanceof java.awt.Scrollbar) || isMac && (component instanceof java.awt.Button)) {
-            return false;
-        }
-        return true;
+        return component != null
+                 && !(component instanceof Scrollbar)
+                 && !(isMac && (component instanceof Button));
     }
 
     /**
@@ -401,16 +428,16 @@ public abstract class OverlappingTestBase {
         Util.waitForIdle(robot);
         try{
             Thread.sleep(500);
-        }catch(Exception exx){
+        } catch (Exception exx) {
             exx.printStackTrace();
         }
 
         if (defaultShift) {
             loc.translate(shift.x, shift.y);
         }
-        if (!(System.getProperty("os.name").toLowerCase().contains("os x"))) {
+        if (!(OSInfo.getOSType() == OSInfo.OSType.MACOSX)) {
             Color c = robot.getPixelColor(loc.x, loc.y);
-            System.out.println("C&B. color: "+c+" compare with "+AWT_VERIFY_COLOR);
+            System.out.println("C&B. color: " + c + " compare with " + AWT_VERIFY_COLOR);
             if (c.equals(AWT_VERIFY_COLOR)) {
                 fail(failMessageColorCheck);
                 passed = false;
@@ -422,8 +449,8 @@ public abstract class OverlappingTestBase {
 
         robot.mouseMove(loc.x, loc.y);
 
-        robot.mousePress(InputEvent.BUTTON1_MASK);
-        robot.mouseRelease(InputEvent.BUTTON1_MASK);
+        robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
+        robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
         Util.waitForIdle(robot);
     }
 
@@ -454,36 +481,32 @@ public abstract class OverlappingTestBase {
      */
     protected Component currentAwtControl;
 
-    private void testComponent(Component component) throws InterruptedException, InvocationTargetException {
+    private void testComponent(Component component) throws InterruptedException,
+                                                           InvocationTargetException {
         Robot robot = null;
         try {
             robot = new Robot();
-        }catch(Exception ignorex) {
+        } catch (Exception ignored) {
         }
         currentAwtControl = component;
         System.out.println("Testing " + currentAwtControl.getClass().getSimpleName());
-        SwingUtilities.invokeAndWait(new Runnable() {
-            public void run() {
-                prepareControls();
-            }
-        });
+
+        SwingUtilities.invokeAndWait(() -> prepareControls());
+
         if (component != null) {
             Util.waitTillShown(component);
         }
         Util.waitForIdle(robot);
-        try {
-            Thread.sleep(500); // wait for graphic effects on systems like Win7
-        } catch (InterruptedException ex) {
-        }
+
+        // wait for graphic effects on systems like Win7
+        robot.delay(500);
+
         if (!instance.performTest()) {
             fail(failMessage);
             passed = false;
         }
-        SwingUtilities.invokeAndWait(new Runnable() {
-            public void run() {
-                cleanup();
-            }
-        });
+
+        SwingUtilities.invokeAndWait(() -> cleanup());
     }
 
     private void testEmbeddedFrame() throws InvocationTargetException, InterruptedException {
@@ -665,6 +688,7 @@ public abstract class OverlappingTestBase {
         failureMessage = whyFailed;
         mainThread.interrupt();
     }//fail()
+
+    static class TestPassedException extends RuntimeException {
+    }
 }// class LWComboBox
-class TestPassedException extends RuntimeException {
-}

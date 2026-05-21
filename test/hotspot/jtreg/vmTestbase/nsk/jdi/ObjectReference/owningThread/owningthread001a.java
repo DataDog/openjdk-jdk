@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,6 @@
 
 package nsk.jdi.ObjectReference.owningThread;
 
-import nsk.share.*;
 import nsk.share.jpda.*;
 import nsk.share.jdi.*;
 
@@ -60,13 +59,16 @@ public class owningthread001a {
 
     //====================================================== test program
 
-    private static Threadowningthread001a thread2 = null;
+    private static Thread thread2 = null;
+    static Thread mainThread = null;
 
     static TestClass  testObj  = new TestClass();
 
     //----------------------------------------------------   main method
 
     public static void main (String argv[]) {
+
+        mainThread = Thread.currentThread();
 
         for (int i=0; i<argv.length; i++) {
             if ( argv[i].equals("-vbs") || argv[i].equals("-verbose") ) {
@@ -99,8 +101,8 @@ public class owningthread001a {
     //------------------------------------------------------  section tested
 
                 case 0:
-                         thread2 = new
-                              Threadowningthread001a("Thread2");
+                         thread2 = JDIThreadFactory.newThread(new
+                              Threadowningthread001a("Thread2"));
                          log1("       thread2 is created");
 
 
@@ -155,13 +157,10 @@ public class owningthread001a {
     }
 }
 
-class Threadowningthread001a extends Thread {
+class Threadowningthread001a extends NamedTask {
 
     public Threadowningthread001a(String threadName) {
         super(threadName);
-    }
-    public Threadowningthread001a(ThreadGroup groupName, String threadName) {
-        super(groupName, threadName);
     }
 
     public static Object waitnotifyObj = new Object();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,14 +25,15 @@
  * @test
  * @bug 8171277
  * @summary Test XEC curve operations
- * @modules jdk.crypto.ec/sun.security.ec
+ * @modules java.base/sun.security.ec
  * @library /test/lib
  * @build jdk.test.lib.Convert
  * @run main TestXECOps
  */
 
-import sun.security.ec.*;
-
+import sun.security.ec.XECOperations;
+import sun.security.ec.XECParameters;
+import java.math.BigInteger;
 import java.security.spec.NamedParameterSpec;
 import java.util.*;
 import jdk.test.lib.Convert;
@@ -93,43 +94,74 @@ public class TestXECOps {
             XECParameters.get(RuntimeException::new, paramSpec);
         XECOperations ops = new XECOperations(settings);
 
+        // Test encodedPointMultiply(byte[] k, byte[] u)
         byte[] basePoint = Convert.byteToByteArray(settings.getBasePoint(),
             settings.getBytes());
-        byte[] a = Convert.hexStringToByteArray(a_str);
-        byte[] b = Convert.hexStringToByteArray(b_str);
-        byte[] expectedResult = Convert.hexStringToByteArray(result_str);
+        byte[] a = HexFormat.of().parseHex(a_str);
+        byte[] b = HexFormat.of().parseHex(b_str);
+        byte[] expectedResult = HexFormat.of().parseHex(result_str);
 
         byte[] a_copy = Arrays.copyOf(a, a.length);
         byte[] b_copy = Arrays.copyOf(b, b.length);
-        byte[] basePoint_copy = Arrays.copyOf(basePoint, basePoint.length);
 
         byte[] resultA = ops.encodedPointMultiply(b,
             ops.encodedPointMultiply(a, basePoint));
         byte[] resultB = ops.encodedPointMultiply(a_copy,
-            ops.encodedPointMultiply(b_copy, basePoint_copy));
+            ops.encodedPointMultiply(b_copy, basePoint));
         if (!Arrays.equals(resultA, expectedResult)) {
             throw new RuntimeException("fail");
         }
         if (!Arrays.equals(resultB, expectedResult)) {
             throw new RuntimeException("fail");
         }
+
+        // Test encodedPointMultiply(byte[] k, BigInteger u)
+        reverse(basePoint);
+        BigInteger bp = new BigInteger(1, basePoint);
+        byte[] c = HexFormat.of().parseHex(a_str);
+        byte[] d = HexFormat.of().parseHex(b_str);
+
+        byte[] res0 = ops.encodedPointMultiply(d,
+            ops.encodedPointMultiply(c, bp));
+        if (!Arrays.equals(res0, expectedResult)) {
+            throw new RuntimeException("bigint fail");
+        }
     }
 
     private void runTest(String opName, String k_in_str,
         String u_in_str, String u_out_str) {
 
-        byte[] k_in = Convert.hexStringToByteArray(k_in_str);
-        byte[] u_in = Convert.hexStringToByteArray(u_in_str);
-        byte[] u_out_expected = Convert.hexStringToByteArray(u_out_str);
+        byte[] k_in = HexFormat.of().parseHex(k_in_str);
+        byte[] u_in = HexFormat.of().parseHex(u_in_str);
+        byte[] u_out_expected = HexFormat.of().parseHex(u_out_str);
 
         NamedParameterSpec paramSpec = new NamedParameterSpec(opName);
         XECParameters settings =
             XECParameters.get(RuntimeException::new, paramSpec);
-        XECOperations ops = new XECOperations(settings);
-        byte[] u_out = ops.encodedPointMultiply(k_in, u_in);
 
-        if (!Arrays.equals(u_out, u_out_expected)) {
+        // Test encodedPointMultiply(byte[] k, byte[] u)
+        XECOperations ops = new XECOperations(settings);
+        byte[] res0 = ops.encodedPointMultiply(k_in, u_in);
+
+        if (!Arrays.equals(res0, u_out_expected)) {
             throw new RuntimeException("fail");
+        }
+
+        // Test encodedPointMultiply(byte[] k, BigInteger u)
+        reverse(u_in);
+        BigInteger u = new BigInteger(1, u_in);
+        byte[] res1 = ops.encodedPointMultiply(k_in, u);
+
+        if (!Arrays.equals(res1, u_out_expected)) {
+            throw new RuntimeException("fail");
+        }
+    }
+
+    private static void reverse(byte[] array) {
+        for (int i = 0; i < array.length / 2; i++) {
+            byte temp = array[i];
+            array[i] = array[array.length - i - 1];
+            array[array.length - i - 1] = temp;
         }
     }
 }

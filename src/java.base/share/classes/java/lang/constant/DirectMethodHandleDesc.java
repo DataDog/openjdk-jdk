@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,9 +26,8 @@ package java.lang.constant;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandleInfo;
-import java.util.OptionalInt;
-import java.util.stream.Stream;
 
+import jdk.internal.constant.DirectMethodHandleDescImpl;
 import jdk.internal.vm.annotation.Stable;
 
 import static java.lang.invoke.MethodHandleInfo.REF_getField;
@@ -46,14 +45,11 @@ import static java.lang.invoke.MethodHandleInfo.REF_putStatic;
  * {@link MethodHandle}.  A {@linkplain DirectMethodHandleDesc} corresponds to
  * a {@code Constant_MethodHandle_info} entry in the constant pool of a classfile.
  *
- * @apiNote In the future, if the Java language permits, {@linkplain DirectMethodHandleDesc}
- * may become a {@code sealed} interface, which would prohibit subclassing except
- * by explicitly permitted types.  Non-platform classes should not implement
- * {@linkplain DirectMethodHandleDesc} directly.
- *
  * @since 12
  */
-public interface DirectMethodHandleDesc extends MethodHandleDesc {
+public sealed interface DirectMethodHandleDesc
+        extends MethodHandleDesc
+        permits DirectMethodHandleDescImpl {
     /**
      * Kinds of method handles that can be described with {@linkplain DirectMethodHandleDesc}.
      *
@@ -92,7 +88,7 @@ public interface DirectMethodHandleDesc extends MethodHandleDesc {
          */
         public final boolean isInterface;
         Kind(int refKind) {
-            this(refKind, false);
+            this.refKind = refKind; this.isInterface = false;
         }
 
         Kind(int refKind, boolean isInterface) { this.refKind = refKind; this.isInterface = isInterface; }
@@ -108,7 +104,7 @@ public interface DirectMethodHandleDesc extends MethodHandleDesc {
          * @throws IllegalArgumentException if there is no such member
          */
         public static Kind valueOf(int refKind) {
-            return valueOf(refKind, false);
+            return valueOf(refKind, refKind == REF_invokeInterface);
         }
 
         /**
@@ -137,16 +133,10 @@ public interface DirectMethodHandleDesc extends MethodHandleDesc {
          */
         public static Kind valueOf(int refKind, boolean isInterface) {
             int i = tableIndex(refKind, isInterface);
-            if (i >= 0 && i < TABLE.length) {
-                Kind kind = TABLE[i];
-                if (kind == null) {
-                    throw new IllegalArgumentException(String.format("refKind=%d", refKind));
-                }
-                if (kind.refKind == refKind && kind.isInterface == isInterface) {
-                    return kind;
-                }
+            if (i >= 2 && i < TABLE.length) {
+                return TABLE[i];
             }
-            throw new IllegalArgumentException(String.format("refKind=%d", refKind));
+            throw new IllegalArgumentException(String.format("refKind=%d isInterface=%s", refKind, isInterface));
         }
 
         private static int tableIndex(int refKind, boolean isInterface) {
@@ -183,28 +173,9 @@ public interface DirectMethodHandleDesc extends MethodHandleDesc {
                     // for either truth value of X.
                     int i = tableIndex(kind.refKind, true);
                     if (TABLE[i] == null) {
-                        // There is not a specific Kind for interfaces
-                        if (kind == VIRTUAL)  kind = INTERFACE_VIRTUAL;
-                        if (TABLE[i] == null)  TABLE[i] = kind;
+                        TABLE[i] = kind;
                     }
                 }
-            }
-        }
-
-        /**
-         * Does this {@code Kind} correspond to a virtual method invocation?
-         *
-         * @return if this {@code Kind} corresponds to a virtual method invocation
-         */
-        boolean isVirtualMethod() {
-            switch (this) {
-                case VIRTUAL:
-                case SPECIAL:
-                case INTERFACE_VIRTUAL:
-                case INTERFACE_SPECIAL:
-                    return true;
-                default:
-                    return false;
             }
         }
     }
@@ -242,7 +213,7 @@ public interface DirectMethodHandleDesc extends MethodHandleDesc {
 
     /**
      * Returns the name of the method or field described by this nominal descriptor.
-     * For constructors, returns the reserved name {@code "<init>"}.
+     * For constructors, returns the reserved name {@value ConstantDescs#INIT_NAME}.
      *
      * @return the name of the method or field
      */

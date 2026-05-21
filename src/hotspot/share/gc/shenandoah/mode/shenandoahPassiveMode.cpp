@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2019, 2021, Red Hat, Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,40 +22,40 @@
  *
  */
 
-#include "precompiled.hpp"
+#include "gc/shenandoah/heuristics/shenandoahHeuristics.hpp"
 #include "gc/shenandoah/heuristics/shenandoahPassiveHeuristics.hpp"
+#include "gc/shenandoah/heuristics/shenandoahSpaceInfo.hpp"
 #include "gc/shenandoah/mode/shenandoahPassiveMode.hpp"
+#include "gc/shenandoah/shenandoahHeap.inline.hpp"
 #include "logging/log.hpp"
 #include "logging/logTag.hpp"
 #include "runtime/globals_extension.hpp"
+#include "runtime/java.hpp"
 
 void ShenandoahPassiveMode::initialize_flags() const {
   // Do not allow concurrent cycles.
   FLAG_SET_DEFAULT(ExplicitGCInvokesConcurrent, false);
   FLAG_SET_DEFAULT(ShenandoahImplicitGCInvokesConcurrent, false);
 
-  // Passive runs with max speed for allocation, because GC is always STW
-  SHENANDOAH_ERGO_DISABLE_FLAG(ShenandoahPacing);
-
   // No need for evacuation reserve with Full GC, only for Degenerated GC.
   if (!ShenandoahDegeneratedGC) {
-    SHENANDOAH_ERGO_OVERRIDE_DEFAULT(ShenandoahEvacReserve, 0);
+    if (FLAG_IS_DEFAULT(ShenandoahEvacReserve)) {
+      log_info(gc)("Heuristics sets -XX:ShenandoahEvacReserve=0");
+      FLAG_SET_DEFAULT(ShenandoahEvacReserve, 0);
+    }
   }
 
   // Disable known barriers by default.
   SHENANDOAH_ERGO_DISABLE_FLAG(ShenandoahLoadRefBarrier);
   SHENANDOAH_ERGO_DISABLE_FLAG(ShenandoahSATBBarrier);
-  SHENANDOAH_ERGO_DISABLE_FLAG(ShenandoahStoreValEnqueueBarrier);
   SHENANDOAH_ERGO_DISABLE_FLAG(ShenandoahCASBarrier);
   SHENANDOAH_ERGO_DISABLE_FLAG(ShenandoahCloneBarrier);
-
-  // Final configuration checks
-  // No barriers are required to run.
+  SHENANDOAH_ERGO_DISABLE_FLAG(ShenandoahCardBarrier);
 }
-ShenandoahHeuristics* ShenandoahPassiveMode::initialize_heuristics() const {
-  if (ShenandoahGCHeuristics != NULL) {
-    return new ShenandoahPassiveHeuristics();
+
+ShenandoahHeuristics* ShenandoahPassiveMode::initialize_heuristics(ShenandoahSpaceInfo* space_info) const {
+  if (ShenandoahGCHeuristics == nullptr) {
+    vm_exit_during_initialization("Unknown -XX:ShenandoahGCHeuristics option (null)");
   }
-  ShouldNotReachHere();
-  return NULL;
+  return new ShenandoahPassiveHeuristics(space_info);
 }

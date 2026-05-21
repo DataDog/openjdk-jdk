@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,8 +24,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "jvmti.h"
-#include "agent_common.h"
-#include "JVMTITools.h"
+#include "agent_common.hpp"
+#include "JVMTITools.hpp"
 
 extern "C" {
 
@@ -34,10 +34,11 @@ extern "C" {
 #define STATUS_FAILED 2
 #define SCALE_SIZE (JVMTI_MAX_EVENT_TYPE_VAL + 1)
 
-static jvmtiEnv *jvmti = NULL;
+static jvmtiEnv *jvmti = nullptr;
 static jvmtiCapabilities caps;
 static jvmtiEventCallbacks callbacks;
 static jrawMonitorID access_lock;
+static jobject notifyFramePopThread = nullptr;
 static jint result = PASSED;
 static jboolean printdump = JNI_FALSE;
 static int flag = 0;
@@ -77,7 +78,7 @@ void disable(jvmtiEnv *jvmti_env, jvmtiEvent kind) {
         printf(">>> disabling %s\n", TranslateEvent(kind));
     }
     err = jvmti_env->SetEventNotificationMode(
-        JVMTI_DISABLE, kind, NULL);
+        JVMTI_DISABLE, kind, nullptr);
     if (err != JVMTI_ERROR_NONE) {
         printf("Fail to disable %s: %s (%d)\n",
                TranslateEvent(kind), TranslateError(err), err);
@@ -98,7 +99,7 @@ void enable(jvmtiEnv *jvmti_env, jvmtiEvent kind) {
         result = STATUS_FAILED;
     }
     err = jvmti_env->SetEventNotificationMode(
-        JVMTI_ENABLE, kind, NULL);
+        JVMTI_ENABLE, kind, nullptr);
     if (err != JVMTI_ERROR_NONE) {
         printf("Fail to enable %s: %s (%d)\n",
                TranslateEvent(kind), TranslateError(err), err);
@@ -120,8 +121,8 @@ void setWatches(jvmtiEnv *jvmti_env, JNIEnv *env, jclass cls) {
     jmethodID mid;
 
     mid = env->GetStaticMethodID(cls, "meth01", "(I)V");
-    if (mid == NULL) {
-      printf("(GetStaticMethodID) returns NULL");
+    if (mid == nullptr) {
+      printf("(GetStaticMethodID) returns null");
       result = STATUS_FAILED;
       return;
     }
@@ -188,25 +189,27 @@ void JNICALL MethodEntry(jvmtiEnv *jvmti_env, JNIEnv *env,
 
     if (flag) {
         mark(jvmti_env, JVMTI_EVENT_METHOD_ENTRY);
-        err = jvmti_env->IsMethodNative(method, &isNative);
-        if (err != JVMTI_ERROR_NONE) {
-            result = STATUS_FAILED;
-            printf("(IsMethodNative) unexpected error: %s (%d)\n",
-                   TranslateError(err), err);
-        }
-        if (isNative == JNI_FALSE) {
-            err = jvmti_env->NotifyFramePop(thr, 0);
-            if (err == JVMTI_ERROR_NONE) {
-                enable(jvmti_env, JVMTI_EVENT_FRAME_POP);
-            } else {
+        if (env->IsSameObject(notifyFramePopThread, thr)) {
+            err = jvmti_env->IsMethodNative(method, &isNative);
+            if (err != JVMTI_ERROR_NONE) {
                 result = STATUS_FAILED;
-                printf("(NotifyFramePop) unexpected error: %s (%d)\n",
+                printf("(IsMethodNative) unexpected error: %s (%d)\n",
                        TranslateError(err), err);
             }
+            if (isNative == JNI_FALSE) {
+                err = jvmti_env->NotifyFramePop(thr, 0);
+                if (err == JVMTI_ERROR_NONE) {
+                    enable(jvmti_env, JVMTI_EVENT_FRAME_POP);
+                } else {
+                    result = STATUS_FAILED;
+                    printf("(NotifyFramePop) unexpected error: %s (%d)\n",
+                           TranslateError(err), err);
+                }
+            }
+            enable(jvmti_env, JVMTI_EVENT_CLASS_LOAD);
+            enable(jvmti_env, JVMTI_EVENT_CLASS_PREPARE);
+            disable(jvmti_env, JVMTI_EVENT_METHOD_ENTRY);
         }
-        enable(jvmti_env, JVMTI_EVENT_CLASS_LOAD);
-        enable(jvmti_env, JVMTI_EVENT_CLASS_PREPARE);
-        disable(jvmti_env, JVMTI_EVENT_METHOD_ENTRY);
     }
 }
 
@@ -306,7 +309,7 @@ jint  Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
     jint res;
     jvmtiError err;
 
-    if (options != NULL && strcmp(options, "printdump") == 0) {
+    if (options != nullptr && strcmp(options, "printdump") == 0) {
         printdump = JNI_TRUE;
     }
 
@@ -314,7 +317,7 @@ jint  Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
     memset(ev_scale, 0, SCALE_SIZE);
 
     res = jvm->GetEnv((void **) &jvmti, JVMTI_VERSION_1_1);
-    if (res != JNI_OK || jvmti == NULL) {
+    if (res != JNI_OK || jvmti == nullptr) {
         printf("Wrong result of a valid call to GetEnv !\n");
         return JNI_ERR;
     }
@@ -392,8 +395,9 @@ jint  Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
 
 JNIEXPORT void JNICALL
 Java_nsk_jvmti_SetEventNotificationMode_setnotif001_enableEv(JNIEnv *env,
-        jclass cls) {
+        jclass cls, jobject framePopThread) {
     setWatches(jvmti, env, cls);
+    notifyFramePopThread = env->NewGlobalRef(framePopThread);
     enable(jvmti, JVMTI_EVENT_METHOD_ENTRY);
     enable(jvmti, JVMTI_EVENT_METHOD_EXIT);
     enable(jvmti, JVMTI_EVENT_THREAD_START);

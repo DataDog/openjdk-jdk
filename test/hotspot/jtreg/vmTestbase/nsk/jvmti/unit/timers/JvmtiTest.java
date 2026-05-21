@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,6 +23,7 @@
 
 package nsk.jvmti.unit.timers;
 
+import jdk.test.lib.thread.ThreadWrapper;
 import java.io.PrintStream;
 import java.util.*;
 
@@ -109,7 +110,7 @@ public class JvmtiTest {
         }
     }
 
-    static class TestThread extends Thread {
+    static class TestThread extends ThreadWrapper {
         int threadNumber;
         int iterations;
 
@@ -123,11 +124,11 @@ public class JvmtiTest {
             for (int i = iterations; i > 0; --i) {
                 List<Integer> list = new ArrayList<Integer>();
                 for (int j = 10000; j > 0; --j) {
-                    list.add(new Integer(j));
+                    list.add(Integer.valueOf(j));
                 }
                 Collections.sort(list);
             }
-            JvmtiTest.RegisterCompletedThread(this, threadNumber, iterations);
+            JvmtiTest.RegisterCompletedThread(this.getThread(), threadNumber, iterations);
             JvmtiTest.completeThread();
         }
     }

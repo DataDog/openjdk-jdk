@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -55,7 +55,7 @@ abstract class CKey implements Key, Length {
             this.hCryptKey = hCryptKey;
         }
 
-        @SuppressWarnings("deprecation")
+        @SuppressWarnings("removal")
         protected void finalize() throws Throwable {
             try {
                 synchronized(this) {
@@ -69,20 +69,25 @@ abstract class CKey implements Key, Length {
         }
     }
 
+    @SuppressWarnings("serial") // Type of field is not Serializable
     protected final NativeHandles handles;
 
     protected final int keyLength;
 
     protected final String algorithm;
 
-    protected CKey(String algorithm, NativeHandles handles, int keyLength) {
+    private final boolean isPublic;
+
+    protected CKey(String algorithm, NativeHandles handles, int keyLength,
+            boolean isPublic) {
         this.algorithm = algorithm;
         this.handles = handles;
         this.keyLength = keyLength;
+        this.isPublic = isPublic;
     }
 
     // Native method to cleanup the key handle.
-    private native static void cleanUp(long hCryptProv, long hCryptKey);
+    private static native void cleanUp(long hCryptProv, long hCryptKey);
 
     @Override
     public int length() {
@@ -101,9 +106,21 @@ abstract class CKey implements Key, Length {
         return algorithm;
     }
 
-    protected native static String getContainerName(long hCryptProv);
+    public String toString() {
+        String typeStr;
+        if (handles.hCryptKey != 0) {
+            typeStr = getKeyType(handles.hCryptKey) + ", container=" +
+                    getContainerName(handles.hCryptProv);
+        } else {
+            typeStr = "CNG";
+        }
+        return algorithm + " " + (isPublic ? "PublicKey" : "PrivateKey") +
+                " [size=" + keyLength + " bits, type=" + typeStr + "]";
+    }
 
-    protected native static String getKeyType(long hCryptKey);
+    protected static native String getContainerName(long hCryptProv);
+
+    protected static native String getKeyType(long hCryptKey);
 
     // This java method generates EC BLOBs for public key or private key.
     // See https://docs.microsoft.com/en-us/windows/desktop/api/bcrypt/ns-bcrypt-_bcrypt_ecckey_blob

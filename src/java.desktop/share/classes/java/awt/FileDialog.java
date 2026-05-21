@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,8 @@ import java.io.File;
 import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.ObjectInputStream;
+import java.io.Serial;
+import java.lang.annotation.Native;
 
 import sun.awt.AWTAccessor;
 
@@ -41,6 +43,7 @@ import sun.awt.AWTAccessor;
  * its {@code show} method to display the dialog,
  * it blocks the rest of the application until the user has
  * chosen a file.
+ * This means that {@link Dialog#setModalityType(ModalityType)} may be ignored.
  *
  * @see Window#show
  *
@@ -54,12 +57,14 @@ public class FileDialog extends Dialog {
      * This constant value indicates that the purpose of the file
      * dialog window is to locate a file from which to read.
      */
+    @Native
     public static final int LOAD = 0;
 
     /**
      * This constant value indicates that the purpose of the file
      * dialog window is to locate a file to which to write.
      */
+    @Native
     public static final int SAVE = 1;
 
     /**
@@ -133,19 +138,11 @@ public class FileDialog extends Dialog {
     private static final String base = "filedlg";
     private static int nameCounter = 0;
 
-    /*
-     * JDK 1.1 serialVersionUID
+    /**
+     * Use serialVersionUID from JDK 1.1 for interoperability.
      */
+     @Serial
      private static final long serialVersionUID = 5035145889651310422L;
-
-
-    static {
-        /* ensure that the necessary native libraries are loaded */
-        Toolkit.loadLibraries();
-        if (!GraphicsEnvironment.isHeadless()) {
-            initIDs();
-        }
-    }
 
     static {
         AWTAccessor.setFileDialogAccessor(
@@ -164,14 +161,11 @@ public class FileDialog extends Dialog {
                         return fileDialog.multipleMode;
                     }
                 }
+                public boolean isBeingDisposed(FileDialog fileDialog) {
+                    return fileDialog.isInDispose;
+                }
             });
     }
-
-    /**
-     * Initialize JNI field and method IDs for fields that may be
-       accessed from C.
-     */
-    private static native void initIDs();
 
     /**
      * Creates a file dialog for loading a file.  The title of the
@@ -230,7 +224,7 @@ public class FileDialog extends Dialog {
      * @param     title   the title of the dialog
      * @param     mode   the mode of the dialog; either
      *            {@code FileDialog.LOAD} or {@code FileDialog.SAVE}
-     * @exception  IllegalArgumentException if an illegal file
+     * @throws  IllegalArgumentException if an illegal file
      *                 dialog mode is supplied
      * @see       java.awt.FileDialog#LOAD
      * @see       java.awt.FileDialog#SAVE
@@ -253,10 +247,10 @@ public class FileDialog extends Dialog {
      * displayed.
      *
      * @param     parent   the owner of the dialog
-     * @exception java.lang.IllegalArgumentException if the {@code parent}'s
+     * @throws java.lang.IllegalArgumentException if the {@code parent}'s
      *            {@code GraphicsConfiguration}
      *            is not from a screen device;
-     * @exception java.lang.IllegalArgumentException if {@code parent}
+     * @throws java.lang.IllegalArgumentException if {@code parent}
      *            is {@code null}; this exception is always thrown when
      *            {@code GraphicsEnvironment.isHeadless}
      *            returns {@code true}
@@ -283,10 +277,10 @@ public class FileDialog extends Dialog {
      * @param     title    the title of the dialog; a {@code null} value
      *                     will be accepted without causing a
      *                     {@code NullPointerException} to be thrown
-     * @exception java.lang.IllegalArgumentException if the {@code parent}'s
+     * @throws java.lang.IllegalArgumentException if the {@code parent}'s
      *            {@code GraphicsConfiguration}
      *            is not from a screen device;
-     * @exception java.lang.IllegalArgumentException if {@code parent}
+     * @throws java.lang.IllegalArgumentException if {@code parent}
      *            is {@code null}; this exception is always thrown when
      *            {@code GraphicsEnvironment.isHeadless}
      *            returns {@code true}
@@ -319,12 +313,12 @@ public class FileDialog extends Dialog {
      *                     {@code NullPointerException} to be thrown
      * @param     mode     the mode of the dialog; either
      *                     {@code FileDialog.LOAD} or {@code FileDialog.SAVE}
-     * @exception java.lang.IllegalArgumentException if an illegal
+     * @throws java.lang.IllegalArgumentException if an illegal
      *            file dialog mode is supplied;
-     * @exception java.lang.IllegalArgumentException if the {@code parent}'s
+     * @throws java.lang.IllegalArgumentException if the {@code parent}'s
      *            {@code GraphicsConfiguration}
      *            is not from a screen device;
-     * @exception java.lang.IllegalArgumentException if {@code parent}
+     * @throws java.lang.IllegalArgumentException if {@code parent}
      *            is {@code null}; this exception is always thrown when
      *            {@code GraphicsEnvironment.isHeadless}
      *            returns {@code true}
@@ -406,7 +400,7 @@ public class FileDialog extends Dialog {
      * @see        java.awt.FileDialog#LOAD
      * @see        java.awt.FileDialog#SAVE
      * @see        java.awt.FileDialog#getMode
-     * @exception  IllegalArgumentException if an illegal file
+     * @throws  IllegalArgumentException if an illegal file
      *                 dialog mode is supplied
      * @since      1.1
      */
@@ -457,6 +451,14 @@ public class FileDialog extends Dialog {
     /**
      * Gets the selected file of this file dialog.  If the user
      * selected {@code CANCEL}, the returned file is {@code null}.
+     * <p>
+     * It is platform-specific as to what happens for {@code LOAD} mode of a
+     * non-existent file. For example, it may be possible for the user to
+     * "accept" the result of a {@code setFile} value or to edit in the name
+     * of some other file to load/open even if it is not present.
+     * Applications should therefore verify the file represented by the
+     * returned {@code String} exists.
+     * The value is usually the basename, not a full path name.
      *
      * @return    the currently selected file of this file dialog window,
      *                or {@code null} if none is selected
@@ -511,13 +513,26 @@ public class FileDialog extends Dialog {
      * specified file. This file becomes the default file if it is set
      * before the file dialog window is first shown.
      * <p>
-     * When the dialog is shown, the specified file is selected. The kind of
-     * selection depends on the file existence, the dialog type, and the native
-     * platform. E.g., the file could be highlighted in the file list, or a
+     * When the dialog is shown, the specified file may be pre-selected.
+     * The visible manifestation of this selection, if any, depends on factors
+     * such as the file existence, the dialog mode, and the native platform.
+     * For example, the file could be highlighted in the file list, or a
      * file name editbox could be populated with the file name.
      * <p>
      * This method accepts either a full file path, or a file name with an
      * extension if used together with the {@code setDirectory} method.
+     * It is platform-specific how a full file path interacts with {@code setDirectory}.
+     * It may be that the directory is always used instead of the file path, or
+     * the file path overrides the directory, or even that the full file path
+     * is interpreted as a base file name. Therefore, it is strongly recommended to
+     * use {@code setDirectory} to set the folder and {@code setFile} to
+     * set a base file name.
+     * <p>
+     * Appearance and behaviours may also differ between {@code LOAD} and {@code SAVE} modes.
+     * <p>
+     * It is also platform-specific as to what happens for {@code LOAD} mode of a non-existent file.
+     * For example, it may be possible for the user to "accept" the {@code setFile} value or
+     * to edit in the name of some other file to load/open even if it is not present.
      * <p>
      * Specifying "" as the file is exactly equivalent to specifying
      * {@code null} as the file.
@@ -536,6 +551,9 @@ public class FileDialog extends Dialog {
 
     /**
      * Enables or disables multiple file selection for the file dialog.
+     * <p>
+     * Multiple mode may be ignored in some cases, for example, commonly
+     * {@code SAVE} mode dialogs do not support it.
      *
      * @param enable    if {@code true}, multiple file selection is enabled;
      *                  {@code false} - disabled.
@@ -605,6 +623,7 @@ public class FileDialog extends Dialog {
      *         not be found
      * @throws IOException if an I/O error occurs
      */
+    @Serial
     private void readObject(ObjectInputStream s)
         throws ClassNotFoundException, IOException
     {

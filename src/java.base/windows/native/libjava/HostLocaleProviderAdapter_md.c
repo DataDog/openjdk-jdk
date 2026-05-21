@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,15 +38,6 @@
 #define CALENDAR_FIELD_AM_PM            9           // Calendar.AM_PM
 #define CALENDAR_STYLE_SHORT_MASK       0x00000001  // Calendar.SHORT
 #define CALENDAR_STYLE_STANDALONE_MASK  0x00008000  // Calendar.STANDALONE
-
-// global variables
-typedef int (WINAPI *PGLIE)(const jchar *, LCTYPE, LPWSTR, int);
-typedef int (WINAPI *PGCIE)(const jchar *, CALID, LPCWSTR, CALTYPE, LPWSTR, int, LPDWORD);
-typedef int (WINAPI *PECIEE)(CALINFO_ENUMPROCEXEX, const jchar *, CALID, LPCWSTR, CALTYPE, LPARAM);
-PGLIE pGetLocaleInfoEx;
-PGCIE pGetCalendarInfoEx;
-PECIEE pEnumCalendarInfoExEx;
-BOOL initialized = FALSE;
 
 // prototypes
 int getLocaleInfoWrapper(const jchar *langtag, LCTYPE type, LPWSTR data, int buflen);
@@ -134,7 +125,7 @@ WCHAR * fixes[2][2][3][16] =
                 L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"",
             },
             { // currency
-                L"\xA4", L"", L"\xA4 ", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"",
+                L"¤", L"", L"¤ ", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"",
             },
             { // percent
                 L"", L"", L"%", L"% ", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"",
@@ -145,7 +136,7 @@ WCHAR * fixes[2][2][3][16] =
                 L"(", L"-", L"- ", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"",
             },
             { //currency
-                L"(\xA4", L"-\xA4", L"\xA4-", L"\xA4", L"(", L"-", L"", L"", L"-", L"-\xA4 ", L"", L"\xA4 ", L"\xA4 -", L"", L"(\xA4 ", L"("
+                L"(¤", L"-¤", L"¤-", L"¤", L"(", L"-", L"", L"", L"-", L"-¤ ", L"", L"¤ ", L"¤ -", L"", L"(¤ ", L"("
             },
             { // percent
                 L"-", L"-", L"-%", L"%-", L"%", L"", L"", L"-% ", L"", L"% ", L"% -", L"", L"", L"", L"", L"",
@@ -158,7 +149,7 @@ WCHAR * fixes[2][2][3][16] =
                 L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L""
             },
             { // currency
-                L"", L"\xA4 ", L"", L" \xA4", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"",
+                L"", L"¤ ", L"", L" ¤", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"",
             },
             { // percent
                 L" %", L"%", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"",
@@ -169,7 +160,7 @@ WCHAR * fixes[2][2][3][16] =
                 L")", L"", L" ", L"-", L" -", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"",
             },
             { //currency
-                L")", L"", L"", L"-", L"\xA4)", L"\xA4", L"-\xA4", L"\xA4-", L" \xA4", L"", L" \xA4-", L"-", L"", L"- \xA4", L")", L" \xA4)"
+                L")", L"", L"", L"-", L"¤)", L"¤", L"-¤", L"¤-", L" ¤", L"", L" ¤-", L"-", L"", L"- ¤", L")", L" ¤)"
             },
             { // percent
                 L" %", L"%", L"", L"", L"-", L"-%", L"%-", L"", L" %-", L"-", L"", L"- %", L"", L"", L"", L"",
@@ -177,31 +168,6 @@ WCHAR * fixes[2][2][3][16] =
         }
     }
 };
-
-/*
- * Class:     sun_util_locale_provider_HostLocaleProviderAdapterImpl
- * Method:    initialize
- * Signature: ()Z
- */
-JNIEXPORT jboolean JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapterImpl_initialize
-  (JNIEnv *env, jclass cls) {
-    if (!initialized) {
-        pGetLocaleInfoEx = (PGLIE)GetProcAddress(
-            GetModuleHandle("kernel32.dll"),
-            "GetLocaleInfoEx");
-        pGetCalendarInfoEx = (PGCIE)GetProcAddress(
-            GetModuleHandle("kernel32.dll"),
-            "GetCalendarInfoEx");
-        pEnumCalendarInfoExEx = (PECIEE)GetProcAddress(
-            GetModuleHandle("kernel32.dll"),
-            "EnumCalendarInfoExEx");
-        initialized =TRUE;
-    }
-
-    return pGetLocaleInfoEx != NULL &&
-           pGetCalendarInfoEx != NULL &&
-           pEnumCalendarInfoExEx != NULL;
-}
 
 /*
  * Class:     sun_util_locale_provider_HostLocaleProviderAdapterImpl
@@ -243,7 +209,7 @@ JNIEXPORT jstring JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapte
 JNIEXPORT jstring JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapterImpl_getDateTimePattern
   (JNIEnv *env, jclass cls, jint dateStyle, jint timeStyle, jstring jlangtag) {
     WCHAR pattern[BUFLEN];
-    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     CHECK_NULL_RETURN(langtag, NULL);
 
     pattern[0] = L'\0';
@@ -274,7 +240,7 @@ JNIEXPORT jint JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapterIm
   (JNIEnv *env, jclass cls, jstring jlangtag) {
     const jchar *langtag;
     jint ret;
-    langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     CHECK_NULL_RETURN(langtag, 0);
     ret = getCalendarID(langtag);
     (*env)->ReleaseStringChars(env, jlangtag, langtag);
@@ -359,18 +325,17 @@ JNIEXPORT jobjectArray JNICALL Java_sun_util_locale_provider_HostLocaleProviderA
 JNIEXPORT jstring JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapterImpl_getNumberPattern
   (JNIEnv *env, jclass cls, jint numberStyle, jstring jlangtag) {
     const jchar *langtag;
-    jstring ret;
+    jstring ret = NULL;
     WCHAR * pattern;
 
-    langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     CHECK_NULL_RETURN(langtag, NULL);
     pattern = getNumberPattern(langtag, numberStyle);
-    CHECK_NULL_RETURN(pattern, NULL);
-
+    if (!IS_NULL(pattern)) {
+        ret = (*env)->NewString(env, pattern, (jsize)wcslen(pattern));
+        free(pattern);
+    }
     (*env)->ReleaseStringChars(env, jlangtag, langtag);
-    ret = (*env)->NewString(env, pattern, (jsize)wcslen(pattern));
-    free(pattern);
-
     return ret;
 }
 
@@ -383,7 +348,7 @@ JNIEXPORT jboolean JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapt
   (JNIEnv *env, jclass cls, jstring jlangtag) {
     DWORD num;
     int got;
-    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     CHECK_NULL_RETURN(langtag, JNI_FALSE);
     got = getLocaleInfoWrapper(langtag,
         LOCALE_IDIGITSUBSTITUTION | LOCALE_RETURN_NUMBER,
@@ -402,7 +367,7 @@ JNIEXPORT jstring JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapte
   (JNIEnv *env, jclass cls, jstring jlangtag, jstring currencySymbol) {
     WCHAR buf[BUFLEN];
     int got;
-    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     CHECK_NULL_RETURN(langtag, currencySymbol);
     got = getLocaleInfoWrapper(langtag, LOCALE_SCURRENCY, buf, BUFLEN);
     (*env)->ReleaseStringChars(env, jlangtag, langtag);
@@ -423,7 +388,7 @@ JNIEXPORT jchar JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapterI
   (JNIEnv *env, jclass cls, jstring jlangtag, jchar decimalSeparator) {
     WCHAR buf[BUFLEN];
     int got;
-    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     CHECK_NULL_RETURN(langtag, decimalSeparator);
     got = getLocaleInfoWrapper(langtag, LOCALE_SDECIMAL, buf, BUFLEN);
     (*env)->ReleaseStringChars(env, jlangtag, langtag);
@@ -444,7 +409,7 @@ JNIEXPORT jchar JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapterI
   (JNIEnv *env, jclass cls, jstring jlangtag, jchar groupingSeparator) {
     WCHAR buf[BUFLEN];
     int got;
-    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     CHECK_NULL_RETURN(langtag, groupingSeparator);
     got = getLocaleInfoWrapper(langtag, LOCALE_STHOUSAND, buf, BUFLEN);
     (*env)->ReleaseStringChars(env, jlangtag, langtag);
@@ -465,7 +430,7 @@ JNIEXPORT jstring JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapte
   (JNIEnv *env, jclass cls, jstring jlangtag, jstring infinity) {
     WCHAR buf[BUFLEN];
     int got;
-    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     CHECK_NULL_RETURN(langtag, infinity);
     got = getLocaleInfoWrapper(langtag, LOCALE_SPOSINFINITY, buf, BUFLEN);
     (*env)->ReleaseStringChars(env, jlangtag, langtag);
@@ -486,7 +451,7 @@ JNIEXPORT jstring JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapte
   (JNIEnv *env, jclass cls, jstring jlangtag, jstring internationalCurrencySymbol) {
     WCHAR buf[BUFLEN];
     int got;
-    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     CHECK_NULL_RETURN(langtag, internationalCurrencySymbol);
     got = getLocaleInfoWrapper(langtag, LOCALE_SINTLSYMBOL, buf, BUFLEN);
     (*env)->ReleaseStringChars(env, jlangtag, langtag);
@@ -507,7 +472,7 @@ JNIEXPORT jchar JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapterI
   (JNIEnv *env, jclass cls, jstring jlangtag, jchar minusSign) {
     WCHAR buf[BUFLEN];
     int got;
-    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     CHECK_NULL_RETURN(langtag, minusSign);
     got = getLocaleInfoWrapper(langtag, LOCALE_SNEGATIVESIGN, buf, BUFLEN);
     (*env)->ReleaseStringChars(env, jlangtag, langtag);
@@ -528,7 +493,7 @@ JNIEXPORT jchar JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapterI
   (JNIEnv *env, jclass cls, jstring jlangtag, jchar monetaryDecimalSeparator) {
     WCHAR buf[BUFLEN];
     int got;
-    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     CHECK_NULL_RETURN(langtag, monetaryDecimalSeparator);
     got = getLocaleInfoWrapper(langtag, LOCALE_SMONDECIMALSEP, buf, BUFLEN);
     (*env)->ReleaseStringChars(env, jlangtag, langtag);
@@ -549,7 +514,7 @@ JNIEXPORT jstring JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapte
   (JNIEnv *env, jclass cls, jstring jlangtag, jstring nan) {
     WCHAR buf[BUFLEN];
     int got;
-    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     CHECK_NULL_RETURN(langtag, nan);
     got = getLocaleInfoWrapper(langtag, LOCALE_SNAN, buf, BUFLEN);
     (*env)->ReleaseStringChars(env, jlangtag, langtag);
@@ -570,7 +535,7 @@ JNIEXPORT jchar JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapterI
   (JNIEnv *env, jclass cls, jstring jlangtag, jchar percent) {
     WCHAR buf[BUFLEN];
     int got;
-    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     CHECK_NULL_RETURN(langtag, percent);
     got = getLocaleInfoWrapper(langtag, LOCALE_SPERCENT, buf, BUFLEN);
     (*env)->ReleaseStringChars(env, jlangtag, langtag);
@@ -592,7 +557,7 @@ JNIEXPORT jchar JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapterI
     WCHAR buf[BUFLEN];
     const jchar *langtag;
     int got;
-    langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     CHECK_NULL_RETURN(langtag, perMill);
     got = getLocaleInfoWrapper(langtag, LOCALE_SPERMILLE, buf, BUFLEN);
 
@@ -615,7 +580,7 @@ JNIEXPORT jchar JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapterI
     WCHAR buf[BUFLEN];
     const jchar *langtag;
     int got;
-    langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     CHECK_NULL_RETURN(langtag, zeroDigit);
     got = getLocaleInfoWrapper(langtag, LOCALE_SNATIVEDIGITS, buf, BUFLEN);
 
@@ -639,7 +604,7 @@ JNIEXPORT jint JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapterIm
     const jchar *langtag;
     int got = 0;
 
-    langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     CHECK_NULL_RETURN(langtag, -1);
     switch (type) {
     case sun_util_locale_provider_HostLocaleProviderAdapterImpl_CD_FIRSTDAYOFWEEK:
@@ -756,7 +721,7 @@ JNIEXPORT jstring JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapte
             return NULL;
     }
 
-    pjChar = (*env)->GetStringChars(env, jStr, JNI_FALSE);
+    pjChar = (*env)->GetStringChars(env, jStr, NULL);
     CHECK_NULL_RETURN(pjChar, NULL);
     got = getLocaleInfoWrapper(pjChar, lcType, buf, BUFLEN);
     (*env)->ReleaseStringChars(env, jStr, pjChar);
@@ -769,34 +734,20 @@ JNIEXPORT jstring JNICALL Java_sun_util_locale_provider_HostLocaleProviderAdapte
 }
 
 int getLocaleInfoWrapper(const jchar *langtag, LCTYPE type, LPWSTR data, int buflen) {
-    if (pGetLocaleInfoEx) {
-        if (wcscmp(L"und", (LPWSTR)langtag) == 0) {
-            // defaults to "en"
-            return pGetLocaleInfoEx(L"en", type, data, buflen);
-        } else {
-            return pGetLocaleInfoEx((LPWSTR)langtag, type, data, buflen);
-        }
+    if (wcscmp(L"und", (LPWSTR)langtag) == 0) {
+        // defaults to "en"
+        return GetLocaleInfoEx(L"en", type, data, buflen);
     } else {
-        // If we ever wanted to support WinXP, we will need extra module from
-        // MS...
-        // return GetLocaleInfo(DownlevelLocaleNameToLCID(langtag, 0), type, data, buflen);
-        return 0;
+        return GetLocaleInfoEx((LPWSTR)langtag, type, data, buflen);
     }
 }
 
 int getCalendarInfoWrapper(const jchar *langtag, CALID id, LPCWSTR reserved, CALTYPE type, LPWSTR data, int buflen, LPDWORD val) {
-    if (pGetCalendarInfoEx) {
-        if (wcscmp(L"und", (LPWSTR)langtag) == 0) {
-            // defaults to "en"
-            return pGetCalendarInfoEx(L"en", id, reserved, type, data, buflen, val);
-        } else {
-            return pGetCalendarInfoEx((LPWSTR)langtag, id, reserved, type, data, buflen, val);
-        }
+    if (wcscmp(L"und", (LPWSTR)langtag) == 0) {
+        // defaults to "en"
+        return GetCalendarInfoEx(L"en", id, reserved, type, data, buflen, val);
     } else {
-        // If we ever wanted to support WinXP, we will need extra module from
-        // MS...
-        // return GetCalendarInfo(DownlevelLocaleNameToLCID(langtag, 0), ...);
-        return 0;
+        return GetCalendarInfoEx((LPWSTR)langtag, id, reserved, type, data, buflen, val);
     }
 }
 
@@ -833,9 +784,9 @@ jint getCalendarID(const jchar *langtag) {
 
 void replaceCalendarArrayElems(JNIEnv *env, jstring jlangtag, jint calid, jobjectArray jarray, DWORD* pTypes, int offset, int length, int style, BOOL bCal) {
     WCHAR name[BUFLEN];
-    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    const jchar *langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     jstring tmp_string;
-    CALTYPE isGenitive;
+    CALTYPE isGenitive = 0;
 
     CHECK_NULL(langtag);
 
@@ -966,29 +917,28 @@ void getNumberPart(const jchar * langtag, const jint numberStyle, WCHAR * number
 void getFixPart(const jchar * langtag, const jint numberStyle, BOOL positive, BOOL prefix, WCHAR * ret) {
     DWORD pattern = 0;
     int style = numberStyle;
-    int got = 0;
 
     if (positive) {
         if (style == sun_util_locale_provider_HostLocaleProviderAdapterImpl_NF_CURRENCY) {
-            got = getLocaleInfoWrapper(langtag,
+            getLocaleInfoWrapper(langtag,
                 LOCALE_ICURRENCY | LOCALE_RETURN_NUMBER,
                 (LPWSTR)&pattern, sizeof(pattern));
         } else if (style == sun_util_locale_provider_HostLocaleProviderAdapterImpl_NF_PERCENT) {
-            got = getLocaleInfoWrapper(langtag,
+            getLocaleInfoWrapper(langtag,
                 LOCALE_IPOSITIVEPERCENT | LOCALE_RETURN_NUMBER,
                 (LPWSTR)&pattern, sizeof(pattern));
         }
     } else {
         if (style == sun_util_locale_provider_HostLocaleProviderAdapterImpl_NF_CURRENCY) {
-            got = getLocaleInfoWrapper(langtag,
+            getLocaleInfoWrapper(langtag,
                 LOCALE_INEGCURR | LOCALE_RETURN_NUMBER,
                 (LPWSTR)&pattern, sizeof(pattern));
         } else if (style == sun_util_locale_provider_HostLocaleProviderAdapterImpl_NF_PERCENT) {
-            got = getLocaleInfoWrapper(langtag,
+            getLocaleInfoWrapper(langtag,
                 LOCALE_INEGATIVEPERCENT | LOCALE_RETURN_NUMBER,
                 (LPWSTR)&pattern, sizeof(pattern));
         } else {
-            got = getLocaleInfoWrapper(langtag,
+            getLocaleInfoWrapper(langtag,
                 LOCALE_INEGNUMBER | LOCALE_RETURN_NUMBER,
                 (LPWSTR)&pattern, sizeof(pattern));
         }
@@ -1002,17 +952,13 @@ void getFixPart(const jchar * langtag, const jint numberStyle, BOOL positive, BO
 }
 
 int enumCalendarInfoWrapper(const jchar *langtag, CALID calid, CALTYPE type, LPWSTR buf, int buflen) {
-    if (pEnumCalendarInfoExEx) {
-        if (wcscmp(L"und", (LPWSTR)langtag) == 0) {
-            // defaults to "en"
-            return pEnumCalendarInfoExEx(&EnumCalendarInfoProc, L"en",
-                calid, NULL, type, (LPARAM)buf);
-        } else {
-            return pEnumCalendarInfoExEx(&EnumCalendarInfoProc, langtag,
-                calid, NULL, type, (LPARAM)buf);
-        }
+    if (wcscmp(L"und", (LPWSTR)langtag) == 0) {
+        // defaults to "en"
+        return EnumCalendarInfoExEx(&EnumCalendarInfoProc, L"en",
+            calid, NULL, type, (LPARAM)buf);
     } else {
-        return 0;
+        return EnumCalendarInfoExEx(&EnumCalendarInfoProc, langtag,
+            calid, NULL, type, (LPARAM)buf);
     }
 }
 
@@ -1023,7 +969,7 @@ BOOL CALLBACK EnumCalendarInfoProc(LPWSTR lpCalInfoStr, CALID calid, LPWSTR lpRe
 }
 
 jobjectArray getErasImpl(JNIEnv *env, jstring jlangtag, jint calid, jint style, jobjectArray eras) {
-    const jchar * langtag = (*env)->GetStringChars(env, jlangtag, JNI_FALSE);
+    const jchar * langtag = (*env)->GetStringChars(env, jlangtag, NULL);
     WCHAR buf[BUFLEN];
     jobjectArray ret = eras;
     CALTYPE type;

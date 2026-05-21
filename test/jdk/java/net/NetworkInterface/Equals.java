@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -55,8 +55,6 @@ public class Equals {
             displayInterfaceInformation(ni, bufferedOut);
             bufferedOut.flush();
         }
-
-        System.setSecurityManager(new SecurityManager());
 
         Enumeration<NetworkInterface> nifs2 = NetworkInterface.getNetworkInterfaces();
         while (nifs2.hasMoreElements()) {

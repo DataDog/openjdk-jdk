@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -33,6 +31,7 @@
 package jdk.test.lib.hprof.parser;
 
 import java.io.*;
+import java.util.zip.GZIPInputStream;
 import jdk.test.lib.hprof.model.*;
 
 /**
@@ -45,6 +44,8 @@ import jdk.test.lib.hprof.model.*;
 
 public abstract class Reader {
     protected PositionDataInputStream in;
+    // Magic number of gzip dump file header.
+    private static final int GZIP_HEADER_MAGIC = 0x1f8b08;
 
     protected Reader(PositionDataInputStream in) {
         this.in = in;
@@ -62,6 +63,7 @@ public abstract class Reader {
      * @param heapFile The name of a file containing a heap dump
      * @param callStack If true, read the call stack of allocaation sites
      */
+    @SuppressWarnings("try")
     public static Snapshot readFile(String heapFile, boolean callStack,
                                     int debugLevel)
             throws IOException {
@@ -81,28 +83,48 @@ public abstract class Reader {
             }
             heapFile = heapFile.substring(0, pos);
         }
-        GzipRandomAccess access = null;
-        try (PositionDataInputStream in = new PositionDataInputStream(
-                new BufferedInputStream(new FileInputStream(heapFile)))) {
+        try (FileInputStream fis = new FileInputStream(heapFile);
+             BufferedInputStream bis = new BufferedInputStream(fis);
+             PositionDataInputStream in = new PositionDataInputStream(bis)) {
             int i = in.readInt();
             if (i == HprofReader.MAGIC_NUMBER) {
                 Reader r
                     = new HprofReader(heapFile, in, dumpNumber,
                                       callStack, debugLevel);
                 return r.read();
-            } else if ((access = GzipRandomAccess.getAccess(heapFile, 16)) != null) {
+            } else if ((i >>> 8) == GZIP_HEADER_MAGIC) {
+                // Possible gziped file, try decompress it and get the stack trace.
                 in.close();
-                try (PositionDataInputStream in2 = new PositionDataInputStream(
-                        new BufferedInputStream(access.asStream(0)))) {
-                    i = in2.readInt();
+                String deCompressedFile = "heapdump" + System.currentTimeMillis() + ".hprof";
+                File out = new File(deCompressedFile);
+                // Decompress to get dump file.
+                try (FileInputStream heapFis = new FileInputStream(heapFile);
+                     GZIPInputStream gis = new GZIPInputStream(heapFis);
+                     FileOutputStream fos = new FileOutputStream(out)) {
+                    byte[] buffer = new byte[1024 * 1024];
+                    int len = 0;
+                    while ((len = gis.read(buffer)) > 0) {
+                        fos.write(buffer, 0, len);
+                    }
+                } catch (Exception e) {
+                    out.delete();
+                    throw new IOException("Cannot decompress the compressed hprof file", e);
+                }
+                // Check dump data header and print stack trace.
+                try (FileInputStream outFis = new FileInputStream(out);
+                     BufferedInputStream outBis = new BufferedInputStream(outFis);
+                     PositionDataInputStream pdin = new PositionDataInputStream(outBis)) {
+                    i = pdin.readInt();
                     if (i == HprofReader.MAGIC_NUMBER) {
-                        Reader r
-                            = new HprofReader(access.asFileBuffer(), in2, dumpNumber,
-                                              callStack, debugLevel);
+                        HprofReader r
+                            = new HprofReader(deCompressedFile, pdin, dumpNumber,
+                                              true, debugLevel);
                         return r.read();
                     } else {
-                        throw new IOException("Wrong magic number in gzipped file: " + i);
+                        throw new IOException("Unrecognized magic number found in decompressed data: " + i);
                     }
+                } finally {
+                    out.delete();
                 }
             } else {
                 throw new IOException("Unrecognized magic number: " + i);
@@ -115,6 +137,7 @@ public abstract class Reader {
      *
      * @param heapFile The name of a file containing a heap dump
      */
+    @SuppressWarnings("try")
     public static String getStack(String heapFile, int debugLevel)
             throws IOException {
         int dumpNumber = 1;
@@ -133,8 +156,9 @@ public abstract class Reader {
             }
             heapFile = heapFile.substring(0, pos);
         }
-        try (PositionDataInputStream in = new PositionDataInputStream(
-                new BufferedInputStream(new FileInputStream(heapFile)))) {
+        try (FileInputStream fis= new FileInputStream(heapFile);
+             BufferedInputStream bis = new BufferedInputStream(fis);
+             PositionDataInputStream in = new PositionDataInputStream(bis)) {
             int i = in.readInt();
             if (i == HprofReader.MAGIC_NUMBER) {
                 HprofReader r
@@ -142,6 +166,41 @@ public abstract class Reader {
                                       true, debugLevel);
                 r.read();
                 return r.printStackTraces();
+            } else if ((i >>> 8) == GZIP_HEADER_MAGIC) {
+                // Possible gziped file, try decompress it and get the stack trace.
+                in.close();
+                String deCompressedFile = "heapdump" + System.currentTimeMillis() + ".hprof";
+                File out = new File(deCompressedFile);
+                // Decompress to get dump file.
+                try (FileInputStream heapFis = new FileInputStream(heapFile);
+                     GZIPInputStream gis = new GZIPInputStream(heapFis);
+                     FileOutputStream fos = new FileOutputStream(out)) {
+                    byte[] buffer = new byte[1024 * 1024];
+                    int len = 0;
+                    while ((len = gis.read(buffer)) > 0) {
+                        fos.write(buffer, 0, len);
+                    }
+                } catch (Exception e) {
+                    out.delete();
+                    throw new IOException("Cannot decompress the compressed hprof file", e);
+                }
+                // Check dump data header and print stack trace.
+                try (FileInputStream outFis = new FileInputStream(out);
+                     BufferedInputStream outBis = new BufferedInputStream(outFis);
+                     PositionDataInputStream pdin = new PositionDataInputStream(outBis)) {
+                    i = pdin.readInt();
+                    if (i == HprofReader.MAGIC_NUMBER) {
+                        HprofReader r
+                            = new HprofReader(deCompressedFile, pdin, dumpNumber,
+                                              true, debugLevel);
+                        r.read();
+                        return r.printStackTraces();
+                    } else {
+                        throw new IOException("Unrecognized magic number found in decompressed data: " + i);
+                    }
+                } finally {
+                    out.delete();
+                }
             } else {
                 throw new IOException("Unrecognized magic number: " + i);
             }

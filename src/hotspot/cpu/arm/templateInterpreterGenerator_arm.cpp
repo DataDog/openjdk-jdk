@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "asm/assembler.hpp"
 #include "asm/macroAssembler.inline.hpp"
 #include "classfile/javaClasses.hpp"
@@ -34,14 +33,17 @@
 #include "interpreter/templateTable.hpp"
 #include "oops/arrayOop.hpp"
 #include "oops/methodData.hpp"
-#include "oops/method.hpp"
+#include "oops/method.inline.hpp"
 #include "oops/oop.inline.hpp"
+#include "oops/resolvedIndyEntry.hpp"
+#include "oops/resolvedMethodEntry.hpp"
 #include "prims/jvmtiExport.hpp"
 #include "prims/jvmtiThreadState.hpp"
 #include "prims/methodHandles.hpp"
 #include "runtime/arguments.hpp"
 #include "runtime/deoptimization.hpp"
 #include "runtime/frame.inline.hpp"
+#include "runtime/jniHandles.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/stubRoutines.hpp"
 #include "runtime/synchronizer.hpp"
@@ -121,14 +123,115 @@ address TemplateInterpreterGenerator::generate_abstract_entry(void) {
 }
 
 address TemplateInterpreterGenerator::generate_math_entry(AbstractInterpreter::MethodKind kind) {
-  if (!InlineIntrinsics) return NULL; // Generate a vanilla entry
+  address entry_point = nullptr;
+  Register continuation = LR;
+  bool use_runtime_call = false;
+  switch (kind) {
+  case Interpreter::java_lang_math_abs:
+    entry_point = __ pc();
+#ifdef __SOFTFP__
+    use_runtime_call = true;
+    __ ldrd(R0, Address(SP));
+#else // !__SOFTFP__
+    __ ldr_double(D0, Address(SP));
+    __ abs_double(D0, D0);
+#endif // __SOFTFP__
+    break;
+  case Interpreter::java_lang_math_sqrt:
+    entry_point = __ pc();
+#ifdef __SOFTFP__
+    use_runtime_call = true;
+    __ ldrd(R0, Address(SP));
+#else // !__SOFTFP__
+    __ ldr_double(D0, Address(SP));
+    __ sqrt_double(D0, D0);
+#endif // __SOFTFP__
+    break;
+  case Interpreter::java_lang_math_sin:
+  case Interpreter::java_lang_math_cos:
+  case Interpreter::java_lang_math_tan:
+  case Interpreter::java_lang_math_log:
+  case Interpreter::java_lang_math_log10:
+  case Interpreter::java_lang_math_exp:
+    entry_point = __ pc();
+    use_runtime_call = true;
+#ifdef __SOFTFP__
+    __ ldrd(R0, Address(SP));
+#else // !__SOFTFP__
+    __ ldr_double(D0, Address(SP));
+#endif // __SOFTFP__
+    break;
+  case Interpreter::java_lang_math_pow:
+    entry_point = __ pc();
+    use_runtime_call = true;
+#ifdef __SOFTFP__
+    __ ldrd(R0, Address(SP, 2 * Interpreter::stackElementSize));
+    __ ldrd(R2, Address(SP));
+#else // !__SOFTFP__
+    __ ldr_double(D0, Address(SP, 2 * Interpreter::stackElementSize));
+    __ ldr_double(D1, Address(SP));
+#endif // __SOFTFP__
+    break;
+  case Interpreter::java_lang_math_fmaD:
+  case Interpreter::java_lang_math_fmaF:
+  case Interpreter::java_lang_math_sinh:
+  case Interpreter::java_lang_math_tanh:
+  case Interpreter::java_lang_math_cbrt:
+    // TODO: Implement intrinsic
+    break;
+  default:
+    ShouldNotReachHere();
+  }
 
-  // TODO: ARM
-  return NULL;
-
-  address entry_point = __ pc();
-  STOP("generate_math_entry");
+  if (entry_point != nullptr) {
+    __ mov(SP, Rsender_sp);
+    if (use_runtime_call) {
+      __ mov(Rtmp_save0, LR);
+      continuation = Rtmp_save0;
+      generate_math_runtime_call(kind);
+    }
+    __ ret(continuation);
+  }
   return entry_point;
+}
+
+void TemplateInterpreterGenerator::generate_math_runtime_call(AbstractInterpreter::MethodKind kind) {
+  address fn;
+  switch (kind) {
+#ifdef __SOFTFP__
+  case Interpreter::java_lang_math_abs:
+    fn = CAST_FROM_FN_PTR(address, SharedRuntime::dabs);
+    break;
+  case Interpreter::java_lang_math_sqrt:
+    fn = CAST_FROM_FN_PTR(address, SharedRuntime::dsqrt);
+    break;
+#endif // __SOFTFP__
+  case Interpreter::java_lang_math_sin:
+    fn = CAST_FROM_FN_PTR(address, SharedRuntime::dsin);
+    break;
+  case Interpreter::java_lang_math_cos:
+    fn = CAST_FROM_FN_PTR(address, SharedRuntime::dcos);
+    break;
+  case Interpreter::java_lang_math_tan:
+    fn = CAST_FROM_FN_PTR(address, SharedRuntime::dtan);
+    break;
+  case Interpreter::java_lang_math_log:
+    fn = CAST_FROM_FN_PTR(address, SharedRuntime::dlog);
+    break;
+  case Interpreter::java_lang_math_log10:
+    fn = CAST_FROM_FN_PTR(address, SharedRuntime::dlog10);
+    break;
+  case Interpreter::java_lang_math_exp:
+    fn = CAST_FROM_FN_PTR(address, SharedRuntime::dexp);
+    break;
+  case Interpreter::java_lang_math_pow:
+    fn = CAST_FROM_FN_PTR(address, SharedRuntime::dpow);
+    break;
+  default:
+    ShouldNotReachHere();
+    fn = nullptr; // silence "maybe uninitialized" compiler warnings
+  }
+  __ call_VM_leaf(fn);
 }
 
 address TemplateInterpreterGenerator::generate_StackOverflowError_handler() {
@@ -206,7 +309,7 @@ address TemplateInterpreterGenerator::generate_ClassCastException_handler() {
 }
 
 address TemplateInterpreterGenerator::generate_exception_handler_common(const char* name, const char* message, bool pass_oop) {
-  assert(!pass_oop || message == NULL, "either oop or message but not both");
+  assert(!pass_oop || message == nullptr, "either oop or message but not both");
   address entry = __ pc();
 
   InlinedString Lname(name);
@@ -226,7 +329,7 @@ address TemplateInterpreterGenerator::generate_exception_handler_common(const ch
   if (pass_oop) {
     __ call_VM(Rexception_obj, CAST_FROM_FN_PTR(address, InterpreterRuntime::create_klass_exception), R1, R2);
   } else {
-    if (message != NULL) {
+    if (message != nullptr) {
       __ ldr_literal(R2, Lmessage);
     } else {
       __ mov(R2, 0);
@@ -240,7 +343,7 @@ address TemplateInterpreterGenerator::generate_exception_handler_common(const ch
   __ nop(); // to avoid filling CPU pipeline with invalid instructions
   __ nop();
   __ bind_literal(Lname);
-  if (!pass_oop && (message != NULL)) {
+  if (!pass_oop && (message != nullptr)) {
     __ bind_literal(Lmessage);
   }
 
@@ -254,7 +357,7 @@ address TemplateInterpreterGenerator::generate_return_entry_for(TosState state, 
 
   // Restore stack bottom in case i2c adjusted stack
   __ ldr(SP, Address(FP, frame::interpreter_frame_last_sp_offset * wordSize));
-  // and NULL it as marker that SP is now tos until next java call
+  // and null it as marker that SP is now tos until next java call
   __ mov(Rtemp, (int)NULL_WORD);
   __ str(Rtemp, Address(FP, frame::interpreter_frame_last_sp_offset * wordSize));
 
@@ -265,30 +368,36 @@ address TemplateInterpreterGenerator::generate_return_entry_for(TosState state, 
 
   const Register Rcache = R2_tmp;
   const Register Rindex = R3_tmp;
-  __ get_cache_and_index_at_bcp(Rcache, Rindex, 1, index_size);
 
-  __ add(Rtemp, Rcache, AsmOperand(Rindex, lsl, LogBytesPerWord));
-  __ ldrb(Rtemp, Address(Rtemp, ConstantPoolCache::base_offset() + ConstantPoolCacheEntry::flags_offset()));
+  if (index_size == sizeof(u4)) {
+    __ load_resolved_indy_entry(Rcache, Rindex);
+    __ ldrh(Rcache, Address(Rcache, in_bytes(ResolvedIndyEntry::num_parameters_offset())));
+  } else {
+    // Pop N words from the stack
+    assert(index_size == sizeof(u2), "Can only be u2");
+    __ load_method_entry(Rcache, Rindex);
+    __ ldrh(Rcache, Address(Rcache, in_bytes(ResolvedMethodEntry::num_parameters_offset())));
+  }
+
   __ check_stack_top();
-  __ add(Rstack_top, Rstack_top, AsmOperand(Rtemp, lsl, Interpreter::logStackElementSize));
+  __ add(Rstack_top, Rstack_top, AsmOperand(Rcache, lsl, Interpreter::logStackElementSize));
 
   __ convert_retval_to_tos(state);
 
- __ check_and_handle_popframe();
- __ check_and_handle_earlyret();
+  __ check_and_handle_popframe();
+  __ check_and_handle_earlyret();
 
   __ dispatch_next(state, step);
 
   return entry;
 }
 
-
 address TemplateInterpreterGenerator::generate_deopt_entry_for(TosState state, int step, address continuation) {
   address entry = __ pc();
 
   __ interp_verify_oop(R0_tos, state, __FILE__, __LINE__);
 
-  // The stack is not extended by deopt but we must NULL last_sp as this
+  // The stack is not extended by deopt but we must null last_sp as this
   // entry is like a "return".
   __ mov(Rtemp, 0);
   __ str(Rtemp, Address(FP, frame::interpreter_frame_last_sp_offset * wordSize));
@@ -307,7 +416,7 @@ address TemplateInterpreterGenerator::generate_deopt_entry_for(TosState state, i
     __ bind(L);
   }
 
-  if (continuation == NULL) {
+  if (continuation == nullptr) {
     __ dispatch_next(state, step);
   } else {
     __ jump_to_entry(continuation);
@@ -351,6 +460,10 @@ address TemplateInterpreterGenerator::generate_safept_entry_for(TosState state, 
   return entry;
 }
 
+address TemplateInterpreterGenerator::generate_cont_resume_interpreter_adapter() {
+  return nullptr;
+}
+
 
 // Helpers for commoning out cases in the various type of method entries.
 //
@@ -364,9 +477,7 @@ address TemplateInterpreterGenerator::generate_safept_entry_for(TosState state, 
 //
 // Uses R0, R1, Rtemp.
 //
-void TemplateInterpreterGenerator::generate_counter_incr(Label* overflow,
-                                                 Label* profile_method,
-                                                 Label* profile_method_continue) {
+void TemplateInterpreterGenerator::generate_counter_incr(Label* overflow) {
   Label done;
   const Register Rcounters = Rtemp;
   const Address invocation_counter(Rcounters,
@@ -375,85 +486,31 @@ void TemplateInterpreterGenerator::generate_counter_incr(Label* overflow,
 
   // Note: In tiered we increment either counters in MethodCounters* or
   // in MDO depending if we're profiling or not.
-  if (TieredCompilation) {
-    int increment = InvocationCounter::count_increment;
-    Label no_mdo;
-    if (ProfileInterpreter) {
-      // Are we profiling?
-      __ ldr(R1_tmp, Address(Rmethod, Method::method_data_offset()));
-      __ cbz(R1_tmp, no_mdo);
-      // Increment counter in the MDO
-      const Address mdo_invocation_counter(R1_tmp,
-                    in_bytes(MethodData::invocation_counter_offset()) +
-                    in_bytes(InvocationCounter::counter_offset()));
-      const Address mask(R1_tmp, in_bytes(MethodData::invoke_mask_offset()));
-      __ increment_mask_and_jump(mdo_invocation_counter, increment, mask, R0_tmp, Rtemp, eq, overflow);
-      __ b(done);
-    }
-    __ bind(no_mdo);
-    __ get_method_counters(Rmethod, Rcounters, done);
-    const Address mask(Rcounters, in_bytes(MethodCounters::invoke_mask_offset()));
-    __ increment_mask_and_jump(invocation_counter, increment, mask, R0_tmp, R1_tmp, eq, overflow);
-    __ bind(done);
-  } else { // not TieredCompilation
-    const Address backedge_counter(Rcounters,
-                  MethodCounters::backedge_counter_offset() +
-                  InvocationCounter::counter_offset());
-
-    const Register Ricnt = R0_tmp;  // invocation counter
-    const Register Rbcnt = R1_tmp;  // backedge counter
-
-    __ get_method_counters(Rmethod, Rcounters, done);
-
-    if (ProfileInterpreter) {
-      const Register Riic = R1_tmp;
-      __ ldr_s32(Riic, Address(Rcounters, MethodCounters::interpreter_invocation_counter_offset()));
-      __ add(Riic, Riic, 1);
-      __ str_32(Riic, Address(Rcounters, MethodCounters::interpreter_invocation_counter_offset()));
-    }
-
-    // Update standard invocation counters
-
-    __ ldr_u32(Ricnt, invocation_counter);
-    __ ldr_u32(Rbcnt, backedge_counter);
-
-    __ add(Ricnt, Ricnt, InvocationCounter::count_increment);
-
-    __ bic(Rbcnt, Rbcnt, ~InvocationCounter::count_mask_value); // mask out the status bits
-
-    __ str_32(Ricnt, invocation_counter);            // save invocation count
-    __ add(Ricnt, Ricnt, Rbcnt);                     // add both counters
-
-    // profile_method is non-null only for interpreted method so
-    // profile_method != NULL == !native_call
-    // BytecodeInterpreter only calls for native so code is elided.
-
-    if (ProfileInterpreter && profile_method != NULL) {
-      assert(profile_method_continue != NULL, "should be non-null");
-
-      // Test to see if we should create a method data oop
-      // Reuse R1_tmp as we don't need backedge counters anymore.
-      Address profile_limit(Rcounters, in_bytes(MethodCounters::interpreter_profile_limit_offset()));
-      __ ldr_s32(R1_tmp, profile_limit);
-      __ cmp_32(Ricnt, R1_tmp);
-      __ b(*profile_method_continue, lt);
-
-      // if no method data exists, go to profile_method
-      __ test_method_data_pointer(R1_tmp, *profile_method);
-    }
-
-    Address invoke_limit(Rcounters, in_bytes(MethodCounters::interpreter_invocation_limit_offset()));
-    __ ldr_s32(R1_tmp, invoke_limit);
-    __ cmp_32(Ricnt, R1_tmp);
-    __ b(*overflow, hs);
-    __ bind(done);
+  int increment = InvocationCounter::count_increment;
+  Label no_mdo;
+  if (ProfileInterpreter) {
+    // Are we profiling?
+    __ ldr(R1_tmp, Address(Rmethod, Method::method_data_offset()));
+    __ cbz(R1_tmp, no_mdo);
+    // Increment counter in the MDO
+    const Address mdo_invocation_counter(R1_tmp,
+                  in_bytes(MethodData::invocation_counter_offset()) +
+                  in_bytes(InvocationCounter::counter_offset()));
+    const Address mask(R1_tmp, in_bytes(MethodData::invoke_mask_offset()));
+    __ increment_mask_and_jump(mdo_invocation_counter, increment, mask, R0_tmp, Rtemp, eq, overflow);
+    __ b(done);
   }
+  __ bind(no_mdo);
+  __ get_method_counters(Rmethod, Rcounters, done);
+  const Address mask(Rcounters, in_bytes(MethodCounters::invoke_mask_offset()));
+  __ increment_mask_and_jump(invocation_counter, increment, mask, R0_tmp, R1_tmp, eq, overflow);
+  __ bind(done);
 }
 
 void TemplateInterpreterGenerator::generate_counter_overflow(Label& do_continue) {
   // InterpreterRuntime::frequency_counter_overflow takes one argument
-  // indicating if the counter overflow occurs at a backwards branch (non-NULL bcp).
-  // The call returns the address of the verified entry point for the method or NULL
+  // indicating if the counter overflow occurs at a backwards branch (non-null bcp).
+  // The call returns the address of the verified entry point for the method or null
   // if the compilation did not complete (either went background or bailed out).
   __ mov(R1, (int)false);
   __ call_VM(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime::frequency_counter_overflow), R1);
@@ -479,7 +536,7 @@ void TemplateInterpreterGenerator::generate_stack_overflow_check(void) {
   const Register RmaxStack = R2;
 
   // monitor entry size
-  const int entry_size = frame::interpreter_frame_monitor_size() * wordSize;
+  const int entry_size = frame::interpreter_frame_monitor_size_in_bytes();
 
   // total overhead size: entry_size + (saved registers, thru expr stack bottom).
   // be sure to change this if you add/subtract anything to/from the overhead area
@@ -509,7 +566,7 @@ void TemplateInterpreterGenerator::generate_stack_overflow_check(void) {
   __ cmp(Rtemp, R0);
 
   __ mov(SP, Rsender_sp, ls);  // restore SP
-  __ b(StubRoutines::throw_StackOverflowError_entry(), ls);
+  __ b(SharedRuntime::throw_StackOverflowError_entry(), ls);
 }
 
 
@@ -518,12 +575,12 @@ void TemplateInterpreterGenerator::generate_stack_overflow_check(void) {
 void TemplateInterpreterGenerator::lock_method() {
   // synchronize method
 
-  const int entry_size = frame::interpreter_frame_monitor_size() * wordSize;
+  const int entry_size = frame::interpreter_frame_monitor_size_in_bytes();
   assert ((entry_size % StackAlignmentInBytes) == 0, "should keep stack alignment");
 
   #ifdef ASSERT
     { Label L;
-      __ ldr_u32(Rtemp, Address(Rmethod, Method::access_flags_offset()));
+      __ ldrh(Rtemp, Address(Rmethod, Method::access_flags_offset()));
       __ tbnz(Rtemp, JVM_ACC_SYNCHRONIZED_BIT, L);
       __ stop("method doesn't need synchronization");
       __ bind(L);
@@ -532,13 +589,12 @@ void TemplateInterpreterGenerator::lock_method() {
 
   // get synchronization object
   { Label done;
-    __ ldr_u32(Rtemp, Address(Rmethod, Method::access_flags_offset()));
+    __ ldrh(Rtemp, Address(Rmethod, Method::access_flags_offset()));
     __ tst(Rtemp, JVM_ACC_STATIC);
     __ ldr(R0, Address(Rlocals, Interpreter::local_offset_in_bytes(0)), eq); // get receiver (assume this is frequent case)
     __ b(done, eq);
     __ load_mirror(R0, Rmethod, Rtemp);
     __ bind(done);
-    __ resolve(IS_NOT_NULL, R0);
   }
 
   // add space for monitor & lock
@@ -549,7 +605,7 @@ void TemplateInterpreterGenerator::lock_method() {
                                               // add space for a monitor entry
   __ str(Rstack_top, Address(FP, frame::interpreter_frame_monitor_block_top_offset * wordSize));
                                               // set new monitor block top
-  __ str(R0, Address(Rstack_top, BasicObjectLock::obj_offset_in_bytes()));
+  __ str(R0, Address(Rstack_top, BasicObjectLock::obj_offset()));
                                               // store object
   __ mov(R1, Rstack_top);                     // monitor entry address
   __ lock_object(R1);
@@ -608,9 +664,11 @@ void TemplateInterpreterGenerator::generate_fixed_frame(bool native_call) {
 
   __ ldr(Rtemp, Address(Rmethod, Method::const_offset()));
   __ ldr(Rtemp, Address(Rtemp, ConstMethod::constants_offset()));
-  __ ldr(Rtemp, Address(Rtemp, ConstantPool::cache_offset_in_bytes()));
+  __ ldr(Rtemp, Address(Rtemp, ConstantPool::cache_offset()));
   __ push(Rtemp);                                      // set constant pool cache
-  __ push(Rlocals);                                    // set locals pointer
+  __ sub(Rtemp, Rlocals, FP);
+  __ logical_shift_right(Rtemp, Rtemp, Interpreter::logStackElementSize); // Rtemp = Rlocals - fp();
+  __ push(Rtemp);                                      // set relativized Rlocals, see frame::interpreter_frame_locals()
   __ push(Rbcp);                                       // set bcp
   __ push(R0);                                         // reserve word for pointer to expression stack bottom
   __ str(SP, Address(SP, 0));                          // set expression stack bottom
@@ -711,7 +769,7 @@ address TemplateInterpreterGenerator::generate_Reference_get_entry(void) {
 
   const int referent_offset = java_lang_ref_Reference::referent_offset();
 
-  // Check if local 0 != NULL
+  // Check if local 0 != nullptr
   // If the receiver is null then it is OK to jump to the slow path.
   __ ldr(Rthis, Address(Rparams));
   __ cbz(Rthis, slow_path);
@@ -734,9 +792,12 @@ address TemplateInterpreterGenerator::generate_Reference_get_entry(void) {
 }
 
 // Not supported
-address TemplateInterpreterGenerator::generate_CRC32_update_entry() { return NULL; }
-address TemplateInterpreterGenerator::generate_CRC32_updateBytes_entry(AbstractInterpreter::MethodKind kind) { return NULL; }
-address TemplateInterpreterGenerator::generate_CRC32C_updateBytes_entry(AbstractInterpreter::MethodKind kind) { return NULL; }
+address TemplateInterpreterGenerator::generate_currentThread() { return nullptr; }
+address TemplateInterpreterGenerator::generate_CRC32_update_entry() { return nullptr; }
+address TemplateInterpreterGenerator::generate_CRC32_updateBytes_entry(AbstractInterpreter::MethodKind kind) { return nullptr; }
+address TemplateInterpreterGenerator::generate_CRC32C_updateBytes_entry(AbstractInterpreter::MethodKind kind) { return nullptr; }
+address TemplateInterpreterGenerator::generate_Float_float16ToFloat_entry() { return nullptr; }
+address TemplateInterpreterGenerator::generate_Float_floatToFloat16_entry() { return nullptr; }
 
 //
 // Interpreter stub for calling a native method. (asm interpreter)
@@ -746,7 +807,7 @@ address TemplateInterpreterGenerator::generate_CRC32C_updateBytes_entry(Abstract
 
 address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
   // determine code generation flags
-  bool inc_counter  = UseCompiler || CountCompiledCalls || LogTouchedMethods;
+  bool inc_counter  = UseCompiler || CountCompiledCalls;
 
   // Incoming registers:
   //
@@ -787,7 +848,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
 
   // make sure method is native & not abstract
 #ifdef ASSERT
-  __ ldr_u32(Rtemp, Address(Rmethod, Method::access_flags_offset()));
+  __ ldrh(Rtemp, Address(Rmethod, Method::access_flags_offset()));
   {
     Label L;
     __ tbnz(Rtemp, JVM_ACC_NATIVE_BIT, L);
@@ -809,7 +870,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
       // been locked yet.
       __ set_do_not_unlock_if_synchronized(true, Rtemp);
     }
-    generate_counter_incr(&invocation_counter_overflow, NULL, NULL);
+    generate_counter_incr(&invocation_counter_overflow);
   }
 
   Label continue_after_compile;
@@ -829,7 +890,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
     // no synchronization necessary
 #ifdef ASSERT
       { Label L;
-        __ ldr_u32(Rtemp, Address(Rmethod, Method::access_flags_offset()));
+        __ ldrh(Rtemp, Address(Rmethod, Method::access_flags_offset()));
         __ tbz(Rtemp, JVM_ACC_SYNCHRONIZED_BIT, L);
         __ stop("method needs synchronization");
         __ bind(L);
@@ -843,7 +904,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
     __ ldr(Rtemp, Address(FP, frame::interpreter_frame_monitor_block_top_offset * wordSize));
     __ cmp(Rtemp, Rstack_top);
     __ b(L, eq);
-    __ stop("broken stack frame setup in interpreter");
+    __ stop("broken stack frame setup in interpreter 3");
     __ bind(L);
   }
 #endif
@@ -885,7 +946,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
   __ sub(SP, SP, AsmOperand(Rsize_of_params, lsl, LogBytesPerLong));
 
 #ifdef __ABI_HARD__
-  // Allocate more stack space to accomodate all GP as well as FP registers:
+  // Allocate more stack space to accommodate all GP as well as FP registers:
   // 4 * wordSize
   // 8 * BytesPerLong
   int reg_arguments = align_up((4*wordSize) + (8*BytesPerLong), StackAlignmentInBytes);
@@ -911,7 +972,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
   // Pass JNIEnv and mirror for static methods
   {
     Label L;
-    __ ldr_u32(Rtemp, Address(Rmethod, Method::access_flags_offset()));
+    __ ldrh(Rtemp, Address(Rmethod, Method::access_flags_offset()));
     __ add(R0, Rthread, in_bytes(JavaThread::jni_environment_offset()));
     __ tbz(Rtemp, JVM_ACC_STATIC_BIT, L);
     __ load_mirror(Rtemp, Rmethod, Rtemp);
@@ -956,8 +1017,10 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
   __ mov(Rtemp, _thread_in_native_trans);
   __ str_32(Rtemp, Address(Rthread, JavaThread::thread_state_offset()));
 
-    // Force this write out before the read below
-  __ membar(MacroAssembler::StoreLoad, Rtemp);
+  // Force this write out before the read below
+  if (!UseSystemMemoryBarrier) {
+    __ membar(MacroAssembler::StoreLoad, Rtemp);
+  }
 
   // Protect the return value in the interleaved code: save it to callee-save registers.
   __ mov(Rsaved_result_lo, R0);
@@ -993,7 +1056,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
   // Zero handles and last_java_sp
   __ reset_last_Java_frame(Rtemp);
   __ ldr(R3, Address(Rthread, JavaThread::active_handles_offset()));
-  __ str_32(__ zero_register(Rtemp), Address(R3, JNIHandleBlock::top_offset_in_bytes()));
+  __ str_32(__ zero_register(Rtemp), Address(R3, JNIHandleBlock::top_offset()));
   if (CheckJNICalls) {
     __ str(__ zero_register(Rtemp), Address(Rthread, JavaThread::pending_jni_exception_check_fn_offset()));
   }
@@ -1078,7 +1141,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
 //
 address TemplateInterpreterGenerator::generate_normal_entry(bool synchronized) {
   // determine code generation flags
-  bool inc_counter  = UseCompiler || CountCompiledCalls || LogTouchedMethods;
+  bool inc_counter  = UseCompiler || CountCompiledCalls;
 
   // Rmethod: Method*
   // Rthread: thread
@@ -1138,7 +1201,7 @@ address TemplateInterpreterGenerator::generate_normal_entry(bool synchronized) {
 
   // make sure method is not native & not abstract
 #ifdef ASSERT
-  __ ldr_u32(Rtemp, Address(Rmethod, Method::access_flags_offset()));
+  __ ldrh(Rtemp, Address(Rmethod, Method::access_flags_offset()));
   {
     Label L;
     __ tbz(Rtemp, JVM_ACC_NATIVE_BIT, L);
@@ -1154,18 +1217,13 @@ address TemplateInterpreterGenerator::generate_normal_entry(bool synchronized) {
 
   // increment invocation count & check for overflow
   Label invocation_counter_overflow;
-  Label profile_method;
-  Label profile_method_continue;
   if (inc_counter) {
     if (synchronized) {
       // Avoid unlocking method's monitor in case of exception, as it has not
       // been locked yet.
       __ set_do_not_unlock_if_synchronized(true, Rtemp);
     }
-    generate_counter_incr(&invocation_counter_overflow, &profile_method, &profile_method_continue);
-    if (ProfileInterpreter) {
-      __ bind(profile_method_continue);
-    }
+    generate_counter_incr(&invocation_counter_overflow);
   }
   Label continue_after_compile;
   __ bind(continue_after_compile);
@@ -1188,7 +1246,7 @@ address TemplateInterpreterGenerator::generate_normal_entry(bool synchronized) {
     // no synchronization necessary
 #ifdef ASSERT
       { Label L;
-        __ ldr_u32(Rtemp, Address(Rmethod, Method::access_flags_offset()));
+        __ ldrh(Rtemp, Address(Rmethod, Method::access_flags_offset()));
         __ tbz(Rtemp, JVM_ACC_SYNCHRONIZED_BIT, L);
         __ stop("method needs synchronization");
         __ bind(L);
@@ -1202,7 +1260,7 @@ address TemplateInterpreterGenerator::generate_normal_entry(bool synchronized) {
     __ ldr(Rtemp, Address(FP, frame::interpreter_frame_monitor_block_top_offset * wordSize));
     __ cmp(Rtemp, Rstack_top);
     __ b(L, eq);
-    __ stop("broken stack frame setup in interpreter");
+    __ stop("broken stack frame setup in interpreter 4");
     __ bind(L);
   }
 #endif
@@ -1218,16 +1276,6 @@ address TemplateInterpreterGenerator::generate_normal_entry(bool synchronized) {
 
   // invocation counter overflow
   if (inc_counter) {
-    if (ProfileInterpreter) {
-      // We have decided to profile this method in the interpreter
-      __ bind(profile_method);
-
-      __ call_VM(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime::profile_method));
-      __ set_method_data_pointer_for_bcp();
-
-      __ b(profile_method_continue);
-    }
-
     // Handle overflow of counter and compile method
     __ bind(invocation_counter_overflow);
     generate_counter_overflow(continue_after_compile);
@@ -1399,7 +1447,7 @@ void TemplateInterpreterGenerator::generate_throw_exception() {
     __ b(L_done, ne);
 
     // The member name argument must be restored if _invokestatic is re-executed after a PopFrame call.
-    // Detect such a case in the InterpreterRuntime function and return the member name argument, or NULL.
+    // Detect such a case in the InterpreterRuntime function and return the member name argument, or null.
 
     // get local0
     __ ldr(R1, Address(Rlocals, 0));
@@ -1421,13 +1469,13 @@ void TemplateInterpreterGenerator::generate_throw_exception() {
 
   // preserve exception over this code sequence
   __ pop_ptr(R0_tos);
-  __ str(R0_tos, Address(Rthread, JavaThread::vm_result_offset()));
+  __ str(R0_tos, Address(Rthread, JavaThread::vm_result_oop_offset()));
   // remove the activation (without doing throws on illegalMonitorExceptions)
   __ remove_activation(vtos, Rexception_pc, false, true, false);
   // restore exception
-  __ get_vm_result(Rexception_obj, Rtemp);
+  __ get_vm_result_oop(Rexception_obj, Rtemp);
 
-  // Inbetween activations - previous activation type unknown yet
+  // In between activations - previous activation type unknown yet
   // compute continuation point - the continuation point expects
   // the following registers set up:
   //
@@ -1590,7 +1638,7 @@ void TemplateInterpreterGenerator::trace_bytecode(Template* t) {
   // Call a little run-time stub to avoid blow-up for each bytecode.
   // The run-time runtime saves the right registers, depending on
   // the tosca in-state for the given template.
-  assert(Interpreter::trace_code(t->tos_in()) != NULL,
+  assert(Interpreter::trace_code(t->tos_in()) != nullptr,
          "entry must have been generated");
   address trace_entry = Interpreter::trace_code(t->tos_in());
   __ call(trace_entry, relocInfo::none);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,9 @@ package compiler.codecache.jmx;
 
 import jdk.test.lib.Asserts;
 import jdk.test.lib.Utils;
-import sun.hotspot.WhiteBox;
-import sun.hotspot.code.BlobType;
-import sun.hotspot.code.CodeBlob;
+import jdk.test.whitebox.WhiteBox;
+import jdk.test.whitebox.code.BlobType;
+import jdk.test.whitebox.code.CodeBlob;
 
 import javax.management.Notification;
 import java.lang.management.MemoryPoolMXBean;
@@ -41,9 +41,9 @@ public final class CodeCacheUtils {
             = Integer.getInteger("codecache.allocation.size", 100);
     public static final WhiteBox WB = WhiteBox.getWhiteBox();
     public static final long SEGMENT_SIZE
-            = WhiteBox.getWhiteBox().getUintxVMFlag("CodeCacheSegmentSize");
+            = WhiteBox.getWhiteBox().getSizeTVMFlag("CodeCacheSegmentSize");
     public static final long MIN_BLOCK_LENGTH
-            = WhiteBox.getWhiteBox().getUintxVMFlag("CodeCacheMinBlockLength");
+            = WhiteBox.getWhiteBox().getSizeTVMFlag("CodeCacheMinBlockLength");
     public static final long MIN_ALLOCATION = SEGMENT_SIZE * MIN_BLOCK_LENGTH;
 
     private CodeCacheUtils() {

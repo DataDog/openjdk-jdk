@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,8 @@
 
 package javax.print.attribute.standard;
 
+import java.io.Serial;
+
 import javax.print.attribute.Attribute;
 import javax.print.attribute.EnumSyntax;
 
@@ -46,6 +48,7 @@ public class MediaTray extends Media implements Attribute {
     /**
      * Use serialVersionUID from JDK 1.4 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = -982503611095214703L;
 
     /**
@@ -129,6 +132,7 @@ public class MediaTray extends Media implements Attribute {
     /**
      * Returns the string table for class {@code MediaTray}.
      */
+    @Override
     protected String[] getStringTable()
     {
         return myStringTable.clone();
@@ -137,6 +141,7 @@ public class MediaTray extends Media implements Attribute {
     /**
      * Returns the enumeration value table for class {@code MediaTray}.
      */
+    @Override
     protected EnumSyntax[] getEnumValueTable() {
         return (EnumSyntax[])myEnumValueTable.clone();
     }

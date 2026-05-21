@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,8 @@ import jtreg.SkippedException;
  * @bug 8191538
  * @summary Test clhsdb 'vmstructsdump' command
  * @requires vm.hasSA
+ * @requires vm.gc != "Z"
+ * @requires (os.arch != "riscv64" | !(vm.cpu.features ~= ".*qemu.*"))
  * @library /test/lib
  * @run main/othervm ClhsdbVmStructsDump
  */
@@ -56,10 +58,8 @@ public class ClhsdbVmStructsDump {
                 "field InstanceKlass _constants ConstantPool*",
                 "field Klass _name Symbol*",
                 "type ClassLoaderData* null",
-                "type DictionaryEntry KlassHashtableEntry",
-                "field JavaThread _osthread OSThread*",
-                "type TenuredGeneration CardGeneration",
-                "field JVMState _bci",
+                "field Thread _osthread OSThread*",
+                "type TenuredGeneration Generation",
                 "type Universe null",
                 "type ConstantPoolCache MetaspaceObj"));
             test.run(theApp.getPid(), cmds, expStrMap, null);

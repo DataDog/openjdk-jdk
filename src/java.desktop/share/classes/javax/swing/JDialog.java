@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -95,22 +95,18 @@ import javax.accessibility.*;
  */
 @JavaBean(defaultProperty = "JMenuBar", description = "A toplevel window for creating dialog boxes.")
 @SwingContainer(delegate = "getContentPane")
-@SuppressWarnings("serial") // Same-version serialization only
+@SuppressWarnings({"serial"}) // Same-version serialization only
 public class JDialog extends Dialog implements WindowConstants,
                                                Accessible,
                                                RootPaneContainer,
                                TransferHandler.HasGetTransferHandler
 {
-    /**
-     * Key into the AppContext, used to check if should provide decorations
-     * by default.
-     */
-    private static final Object defaultLookAndFeelDecoratedKey =
-            new StringBuffer("JDialog.defaultLookAndFeelDecorated");
-
     private int defaultCloseOperation = HIDE_ON_CLOSE;
 
     /**
+     * The <code>JRootPane</code> instance that manages the
+     * <code>contentPane</code>.
+     *
      * @see #getRootPane
      * @see #setRootPane
      */
@@ -510,9 +506,6 @@ public class JDialog extends Dialog implements WindowConstants,
      *     if the {@code owner}'s {@code GraphicsConfiguration} is not from a screen device
      * @throws HeadlessException
      *     when {@code GraphicsEnvironment.isHeadless()} returns {@code true}
-     * @throws SecurityException
-     *     if the calling thread does not have permission to create modal dialogs
-     *     with the given {@code modalityType}
      *
      * @see java.awt.Dialog.ModalityType
      * @see java.awt.Dialog#setModal
@@ -577,9 +570,6 @@ public class JDialog extends Dialog implements WindowConstants,
      *     if the {@code owner}'s {@code GraphicsConfiguration} is not from a screen device
      * @throws HeadlessException
      *     when {@code GraphicsEnvironment.isHeadless()} returns {@code true}
-     * @throws SecurityException
-     *     if the calling thread does not have permission to create modal dialogs
-     *     with the given {@code modalityType}
      *
      * @see java.awt.Dialog.ModalityType
      * @see java.awt.Dialog#setModal
@@ -622,9 +612,6 @@ public class JDialog extends Dialog implements WindowConstants,
      *     if the {@code owner}'s {@code GraphicsConfiguration} is not from a screen device
      * @throws HeadlessException
      *     when {@code GraphicsEnvironment.isHeadless()} returns {@code true}
-     * @throws SecurityException
-     *     if the calling thread does not have permission to create modal dialogs
-     *     with the given {@code modalityType}
      *
      * @see java.awt.Dialog.ModalityType
      * @see java.awt.Dialog#setModal
@@ -670,7 +657,7 @@ public class JDialog extends Dialog implements WindowConstants,
         JRootPane rp = new JRootPane();
         // NOTE: this uses setOpaque vs LookAndFeel.installProperty as there
         // is NO reason for the RootPane not to be opaque. For painting to
-        // work the contentPane must be opaque, therefor the RootPane can
+        // work the contentPane must be opaque, therefore the RootPane can
         // also be opaque.
         rp.setOpaque(true);
         return rp;
@@ -1125,6 +1112,8 @@ public class JDialog extends Dialog implements WindowConstants,
         }
     }
 
+    private static boolean defaultLAFDecorated;
+
     /**
      * Provides a hint as to whether or not newly created {@code JDialog}s
      * should have their Window decorations (such as borders, widgets to
@@ -1150,11 +1139,7 @@ public class JDialog extends Dialog implements WindowConstants,
      * @since 1.4
      */
     public static void setDefaultLookAndFeelDecorated(boolean defaultLookAndFeelDecorated) {
-        if (defaultLookAndFeelDecorated) {
-            SwingUtilities.appContextPut(defaultLookAndFeelDecoratedKey, Boolean.TRUE);
-        } else {
-            SwingUtilities.appContextPut(defaultLookAndFeelDecoratedKey, Boolean.FALSE);
-        }
+        defaultLAFDecorated = defaultLookAndFeelDecorated;
     }
 
     /**
@@ -1166,12 +1151,7 @@ public class JDialog extends Dialog implements WindowConstants,
      * @since 1.4
      */
     public static boolean isDefaultLookAndFeelDecorated() {
-        Boolean defaultLookAndFeelDecorated =
-            (Boolean) SwingUtilities.appContextGet(defaultLookAndFeelDecoratedKey);
-        if (defaultLookAndFeelDecorated == null) {
-            defaultLookAndFeelDecorated = Boolean.FALSE;
-        }
-        return defaultLookAndFeelDecorated.booleanValue();
+        return defaultLAFDecorated;
     }
 
     /**

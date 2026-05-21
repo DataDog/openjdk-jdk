@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,6 @@
 
 package nsk.jdi.LocalVariable.isVisible;
 
-import nsk.share.*;
 import nsk.share.jpda.*;
 import nsk.share.jdi.*;
 
@@ -59,6 +58,9 @@ public class isvisible001a {
     }
 
     //====================================================== test program
+
+    static Thread thread2 = null;
+
     //----------------------------------------------------   main method
 
     public static void main (String argv[]) {
@@ -94,8 +96,8 @@ public class isvisible001a {
     //------------------------------------------------------  section tested
 
                 case 0:
-                         Threadisvisible001a thread2 =
-                             new Threadisvisible001a("Thread2");
+                         thread2 =
+                             JDIThreadFactory.newThread(new Threadisvisible001a("Thread2"));
                          log1("       thread2 is created");
 
                          label:
@@ -145,7 +147,7 @@ public class isvisible001a {
     }
 }
 
-class Threadisvisible001a extends Thread {
+class Threadisvisible001a extends NamedTask {
 
     public Threadisvisible001a(String threadName) {
         super(threadName);

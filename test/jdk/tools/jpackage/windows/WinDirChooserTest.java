@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,7 +21,7 @@
  * questions.
  */
 
-import jdk.jpackage.test.TKit;
+import jdk.jpackage.test.Annotations.Test;
 import jdk.jpackage.test.PackageTest;
 import jdk.jpackage.test.PackageType;
 
@@ -36,21 +36,23 @@ import jdk.jpackage.test.PackageType;
 /*
  * @test
  * @summary jpackage with --win-dir-chooser
- * @library ../helpers
+ * @library /test/jdk/tools/jpackage/helpers
  * @key jpackagePlatformPackage
  * @build jdk.jpackage.test.*
+ * @build WinDirChooserTest
  * @requires (os.family == "windows")
- * @modules jdk.jpackage/jdk.jpackage.internal
- * @run main/othervm/timeout=360 -Xmx512m WinDirChooserTest
+ * @run main/othervm/timeout=540 -Xmx512m jdk.jpackage.test.Main
+ *  --jpt-run=WinDirChooserTest
  */
 
 public class WinDirChooserTest {
-    public static void main(String[] args) {
-        TKit.run(args, () -> {
-            new PackageTest()
-            .forTypes(PackageType.WINDOWS)
-            .configureHelloApp()
-            .addInitializer(cmd -> cmd.addArgument("--win-dir-chooser")).run();
-        });
+
+    @Test
+    public static void test() {
+        new PackageTest()
+                .forTypes(PackageType.WINDOWS)
+                .configureHelloApp()
+                .addInitializer(cmd -> cmd.addArgument("--win-dir-chooser"))
+                .run();
     }
 }

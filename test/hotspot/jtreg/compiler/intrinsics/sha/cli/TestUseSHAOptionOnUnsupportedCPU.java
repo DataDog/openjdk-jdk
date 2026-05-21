@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,11 +25,11 @@
  * @test
  * @bug 8035968
  * @summary Verify UseSHA option processing on unsupported CPU.
- * @library /test/lib testcases /
- * @modules java.base/jdk.internal.misc
- *          java.management
- * @build sun.hotspot.WhiteBox
- * @run driver ClassFileInstaller sun.hotspot.WhiteBox
+ * @library /test/lib /
+ * @requires vm.flagless
+ *
+ * @build jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run main/othervm -Xbootclasspath/a:. -XX:+UnlockDiagnosticVMOptions
  *                   -XX:+WhiteBoxAPI
  *                   compiler.intrinsics.sha.cli.TestUseSHAOptionOnUnsupportedCPU
@@ -37,21 +37,15 @@
 
 package compiler.intrinsics.sha.cli;
 
-import compiler.intrinsics.sha.cli.testcases.GenericTestCaseForOtherCPU;
-import compiler.intrinsics.sha.cli.testcases.GenericTestCaseForUnsupportedAArch64CPU;
-import compiler.intrinsics.sha.cli.testcases.GenericTestCaseForUnsupportedX86CPU;
+import compiler.intrinsics.sha.cli.testcases.GenericTestCaseForUnsupportedCPU;
 import compiler.intrinsics.sha.cli.testcases.UseSHASpecificTestCaseForUnsupportedCPU;
 
 public class TestUseSHAOptionOnUnsupportedCPU {
     public static void main(String args[]) throws Throwable {
         new DigestOptionsBase(
-                new GenericTestCaseForUnsupportedX86CPU(
-                        DigestOptionsBase.USE_SHA_OPTION),
-                new GenericTestCaseForUnsupportedAArch64CPU(
+                new GenericTestCaseForUnsupportedCPU(
                         DigestOptionsBase.USE_SHA_OPTION),
                 new UseSHASpecificTestCaseForUnsupportedCPU(
-                        DigestOptionsBase.USE_SHA_OPTION),
-                new GenericTestCaseForOtherCPU(
                         DigestOptionsBase.USE_SHA_OPTION)).test();
     }
 }

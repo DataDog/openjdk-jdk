@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2020, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2019, 2022, Red Hat, Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,29 +25,22 @@
 #ifndef SHARE_GC_SHENANDOAH_SHENANDOAHNMETHOD_INLINE_HPP
 #define SHARE_GC_SHENANDOAH_SHENANDOAHNMETHOD_INLINE_HPP
 
+#include "gc/shenandoah/shenandoahNMethod.hpp"
+
 #include "gc/shared/barrierSet.hpp"
 #include "gc/shared/barrierSetNMethod.hpp"
-#include "gc/shenandoah/shenandoahConcurrentRoots.hpp"
-#include "gc/shenandoah/shenandoahNMethod.hpp"
+#include "gc/shenandoah/shenandoahClosures.inline.hpp"
 
 nmethod* ShenandoahNMethod::nm() const {
   return _nm;
 }
 
-ShenandoahReentrantLock* ShenandoahNMethod::lock() {
+ShenandoahNMethodLock* ShenandoahNMethod::lock() {
   return &_lock;
 }
 
-int ShenandoahNMethod::oop_count() const {
-  return _oops_count + static_cast<int>(nm()->oops_end() - nm()->oops_begin());
-}
-
-bool ShenandoahNMethod::has_oops() const {
-  return oop_count() > 0;
-}
-
-void ShenandoahNMethod::mark_unregistered() {
-  _unregistered = true;
+ShenandoahNMethodLock* ShenandoahNMethod::ic_lock() {
+  return &_ic_lock;
 }
 
 bool ShenandoahNMethod::is_unregistered() const {
@@ -73,13 +66,12 @@ void ShenandoahNMethod::oops_do(OopClosure* oops, bool fix_relocations) {
 }
 
 void ShenandoahNMethod::heal_nmethod_metadata(ShenandoahNMethod* nmethod_data) {
-  ShenandoahEvacuateUpdateRootsClosure<> cl;
+  ShenandoahEvacuateUpdateMetadataClosure cl;
   nmethod_data->oops_do(&cl, true /*fix relocation*/);
 }
 
 void ShenandoahNMethod::disarm_nmethod(nmethod* nm) {
   BarrierSetNMethod* const bs = BarrierSet::barrier_set()->barrier_set_nmethod();
-  assert(bs != NULL, "Sanity");
   if (bs->is_armed(nm)) {
     bs->disarm(nm);
   }
@@ -93,12 +85,15 @@ void ShenandoahNMethod::attach_gc_data(nmethod* nm, ShenandoahNMethod* gc_data) 
   nm->set_gc_data<ShenandoahNMethod>(gc_data);
 }
 
-ShenandoahReentrantLock* ShenandoahNMethod::lock_for_nmethod(nmethod* nm) {
+ShenandoahNMethodLock* ShenandoahNMethod::lock_for_nmethod(nmethod* nm) {
   return gc_data(nm)->lock();
 }
 
+ShenandoahNMethodLock* ShenandoahNMethod::ic_lock_for_nmethod(nmethod* nm) {
+  return gc_data(nm)->ic_lock();
+}
+
 bool ShenandoahNMethodTable::iteration_in_progress() const {
-  shenandoah_assert_locked_or_safepoint(CodeCache_lock);
   return _itr_cnt > 0;
 }
 

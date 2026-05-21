@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,9 +21,9 @@
  * questions.
  */
 
-/**
+/*
  * @test
- * @bug 8182297 8242919
+ * @bug 8182297 8242919 8267459
  * @summary Verify that pasting multi-line snippets works properly.
  * @library /tools/lib
  * @modules
@@ -32,12 +32,13 @@
  *     jdk.compiler/com.sun.tools.javac.api
  *     jdk.compiler/com.sun.tools.javac.main
  *     jdk.internal.le/jdk.internal.org.jline.reader.impl
+ *     jdk.jshell/jdk.internal.jshell.tool:open
  *     jdk.jshell/jdk.internal.jshell.tool.resources:open
  *     jdk.jshell/jdk.jshell:open
  * @build toolbox.ToolBox toolbox.JarTask toolbox.JavacTask
  * @build Compiler UITesting
  * @build PasteAndMeasurementsUITest
- * @run testng/othervm PasteAndMeasurementsUITest
+ * @run junit/othervm PasteAndMeasurementsUITest
  */
 
 import java.io.Console;
@@ -45,15 +46,15 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import jdk.internal.org.jline.reader.impl.LineReaderImpl;
 
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Test;
 
-@Test
 public class PasteAndMeasurementsUITest extends UITesting {
 
     public PasteAndMeasurementsUITest() {
         super(true);
     }
 
+    @Test
     public void testPrevNextSnippet() throws Exception {
         Field cons = System.class.getDeclaredField("cons");
         cons.setAccessible(true);
@@ -76,6 +77,7 @@ public class PasteAndMeasurementsUITest extends UITesting {
     }
         private static final String LOC = "\033[12;1R";
 
+    @Test
     public void testBracketedPaste() throws Exception {
         Field cons = System.class.getDeclaredField("cons");
         cons.setAccessible(true);
@@ -87,6 +89,21 @@ public class PasteAndMeasurementsUITest extends UITesting {
                             "int i;" +
                             LineReaderImpl.BRACKETED_PASTE_END);
             waitOutput(out,       "int i;");
+        });
+    }
+
+    @Test
+    public void testBracketedPasteNonAscii() throws Exception {
+        Field cons = System.class.getDeclaredField("cons");
+        cons.setAccessible(true);
+        Constructor console = Console.class.getDeclaredConstructor();
+        console.setAccessible(true);
+        cons.set(null, console.newInstance());
+        doRunTest((inputSink, out) -> {
+            inputSink.write(LineReaderImpl.BRACKETED_PASTE_BEGIN +
+                            "int \u010d;" +
+                            LineReaderImpl.BRACKETED_PASTE_END);
+            waitOutput(out,       "int \uffc4\uff8d;"); //UTF-8 encoding of \u010d
         });
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -62,8 +62,9 @@ import jdk.internal.icu.impl.UBiDiProps;
  * <h2>Bidi algorithm for ICU</h2>
  *
  * This is an implementation of the Unicode Bidirectional Algorithm. The
- * algorithm is defined in the <a
- * href="http://www.unicode.org/unicode/reports/tr9/">Unicode Standard Annex #9</a>.
+ * algorithm is defined in the
+ * <a href="https://www.unicode.org/reports/tr9/">Unicode Standard Annex #9:
+ * Unicode Bidirectional Algorithm</a>.
  * <p>
  *
  * Note: Libraries that perform a bidirectional algorithm and reorder strings
@@ -983,8 +984,9 @@ public class BidiBase {
 
     /**
      * Enumerated property Bidi_Paired_Bracket_Type (new in Unicode 6.3).
-     * Used in UAX #9: Unicode Bidirectional Algorithm
-     * (http://www.unicode.org/reports/tr9/)
+     * Used in
+     * <a href="https://www.unicode.org/reports/tr9/">Unicode Standard Annex #9:
+     * Unicode Bidirectional Algorithm</a>.
      * Returns UCharacter.BidiPairedBracketType values.
      * @stable ICU 52
      */
@@ -2407,9 +2409,9 @@ public class BidiBase {
         return directionFromFlags();
     }
 
-    /*********************************************************************/
+    /* *******************************************************************/
     /* The Properties state machine table                                */
-    /*********************************************************************/
+    /* *******************************************************************/
     /*                                                                   */
     /* All table cells are 8 bits:                                       */
     /*      bits 0..4:  next state                                       */
@@ -2420,9 +2422,9 @@ public class BidiBase {
     /* Cells may also be of format "_(x,y)" where x represents an action */
     /* to perform and y represents the next state.                       */
     /*                                                                   */
-    /*********************************************************************/
+    /* *******************************************************************/
     /* Definitions and type for properties state tables                  */
-    /*********************************************************************/
+    /* *******************************************************************/
     private static final int IMPTABPROPS_COLUMNS = 16;
     private static final int IMPTABPROPS_RES = IMPTABPROPS_COLUMNS - 1;
     private static short GetStateProps(short cell) {
@@ -2445,7 +2447,7 @@ public class BidiBase {
     private static final short _S  = 5;
     private static final short _B  = 6; /* reduced dirProp */
 
-    /*********************************************************************/
+    /* *******************************************************************/
     /*                                                                   */
     /*      PROPERTIES  STATE  TABLE                                     */
     /*                                                                   */
@@ -2508,9 +2510,9 @@ public class BidiBase {
 /*23 ENR+ET      */ {  32+1,  32+2,    21,  32+5,  32+7, 32+15, 32+17,  32+7,    23,  32+7,    23,    23,  32+3,    18,    21,   _AN }
     };
 
-    /*********************************************************************/
+    /* *******************************************************************/
     /* The levels state machine tables                                   */
-    /*********************************************************************/
+    /* *******************************************************************/
     /*                                                                   */
     /* All table cells are 8 bits:                                       */
     /*      bits 0..3:  next state                                       */
@@ -2523,9 +2525,9 @@ public class BidiBase {
     /*                                                                   */
     /* This format limits each table to 16 states each and to 15 actions.*/
     /*                                                                   */
-    /*********************************************************************/
+    /* *******************************************************************/
     /* Definitions and type for levels state tables                      */
-    /*********************************************************************/
+    /* *******************************************************************/
     private static final int IMPTABLEVELS_COLUMNS = _B + 2;
     private static final int IMPTABLEVELS_RES = IMPTABLEVELS_COLUMNS - 1;
     private static short GetState(byte cell) { return (short)(cell & 0x0f); }
@@ -2542,7 +2544,7 @@ public class BidiBase {
         }
     }
 
-    /*********************************************************************/
+    /* *******************************************************************/
     /*                                                                   */
     /*      LEVELS  STATE  TABLES                                        */
     /*                                                                   */
@@ -3363,8 +3365,8 @@ public class BidiBase {
 
     /**
      * Perform the Unicode Bidi algorithm. It is defined in the
-     * <a href="http://www.unicode.org/unicode/reports/tr9/">Unicode Standard Annex #9</a>,
-     * version 13,
+     * <a href="https://www.unicode.org/reports/tr9/">Unicode Standard Annex #9:
+     * Unicode Bidirectional Algorithm</a>, version 13,
      * also described in The Unicode Standard, Version 4.0 .<p>
      *
      * This method takes a piece of plain text containing one or more paragraphs,
@@ -3448,8 +3450,8 @@ public class BidiBase {
 
     /**
      * Perform the Unicode Bidi algorithm. It is defined in the
-     * <a href="http://www.unicode.org/unicode/reports/tr9/">Unicode Standard Annex #9</a>,
-     * version 13,
+     * <a href="https://www.unicode.org/reports/tr9/">Unicode Standard Annex #9:
+     * Unicode Bidirectional Algorithm</a>, version 13,
      * also described in The Unicode Standard, Version 4.0 .<p>
      *
      * This method takes a piece of plain text containing one or more paragraphs,
@@ -3784,8 +3786,8 @@ public class BidiBase {
 
     /**
      * Perform the Unicode Bidi algorithm on a given paragraph, as defined in the
-     * <a href="http://www.unicode.org/unicode/reports/tr9/">Unicode Standard Annex #9</a>,
-     * version 13,
+     * <a href="https://www.unicode.org/reports/tr9/">Unicode Standard Annex #9:
+     * Unicode Bidirectional Algorithm</a>, version 13,
      * also described in The Unicode Standard, Version 4.0 .<p>
      *
      * This method takes a paragraph of text and computes the
@@ -4593,7 +4595,7 @@ public class BidiBase {
                       objectStart + " is out of range 0 to " +
                       (objects.length-1));
         }
-        if (0 > count || objects.length < (objectStart+count)) {
+        if (0 > count || objects.length - count < objectStart) {
             throw new IllegalArgumentException("Value count " +
                       count + " is less than zero, or objectStart + count" +
                       " is beyond objects length " + objects.length);
@@ -4742,7 +4744,6 @@ public class BidiBase {
         static final Boolean RUN_DIRECTION_LTR = (jafa == null) ?
             Boolean.FALSE : (Boolean)jafa.getTextAttributeConstant("RUN_DIRECTION_LTR");
 
-        @SuppressWarnings("serial")
         private static AttributedCharacterIterator.Attribute
             getTextAttribute(String name)
         {

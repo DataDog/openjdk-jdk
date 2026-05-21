@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,17 +25,17 @@
 
 package sun.nio.ch;
 
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.nio.channels.*;
 import java.nio.ByteBuffer;
 import java.nio.BufferOverflowException;
 import java.net.*;
 import java.util.concurrent.*;
 import java.io.IOException;
-import java.security.AccessController;
-import java.security.PrivilegedActionException;
-import java.security.PrivilegedExceptionAction;
+import jdk.internal.util.Exceptions;
+import jdk.internal.invoke.MhUtil;
 import jdk.internal.misc.Unsafe;
-import sun.net.util.SocketExceptions;
 
 /**
  * Windows implementation of AsynchronousSocketChannel using overlapped I/O.
@@ -45,10 +45,9 @@ class WindowsAsynchronousSocketChannelImpl
     extends AsynchronousSocketChannelImpl implements Iocp.OverlappedChannel
 {
     private static final Unsafe unsafe = Unsafe.getUnsafe();
-    private static int addressSize = unsafe.addressSize();
 
     private static int dependsArch(int value32, int value64) {
-        return (addressSize == 4) ? value32 : value64;
+        return (unsafe.addressSize() == 4) ? value32 : value64;
     }
 
     /*
@@ -254,7 +253,7 @@ class WindowsAsynchronousSocketChannelImpl
 
             if (exc != null) {
                 closeChannel();
-                exc = SocketExceptions.of(toIOException(exc), remote);
+                exc = Exceptions.ioException(toIOException(exc), remote);
                 result.setFailure(exc);
             }
             Invoker.invoke(result);
@@ -281,7 +280,7 @@ class WindowsAsynchronousSocketChannelImpl
             if (exc != null) {
                 closeChannel();
                 IOException ee = toIOException(exc);
-                ee = SocketExceptions.of(ee, remote);
+                ee = Exceptions.ioException(ee, remote);
                 result.setFailure(ee);
             }
 
@@ -297,28 +296,15 @@ class WindowsAsynchronousSocketChannelImpl
          */
         @Override
         public void failed(int error, IOException x) {
-            x = SocketExceptions.of(x, remote);
+            x = Exceptions.ioException(x, remote);
             if (isOpen()) {
                 closeChannel();
                 result.setFailure(x);
             } else {
-                x = SocketExceptions.of(new AsynchronousCloseException(), remote);
+                x = Exceptions.ioException(new AsynchronousCloseException(), remote);
                 result.setFailure(x);
             }
             Invoker.invoke(result);
-        }
-    }
-
-    private void doPrivilegedBind(final SocketAddress sa) throws IOException {
-        try {
-            AccessController.doPrivileged(new PrivilegedExceptionAction<Void>() {
-                public Void run() throws IOException {
-                    bind(sa);
-                    return null;
-                }
-            });
-        } catch (PrivilegedActionException e) {
-            throw (IOException) e.getException();
         }
     }
 
@@ -337,11 +323,6 @@ class WindowsAsynchronousSocketChannelImpl
 
         InetSocketAddress isa = Net.checkAddress(remote);
 
-        // permission check
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null)
-            sm.checkConnect(isa.getAddress().getHostAddress(), isa.getPort());
-
         // check and update state
         // ConnectEx requires the socket to be bound to a local address
         IOException bindException = null;
@@ -353,11 +334,7 @@ class WindowsAsynchronousSocketChannelImpl
             if (localAddress == null) {
                 try {
                     SocketAddress any = new InetSocketAddress(0);
-                    if (sm == null) {
-                        bind(any);
-                    } else {
-                        doPrivilegedBind(any);
-                    }
+                    bind(any);
                 } catch (IOException x) {
                     bindException = x;
                 }
@@ -393,13 +370,17 @@ class WindowsAsynchronousSocketChannelImpl
      * result when the read completes.
      */
     private class ReadTask<V,A> implements Runnable, Iocp.ResultHandler {
+        private static final VarHandle RELEASED = MhUtil.findVarHandle(MethodHandles.lookup(),
+                "released", boolean.class);
         private final ByteBuffer[] bufs;
         private final int numBufs;
         private final boolean scatteringRead;
         private final PendingFuture<V,A> result;
+        private volatile boolean released;
 
         // set by run method
         private ByteBuffer[] shadow;
+        private Runnable scopeHandleReleasers;
 
         ReadTask(ByteBuffer[] bufs,
                  boolean scatteringRead,
@@ -416,6 +397,7 @@ class WindowsAsynchronousSocketChannelImpl
          * it substitutes non-direct buffers with direct buffers.
          */
         void prepareBuffers() {
+            scopeHandleReleasers = IOUtil.acquireScopes(bufs);
             shadow = new ByteBuffer[numBufs];
             long address = readBufferArray;
             for (int i=0; i<numBufs; i++) {
@@ -429,10 +411,10 @@ class WindowsAsynchronousSocketChannelImpl
                     // substitute with direct buffer
                     ByteBuffer bb = Util.getTemporaryDirectBuffer(rem);
                     shadow[i] = bb;
-                    a = ((DirectBuffer)bb).address();
+                    a = IOUtil.bufferAddress(bb);
                 } else {
                     shadow[i] = dst;
-                    a = ((DirectBuffer)dst).address() + pos;
+                    a = IOUtil.bufferAddress(dst) + pos;
                 }
                 unsafe.putAddress(address + OFFSETOF_BUF, a);
                 unsafe.putInt(address + OFFSETOF_LEN, rem);
@@ -485,10 +467,13 @@ class WindowsAsynchronousSocketChannelImpl
         }
 
         void releaseBuffers() {
-            for (int i=0; i<numBufs; i++) {
-                if (!(bufs[i] instanceof DirectBuffer)) {
-                    Util.releaseTemporaryDirectBuffer(shadow[i]);
+            if (RELEASED.compareAndSet(this, false, true)) {
+                for (int i = 0; i < numBufs; i++) {
+                    if (!(bufs[i] instanceof DirectBuffer)) {
+                        Util.releaseTemporaryDirectBuffer(shadow[i]);
+                    }
                 }
+                IOUtil.releaseScopes(scopeHandleReleasers);
             }
         }
 
@@ -664,13 +649,17 @@ class WindowsAsynchronousSocketChannelImpl
      * result when the write completes.
      */
     private class WriteTask<V,A> implements Runnable, Iocp.ResultHandler {
+        private static final VarHandle RELEASED = MhUtil.findVarHandle(MethodHandles.lookup(),
+                "released", boolean.class);
         private final ByteBuffer[] bufs;
         private final int numBufs;
         private final boolean gatheringWrite;
         private final PendingFuture<V,A> result;
+        private volatile boolean released;
 
         // set by run method
         private ByteBuffer[] shadow;
+        private Runnable scopeHandleReleasers;
 
         WriteTask(ByteBuffer[] bufs,
                   boolean gatheringWrite,
@@ -687,6 +676,7 @@ class WindowsAsynchronousSocketChannelImpl
          * it substitutes non-direct buffers with direct buffers.
          */
         void prepareBuffers() {
+            scopeHandleReleasers = IOUtil.acquireScopes(bufs);
             shadow = new ByteBuffer[numBufs];
             long address = writeBufferArray;
             for (int i=0; i<numBufs; i++) {
@@ -703,10 +693,10 @@ class WindowsAsynchronousSocketChannelImpl
                     bb.flip();
                     src.position(pos);  // leave heap buffer untouched for now
                     shadow[i] = bb;
-                    a = ((DirectBuffer)bb).address();
+                    a = IOUtil.bufferAddress(bb);
                 } else {
                     shadow[i] = src;
-                    a = ((DirectBuffer)src).address() + pos;
+                    a = IOUtil.bufferAddress(src) + pos;
                 }
                 unsafe.putAddress(address + OFFSETOF_BUF, a);
                 unsafe.putInt(address + OFFSETOF_LEN, rem);
@@ -749,10 +739,13 @@ class WindowsAsynchronousSocketChannelImpl
         }
 
         void releaseBuffers() {
-            for (int i=0; i<numBufs; i++) {
-                if (!(bufs[i] instanceof DirectBuffer)) {
-                    Util.releaseTemporaryDirectBuffer(shadow[i]);
+            if (RELEASED.compareAndSet(this, false, true)) {
+                for (int i = 0; i < numBufs; i++) {
+                    if (!(bufs[i] instanceof DirectBuffer)) {
+                        Util.releaseTemporaryDirectBuffer(shadow[i]);
+                    }
                 }
+                IOUtil.releaseScopes(scopeHandleReleasers);
             }
         }
 
@@ -922,7 +915,7 @@ class WindowsAsynchronousSocketChannelImpl
 
     private static native void updateConnectContext(long socket) throws IOException;
 
-    private static native int read0(long socket, int count, long addres, long overlapped)
+    private static native int read0(long socket, int count, long address, long overlapped)
         throws IOException;
 
     private static native int write0(long socket, int count, long address,

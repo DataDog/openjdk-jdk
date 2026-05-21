@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -61,17 +61,38 @@
 package jdk.dynalink.beans;
 
 import java.lang.invoke.MethodHandle;
-import java.util.Collections;
+import java.lang.reflect.Method;
+import java.lang.reflect.RecordComponent;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 class BeanIntrospector extends FacetIntrospector {
+    private final Class<?> clazz;
+
     BeanIntrospector(final Class<?> clazz) {
         super(clazz, true);
+        this.clazz = clazz;
     }
 
     @Override
     Map<String, MethodHandle> getInnerClassGetters() {
-        return Collections.emptyMap(); // NOTE: non-static inner classes are also on StaticClassIntrospector.
+        return Map.of(); // NOTE: non-static inner classes are also on StaticClassIntrospector.
+    }
+
+    @Override Collection<Method> getRecordComponentGetters() {
+        if (clazz.isRecord()) {
+            final RecordComponent[] rcs = clazz.getRecordComponents();
+            return Arrays.stream(rcs)
+                .map(RecordComponent::getAccessor)
+                .map(membersLookup::getAccessibleMethod)
+                .filter(Objects::nonNull) // no accessible counterpart
+                .toList();
+        } else {
+            return List.of();
+        }
     }
 
     @Override

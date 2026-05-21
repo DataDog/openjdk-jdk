@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,26 +28,32 @@
 
 package nsk.share;
 
+import java.lang.ref.PhantomReference;
 import java.util.*;
 import nsk.share.gc.gp.*;
 import nsk.share.test.ExecutionController;
 import nsk.share.test.Stresser;
+import jdk.test.lib.Utils;
+import jdk.test.whitebox.WhiteBox;
 
 /**
  * The <code>ClassUnloader</code> class allows to force VM to unload class(es)
- * using memory stressing technique.
+ * using WhiteBox.fullGC technique.
  *
- * <p>The method <code>unloadClass()</code> is provided which eats memory
- * to enforce GC to cleanup the heap. So, if all references to a class
+ * <p>The method <code>unloadClass()</code> is provided which calls
+ * WhiteBox.fullGC to cleanup the heap. So, if all references to a class
  * and its loader are canceled, this may result in unloading the class.
  *
  * <p>ClassUnloader mainly intends to unload a class which was loaded
  * with especial <code>ClassUnloader.loadClass()</code> method.
- * A class is considered unloaded if its class loader is finalized.
- * If there no finalization of class loader detected for some timeout,
- * class is considered still loaded and method returns <i>false</i>.
+ * A class is eligible for unloading if its class loader has been reclaimed.
+ * A Cleaner is used to inform the main test code when the class loader
+ * becomes unreachable and is reclaimed.
+ * If, after setting the class loader to null, no notification that it has become
+ * reclaimed is received within the timeout interval, then the class is considered
+ * to still be loaded and <code>unloadClass()</code> returns <i>false</i>.
  *
- * <p>Such finalization control applies only to a class loaded by
+ * <p>Such reclaiming control applies only to a class loaded by
  * ClassUnloader's <code>loadClass()</code> method. Otherwise, if there
  * was no such class loaded, <code>unloadClass()</code> doesn't wait
  * for a timeout and always returns <i>false</i>.
@@ -73,19 +79,9 @@ public class ClassUnloader {
     public static final String INTERNAL_CLASS_LOADER_NAME = "nsk.share.CustomClassLoader";
 
     /**
-     * Whole amount of time in milliseconds to wait for class loader finalization.
+     * Phantom reference to the class loader.
      */
-    private static final int WAIT_TIMEOUT = 15000;
-
-    /**
-     * Piece of time in milliseconds to wait in a loop for class loader finalization.
-     */
-    private static final int WAIT_DELTA = 1000;
-
-    /**
-     * Has class loader been finalized or not.
-     */
-    volatile boolean finalized = false;
+    private PhantomReference<Object> customClassLoaderPhantomRef = null;
 
     /**
      * Current class loader used for loading classes.
@@ -96,6 +92,14 @@ public class ClassUnloader {
      * List of classes loaded with current class loader.
      */
     private Vector<Class<?>> classObjects = new Vector<Class<?>>();
+
+    /**
+     * Has class loader been reclaimed or not.
+     */
+    private boolean isClassLoaderReclaimed() {
+        return customClassLoaderPhantomRef != null
+            && customClassLoaderPhantomRef.refersTo(null);
+    }
 
     /**
      * Class object of the first class been loaded with current class loader.
@@ -131,8 +135,10 @@ public class ClassUnloader {
      * @see #setClassLoader(CustomClassLoader)
      */
     public CustomClassLoader createClassLoader() {
-        customClassLoader = new CustomClassLoader(this);
+        customClassLoader = new CustomClassLoader();
         classObjects.removeAllElements();
+
+        customClassLoaderPhantomRef = new PhantomReference<>(customClassLoader, null);
 
         return customClassLoader;
     }
@@ -146,7 +152,8 @@ public class ClassUnloader {
     public void setClassLoader(CustomClassLoader customClassLoader) {
         this.customClassLoader = customClassLoader;
         classObjects.removeAllElements();
-        customClassLoader.setClassUnloader(this);
+
+        customClassLoaderPhantomRef = new PhantomReference<>(customClassLoader, null);
     }
 
     /**
@@ -223,130 +230,51 @@ public class ClassUnloader {
 
     /**
      * Forces GC to unload previously loaded classes by cleaning all references
-     * to class loader with its loaded classes and eating memory.
+     * to class loader with its loaded classes.
      *
-     * @return  <i>true</i> if classes unloading has been detected
+     * @return  <i>true</i> if the class has been unloaded
              or <i>false</i> otherwise
      *
-     * @throws  Failure if exception other than OutOfMemoryError
-     *           is thrown while eating memory
-     *
-     * @see #eatMemory()
+     * @see WhiteBox.getWhiteBox().fullGC()
      */
-    public boolean unloadClass(ExecutionController stresser) {
-
-        finalized = false;
-
+    public boolean unloadClass() {
         // free references to class and class loader to be able for collecting by GC
-        long waitTimeout = (customClassLoader == null) ? 0 : WAIT_TIMEOUT;
         classObjects.removeAllElements();
         customClassLoader = null;
 
-        // force class unloading by eating memory pool
-        eatMemory(stresser);
+        // force class unloading by triggering full GC
+        WhiteBox.getWhiteBox().fullGC();
 
-        // give GC chance to run and wait for finalization
-        long timeToFinish = System.currentTimeMillis() + waitTimeout;
-        while (!finalized && System.currentTimeMillis() < timeToFinish) {
-            if (!stresser.continueExecution()) {
-                return false;
-            }
-            try {
-                // suspend thread for a while
-                Thread.sleep(WAIT_DELTA);
-            } catch (InterruptedException e) {
-                throw new Failure("Unexpected InterruptedException while class unloading: " + e);
-            }
-        }
-
-        // force GC to unload marked class loader and its classes
-        if (finalized) {
-            Runtime.getRuntime().gc();
+        if (isClassLoaderReclaimed()) {
+            System.out.println("ClassUnloader: class loader has been reclaimed.");
             return true;
+        } else {
+            System.out.println("ClassUnloader: class loader is still reachable.");
+            return false;
         }
-
-        // class loader has not been finalized
-        return false;
-    }
-
-    public boolean unloadClass() {
-        Stresser stresser = new Stresser() {
-
-            @Override
-            public boolean continueExecution() {
-                return true;
-            }
-
-        };
-        return unloadClass(stresser);
     }
 
     /**
-     * Stresses memory by allocating arrays of bytes.
+     * Forces GC to unload previously loaded classes by cleaning all references
+     * to class loader with its loaded classes and wait for class loader to be reclaimed.
      *
-     * Note that this method can throw Failure if any exception
-     * is thrown while eating memory. To avoid OOM while allocating
-     * exception we preallocate it before the lunch starts. It means
-     * that exception stack trace does not correspond to the place
-     * where exception is thrown, but points at start of the method.
-     *
-     * @throws  Failure if exception other than OutOfMemoryError
-     *           is thrown while eating memory
+     * @param timeout max time to wait for class loader to be reclaimed in milliseconds
+     * @return  <i>true</i> if the class has been unloaded
+             or <i>false</i> otherwise
      */
-    public static void eatMemory(ExecutionController stresser) {
-        GarbageUtils.eatMemory(stresser, 50, 1024, 2);
-
-        /*
-         * System.runFinalization() may potentially fail with OOM. This is why
-         * System.runFinalization() is repeated several times.
-         */
-        for (int i = 0; i < 10; ++i) {
+    public boolean unloadClassAndWait(long timeout) {
+        timeout = Utils.adjustTimeout(timeout);
+        boolean wasUnloaded;
+        final long waitTime = 100;
+        do {
             try {
-                if(!stresser.continueExecution()) {
-                    return;
-                }
-                System.runFinalization();
-                break;
-            } catch (OutOfMemoryError e) {
+                Thread.sleep(waitTime);
+            } catch (InterruptedException e) {
+                // ignore
             }
-        }
-    }
-
-        /**
-     * Stresses memory by allocating arrays of bytes.
-     *
-     * Note that this method can throw Failure if any exception
-     * is thrown while eating memory. To avoid OOM while allocating
-     * exception we preallocate it before the lunch starts. It means
-     * that exception stack trace does not correspond to the place
-     * where exception is thrown, but points at start of the method.
-     *
-     * @throws  Failure if exception other than OutOfMemoryError
-     *           is thrown while eating memory
-     */
-    public static void eatMemory() {
-        Stresser stresser = new Stresser() {
-
-            @Override
-            public boolean continueExecution() {
-                return true;
-            }
-
-        };
-        GarbageUtils.eatMemory(stresser, 50, 1024, 2);
-        /*
-         * System.runFinalization() may potentially fail with OOM. This is why
-         * System.runFinalization() is repeated several times.
-         */
-        for (int i = 0; i < 10; ++i) {
-            try {
-                if(!stresser.continueExecution()) {
-                    return;
-                }
-                System.runFinalization();
-                break;
-            } catch (OutOfMemoryError e) {
-            }
-        }
+            timeout -= waitTime;
+            wasUnloaded = unloadClass();
+        } while (!wasUnloaded && timeout > 0);
+        return wasUnloaded;
     }
 }

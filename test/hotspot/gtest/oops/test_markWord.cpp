@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,18 +21,17 @@
  * questions.
  */
 
-#include "precompiled.hpp"
-#include "classfile/systemDictionary.hpp"
+#include "classfile/vmClasses.hpp"
 #include "memory/resourceArea.hpp"
 #include "memory/universe.hpp"
+#include "oops/instanceKlass.hpp"
 #include "oops/oop.inline.hpp"
-#include "runtime/atomic.hpp"
-#include "runtime/biasedLocking.hpp"
+#include "runtime/atomicAccess.hpp"
 #include "runtime/interfaceSupport.inline.hpp"
 #include "runtime/orderAccess.hpp"
 #include "runtime/os.hpp"
-#include "runtime/synchronizer.hpp"
 #include "runtime/semaphore.inline.hpp"
+#include "runtime/synchronizer.hpp"
 #include "threadHelper.inline.hpp"
 #include "unittest.hpp"
 #include "utilities/globalDefinitions.hpp"
@@ -40,20 +39,11 @@
 
 // The test doesn't work for PRODUCT because it needs WizardMode
 #ifndef PRODUCT
-static bool test_pattern(stringStream* st, const char* pattern) {
-  return (strstr(st->as_string(), pattern) != NULL);
-}
 
 static void assert_test_pattern(Handle object, const char* pattern) {
   stringStream st;
   object->print_on(&st);
-  ASSERT_TRUE(test_pattern(&st, pattern)) << pattern << " not in " << st.as_string();
-}
-
-static void assert_not_test_pattern(Handle object, const char* pattern) {
-  stringStream st;
-  object->print_on(&st);
-  ASSERT_FALSE(test_pattern(&st, pattern)) << pattern << " found in " << st.as_string();
+  ASSERT_THAT(st.base(), testing::HasSubstr(pattern));
 }
 
 class LockerThread : public JavaTestThread {
@@ -63,7 +53,7 @@ class LockerThread : public JavaTestThread {
   virtual ~LockerThread() {}
 
   void main_run() {
-    Thread* THREAD = Thread::current();
+    JavaThread* THREAD = JavaThread::current();
     HandleMark hm(THREAD);
     Handle h_obj(THREAD, _obj);
     ResourceMark rm(THREAD);
@@ -85,45 +75,23 @@ TEST_VM(markWord, printing) {
   ThreadInVMfromNative invm(THREAD);
   ResourceMark rm(THREAD);
 
-  oop obj = SystemDictionary::Byte_klass()->allocate_instance(THREAD);
+  oop obj = vmClasses::Byte_klass()->allocate_instance(THREAD);
 
   FlagSetting fs(WizardMode, true);
 
   HandleMark hm(THREAD);
   Handle h_obj(THREAD, obj);
 
-  if (UseBiasedLocking && BiasedLocking::enabled()) {
-    // Can't test this with biased locking disabled.
-    // Biased locking is initially enabled for this java.lang.Byte object.
-    assert_test_pattern(h_obj, "is_biased");
-
-    // Lock using biased locking.
-    BasicObjectLock lock;
-    lock.set_obj(obj);
-    markWord prototype_header = obj->klass()->prototype_header();
-    markWord mark = obj->mark();
-    markWord biased_mark = markWord::encode((JavaThread*) THREAD, mark.age(), prototype_header.bias_epoch());
-    obj->set_mark(biased_mark);
-    // Look for the biased_locker in markWord, not prototype_header.
-#ifdef _LP64
-    assert_not_test_pattern(h_obj, "mark(is_biased biased_locker=0x0000000000000000");
-#else
-    assert_not_test_pattern(h_obj, "mark(is_biased biased_locker=0x00000000");
-#endif
-  }
-
-  // Same thread tries to lock it again.
+  // Thread tries to lock it.
   {
     ObjectLocker ol(h_obj, THREAD);
     assert_test_pattern(h_obj, "locked");
   }
-
-  // This is no longer biased, because ObjectLocker revokes the bias.
-  assert_test_pattern(h_obj, "is_neutral no_hash");
+  assert_test_pattern(h_obj, "is_unlocked no_hash");
 
   // Hash the object then print it.
   intx hash = h_obj->identity_hash();
-  assert_test_pattern(h_obj, "is_neutral hash=0x");
+  assert_test_pattern(h_obj, "is_unlocked hash=0x");
 
   // Wait gets the lock inflated.
   {
@@ -134,7 +102,7 @@ TEST_VM(markWord, printing) {
     st = new LockerThread(&done, h_obj());
     st->doit();
 
-    ol.wait(THREAD);
+    ol.wait_uninterruptibly(THREAD);
     assert_test_pattern(h_obj, "monitor");
     done.wait_with_safepoint_check(THREAD);  // wait till the thread is done.
   }

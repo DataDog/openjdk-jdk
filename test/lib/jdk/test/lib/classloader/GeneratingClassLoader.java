@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,13 +38,13 @@ class TemplateClass {
 
 public class GeneratingClassLoader extends ClassLoader {
 
-    public synchronized Class loadClass(String name) throws ClassNotFoundException {
+    public synchronized Class<?> loadClass(String name) throws ClassNotFoundException {
         return loadClass(name, false);
     }
 
-    public synchronized Class loadClass(String name, boolean resolve)
+    public synchronized Class<?> loadClass(String name, boolean resolve)
             throws ClassNotFoundException {
-        Class c = findLoadedClass(name);
+        Class<?> c = findLoadedClass(name);
         if (c != null) {
             return c;
         }
@@ -129,7 +129,7 @@ public class GeneratingClassLoader extends ClassLoader {
                 throw new RuntimeException("Class name not found in template class file");
             }
         }
-        return (byte[]) bytecode.clone();
+        return bytecode.clone();
     }
 
     private void readByteCode() throws ClassNotFoundException {
@@ -173,7 +173,7 @@ public class GeneratingClassLoader extends ClassLoader {
                     if (i == bytecode.length) {
                         break;
                     }
-                    offsets.add(new Integer(i));
+                    offsets.add(i);
                     i++;
                 }
             } catch (UnsupportedEncodingException e) {

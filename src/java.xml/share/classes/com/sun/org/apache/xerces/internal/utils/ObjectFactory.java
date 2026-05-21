@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2024, Oracle and/or its affiliates. All rights reserved.
  */
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
@@ -35,7 +35,7 @@ import jdk.xml.internal.SecuritySupport;
  * when bundled as part of the JDK.
  * <p>
  *
- * @LastModified: Oct 2017
+ * @LastModified: Nov 2024
  */
 public final class ObjectFactory {
 
@@ -55,13 +55,9 @@ public final class ObjectFactory {
 
     /** Returns true if debug has been enabled. */
     private static boolean isDebugEnabled() {
-        try {
-            String val = SecuritySupport.getSystemProperty("xerces.debug");
-            // Allow simply setting the prop to turn on debug
-            return (val != null && (!"false".equals(val)));
-        }
-        catch (SecurityException se) {}
-        return false;
+        String val = System.getProperty("xerces.debug");
+        // Allow simply setting the prop to turn on debug
+        return (val != null && (!"false".equals(val)));
     } // isDebugEnabled()
 
     /** Prints a message to standard error if debugging is enabled. */
@@ -78,10 +74,6 @@ public final class ObjectFactory {
     public static ClassLoader findClassLoader()
         throws ConfigurationError
     {
-        if (System.getSecurityManager()!=null) {
-            //this will ensure bootclassloader is used
-            return null;
-        }
         // Figure out which ClassLoader to use for loading the provider
         // class.  If there is a Context ClassLoader then use it.
         ClassLoader context = SecuritySupport.getContextClassLoader();
@@ -140,12 +132,7 @@ public final class ObjectFactory {
     public static Object newInstance(String className, boolean doFallback)
         throws ConfigurationError
     {
-        if (System.getSecurityManager()!=null) {
-            return newInstance(className, null, doFallback);
-        } else {
-            return newInstance(className,
-                findClassLoader (), doFallback);
-        }
+        return newInstance(className, findClassLoader (), doFallback);
     }
 
     /**
@@ -189,20 +176,6 @@ public final class ObjectFactory {
                                       boolean doFallback)
         throws ClassNotFoundException, ConfigurationError
     {
-        //throw security exception if the calling thread is not allowed to access the package
-        //restrict the access to package as speicified in java.security policy
-        SecurityManager security = System.getSecurityManager();
-        if (security != null) {
-            if (className.startsWith(JAXP_INTERNAL) ||
-                    className.startsWith(STAX_INTERNAL)) {
-                cl = null;
-            } else {
-                final int lastDot = className.lastIndexOf(".");
-                String packageName = className;
-                if (lastDot != -1) packageName = className.substring(0, lastDot);
-                security.checkPackageAccess(packageName);
-            }
-        }
         Class<?> providerClass;
         if (cl == null) {
             //use the bootstrap ClassLoader.

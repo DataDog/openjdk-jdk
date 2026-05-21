@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
  * @test
  * @bug 8005046 8011052 8025087
  * @summary Test basic properties of javax.lang.element.ExecutableElement
- * @author  Joseph D. Darcy
  * @library /tools/javac/lib
  * @modules java.compiler
  *          jdk.compiler
@@ -41,7 +40,6 @@ import java.util.regex.*;
 import javax.annotation.processing.*;
 import javax.lang.model.element.*;
 import static javax.lang.model.util.ElementFilter.*;
-import static javax.tools.Diagnostic.Kind.*;
 
 /**
  * Test some basic workings of javax.lang.element.ExecutableElement
@@ -62,12 +60,12 @@ public class TestExecutableElement extends JavacTestingAbstractProcessor impleme
         } else {
             String expectedMethodCountStr = processingEnv.getOptions().get("expectedMethodCount");
             if (expectedMethodCountStr == null) {
-                messager.printMessage(ERROR, "No expected method count specified.");
+                messager.printError("No expected method count specified.");
             } else {
                 int expectedMethodCount = Integer.parseInt(expectedMethodCountStr);
 
                 if (seenMethods != expectedMethodCount) {
-                    messager.printMessage(ERROR, "Wrong number of seen methods: " + seenMethods);
+                    messager.printError("Wrong number of seen methods: " + seenMethods);
                 }
             }
         }
@@ -87,9 +85,8 @@ public class TestExecutableElement extends JavacTestingAbstractProcessor impleme
 
         if (expectedDefault) {
             if (!method.getModifiers().contains(Modifier.DEFAULT)) {
-                messager.printMessage(ERROR,
-                                      "Modifier \"default\" not present as expected.",
-                                      method);
+                messager.printError("Modifier \"default\" not present as expected.",
+                                    method);
             }
 
             // Check printing output
@@ -98,29 +95,26 @@ public class TestExecutableElement extends JavacTestingAbstractProcessor impleme
             Pattern p = Pattern.compile(expectedIsDefault.expectedTextRegex(), Pattern.DOTALL);
 
             if (! p.matcher(stringWriter.toString()).matches()) {
-                messager.printMessage(ERROR,
-                                      new Formatter().format("Unexpected printing ouptput:%n\tgot %s,%n\texpected pattern %s.",
-                                                             stringWriter.toString(),
-                                                             expectedIsDefault.expectedTextRegex()).toString(),
-                                      method);
+                messager.printError(new Formatter().format("Unexpected printing ouptput:%n\tgot %s,%n\texpected pattern %s.",
+                                                           stringWriter.toString(),
+                                                           expectedIsDefault.expectedTextRegex()).toString(),
+                                    method);
             }
 
             System.out.println("\t" + stringWriter.toString());
 
         } else {
             if (method.getModifiers().contains(Modifier.DEFAULT)) {
-                messager.printMessage(ERROR,
-                                      "Modifier \"default\" present when not expected.",
-                                      method);
+                messager.printError("Modifier \"default\" present when not expected.",
+                                    method);
             }
         }
 
         if (methodIsDefault != expectedDefault) {
-            messager.printMessage(ERROR,
-                                  new Formatter().format("Unexpected Executable.isDefault result: got ``%s'', expected ``%s''.",
-                                                         expectedDefault,
-                                                         methodIsDefault).toString(),
-                                  method);
+            messager.printError(new Formatter().format("Unexpected Executable.isDefault result: got ``%s'', expected ``%s''.",
+                                                       expectedDefault,
+                                                       methodIsDefault).toString(),
+                                method);
         }
     }
 }
@@ -143,8 +137,8 @@ interface ProviderOfDefault {
     boolean process(Set<? extends TypeElement> annotations,
                     RoundEnvironment roundEnv);
 
-    @IsDefault(value=true, expectedTextRegex="\\s*@IsDefault\\(.*\\)\\s*default strictfp void quux\\(\\);\\s*$")
-    default strictfp void quux() {};
+    @IsDefault(value=true, expectedTextRegex="\\s*@IsDefault\\(.*\\)\\s*default void quux\\(\\);\\s*$")
+    default void quux() {};
     @IsDefault(false)
     static void statik() {}
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,12 +25,17 @@
 #ifndef OS_POSIX_SIGNALS_POSIX_HPP
 #define OS_POSIX_SIGNALS_POSIX_HPP
 
-#include "memory/allocation.hpp"
+#include "memory/allStatic.hpp"
 #include "utilities/globalDefinitions.hpp"
 
 class outputStream;
 class Thread;
 class OSThread;
+
+extern "C" {
+  typedef void (*sa_handler_t)(int);
+  typedef void (*sa_sigaction_t)(int, siginfo_t*, void*);
+}
 
 class PosixSignals : public AllStatic {
 
@@ -47,6 +52,8 @@ public:
 
   static bool is_sig_ignored(int sig);
 
+  static void* get_signal_handler_for_signal(int sig);
+
   static void hotspot_sigmask(Thread* thread);
 
   static void print_signal_handler(outputStream* st, int sig, char* buf, size_t buflen);
@@ -61,6 +68,14 @@ public:
   // Unblock all signals whose delivery cannot be deferred and which, if they happen
   //  while delivery is blocked, would cause crashes or hangs (see JDK-8252533).
   static void unblock_error_signals();
+
+  // Signal handler installation
+  static int install_sigaction_signal_handler(struct sigaction* sigAct, // Main VM handler routine
+                                              struct sigaction* oldAct,
+                                              int sig,
+                                              sa_sigaction_t handler);
+  static void* install_generic_signal_handler(int sig, void* handler); // Used by JVM_RegisterSignal
+  static void* user_handler(); // Needed for signal handler comparisons
 };
 
 #endif // OS_POSIX_SIGNALS_POSIX_HPP

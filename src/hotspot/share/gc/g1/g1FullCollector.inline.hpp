@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,20 +26,75 @@
 #define SHARE_GC_G1_G1FULLCOLLECTOR_INLINE_HPP
 
 #include "gc/g1/g1FullCollector.hpp"
+
 #include "gc/g1/g1FullGCHeapRegionAttr.hpp"
+#include "gc/g1/g1HeapRegion.inline.hpp"
 #include "oops/oopsHierarchy.hpp"
 
-bool G1FullCollector::is_in_pinned_or_closed(oop obj) const {
-  return _region_attr_table.is_pinned_or_closed(cast_from_oop<HeapWord*>(obj));
+bool G1FullCollector::is_compacting(oop obj) const {
+  return _region_attr_table.is_compacting(cast_from_oop<HeapWord *>(obj));
 }
 
-bool G1FullCollector::is_in_pinned(oop obj) const {
-  return _region_attr_table.is_pinned(cast_from_oop<HeapWord*>(obj));
+bool G1FullCollector::is_skip_compacting(uint region_index) const {
+  return _region_attr_table.is_skip_compacting(region_index);
 }
 
-bool G1FullCollector::is_in_closed(oop obj) const {
-  return _region_attr_table.is_closed_archive(cast_from_oop<HeapWord*>(obj));
+bool G1FullCollector::is_compaction_target(uint region_index) const {
+  return _region_attr_table.is_compacting(region_index) || is_free(region_index);
+}
+
+void G1FullCollector::set_free(uint region_idx) {
+  _region_attr_table.set_free(region_idx);
+}
+
+bool G1FullCollector::is_free(uint region_idx) const {
+  return _region_attr_table.is_free(region_idx);
+}
+
+void G1FullCollector::update_from_compacting_to_skip_compacting(uint region_idx) {
+  _region_attr_table.verify_is_compacting(region_idx);
+  _region_attr_table.set_skip_compacting(region_idx);
+}
+
+void G1FullCollector::update_from_skip_compacting_to_compacting(uint region_idx) {
+  DEBUG_ONLY(_region_attr_table.verify_is_skip_compacting(region_idx);)
+  _region_attr_table.set_compacting(region_idx);
+}
+
+void G1FullCollector::set_compaction_top(G1HeapRegion* r, HeapWord* value) {
+  _compaction_tops[r->hrm_index()].store_relaxed(value);
+}
+
+HeapWord* G1FullCollector::compaction_top(G1HeapRegion* r) const {
+  return _compaction_tops[r->hrm_index()].load_relaxed();
+}
+
+void G1FullCollector::set_has_compaction_targets() {
+  if (!_has_compaction_targets) {
+    _has_compaction_targets = true;
+  }
+}
+
+bool G1FullCollector::has_compaction_targets() const {
+  return _has_compaction_targets;
+}
+
+void G1FullCollector::set_has_humongous() {
+  if (!_has_humongous) {
+    _has_humongous = true;
+  }
+}
+
+bool G1FullCollector::has_humongous() {
+  return _has_humongous;
+}
+
+void G1FullCollector::add_humongous_region(G1HeapRegion* hr) {
+  _humongous_compaction_regions.append(hr);
+}
+
+GrowableArrayCHeap<G1HeapRegion*, mtGC>& G1FullCollector::humongous_compaction_regions() {
+  return _humongous_compaction_regions;
 }
 
 #endif // SHARE_GC_G1_G1FULLCOLLECTOR_INLINE_HPP
-

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,22 +35,6 @@ import com.sun.source.doctree.*;
  * Inside your method, call super.visitXYZ to visit descendant
  * nodes.
  *
- * <p>The default implementation of the visitXYZ methods will determine
- * a result as follows:
- * <ul>
- * <li>If the node being visited has no children, the result will be {@code null}.
- * <li>If the node being visited has one child, the result will be the
- * result of calling {@code scan} on that child. The child may be a simple node
- * or itself a list of nodes.
- * <li> If the node being visited has more than one child, the result will
- * be determined by calling {@code scan} each child in turn, and then combining the
- * result of each scan after the first with the cumulative result
- * so far, as determined by the {@link #reduce} method. Each child may be either
- * a simple node of a list of nodes. The default behavior of the {@code reduce}
- * method is such that the result of the visitXYZ method will be the result of
- * the last child scanned.
- * </ul>
- *
  * <p>Here is an example to count the number of erroneous nodes in a tree:
  * <pre>
  *   class CountErrors extends DocTreeScanner&lt;Integer,Void&gt; {
@@ -64,6 +48,29 @@ import com.sun.source.doctree.*;
  *      }
  *   }
  * </pre>
+ *
+ * @implSpec
+ * <p>The default implementation of the visitXYZ methods will determine
+ * a result as follows:
+ * <ul>
+ * <li>If the node being visited has no children, the result will be {@code null}.
+ * <li>If the node being visited has one child, the result will be the
+ * result of calling {@code scan} with that child. The child may be a simple node
+ * or itself a list of nodes.
+ * <li>If the node being visited has more than one child, the result will
+ * be determined by calling {@code scan} with each child in turn, and then combining the
+ * result of each scan after the first with the cumulative result
+ * so far, as determined by the {@link #reduce} method. Each child may be either
+ * a simple node or a list of nodes. The default behavior of the {@code reduce}
+ * method is such that the result of the visitXYZ method will be the result of
+ * the last child scanned.
+ * </ul>
+ *
+ * @param <R> the return type of this visitor's methods.  Use {@link
+ *            Void} for visitors that do not need to return results.
+ * @param <P> the type of the additional parameter to this visitor's
+ *            methods.  Use {@code Void} for visitors that do not need an
+ *            additional parameter.
  *
  * @since 1.8
  */
@@ -128,7 +135,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
  ****************************************************************************/
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -140,7 +149,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -152,7 +163,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation returns {@code null}.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation returns {@code null}.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -164,7 +177,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -176,7 +191,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -191,7 +208,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation returns {@code null}.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation returns {@code null}.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -203,11 +222,15 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation returns {@code null}.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation returns {@code null}.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
      * @return the result of scanning
+     *
+     * @since 10
      */
     @Override
     public R visitDocType(DocTypeTree node, P p) {
@@ -215,7 +238,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation returns {@code null}.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation returns {@code null}.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -227,7 +252,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation returns {@code null}.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation returns {@code null}.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -239,7 +266,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation returns {@code null}.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation returns {@code null}.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -251,7 +280,25 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation returns {@code null}.
+     *
+     * @param node  {@inheritDoc}
+     * @param p  {@inheritDoc}
+     * @return the result of scanning
+     *
+     * @since 21
+     */
+    @Override
+    public R visitEscape(EscapeTree node, P p) {
+        return null;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -263,7 +310,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation returns {@code null}.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation returns {@code null}.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -275,7 +324,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -289,7 +340,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation returns {@code null}.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -297,11 +350,13 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
      */
     @Override
     public R visitInheritDoc(InheritDocTree node, P p) {
-        return null;
+        return scan(node.getSupertype(), p);
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -315,7 +370,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -327,7 +384,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -341,7 +400,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -355,7 +416,25 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation returns {@code null}.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation returns {@code null}.
+     *
+     * @param node  {@inheritDoc}
+     * @param p  {@inheritDoc}
+     * @return the result of scanning
+     *
+     * @since 23
+     */
+    @Override
+    public R visitRawText(RawTextTree node, P p) {
+        return null;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation returns {@code null}.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -367,7 +446,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -379,7 +460,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -391,7 +474,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -403,7 +488,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -415,7 +502,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -430,7 +519,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -442,7 +533,43 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
+     *
+     * @param node  {@inheritDoc}
+     * @param p  {@inheritDoc}
+     * @return the result of scanning
+     * @since 18
+     */
+    @Override
+    public R visitSnippet(SnippetTree node, P p) {
+        R r = scan(node.getAttributes(), p);
+        r = scanAndReduce(node.getBody(), p, r);
+        return r;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
+     *
+     * @param node {@inheritDoc}
+     * @param p    {@inheritDoc}
+     * @return the result of scanning
+     * @since 20
+     */
+    @Override
+    public R visitSpec(SpecTree node, P p) {
+        R r = scan(node.getURL(), p);
+        r = scanAndReduce(node.getTitle(), p, r);
+        return r;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -454,7 +581,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -467,7 +596,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation returns {@code null}.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation returns {@code null}.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -480,7 +611,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation returns {@code null}.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation returns {@code null}.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -492,7 +625,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -506,7 +641,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -518,7 +655,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -530,7 +669,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -544,7 +685,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -552,11 +695,15 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
      */
     @Override
     public R visitValue(ValueTree node, P p) {
-        return scan(node.getReference(), p);
+        R r = scan(node.getFormat(), p);
+        r = scanAndReduce(node.getReference(), p, r);
+        return r;
     }
 
     /**
-     * {@inheritDoc} This implementation scans the children in left to right order.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation scans the children in left to right order.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}
@@ -568,7 +715,9 @@ public class DocTreeScanner<R,P> implements DocTreeVisitor<R,P> {
     }
 
     /**
-     * {@inheritDoc} This implementation returns {@code null}.
+     * {@inheritDoc}
+     *
+     * @implSpec This implementation returns {@code null}.
      *
      * @param node  {@inheritDoc}
      * @param p  {@inheritDoc}

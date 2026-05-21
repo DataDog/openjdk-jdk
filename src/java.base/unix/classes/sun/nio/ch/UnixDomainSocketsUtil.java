@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,8 +26,6 @@
 package sun.nio.ch;
 
 import java.nio.charset.Charset;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import sun.net.NetProperties;
 import jdk.internal.util.StaticProperty;
 
@@ -52,14 +50,11 @@ class UnixDomainSocketsUtil {
      * 3. ${java.io.tmpdir} system property
      */
     static String getTempDir() {
-        PrivilegedAction<String> action = () -> {
-            String s = NetProperties.get("jdk.net.unixdomain.tmpdir");
-            if (s != null && s.length() > 0) {
-                return s;
-            } else {
-                return StaticProperty.javaIoTmpDir();
-            }
-        };
-        return AccessController.doPrivileged(action);
+        String s = NetProperties.get("jdk.net.unixdomain.tmpdir");
+        if (s != null && s.length() > 0) {
+            return s;
+        } else {
+            return StaticProperty.javaIoTmpDir();
+        }
     }
 }

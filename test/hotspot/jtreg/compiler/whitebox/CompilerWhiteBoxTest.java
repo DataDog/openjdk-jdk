@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,8 +24,8 @@
 package compiler.whitebox;
 
 import jdk.test.lib.Platform;
-import sun.hotspot.WhiteBox;
-import sun.hotspot.code.NMethod;
+import jdk.test.whitebox.WhiteBox;
+import jdk.test.whitebox.code.NMethod;
 
 import java.lang.reflect.Executable;
 import java.util.Objects;
@@ -42,9 +42,7 @@ public abstract class CompilerWhiteBoxTest {
     /** {@code CompLevel::CompLevel_none} -- Interpreter */
     public static final int COMP_LEVEL_NONE = 0;
     /** {@code CompLevel::CompLevel_any}, {@code CompLevel::CompLevel_all} */
-    public static final int COMP_LEVEL_ANY = -2;
-    /** {@code CompLevel::CompLevel_aot} -- AOT */
-    public static final int COMP_LEVEL_AOT = -1;
+    public static final int COMP_LEVEL_ANY = -1;
     /** {@code CompLevel::CompLevel_simple} -- C1 */
     public static final int COMP_LEVEL_SIMPLE = 1;
     /** {@code CompLevel::CompLevel_limited_profile} -- C1, invocation &amp; backedge counters */
@@ -64,8 +62,6 @@ public abstract class CompilerWhiteBoxTest {
     /** Value of {@code -XX:BackgroundCompilation} */
     protected static final boolean BACKGROUND_COMPILATION
             = Boolean.valueOf(getVMOption("BackgroundCompilation", "true"));
-    protected static final boolean USE_COUNTER_DECAY
-            = Boolean.valueOf(getVMOption("UseCounterDecay", "true"));
     /** Value of {@code -XX:TieredCompilation} */
     protected static final boolean TIERED_COMPILATION
             = Boolean.valueOf(getVMOption("TieredCompilation", "false"));
@@ -81,13 +77,7 @@ public abstract class CompilerWhiteBoxTest {
     protected static final long BACKEDGE_THRESHOLD;
 
     static {
-        if (TIERED_COMPILATION) {
-            BACKEDGE_THRESHOLD = THRESHOLD = 150000;
-        } else {
-            THRESHOLD = COMPILE_THRESHOLD;
-            BACKEDGE_THRESHOLD = Math.max(10000, COMPILE_THRESHOLD *
-                    Long.parseLong(getVMOption("OnStackReplacePercentage")));
-        }
+        BACKEDGE_THRESHOLD = THRESHOLD = 150000;
     }
 
     /**
@@ -231,15 +221,28 @@ public abstract class CompilerWhiteBoxTest {
      *                          compilation level.
      */
     protected final void checkNotCompiled(boolean isOsr) {
-        if (WHITE_BOX.isMethodQueuedForCompilation(method)) {
-            throw new RuntimeException(method + " must not be in queue");
+        checkNotCompiled(method, isOsr);
+    }
+
+    /**
+     * Checks, that the specified executable is not (OSR-)compiled.
+     *
+     * @param executable The method or constructor to check.
+     * @param isOsr Check for OSR compilation if true
+     * @throws RuntimeException if {@linkplain #method} is in compiler queue or
+     *                          is compiled, or if {@linkplain #method} has zero
+     *                          compilation level.
+     */
+    protected static final void checkNotCompiled(Executable executable, boolean isOsr) {
+        if (WHITE_BOX.isMethodQueuedForCompilation(executable)) {
+            throw new RuntimeException(executable + " must not be in queue");
         }
-        if (WHITE_BOX.isMethodCompiled(method, isOsr)) {
-            throw new RuntimeException(method + " must not be " +
+        if (WHITE_BOX.isMethodCompiled(executable, isOsr)) {
+            throw new RuntimeException(executable + " must not be " +
                                        (isOsr ? "osr_" : "") + "compiled");
         }
-        if (WHITE_BOX.getMethodCompilationLevel(method, isOsr) != 0) {
-            throw new RuntimeException(method + (isOsr ? " osr_" : " ") +
+        if (WHITE_BOX.getMethodCompilationLevel(executable, isOsr) != 0) {
+            throw new RuntimeException(executable + (isOsr ? " osr_" : " ") +
                                        "comp_level must be == 0");
         }
     }
@@ -252,21 +255,34 @@ public abstract class CompilerWhiteBoxTest {
      *                          has nonzero compilation level
      */
     protected final void checkCompiled() {
+        checkCompiled(method, testCase.isOsr());
+    }
+
+    /**
+     * Checks, that the specified executable is compiled.
+     *
+     * @param executable The method or constructor to check.
+     * @param isOsr Check for OSR compilation if true
+     * @throws RuntimeException if {@linkplain #method} isn't in compiler queue
+     *                          and isn't compiled, or if {@linkplain #method}
+     *                          has nonzero compilation level
+     */
+    protected static final void checkCompiled(Executable executable, boolean isOsr) {
         final long start = System.currentTimeMillis();
-        waitBackgroundCompilation();
-        if (WHITE_BOX.isMethodQueuedForCompilation(method)) {
+        waitBackgroundCompilation(executable);
+        if (WHITE_BOX.isMethodQueuedForCompilation(executable)) {
             System.err.printf("Warning: %s is still in queue after %dms%n",
-                    method, System.currentTimeMillis() - start);
+                    executable, System.currentTimeMillis() - start);
             return;
         }
-        if (!WHITE_BOX.isMethodCompiled(method, testCase.isOsr())) {
-            throw new RuntimeException(method + " must be "
-                    + (testCase.isOsr() ? "osr_" : "") + "compiled");
+        if (!WHITE_BOX.isMethodCompiled(executable, isOsr)) {
+            throw new RuntimeException(executable + " must be "
+                    + (isOsr ? "osr_" : "") + "compiled");
         }
-        if (WHITE_BOX.getMethodCompilationLevel(method, testCase.isOsr())
+        if (WHITE_BOX.getMethodCompilationLevel(executable, isOsr)
                 == 0) {
-            throw new RuntimeException(method
-                    + (testCase.isOsr() ? " osr_" : " ")
+            throw new RuntimeException(executable
+                    + (isOsr ? " osr_" : " ")
                     + "comp_level must be != 0");
         }
     }
@@ -375,9 +391,6 @@ public abstract class CompilerWhiteBoxTest {
      * @see #compile(int)
      */
     protected final int compile() throws Exception {
-        if (USE_COUNTER_DECAY) {
-            throw new Exception("Tests using compile method must turn off counter decay for reliability");
-        }
         if (testCase.isOsr()) {
             return compile(1);
         } else {

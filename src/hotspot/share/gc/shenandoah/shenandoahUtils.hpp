@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2017, 2019, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2017, 2021, Red Hat, Inc. All rights reserved.
+ * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,27 +31,47 @@
 #include "gc/shared/gcVMOperations.hpp"
 #include "gc/shared/isGCActiveMark.hpp"
 #include "gc/shared/suspendibleThreadSet.hpp"
-#include "gc/shared/weakProcessorPhaseTimes.hpp"
+#include "gc/shared/workerThread.hpp"
 #include "gc/shenandoah/shenandoahPhaseTimings.hpp"
 #include "gc/shenandoah/shenandoahThreadLocalData.hpp"
 #include "jfr/jfrEvents.hpp"
 #include "memory/allocation.hpp"
 #include "runtime/safepoint.hpp"
-#include "runtime/vmThread.hpp"
 #include "runtime/vmOperations.hpp"
+#include "runtime/vmThread.hpp"
 #include "services/memoryService.hpp"
 
 class GCTimer;
+class ShenandoahGeneration;
+
+#define SHENANDOAH_RETURN_EVENT_MESSAGE(generation_type, prefix, postfix) \
+  switch (generation_type) {                                              \
+    case NON_GEN:                                                         \
+      return prefix postfix;                                              \
+    case GLOBAL:                                                          \
+      return prefix " (Global)" postfix;                                  \
+    case YOUNG:                                                           \
+      return prefix " (Young)" postfix;                                   \
+    case OLD:                                                             \
+      return prefix " (Old)" postfix;                                     \
+    default:                                                              \
+      ShouldNotReachHere();                                               \
+      return prefix " (Unknown)" postfix;                                 \
+  }                                                                       \
 
 class ShenandoahGCSession : public StackObj {
 private:
   ShenandoahHeap* const _heap;
+  ShenandoahGeneration* const _generation;
   GCTimer*  const _timer;
   GCTracer* const _tracer;
 
   TraceMemoryManagerStats _trace_cycle;
+
+  static const char* cycle_end_message(ShenandoahGenerationType type);
 public:
-  ShenandoahGCSession(GCCause::Cause cause);
+  ShenandoahGCSession(GCCause::Cause cause, ShenandoahGeneration* generation,
+                      bool is_degenerated = false, bool is_out_of_cycle = false);
   ~ShenandoahGCSession();
 };
 
@@ -64,11 +85,12 @@ private:
 
   ShenandoahPhaseTimings* const         _timings;
   const ShenandoahPhaseTimings::Phase   _phase;
+  const bool                            _should_aggregate;
   ShenandoahPhaseTimings::Phase         _parent_phase;
   double _start;
 
 public:
-  ShenandoahTimingsTracker(ShenandoahPhaseTimings::Phase phase);
+  ShenandoahTimingsTracker(ShenandoahPhaseTimings::Phase phase, bool should_aggregate = false);
   ~ShenandoahTimingsTracker();
 
   static ShenandoahPhaseTimings::Phase current_phase() { return _current_phase; }
@@ -132,11 +154,11 @@ private:
   ShenandoahHeap* const _heap;
   const GCIdMark                _gc_id_mark;
   const SvcGCMarker             _svc_gc_mark;
-  const IsGCActiveMark          _is_gc_active_mark;
+  const IsSTWGCActiveMark       _is_gc_active_mark;
   TraceMemoryManagerStats       _trace_pause;
 
 public:
-  ShenandoahGCPauseMark(uint gc_id, SvcGCMarker::reason_type type);
+  ShenandoahGCPauseMark(uint gc_id, const char* notification_action, SvcGCMarker::reason_type type);
 };
 
 class ShenandoahSafepoint : public AllStatic {
@@ -159,13 +181,14 @@ public:
 
     // Otherwise check we are at proper operation type
     VM_Operation* vm_op = VMThread::vm_operation();
-    if (vm_op == NULL) return false;
+    if (vm_op == nullptr) return false;
 
     VM_Operation::VMOp_Type type = vm_op->type();
     return type == VM_Operation::VMOp_ShenandoahInitMark ||
            type == VM_Operation::VMOp_ShenandoahFinalMarkStartEvac ||
            type == VM_Operation::VMOp_ShenandoahInitUpdateRefs ||
            type == VM_Operation::VMOp_ShenandoahFinalUpdateRefs ||
+           type == VM_Operation::VMOp_ShenandoahFinalVerify ||
            type == VM_Operation::VMOp_ShenandoahFullGC ||
            type == VM_Operation::VMOp_ShenandoahDegeneratedGC;
   }
@@ -173,16 +196,10 @@ public:
 
 class ShenandoahWorkerSession : public StackObj {
 protected:
-  uint _worker_id;
-
   ShenandoahWorkerSession(uint worker_id);
-  ~ShenandoahWorkerSession();
 public:
   static inline uint worker_id() {
-    Thread* thr = Thread::current();
-    uint id = ShenandoahThreadLocalData::worker_id(thr);
-    assert(id != ShenandoahThreadLocalData::INVALID_WORKER_ID, "Worker session has not been created");
-    return id;
+    return WorkerThread::worker_id();
   }
 };
 
@@ -204,28 +221,19 @@ public:
   ~ShenandoahParallelWorkerSession();
 };
 
-class ShenandoahSuspendibleThreadSetJoiner {
-private:
-  SuspendibleThreadSetJoiner _joiner;
+// Regions cannot be uncommitted when concurrent reset is zeroing out the bitmaps.
+// This CADR class enforces this by forbidding region uncommits while it is in scope.
+class ShenandoahNoUncommitMark : public StackObj {
+  ShenandoahHeap* const _heap;
 public:
-  ShenandoahSuspendibleThreadSetJoiner(bool active = true) : _joiner(active) {
-    assert(!ShenandoahThreadLocalData::is_evac_allowed(Thread::current()), "STS should be joined before evac scope");
+  explicit ShenandoahNoUncommitMark(ShenandoahHeap* heap) : _heap(heap) {
+    _heap->forbid_uncommit();
   }
-  ~ShenandoahSuspendibleThreadSetJoiner() {
-    assert(!ShenandoahThreadLocalData::is_evac_allowed(Thread::current()), "STS should be left after evac scope");
+
+  ~ShenandoahNoUncommitMark() {
+    _heap->allow_uncommit();
   }
 };
 
-class ShenandoahSuspendibleThreadSetLeaver {
-private:
-  SuspendibleThreadSetLeaver _leaver;
-public:
-  ShenandoahSuspendibleThreadSetLeaver(bool active = true) : _leaver(active) {
-    assert(!ShenandoahThreadLocalData::is_evac_allowed(Thread::current()), "STS should be left after evac scope");
-  }
-  ~ShenandoahSuspendibleThreadSetLeaver() {
-    assert(!ShenandoahThreadLocalData::is_evac_allowed(Thread::current()), "STS should be joined before evac scope");
-  }
-};
 
 #endif // SHARE_GC_SHENANDOAH_SHENANDOAHUTILS_HPP

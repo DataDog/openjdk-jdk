@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -83,7 +83,7 @@ abstract class KeyManagerFactoryImpl extends KeyManagerFactorySpi {
                 UnrecoverableKeyException {
             if (ks == null) {
                 keyManager = new X509KeyManagerImpl(
-                        Collections.<Builder>emptyList());
+                        Collections.emptyList());
             } else {
                 try {
                     Builder builder = Builder.newInstance(ks,
@@ -99,7 +99,7 @@ abstract class KeyManagerFactoryImpl extends KeyManagerFactorySpi {
         @Override
         protected void engineInit(ManagerFactoryParameters params) throws
                 InvalidAlgorithmParameterException {
-            if (params instanceof KeyStoreBuilderParameters == false) {
+            if (!(params instanceof KeyStoreBuilderParameters)) {
                 throw new InvalidAlgorithmParameterException(
                 "Parameters must be instance of KeyStoreBuilderParameters");
             }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,17 +27,13 @@ package sun.rmi.transport;
 import java.io.InvalidClassException;
 import java.lang.ref.PhantomReference;
 import java.lang.ref.ReferenceQueue;
-import java.net.SocketPermission;
 import java.rmi.UnmarshalException;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.rmi.ConnectException;
 import java.rmi.RemoteException;
 import java.rmi.dgc.DGC;
 import java.rmi.dgc.Lease;
@@ -45,13 +41,9 @@ import java.rmi.dgc.VMID;
 import java.rmi.server.ObjID;
 
 import sun.rmi.runtime.Log;
-import sun.rmi.runtime.NewThreadAction;
+import sun.rmi.runtime.RuntimeUtil;
 import sun.rmi.server.UnicastRef;
 import sun.rmi.server.Util;
-
-import java.security.AccessControlContext;
-import java.security.Permissions;
-import java.security.ProtectionDomain;
 
 /**
  * DGCClient implements the client-side of the RMI distributed garbage
@@ -92,18 +84,15 @@ final class DGCClient {
 
     /** lease duration to request (usually ignored by server) */
     private static final long leaseValue =              // default 10 minutes
-        AccessController.doPrivileged((PrivilegedAction<Long>) () ->
-            Long.getLong("java.rmi.dgc.leaseValue", 600000));
+        Long.getLong("java.rmi.dgc.leaseValue", 600000);
 
     /** maximum interval between retries of failed clean calls */
     private static final long cleanInterval =           // default 3 minutes
-        AccessController.doPrivileged((PrivilegedAction<Long>) () ->
-            Long.getLong("sun.rmi.dgc.cleanInterval", 180000));
+        Long.getLong("sun.rmi.dgc.cleanInterval", 180000);
 
     /** maximum interval between complete garbage collections of local heap */
     private static final long gcInterval =              // default 1 hour
-        AccessController.doPrivileged((PrivilegedAction<Long>) () ->
-            Long.getLong("sun.rmi.dgc.client.gcInterval", 3600000));
+        Long.getLong("sun.rmi.dgc.client.gcInterval", 3600000);
 
     /** minimum retry count for dirty calls that fail */
     private static final int dirtyFailureRetries = 5;
@@ -116,18 +105,6 @@ final class DGCClient {
 
     /** ObjID for server-side DGC object */
     private static final ObjID dgcID = new ObjID(ObjID.DGC_ID);
-
-    /**
-     * An AccessControlContext with only socket permissions,
-     * suitable for an RMIClientSocketFactory.
-     */
-    private static final AccessControlContext SOCKET_ACC;
-    static {
-        Permissions perms = new Permissions();
-        perms.add(new SocketPermission("*", "connect,resolve"));
-        ProtectionDomain[] pd = { new ProtectionDomain(null, perms) };
-        SOCKET_ACC = new AccessControlContext(pd);
-    }
 
     /*
      * Disallow anyone from creating one of these.
@@ -259,9 +236,8 @@ final class DGCClient {
             } catch (RemoteException e) {
                 throw new Error("internal error creating DGC stub");
             }
-            renewCleanThread =  AccessController.doPrivileged(
-                new NewThreadAction(new RenewCleanThread(),
-                                    "RenewClean-" + endpoint, true));
+            renewCleanThread =
+                RuntimeUtil.newSystemThread(new RenewCleanThread(), "RenewClean-" + endpoint, true);
             renewCleanThread.start();
         }
 
@@ -495,13 +471,7 @@ final class DGCClient {
             if (newRenewTime < renewTime) {
                 renewTime = newRenewTime;
                 if (interruptible) {
-                    AccessController.doPrivileged(
-                        new PrivilegedAction<Void>() {
-                            public Void run() {
-                            renewCleanThread.interrupt();
-                            return null;
-                        }
-                    });
+                    renewCleanThread.interrupt();
                 }
             } else {
                 renewTime = newRenewTime;
@@ -592,19 +562,13 @@ final class DGCClient {
                         }
                     }
 
-                    boolean needRenewal_ = needRenewal;
-                    Set<RefEntry> refsToDirty_ = refsToDirty;
-                    long sequenceNum_ = sequenceNum;
-                    AccessController.doPrivileged((PrivilegedAction<Void>)() -> {
-                        if (needRenewal_) {
-                            makeDirtyCall(refsToDirty_, sequenceNum_);
-                        }
+                    if (needRenewal) {
+                        makeDirtyCall(refsToDirty, sequenceNum);
+                    }
 
-                        if (!pendingCleans.isEmpty()) {
-                            makeCleanCalls();
-                        }
-                        return null;
-                    }, SOCKET_ACC);
+                    if (!pendingCleans.isEmpty()) {
+                        makeCleanCalls();
+                    }
                 } while (!removed || !pendingCleans.isEmpty());
             }
         }

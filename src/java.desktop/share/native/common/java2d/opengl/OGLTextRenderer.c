@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -63,7 +63,8 @@ typedef enum {
     MODE_USE_CACHE_GRAY,
     MODE_USE_CACHE_LCD,
     MODE_NO_CACHE_GRAY,
-    MODE_NO_CACHE_LCD
+    MODE_NO_CACHE_LCD,
+    MODE_NO_CACHE_COLOR
 } GlyphMode;
 static GlyphMode glyphMode = MODE_NOT_INITED;
 
@@ -346,8 +347,8 @@ OGLTR_UpdateLCDTextContrast(jint contrast)
     double ig = 1.0 / g;
     GLint loc;
 
-    J2dTraceLn1(J2D_TRACE_INFO,
-                "OGLTR_UpdateLCDTextContrast: contrast=%d", contrast);
+    J2dTraceLn(J2D_TRACE_INFO,
+               "OGLTR_UpdateLCDTextContrast: contrast=%d", contrast);
 
     loc = j2d_glGetUniformLocationARB(lcdTextProgram, "gamma");
     j2d_glUniform3fARB(loc, g, g, g);
@@ -375,8 +376,8 @@ OGLTR_UpdateLCDTextColor(jint contrast)
     GLfloat clr[4];
     GLint loc;
 
-    J2dTraceLn1(J2D_TRACE_INFO,
-                "OGLTR_UpdateLCDTextColor: contrast=%d", contrast);
+    J2dTraceLn(J2D_TRACE_INFO,
+               "OGLTR_UpdateLCDTextColor: contrast=%d", contrast);
 
     /*
      * Note: Ideally we would update the "src_adj" uniform parameter only
@@ -526,6 +527,7 @@ OGLTR_DisableGlyphModeState()
         j2d_glDisable(GL_TEXTURE_2D);
         break;
 
+    case MODE_NO_CACHE_COLOR:
     case MODE_NO_CACHE_GRAY:
     case MODE_USE_CACHE_GRAY:
     case MODE_NOT_INITED:
@@ -978,6 +980,33 @@ OGLTR_DrawLCDGlyphNoCache(OGLContext *oglc, OGLSDOps *dstOps,
     return JNI_TRUE;
 }
 
+static jboolean
+OGLTR_DrawColorGlyphNoCache(OGLContext *oglc, GlyphInfo *ginfo, jint x, jint y)
+{
+    if (glyphMode != MODE_NO_CACHE_COLOR) {
+        OGLTR_DisableGlyphModeState();
+        RESET_PREVIOUS_OP();
+        glyphMode = MODE_NO_CACHE_COLOR;
+    }
+
+    // see OGLBlitSwToSurface() in OGLBlitLoops.c
+    // for more info on the following two lines
+    j2d_glRasterPos2i(0, 0);
+    j2d_glBitmap(0, 0, 0, 0, (GLfloat) x, (GLfloat) (-y), NULL);
+
+    // in OpenGL image data is assumed to contain lines from bottom to top
+    j2d_glPixelZoom(1, -1);
+
+    j2d_glDrawPixels(ginfo->width, ginfo->height, GL_BGRA, GL_UNSIGNED_BYTE,
+                     ginfo->image);
+
+    // restoring state
+    j2d_glPixelZoom(1, 1);
+
+    return JNI_TRUE;
+}
+
+
 // see DrawGlyphList.c for more on this macro...
 #define FLOOR_ASSIGN(l, r) \
     if ((r)<0) (l) = ((int)floor(r)); else (l) = ((int)(r))
@@ -1006,7 +1035,7 @@ OGLTR_DrawGlyphList(JNIEnv *env, OGLContext *oglc, OGLSDOps *dstOps,
 
     // We have to obtain an information about destination content
     // in order to render lcd glyphs. It could be done by copying
-    // a part of desitination buffer into an intermediate texture
+    // a part of destination buffer into an intermediate texture
     // using glCopyTexSubImage2D(). However, on macosx this path is
     // slow, and it dramatically reduces the overall speed of lcd
     // text rendering.
@@ -1028,7 +1057,7 @@ OGLTR_DrawGlyphList(JNIEnv *env, OGLContext *oglc, OGLSDOps *dstOps,
     for (glyphCounter = 0; glyphCounter < totalGlyphs; glyphCounter++) {
         jint x, y;
         jfloat glyphx, glyphy;
-        jboolean grayscale, ok;
+        jboolean ok;
         GlyphInfo *ginfo = (GlyphInfo *)jlong_to_ptr(NEXT_LONG(images));
 
         if (ginfo == NULL) {
@@ -1037,8 +1066,6 @@ OGLTR_DrawGlyphList(JNIEnv *env, OGLContext *oglc, OGLSDOps *dstOps,
                           "OGLTR_DrawGlyphList: glyph info is null");
             break;
         }
-
-        grayscale = (ginfo->rowBytes == ginfo->width);
 
         if (usePositions) {
             jfloat posx = NEXT_FLOAT(positions);
@@ -1060,7 +1087,7 @@ OGLTR_DrawGlyphList(JNIEnv *env, OGLContext *oglc, OGLSDOps *dstOps,
             continue;
         }
 
-        if (grayscale) {
+        if (ginfo->rowBytes == ginfo->width) {
             // grayscale or monochrome glyph data
             if (ginfo->width <= OGLTR_CACHE_CELL_WIDTH &&
                 ginfo->height <= OGLTR_CACHE_CELL_HEIGHT)
@@ -1069,6 +1096,9 @@ OGLTR_DrawGlyphList(JNIEnv *env, OGLContext *oglc, OGLSDOps *dstOps,
             } else {
                 ok = OGLTR_DrawGrayscaleGlyphNoCache(oglc, ginfo, x, y);
             }
+        } else if (ginfo->rowBytes == ginfo->width * 4) {
+            // color glyph data
+            ok = OGLTR_DrawColorGlyphNoCache(oglc, ginfo, x, y);
         } else {
             // LCD-optimized glyph data
             jint rowBytesOffset = 0;

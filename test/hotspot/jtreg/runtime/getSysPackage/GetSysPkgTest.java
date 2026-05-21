@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,8 @@
  * @modules java.base/jdk.internal.misc
  * @modules java.base/jdk.internal.loader
  *          java.logging
+ * @requires vm.flagless
+ * @requires !jdk.explodedImage
  * @library /test/lib
  * @run driver GetSysPkgTest
  */
@@ -36,6 +38,7 @@ import java.lang.reflect.Method;
 import jdk.test.lib.compiler.InMemoryJavaCompiler;
 import jdk.test.lib.process.ProcessTools;
 import jdk.test.lib.process.OutputAnalyzer;
+import jdk.test.lib.helpers.ClassFileInstaller;
 
 // Test that JVM get_system_package() returns the module location for defined packages.
 public class GetSysPkgTest {
@@ -99,7 +102,7 @@ public class GetSysPkgTest {
                 InMemoryJavaCompiler.compile("GetSysPkg_package.GetSysClass", source);
             ClassFileInstaller.writeClassToDisk("GetSysPkg_package/GetSysClass", klassbuf);
 
-            ProcessBuilder pb = ProcessTools.createJavaProcessBuilder("-Xbootclasspath/a:bl_dir",
+            ProcessBuilder pb = ProcessTools.createLimitedTestJavaProcessBuilder("-Xbootclasspath/a:bl_dir",
                 "--add-opens=java.base/jdk.internal.loader=ALL-UNNAMED", "-cp", "." + File.pathSeparator +
                 System.getProperty("test.classes"), "GetSysPkgTest", "do_tests");
             OutputAnalyzer output = new OutputAnalyzer(pb.start());

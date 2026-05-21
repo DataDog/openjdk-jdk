@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,7 +29,7 @@ import javax.tools.*;
 import com.sun.tools.javac.api.*;
 import com.sun.tools.javac.api.DiagnosticFormatter.Configuration.DiagnosticPart;
 import com.sun.tools.javac.api.Formattable.LocalizedString;
-import com.sun.tools.javac.code.Flags.Flag;
+import com.sun.tools.javac.code.FlagsEnum;
 import com.sun.tools.javac.code.Kinds.KindName;
 import com.sun.tools.javac.code.*;
 import com.sun.tools.javac.file.*;
@@ -43,7 +43,7 @@ import javax.lang.model.SourceVersion;
 /**
  * Compiler factory for instances of Example.Compiler that use custom
  * DiagnosticFormatter and Messages objects to track the types of args
- * when when localizing diagnostics.
+ * when localizing diagnostics.
  * The compiler objects only support "output" mode, not "check" mode.
  */
 class ArgTypeCompilerFactory implements Example.Compiler.Factory {
@@ -303,7 +303,7 @@ class ArgTypeCompilerFactory implements Example.Compiler.Factory {
             return "number";
         if (o instanceof String)
             return "string";
-        if (o instanceof Flag)
+        if (o instanceof FlagsEnum)
             return "modifier";
         if (o instanceof KindName)
             return "symbol kind";

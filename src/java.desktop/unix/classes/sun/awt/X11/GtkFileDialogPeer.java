@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -40,7 +40,7 @@ final class GtkFileDialogPeer extends XDialogPeer implements FileDialogPeer {
     private final FileDialog fd;
 
     // A pointer to the native GTK FileChooser widget
-    private volatile long widget = 0L;
+    private volatile long widget;
     private long standaloneWindow;
     private volatile boolean quit;
 
@@ -154,6 +154,7 @@ final class GtkFileDialogPeer extends XDialogPeer implements FileDialogPeer {
         // have delegated to FileDialog#setFile
     }
 
+    @Override
     protected void requestXFocus(long time, boolean timeProvided) {
         if(standaloneWindow == 0) {
             super.requestXFocus(time, timeProvided);

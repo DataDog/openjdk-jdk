@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -45,7 +45,6 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.zip.ZipFile;
 
@@ -92,8 +91,19 @@ class ModuleReferences {
                                         ModulePatcher patcher,
                                         Path file) {
         URI uri = file.toUri();
-        Supplier<ModuleReader> supplier = () -> new JarModuleReader(file, uri);
-        HashSupplier hasher = (a) -> ModuleHashes.computeHash(supplier, a);
+        String fileString = file.toString();
+        Supplier<ModuleReader> supplier = new Supplier<>() {
+            @Override
+            public ModuleReader get() {
+                return new JarModuleReader(fileString, uri);
+            }
+        };
+        HashSupplier hasher = new HashSupplier() {
+            @Override
+            public byte[] generate(String algorithm) {
+              return ModuleHashes.computeHash(supplier, algorithm);
+            }
+        };
         return newModule(attrs, uri, supplier, patcher, hasher);
     }
 
@@ -122,7 +132,7 @@ class ModuleReferences {
      * A base module reader that encapsulates machinery required to close the
      * module reader safely.
      */
-    static abstract class SafeCloseModuleReader implements ModuleReader {
+    abstract static class SafeCloseModuleReader implements ModuleReader {
 
         // RW lock to support safe close
         private final ReadWriteLock lock = new ReentrantReadWriteLock();
@@ -223,9 +233,9 @@ class ModuleReferences {
         private final JarFile jf;
         private final URI uri;
 
-        static JarFile newJarFile(Path path) {
+        static JarFile newJarFile(String path) {
             try {
-                return new JarFile(new File(path.toString()),
+                return new JarFile(new File(path),
                                    true,                       // verify
                                    ZipFile.OPEN_READ,
                                    JarFile.runtimeVersion());
@@ -234,7 +244,7 @@ class ModuleReferences {
             }
         }
 
-        JarModuleReader(Path path, URI uri) {
+        JarModuleReader(String path, URI uri) {
             this.jf = newJarFile(path);
             this.uri = uri;
         }
@@ -274,7 +284,7 @@ class ModuleReferences {
             // take snapshot to avoid async close
             List<String> names = jf.versionedStream()
                     .map(JarEntry::getName)
-                    .collect(Collectors.toList());
+                    .toList();
             return names.stream();
         }
 
@@ -340,7 +350,7 @@ class ModuleReferences {
             List<String> names = jf.stream()
                     .filter(e -> e.section() == JmodFile.Section.CLASSES)
                     .map(JmodFile.Entry::name)
-                    .collect(Collectors.toList());
+                    .toList();
             return names.stream();
         }
 
@@ -360,13 +370,6 @@ class ModuleReferences {
 
         ExplodedModuleReader(Path dir) {
             this.dir = dir;
-
-            // when running with a security manager then check that the caller
-            // has access to the directory.
-            SecurityManager sm = System.getSecurityManager();
-            if (sm != null) {
-                boolean unused = Files.isDirectory(dir);
-            }
         }
 
         /**

@@ -4,9 +4,7 @@
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation. Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -366,7 +364,7 @@ public abstract class Operator
     }
 
     /**
-     * Returns component visualizer. Visualizer is used from from
+     * Returns component visualizer. Visualizer is used from
      * makeComponentVisible() method.
      *
      * @return a visualizer assigned to this operator.
@@ -378,7 +376,7 @@ public abstract class Operator
     }
 
     /**
-     * Changes component visualizer. Visualizer is used from from
+     * Changes component visualizer. Visualizer is used from
      * makeComponentVisible() method.
      *
      * @param vo a visualizer to assign to this operator.
@@ -720,10 +718,9 @@ public abstract class Operator
         try {
             return stateWaiter.waitAction(null);
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw (new JemmyException(
+            throw new JemmyException(
                     "Waiting of \"" + waitable.getDescription()
-                            + "\" state has been interrupted!"));
+                            + "\" state has been interrupted!");
         }
     }
 
@@ -735,14 +732,22 @@ public abstract class Operator
      * defined by {@code "ComponentOperator.WaitStateTimeout"}
      */
     public void waitStateOnQueue(final ComponentChooser state) {
-        waitState((comp) -> {
-            return (boolean) (queueTool.invokeSmoothly(
-                    new QueueTool.QueueAction<Object>("checkComponent") {
-                @Override
-                public final Object launch() throws Exception {
-                    return state.checkComponent(comp);
-                }
-            }));
+        waitState(new ComponentChooser() {
+            @Override
+            public boolean checkComponent(Component comp) {
+                return (boolean) (queueTool.invokeSmoothly(
+                        new QueueTool.QueueAction<Object>("checkComponent") {
+                            @Override
+                            public final Object launch() throws Exception {
+                                return state.checkComponent(comp);
+                            }
+                        }));
+            }
+
+            @Override
+            public String getDescription() {
+                return state.getDescription();
+            }
         });
     }
 
@@ -1073,7 +1078,7 @@ public abstract class Operator
     }
 
     /**
-     * Interface used to make component visible & ready to to make operations
+     * Interface used to make component visible & ready to make operations
      * with.
      */
     public interface ComponentVisualizer {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,27 +21,28 @@
  * questions.
  */
 
-/**
+/*
  * @test
  * @bug 8166334 8188894
  * @summary test shift-tab shortcuts "fixes"
  * @modules
+ *     jdk.jshell/jdk.internal.jshell.tool:open
  *     jdk.jshell/jdk.internal.jshell.tool.resources:open
  *     jdk.jshell/jdk.jshell:open
  * @build UITesting
  * @build ToolShiftTabTest
- * @run testng/timeout=300 ToolShiftTabTest
+ * @run junit/timeout=300 ToolShiftTabTest
  */
 
 import java.util.regex.Pattern;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Test;
 
-@Test
 public class ToolShiftTabTest extends UITesting {
 
     // Shift-tab as escape sequence
     private String FIX = "\033\133\132";
 
+    @Test
     public void testFixVariable() throws Exception {
         doRunTest((inputSink, out) -> {
             inputSink.write("3+4");
@@ -53,6 +54,7 @@ public class ToolShiftTabTest extends UITesting {
         });
     }
 
+    @Test
     public void testFixMethod() throws Exception {
         doRunTest((inputSink, out) -> {
             inputSink.write("5.5 >= 3.1415926535");
@@ -67,6 +69,7 @@ public class ToolShiftTabTest extends UITesting {
         });
     }
 
+    @Test
     public void testFixMethodVoid() throws Exception {
         doRunTest((inputSink, out) -> {
             inputSink.write("System.out.println(\"Testing\")");
@@ -80,6 +83,7 @@ public class ToolShiftTabTest extends UITesting {
         });
     }
 
+    @Test
     public void testFixMethodNoLeaks() throws Exception {
         doRunTest((inputSink, out) -> {
             inputSink.write("4");
@@ -105,14 +109,18 @@ public class ToolShiftTabTest extends UITesting {
         });
     }
 
+    @Test
     public void testFixImport() throws Exception {
         doRunTest((inputSink, out) -> {
-            do {
-                inputSink.write("Frame");
+            inputSink.write("Frame");
+            inputSink.write(FIX + "i");
+            while (!waitOutput(out, "java.awt.Frame", "Results may be incomplete")) {
+                Thread.sleep(1000);
                 inputSink.write(FIX + "i");
-                inputSink.write("1");
-                inputSink.write(".WIDTH\n");
-            } while (!waitOutput(out, "==> 1", "Results may be incomplete"));
+            }
+            inputSink.write("1");
+            inputSink.write(".WIDTH\n");
+            waitOutput(out, "==> 1");
             inputSink.write("/import\n");
             waitOutput(out, "|    import java.awt.Frame");
 
@@ -122,6 +130,7 @@ public class ToolShiftTabTest extends UITesting {
         });
     }
 
+    @Test
     public void testFixBad() throws Exception {
         doRunTest((inputSink, out) -> {
             inputSink.write("123");

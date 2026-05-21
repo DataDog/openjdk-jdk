@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -346,7 +346,7 @@
  * <pre>{@code
  *     List<String> results =
  *         stream.filter(s -> pattern.matcher(s).matches())
- *               .collect(Collectors.toList());  // No side-effects!
+ *               .toList();  // No side-effects!
  * }</pre>
  *
  * <h3><a id="Ordering">Ordering</a></h3>
@@ -436,7 +436,7 @@
  * can operate on subsets of the data in parallel, and then combine the
  * intermediate results to get the final correct answer.  (Even if the language
  * had a "parallel for-each" construct, the mutative accumulation approach would
- * still required the developer to provide
+ * still require the developer to provide
  * thread-safe updates to the shared accumulating variable {@code sum}, and
  * the required synchronization would then likely eliminate any performance gain from
  * parallelism.)  Using {@code reduce()} instead removes all of the
@@ -620,6 +620,19 @@
  * but in some cases equivalence may be relaxed to account for differences in
  * order.
  *
+ * <h3><a id="Extensibility">Extensibility</a></h3>
+ *
+ * <p>Implementing {@link java.util.stream.Collector};
+ * using the factory method {@code java.util.stream.Collector.of(...)}; or
+ * using the predefined collectors in {@link java.util.stream.Collectors} allows
+ * for user-defined, reusable, <em>terminal</em> operations.
+ *
+ * <p>Implementing {@link java.util.stream.Gatherer}; using the factory
+ * methods {@code java.util.stream.Gatherer.of(...)} and
+ * {@code java.util.stream.Gatherer.ofSequential(...)};
+ * or using the predefined gatherers in {@link java.util.stream.Gatherers}
+ * allows for user-defined, reusable, <em>intermediate</em> operations.
+ *
  * <h3><a id="ConcurrentReduction">Reduction, concurrency, and ordering</a></h3>
  *
  * With some complex reduction operations, for example a {@code collect()} that
@@ -752,5 +765,4 @@
  */
 package java.util.stream;
 
-import java.util.function.BinaryOperator;
 import java.util.function.UnaryOperator;

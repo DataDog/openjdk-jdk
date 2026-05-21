@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,9 @@
 #define SHARE_GC_Z_ZLOCK_INLINE_HPP
 
 #include "gc/z/zLock.hpp"
-#include "runtime/atomic.hpp"
+
+#include "runtime/javaThread.hpp"
 #include "runtime/os.inline.hpp"
-#include "runtime/thread.hpp"
 #include "utilities/debug.hpp"
 
 inline void ZLock::lock() {
@@ -42,18 +42,18 @@ inline void ZLock::unlock() {
   _lock.unlock();
 }
 
-inline ZReentrantLock::ZReentrantLock() :
-    _lock(),
-    _owner(NULL),
+inline ZReentrantLock::ZReentrantLock()
+  : _lock(),
+    _owner(nullptr),
     _count(0) {}
 
 inline void ZReentrantLock::lock() {
   Thread* const thread = Thread::current();
-  Thread* const owner = Atomic::load(&_owner);
+  Thread* const owner = _owner.load_relaxed();
 
   if (owner != thread) {
     _lock.lock();
-    Atomic::store(&_owner, thread);
+    _owner.store_relaxed(thread);
   }
 
   _count++;
@@ -66,14 +66,14 @@ inline void ZReentrantLock::unlock() {
   _count--;
 
   if (_count == 0) {
-    Atomic::store(&_owner, (Thread*)NULL);
+    _owner.store_relaxed(nullptr);
     _lock.unlock();
   }
 }
 
 inline bool ZReentrantLock::is_owned() const {
   Thread* const thread = Thread::current();
-  Thread* const owner = Atomic::load(&_owner);
+  Thread* const owner = _owner.load_relaxed();
   return owner == thread;
 }
 
@@ -102,16 +102,16 @@ inline void ZConditionLock::notify_all() {
 }
 
 template <typename T>
-inline ZLocker<T>::ZLocker(T* lock) :
-    _lock(lock) {
-  if (_lock != NULL) {
+inline ZLocker<T>::ZLocker(T* lock)
+  : _lock(lock) {
+  if (_lock != nullptr) {
     _lock->lock();
   }
 }
 
 template <typename T>
 inline ZLocker<T>::~ZLocker() {
-  if (_lock != NULL) {
+  if (_lock != nullptr) {
     _lock->unlock();
   }
 }

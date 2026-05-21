@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,48 +22,103 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+
 package javax.swing;
 
-import java.util.*;
-
-import java.applet.Applet;
-import java.awt.*;
-import java.awt.event.*;
-import java.awt.print.*;
-
-import java.beans.JavaBean;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Cursor;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.Graphics;
+import java.awt.GraphicsEnvironment;
+import java.awt.HeadlessException;
+import java.awt.IllegalComponentStateException;
+import java.awt.KeyboardFocusManager;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.Window;
+import java.awt.event.FocusListener;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseEvent;
+import java.awt.print.PageFormat;
+import java.awt.print.Printable;
+import java.awt.print.PrinterAbortException;
+import java.awt.print.PrinterException;
+import java.awt.print.PrinterJob;
 import java.beans.BeanProperty;
+import java.beans.JavaBean;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
-
-import java.io.ObjectOutputStream;
-import java.io.ObjectInputStream;
 import java.io.IOException;
 import java.io.InvalidObjectException;
-
-import javax.accessibility.*;
-
-import javax.swing.event.*;
-import javax.swing.plaf.*;
-import javax.swing.table.*;
-import javax.swing.border.*;
-
-import java.text.NumberFormat;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serial;
 import java.text.DateFormat;
 import java.text.MessageFormat;
-import java.util.List;
+import java.text.NumberFormat;
+import java.util.Date;
+import java.util.Enumeration;
+import java.util.EventObject;
+import java.util.Hashtable;
+import java.util.Locale;
+import java.util.Vector;
 
-import javax.print.attribute.*;
+import javax.accessibility.Accessible;
+import javax.accessibility.AccessibleAction;
+import javax.accessibility.AccessibleComponent;
+import javax.accessibility.AccessibleContext;
+import javax.accessibility.AccessibleExtendedTable;
+import javax.accessibility.AccessibleRole;
+import javax.accessibility.AccessibleSelection;
+import javax.accessibility.AccessibleState;
+import javax.accessibility.AccessibleStateSet;
+import javax.accessibility.AccessibleTable;
+import javax.accessibility.AccessibleTableModelChange;
+import javax.accessibility.AccessibleText;
+import javax.accessibility.AccessibleValue;
 import javax.print.PrintService;
+import javax.print.attribute.HashPrintRequestAttributeSet;
+import javax.print.attribute.PrintRequestAttributeSet;
+import javax.swing.border.Border;
+import javax.swing.border.EmptyBorder;
+import javax.swing.border.LineBorder;
+import javax.swing.event.CellEditorListener;
+import javax.swing.event.ChangeEvent;
+import javax.swing.event.ListSelectionEvent;
+import javax.swing.event.ListSelectionListener;
+import javax.swing.event.RowSorterEvent;
+import javax.swing.event.RowSorterListener;
+import javax.swing.event.TableColumnModelEvent;
+import javax.swing.event.TableColumnModelListener;
+import javax.swing.event.TableModelEvent;
+import javax.swing.event.TableModelListener;
+import javax.swing.plaf.TableUI;
+import javax.swing.plaf.UIResource;
+import javax.swing.table.AbstractTableModel;
+import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.table.DefaultTableColumnModel;
+import javax.swing.table.DefaultTableModel;
+import javax.swing.table.JTableHeader;
+import javax.swing.table.TableCellEditor;
+import javax.swing.table.TableCellRenderer;
+import javax.swing.table.TableColumn;
+import javax.swing.table.TableColumnModel;
+import javax.swing.table.TableModel;
+import javax.swing.table.TableRowSorter;
 
 import sun.awt.AWTAccessor;
 import sun.awt.AWTAccessor.MouseEventAccessor;
-import sun.reflect.misc.ReflectUtil;
-
+import sun.swing.PrintingStatus;
 import sun.swing.SwingUtilities2;
 import sun.swing.SwingUtilities2.Section;
-import static sun.swing.SwingUtilities2.Section.*;
-import sun.swing.PrintingStatus;
+
+import static sun.swing.SwingUtilities2.Section.LEADING;
+import static sun.swing.SwingUtilities2.Section.MIDDLE;
+import static sun.swing.SwingUtilities2.Section.TRAILING;
 
 /**
  * The <code>JTable</code> is used to display and edit regular two-dimensional tables
@@ -364,8 +419,8 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * in the <code>TableModel</code> interface.
      */
     protected transient Hashtable<Object, Object> defaultRenderersByColumnClass;
-    // Logicaly, the above is a Hashtable<Class<?>, TableCellRenderer>.
-    // It is declared otherwise to accomodate using UIDefaults.
+    // Logically, the above is a Hashtable<Class<?>, TableCellRenderer>.
+    // It is declared otherwise to accommodate using UIDefaults.
 
     /**
      * A table of objects that display and edit the contents of a cell,
@@ -373,8 +428,8 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * in the <code>TableModel</code> interface.
      */
     protected transient Hashtable<Object, Object> defaultEditorsByColumnClass;
-    // Logicaly, the above is a Hashtable<Class<?>, TableCellEditor>.
-    // It is declared otherwise to accomodate using UIDefaults.
+    // Logically, the above is a Hashtable<Class<?>, TableCellEditor>.
+    // It is declared otherwise to accommodate using UIDefaults.
 
     /** The foreground color of selected cells. */
     protected Color selectionForeground;
@@ -627,6 +682,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
                            JComponent.getManagingFocusForwardTraversalKeys());
         setFocusTraversalKeys(KeyboardFocusManager.BACKWARD_TRAVERSAL_KEYS,
                            JComponent.getManagingFocusBackwardTraversalKeys());
+
         if (cm == null) {
             cm = createDefaultColumnModel();
             autoCreateColumnsFromModel = true;
@@ -645,7 +701,6 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
             dm = createDefaultDataModel();
         }
         setModel(dm);
-
         initializeLocalVars();
         updateUI();
     }
@@ -934,7 +989,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * the row margin.
      *
      * @param   rowHeight                       new row height
-     * @exception IllegalArgumentException      if <code>rowHeight</code> is
+     * @throws IllegalArgumentException      if <code>rowHeight</code> is
      *                                          less than 1
      * @see     #getRowHeight
      */
@@ -980,7 +1035,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * @param   row                             the row whose height is being
                                                 changed
      * @param   rowHeight                       new row height, in pixels
-     * @exception IllegalArgumentException      if <code>rowHeight</code> is
+     * @throws IllegalArgumentException      if <code>rowHeight</code> is
      *                                          less than 1
      * @since 1.3
      */
@@ -1069,7 +1124,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * The default color is look and feel dependent.
      *
      * @param   gridColor                       the new color of the grid lines
-     * @exception IllegalArgumentException      if <code>gridColor</code> is <code>null</code>
+     * @throws IllegalArgumentException      if <code>gridColor</code> is <code>null</code>
      * @see     #getGridColor
      */
     @BeanProperty(description
@@ -1109,7 +1164,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * @see     #setShowHorizontalLines
      */
     @BeanProperty(description
-            = "The color used to draw the grid lines.")
+            = "Whether grid lines are drawn around the cells.")
     public void setShowGrid(boolean showGrid) {
         setShowHorizontalLines(showGrid);
         setShowVerticalLines(showGrid);
@@ -1209,6 +1264,12 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
             autoResizeMode = mode;
             resizeAndRepaint();
             if (tableHeader != null) {
+                if (mode == JTable.AUTO_RESIZE_LAST_COLUMN) {
+                    int colCnt = columnModel.getColumnCount();
+                    if (colCnt > 0) {
+                        tableHeader.setResizingColumn(columnModel.getColumn(colCnt - 1));
+                    }
+                }
                 tableHeader.resizeAndRepaint();
             }
             firePropertyChange("autoResizeMode", old, autoResizeMode);
@@ -1341,6 +1402,9 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
             return null;
         }
         else {
+            if (defaultRenderersByColumnClass == null) {
+                createDefaultRenderers();
+            }
             Object renderer = defaultRenderersByColumnClass.get(columnClass);
             if (renderer != null) {
                 return (TableCellRenderer)renderer;
@@ -1398,6 +1462,9 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
             return null;
         }
         else {
+            if (defaultEditorsByColumnClass == null) {
+                createDefaultEditors();
+            }
             Object editor = defaultEditorsByColumnClass.get(columnClass);
             if (editor != null) {
                 return (TableCellEditor)editor;
@@ -1428,7 +1495,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * table's {@code TransferHandler}.
      *
      * @param b whether or not to enable automatic drag handling
-     * @exception HeadlessException if
+     * @throws HeadlessException if
      *            <code>b</code> is <code>true</code> and
      *            <code>GraphicsEnvironment.isHeadless()</code>
      *            returns <code>true</code>
@@ -2078,42 +2145,54 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
         return getRowSelectionAllowed() && getColumnSelectionAllowed();
     }
 
+    private void selectRows(int rowCount) {
+        ListSelectionModel selModel = selectionModel;
+        selModel.setValueIsAdjusting(true);
+        int oldLead = getAdjustedIndex(selModel.getLeadSelectionIndex(), true);
+        int oldAnchor = getAdjustedIndex(selModel.getAnchorSelectionIndex(), true);
+
+        setRowSelectionInterval(0, rowCount - 1);
+
+        // this is done to restore the anchor and lead
+        SwingUtilities2.setLeadAnchorWithoutSelection(selModel, oldLead, oldAnchor);
+
+        selModel.setValueIsAdjusting(false);
+    }
+
+    private void selectColumns(int columnCount) {
+        ListSelectionModel selModel = columnModel.getSelectionModel();
+        selModel.setValueIsAdjusting(true);
+        int oldLead = getAdjustedIndex(selModel.getLeadSelectionIndex(), false);
+        int oldAnchor = getAdjustedIndex(selModel.getAnchorSelectionIndex(), false);
+
+        setColumnSelectionInterval(0, columnCount - 1);
+
+        // this is done to restore the anchor and lead
+        SwingUtilities2.setLeadAnchorWithoutSelection(selModel, oldLead, oldAnchor);
+
+        selModel.setValueIsAdjusting(false);
+    }
+
     /**
      *  Selects all rows, columns, and cells in the table.
      */
     public void selectAll() {
+        int rowCount = getRowCount();
+        int columnCount = getColumnCount();
+
         // If I'm currently editing, then I should stop editing
         if (isEditing()) {
             removeEditor();
         }
-        if (getRowCount() > 0 && getColumnCount() > 0) {
-            int oldLead;
-            int oldAnchor;
-            ListSelectionModel selModel;
-
-            selModel = selectionModel;
-            selModel.setValueIsAdjusting(true);
-            oldLead = getAdjustedIndex(selModel.getLeadSelectionIndex(), true);
-            oldAnchor = getAdjustedIndex(selModel.getAnchorSelectionIndex(), true);
-
-            setRowSelectionInterval(0, getRowCount()-1);
-
-            // this is done to restore the anchor and lead
-            SwingUtilities2.setLeadAnchorWithoutSelection(selModel, oldLead, oldAnchor);
-
-            selModel.setValueIsAdjusting(false);
-
-            selModel = columnModel.getSelectionModel();
-            selModel.setValueIsAdjusting(true);
-            oldLead = getAdjustedIndex(selModel.getLeadSelectionIndex(), false);
-            oldAnchor = getAdjustedIndex(selModel.getAnchorSelectionIndex(), false);
-
-            setColumnSelectionInterval(0, getColumnCount()-1);
-
-            // this is done to restore the anchor and lead
-            SwingUtilities2.setLeadAnchorWithoutSelection(selModel, oldLead, oldAnchor);
-
-            selModel.setValueIsAdjusting(false);
+        if (rowCount > 0 && columnCount > 0) {
+            selectRows(rowCount);
+            selectColumns(columnCount);
+        } else if (rowCount > 0 && columnCount == 0
+                   && getRowSelectionAllowed()) {
+            selectRows(rowCount);
+        } else if (columnCount > 0  && rowCount == 0
+                   && getColumnSelectionAllowed()) {
+            selectColumns(columnCount);
         }
     }
 
@@ -2163,7 +2242,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * Selects the rows from <code>index0</code> to <code>index1</code>,
      * inclusive.
      *
-     * @exception IllegalArgumentException      if <code>index0</code> or
+     * @throws IllegalArgumentException      if <code>index0</code> or
      *                                          <code>index1</code> lie outside
      *                                          [0, <code>getRowCount()</code>-1]
      * @param   index0 one end of the interval
@@ -2177,7 +2256,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * Selects the columns from <code>index0</code> to <code>index1</code>,
      * inclusive.
      *
-     * @exception IllegalArgumentException      if <code>index0</code> or
+     * @throws IllegalArgumentException      if <code>index0</code> or
      *                                          <code>index1</code> lie outside
      *                                          [0, <code>getColumnCount()</code>-1]
      * @param   index0 one end of the interval
@@ -2191,7 +2270,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * Adds the rows from <code>index0</code> to <code>index1</code>, inclusive, to
      * the current selection.
      *
-     * @exception IllegalArgumentException      if <code>index0</code> or <code>index1</code>
+     * @throws IllegalArgumentException      if <code>index0</code> or <code>index1</code>
      *                                          lie outside [0, <code>getRowCount()</code>-1]
      * @param   index0 one end of the interval
      * @param   index1 the other end of the interval
@@ -2204,7 +2283,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * Adds the columns from <code>index0</code> to <code>index1</code>,
      * inclusive, to the current selection.
      *
-     * @exception IllegalArgumentException      if <code>index0</code> or
+     * @throws IllegalArgumentException      if <code>index0</code> or
      *                                          <code>index1</code> lie outside
      *                                          [0, <code>getColumnCount()</code>-1]
      * @param   index0 one end of the interval
@@ -2217,7 +2296,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
     /**
      * Deselects the rows from <code>index0</code> to <code>index1</code>, inclusive.
      *
-     * @exception IllegalArgumentException      if <code>index0</code> or
+     * @throws IllegalArgumentException      if <code>index0</code> or
      *                                          <code>index1</code> lie outside
      *                                          [0, <code>getRowCount()</code>-1]
      * @param   index0 one end of the interval
@@ -2230,7 +2309,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
     /**
      * Deselects the columns from <code>index0</code> to <code>index1</code>, inclusive.
      *
-     * @exception IllegalArgumentException      if <code>index0</code> or
+     * @throws IllegalArgumentException      if <code>index0</code> or
      *                                          <code>index1</code> lie outside
      *                                          [0, <code>getColumnCount()</code>-1]
      * @param   index0 one end of the interval
@@ -2539,7 +2618,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * <code>equals</code>.
      *
      * @return  the <code>TableColumn</code> object that matches the identifier
-     * @exception IllegalArgumentException      if <code>identifier</code> is <code>null</code> or no <code>TableColumn</code> has this identifier
+     * @throws IllegalArgumentException      if <code>identifier</code> is <code>null</code> or no <code>TableColumn</code> has this identifier
      *
      * @param   identifier                      the identifier object
      */
@@ -2943,16 +3022,17 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
         }
         else {
             TableColumnModel cm = getColumnModel();
-            if( getComponentOrientation().isLeftToRight() ) {
-                for(int i = 0; i < column; i++) {
-                    r.x += cm.getColumn(i).getWidth();
-                }
-            } else {
-                for(int i = cm.getColumnCount()-1; i > column; i--) {
-                    r.x += cm.getColumn(i).getWidth();
-                }
+            for (int i = 0; i < column; i++) {
+                r.x += cm.getColumn(i).getWidth();
             }
-            r.width = cm.getColumn(column).getWidth();
+            // Table columns are laid out from right to left when component
+            // orientation is set to ComponentOrientation.RIGHT_TO_LEFT,
+            // adjust the x coordinate for this case.
+            final int columnWidth = cm.getColumn(column).getWidth();
+            if (!getComponentOrientation().isLeftToRight()) {
+                r.x = getWidth() - r.x - columnWidth;
+            }
+            r.width = columnWidth;
         }
 
         if (valid && !includeSpacing) {
@@ -3111,13 +3191,27 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * (maximum or minimum).
      *
      */
+
     public void doLayout() {
+        boolean prefWidthSet = false;
         TableColumn resizingColumn = getResizingColumn();
-        if (resizingColumn == null) {
+        // doLayout is called for both pack and show
+        // so if initial preferred width is set by user then
+        // it needs to be honoured even if resizingColumn
+        // is set to last column on account of
+        // AUTO_RESIZE_LAST_COLUMN autoResizeMode
+        for (int i = 0; i < columnModel.getColumnCount(); i++) {
+            if (columnModel.getColumn(i).getPreferredWidth() != 75
+                    && columnModel.getColumn(i).getWidth() == 75) {
+                prefWidthSet = true;
+                break;
+            }
+        }
+        if (resizingColumn == null || prefWidthSet) {
             setWidthsFromPreferredWidths(false);
         }
         else {
-            // JTable behaves like a layout manger - but one in which the
+            // JTable behaves like a layout manager - but one in which the
             // user can come along and dictate how big one of the children
             // (columns) is supposed to be.
 
@@ -3128,7 +3222,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
             accommodateDelta(columnIndex, delta);
             delta = getWidth() - getColumnModel().getTotalColumnWidth();
 
-            // If the delta cannot be completely accomodated, then the
+            // If the delta cannot be completely accommodated, then the
             // resizing column will have to take any remainder. This means
             // that the column is not being allowed to take the requested
             // width. This happens under many circumstances: For example,
@@ -3146,7 +3240,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
             // would have resulted in the layout the user has chosen.
             // Thereafter, during window resizing etc. it has to work off
             // the preferred sizes as usual - the idea being that, whatever
-            // the user does, everything stays in synch and things don't jump
+            // the user does, everything stays in sync and things don't jump
             // around.
             setWidthsFromPreferredWidths(true);
         }
@@ -3973,7 +4067,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
         }
 
         /**
-         * Inovked when either the table has changed or the sorter has changed
+         * Invoked when either the table has changed or the sorter has changed
          * and after the sorter has been notified. If necessary this will
          * reapply the selection and variable row heights.
          */
@@ -4373,8 +4467,6 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
         if (e == null || e.getFirstRow() == TableModelEvent.HEADER_ROW) {
             // The whole thing changed
             clearSelectionAndLeadAnchor();
-
-            rowModel = null;
 
             if (sortManager != null) {
                 try {
@@ -5424,6 +5516,21 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
 
             return this;
         }
+
+        @Override
+        public AccessibleContext getAccessibleContext() {
+            if (accessibleContext == null) {
+                accessibleContext = new AccessibleBooleanRenderer();
+            }
+            return accessibleContext;
+        }
+
+        class AccessibleBooleanRenderer extends JCheckBox.AccessibleJCheckBox {
+            @Override
+            public AccessibleAction getAccessibleAction() {
+                return null;
+            }
+        }
     }
 
     /**
@@ -5476,7 +5583,6 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
                     return super.stopCellEditing();
                 }
 
-                SwingUtilities2.checkAccess(constructor.getModifiers());
                 value = constructor.newInstance(new Object[]{s});
             }
             catch (Exception e) {
@@ -5500,8 +5606,6 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
                 if (type == Object.class) {
                     type = String.class;
                 }
-                ReflectUtil.checkPackageAccess(type);
-                SwingUtilities2.checkAccess(type.getModifiers());
                 constructor = type.getConstructor(argTypes);
             }
             catch (Exception e) {
@@ -5535,7 +5639,6 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      */
     protected void initializeLocalVars() {
         updateSelectionOnSort = true;
-        setOpaque(true);
         createDefaultRenderers();
         createDefaultEditors();
 
@@ -5847,6 +5950,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * See readObject() and writeObject() in JComponent for more
      * information about serialization in Swing.
      */
+    @Serial
     private void writeObject(ObjectOutputStream s) throws IOException {
         s.defaultWriteObject();
         if (getUIClassID().equals(uiClassID)) {
@@ -5858,6 +5962,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
         }
     }
 
+    @Serial
     private void readObject(ObjectInputStream s)
         throws IOException, ClassNotFoundException
     {
@@ -5916,6 +6021,8 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
 
         surrendersFocusOnKeystroke = f.get("surrendersFocusOnKeystroke", false);
         editorRemover = (PropertyChangeListener) f.get("editorRemover", null);
+        editingColumn = -1;
+        editingRow = -1;
         columnSelectionAdjusting = f.get("columnSelectionAdjusting", false);
         rowSelectionAdjusting = f.get("rowSelectionAdjusting", false);
         printError = (Throwable) f.get("printError", null);
@@ -5948,6 +6055,9 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * do any Swing-specific pre-serialization configuration.
      */
     void compWriteObjectNotify() {
+        if (isEditing() && !getCellEditor().stopCellEditing()) {
+            getCellEditor().cancelCellEditing();
+        }
         super.compWriteObjectNotify();
         // If ToolTipText != null, then the tooltip has already been
         // unregistered by JComponent.compWriteObjectNotify()
@@ -6028,7 +6138,6 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
             this.focusManager = fm;
         }
 
-        @SuppressWarnings("deprecation")
         public void propertyChange(PropertyChangeEvent ev) {
             if (!isEditing() || getClientProperty("terminateEditOnFocusLost") != Boolean.TRUE) {
                 return;
@@ -6039,8 +6148,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
                 if (c == JTable.this) {
                     // focus remains inside the table
                     return;
-                } else if ((c instanceof Window) ||
-                           (c instanceof Applet && c.getParent() == null)) {
+                } else if (c instanceof Window) {
                     if (c == SwingUtilities.getRoot(JTable.this)) {
                         if (!getCellEditor().stopCellEditing()) {
                             getCellEditor().cancelCellEditing();
@@ -6067,8 +6175,6 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * occurs on the default printer.
      *
      * @return true, unless printing is cancelled by the user
-     * @throws SecurityException if this thread is not allowed to
-     *                           initiate a print job request
      * @throws PrinterException if an error in the print system causes the job
      *                          to be aborted
      * @see #print(JTable.PrintMode, MessageFormat, MessageFormat,
@@ -6093,8 +6199,6 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      *
      * @param  printMode        the printing mode that the printable should use
      * @return true, unless printing is cancelled by the user
-     * @throws SecurityException if this thread is not allowed to
-     *                           initiate a print job request
      * @throws PrinterException if an error in the print system causes the job
      *                          to be aborted
      * @see #print(JTable.PrintMode, MessageFormat, MessageFormat,
@@ -6125,8 +6229,6 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      *                          to be used in printing a footer,
      *                          or null for none
      * @return true, unless printing is cancelled by the user
-     * @throws SecurityException if this thread is not allowed to
-     *                           initiate a print job request
      * @throws PrinterException if an error in the print system causes the job
      *                          to be aborted
      * @see #print(JTable.PrintMode, MessageFormat, MessageFormat,
@@ -6167,8 +6269,6 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      *                           dialog or run interactively, and
      *                           <code>GraphicsEnvironment.isHeadless</code>
      *                           returns <code>true</code>
-     * @throws SecurityException if this thread is not allowed to
-     *                           initiate a print job request
      * @throws PrinterException if an error in the print system causes the job
      *                          to be aborted
      * @see #print(JTable.PrintMode, MessageFormat, MessageFormat,
@@ -6262,9 +6362,6 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      *                           dialog or run interactively, and
      *                           <code>GraphicsEnvironment.isHeadless</code>
      *                           returns <code>true</code>
-     * @throws  SecurityException if a security manager exists and its
-     *          {@link java.lang.SecurityManager#checkPrintJobAccess}
-     *          method disallows this thread from creating a print job request
      * @throws PrinterException if an error in the print system causes the job
      *                          to be aborted
      * @see #getPrintable
@@ -6293,9 +6390,6 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
             }
         }
 
-        // Get a PrinterJob.
-        // Do this before anything with side-effects since it may throw a
-        // security exception - in which case we don't want to do anything else.
         final PrinterJob job = PrinterJob.getPrinterJob();
 
         if (isEditing()) {
@@ -6521,7 +6615,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
      * A <code>Printable</code> implementation that wraps another
      * <code>Printable</code>, making it safe for printing on another thread.
      */
-    private class ThreadSafePrintable implements Printable {
+    private static class ThreadSafePrintable implements Printable {
 
         /** The delegate <code>Printable</code>. */
         private Printable printDelegate;
@@ -6698,39 +6792,35 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
             Object newValue = e.getNewValue();
 
                 // re-set tableModel listeners
-            if (name.compareTo("model") == 0) {
+            if (name.equals("model")) {
 
-                if (oldValue != null && oldValue instanceof TableModel) {
-                    ((TableModel) oldValue).removeTableModelListener(this);
+                if (oldValue instanceof TableModel oldModel) {
+                    oldModel.removeTableModelListener(this);
                 }
-                if (newValue != null && newValue instanceof TableModel) {
-                    ((TableModel) newValue).addTableModelListener(this);
+                if (newValue instanceof TableModel newModel) {
+                    newModel.addTableModelListener(this);
                 }
 
                 // re-set selectionModel listeners
-            } else if (name.compareTo("selectionModel") == 0) {
+            } else if (name.equals("selectionModel")) {
 
                 Object source = e.getSource();
                 if (source == JTable.this) {    // row selection model
 
-                    if (oldValue != null &&
-                        oldValue instanceof ListSelectionModel) {
-                        ((ListSelectionModel) oldValue).removeListSelectionListener(this);
+                    if (oldValue instanceof ListSelectionModel oldModel) {
+                        oldModel.removeListSelectionListener(this);
                     }
-                    if (newValue != null &&
-                        newValue instanceof ListSelectionModel) {
-                        ((ListSelectionModel) newValue).addListSelectionListener(this);
+                    if (newValue instanceof ListSelectionModel newModel) {
+                        newModel.addListSelectionListener(this);
                     }
 
                 } else if (source == JTable.this.getColumnModel()) {
 
-                    if (oldValue != null &&
-                        oldValue instanceof ListSelectionModel) {
-                        ((ListSelectionModel) oldValue).removeListSelectionListener(this);
+                    if (oldValue instanceof ListSelectionModel oldModel) {
+                        oldModel.removeListSelectionListener(this);
                     }
-                    if (newValue != null &&
-                        newValue instanceof ListSelectionModel) {
-                        ((ListSelectionModel) newValue).addListSelectionListener(this);
+                    if (newValue instanceof ListSelectionModel newModel) {
+                        newModel.addListSelectionListener(this);
                     }
 
                 } else {
@@ -6739,27 +6829,25 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
 
                 // re-set columnModel listeners
                 // and column's selection property listener as well
-            } else if (name.compareTo("columnModel") == 0) {
+            } else if (name.equals("columnModel")) {
 
-                if (oldValue != null && oldValue instanceof TableColumnModel) {
-                    TableColumnModel tcm = (TableColumnModel) oldValue;
+                if (oldValue instanceof TableColumnModel tcm) {
                     tcm.removeColumnModelListener(this);
                     tcm.getSelectionModel().removeListSelectionListener(this);
                 }
-                if (newValue != null && newValue instanceof TableColumnModel) {
-                    TableColumnModel tcm = (TableColumnModel) newValue;
+                if (newValue instanceof TableColumnModel tcm) {
                     tcm.addColumnModelListener(this);
                     tcm.getSelectionModel().addListSelectionListener(this);
                 }
 
                 // re-se cellEditor listeners
-            } else if (name.compareTo("tableCellEditor") == 0) {
+            } else if (name.equals("tableCellEditor")) {
 
-                if (oldValue != null && oldValue instanceof TableCellEditor) {
-                    ((TableCellEditor) oldValue).removeCellEditorListener(this);
+                if (oldValue instanceof TableCellEditor oldEditor) {
+                    oldEditor.removeCellEditorListener(this);
                 }
-                if (newValue != null && newValue instanceof TableCellEditor) {
-                    ((TableCellEditor) newValue).addCellEditorListener(this);
+                if (newValue instanceof TableCellEditor newEditor) {
+                    newEditor.addCellEditorListener(this);
                 }
             }
         }
@@ -7234,7 +7322,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
 
                     // Situation:
                     //   We have a table, like the 6x3 table below,
-                    //   wherein three colums and one row selected
+                    //   wherein three columns and one row selected
                     //   (selected cells marked with "*", unselected "0"):
                     //
                     //            0 * 0 * * 0
@@ -8288,7 +8376,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
              *
              * @return this component's locale; if this component does
              *    not have a locale, the locale of its parent is returned
-             * @exception IllegalComponentStateException if the
+             * @throws IllegalComponentStateException if the
              *    <code>Component</code> does not have its own locale
              *    and has not yet been added to a containment hierarchy
              *    such that the locale can be determined from the
@@ -8344,7 +8432,11 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
              * @return the <code>AccessibleAction</code>, or <code>null</code>
              */
             public AccessibleAction getAccessibleAction() {
-                return getCurrentAccessibleContext().getAccessibleAction();
+                AccessibleContext ac = getCurrentAccessibleContext();
+                if (ac != null) {
+                    return ac.getAccessibleAction();
+                }
+                return null;
             }
 
             /**
@@ -9090,7 +9182,7 @@ public class JTable extends JComponent implements TableModelListener, Scrollable
              *
              * @return this component's locale; if this component does
              *    not have a locale, the locale of its parent is returned
-             * @exception IllegalComponentStateException if the
+             * @throws IllegalComponentStateException if the
              *    <code>Component</code> does not have its own locale
              *    and has not yet been added to a containment hierarchy
              *    such that the locale can be determined from the

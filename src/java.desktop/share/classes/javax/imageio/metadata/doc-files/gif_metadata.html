@@ -5,7 +5,7 @@
   <title>GIF Metadata Format Specification</title>
 </head>
 <!--
-Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
+Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
 DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 
 This code is free software; you can redistribute it and/or modify it
@@ -31,7 +31,6 @@ questions.
 
 <body>
 <main role="main">
-<div class="contentContainer">
 <h1>GIF Metadata Format Specification</h1>
 <a id="gif_stream_metadata_format"></a>
 <h2>GIF Stream Metadata Format Specification</h2>
@@ -80,7 +79,7 @@ images that do not have their own local color table.
         &lt;!-- Max value: 65535 (inclusive) --&gt;
       &lt;!ATTLIST "LogicalScreenDescriptor" "colorResolution" #CDATA
          #REQUIRED&gt;
-        &lt;!-- The number of bits of color resolution, beteen 1 and 8 --&gt;
+        &lt;!-- The number of bits of color resolution, between 1 and 8 --&gt;
         &lt;!-- Data type: Integer --&gt;
         &lt;!-- Min value: 1 (inclusive) --&gt;
         &lt;!-- Max value: 8 (inclusive) --&gt;
@@ -137,7 +136,7 @@ images that do not have their own local color table.
 <p>
 
 The GIF image metadata format encodes the image descriptor, local
-color table, and extension information assciated with a single image
+color table, and extension information associated with a single image
 within a GIF file, typically a frame of an animation.
 
 <p>
@@ -156,7 +155,7 @@ for the frame at hand.
 The graphic control extension contains information on how the frame is
 to be incorporated into the animation.  The disposal method indicates
 whether the current frame should remain in place
-(<code>doNotDispose</code>), be restored to the backgound color as
+(<code>doNotDispose</code>), be restored to the background color as
 specified in the stream metadata
 (<code>restoreToBackgroundColor</code>), or be restored to the
 previous frame contents (<code>restoreToPrevious</code>) prior to
@@ -346,7 +345,7 @@ advanced only on user input.
 
 <p>
 <a id="mapping"></a>
-<table border=1>
+<table class="striped">
 <caption><b>Mapping of Standard to GIF Native Stream Metadata</b></caption>
 <thead>
 <tr>
@@ -409,7 +408,7 @@ advanced only on user input.
 </tbody>
 </table>
 
-<table border=1>
+<table class="striped">
 <caption><b>Mapping of Standard to GIF Native Image Metadata</b></caption>
 <thead>
 <tr>
@@ -463,7 +462,6 @@ advanced only on user input.
 </tr>
 </tbody>
 </table>
-</div>
 </main>
 </body>
 </html>

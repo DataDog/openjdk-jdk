@@ -178,10 +178,7 @@ public class SubmissionPublisherTest extends JSR166TestCase {
         checkInitialState(p);
         assertEquals(p.getMaxBufferCapacity(), Flow.defaultBufferSize());
         Executor e = p.getExecutor(), c = ForkJoinPool.commonPool();
-        if (ForkJoinPool.getCommonPoolParallelism() > 1)
-            assertSame(e, c);
-        else
-            assertNotSame(e, c);
+        assertSame(e, c);
     }
 
     /**
@@ -682,7 +679,7 @@ public class SubmissionPublisherTest extends JSR166TestCase {
         return false;
     }
 
-    static boolean reqHandle(AtomicInteger count, Subscriber s) {
+    static boolean reqHandle(AtomicInteger count, Subscriber<?> s) {
         count.getAndIncrement();
         ((TestSubscriber)s).sn.request(Long.MAX_VALUE);
         return true;
@@ -985,7 +982,7 @@ public class SubmissionPublisherTest extends JSR166TestCase {
     public void testConsumeNPE() {
         SubmissionPublisher<Integer> p = basicPublisher();
         try {
-            CompletableFuture<Void> f = p.consume(null);
+            CompletableFuture<Void> unused = p.consume(null);
             shouldThrow();
         } catch (NullPointerException success) {}
     }

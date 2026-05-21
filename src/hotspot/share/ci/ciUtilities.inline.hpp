@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@
 #define SHARE_CI_CIUTILITIES_INLINE_HPP
 
 #include "ci/ciUtilities.hpp"
+
 #include "runtime/interfaceSupport.inline.hpp"
 
 // Add a ci native entry wrapper?
@@ -34,10 +35,9 @@
 #define VM_ENTRY_MARK                       \
   CompilerThread* thread=CompilerThread::current(); \
   ThreadInVMfromNative __tiv(thread);       \
-  ResetNoHandleMark rnhm;                   \
   HandleMarkCleaner __hm(thread);           \
-  Thread* THREAD = thread;                  \
-  debug_only(VMNativeEntryWrapper __vew;)
+  JavaThread* THREAD = thread; /* For exception macros. */ \
+  DEBUG_ONLY(VMNativeEntryWrapper __vew;)
 
 
 
@@ -49,15 +49,15 @@
  * [TODO] The NoHandleMark line does nothing but declare a function prototype \
  * The NoHandkeMark constructor is NOT executed. If the ()'s are   \
  * removed, causes the NoHandleMark assert to trigger. \
- * debug_only(NoHandleMark __hm();)         \
+ * DEBUG_ONLY(NoHandleMark __hm();)         \
  */                                         \
-  Thread* THREAD = thread;                  \
-  debug_only(VMNativeEntryWrapper __vew;)
+  JavaThread* THREAD = thread; /* For exception macros. */ \
+  DEBUG_ONLY(VMNativeEntryWrapper __vew;)
 
 
 #define EXCEPTION_CONTEXT \
-  CompilerThread* thread=CompilerThread::current(); \
-  Thread* THREAD = thread;
+  CompilerThread* thread = CompilerThread::current(); \
+  JavaThread* THREAD = thread; // For exception macros.
 
 
 #define GUARDED_VM_ENTRY(action)            \

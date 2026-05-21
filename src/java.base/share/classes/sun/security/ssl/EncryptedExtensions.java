@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -47,7 +47,7 @@ final class EncryptedExtensions {
         private final SSLExtensions extensions;
 
         EncryptedExtensionsMessage(
-                HandshakeContext handshakeContext) throws IOException {
+                HandshakeContext handshakeContext) {
             super(handshakeContext);
             this.extensions = new SSLExtensions(this);
         }
@@ -98,9 +98,10 @@ final class EncryptedExtensions {
         @Override
         public String toString() {
             MessageFormat messageFormat = new MessageFormat(
-                    "\"EncryptedExtensions\": [\n" +
-                    "{0}\n" +
-                    "]",
+                    """
+                            "EncryptedExtensions": [
+                            {0}
+                            ]""",
                     Locale.ENGLISH);
             Object[] messageFields = {
                 Utilities.indent(extensions.toString())
@@ -133,7 +134,7 @@ final class EncryptedExtensions {
                             SSLHandshake.ENCRYPTED_EXTENSIONS,
                             shc.negotiatedProtocol);
             eem.extensions.produce(shc, extTypes);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine("Produced EncryptedExtensions message", eem);
             }
 
@@ -167,7 +168,7 @@ final class EncryptedExtensions {
 
             EncryptedExtensionsMessage eem =
                     new EncryptedExtensionsMessage(chc, message);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                         "Consuming EncryptedExtensions handshake message", eem);
             }

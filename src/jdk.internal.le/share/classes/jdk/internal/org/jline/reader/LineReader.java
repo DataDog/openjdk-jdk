@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2019, the original author or authors.
+ * Copyright (c) 2002-2023, the original author(s).
  *
  * This software is distributable under the BSD license. See the terms of the
  * BSD license in the documentation provided with this software.
@@ -10,6 +10,7 @@ package jdk.internal.org.jline.reader;
 
 import java.io.File;
 import java.io.InputStream;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Map;
 import java.util.function.IntConsumer;
@@ -21,7 +22,7 @@ import jdk.internal.org.jline.utils.AttributedString;
 
 /** Read lines from the console, with input editing.
  *
- * <h3>Thread safety</h3>
+ * <h2>Thread safety</h2>
  * The <code>LineReader</code> implementations are not thread safe,
  * thus you should not attempt to use a single reader in several threads.
  * Any attempt to call one of the <code>readLine</code> call while one is
@@ -31,7 +32,7 @@ import jdk.internal.org.jline.utils.AttributedString;
  * {@link #printAbove(String)} or {@link #printAbove(AttributedString)} at
  * any time to allow text to be printed above the current prompt.
  *
- * <h3>Prompt strings</h3>
+ * <h2>Prompt strings</h2>
  * It is traditional for an interactive console-based program
  * to print a short prompt string to signal that the user is expected
  * to type a command.  JLine supports 3 kinds of prompt string:
@@ -81,7 +82,6 @@ import jdk.internal.org.jline.utils.AttributedString;
  * </dd>
  * </dl>
  */
-
 public interface LineReader {
 
     /**
@@ -284,6 +284,7 @@ public interface LineReader {
     String MAIN = "main";
     String EMACS = "emacs";
     String SAFE = ".safe";
+    String DUMB = "dumb";
     String MENU = "menu";
 
     //
@@ -294,7 +295,14 @@ public interface LineReader {
     String COMMENT_BEGIN = "comment-begin";
     String BELL_STYLE = "bell-style";
     String PREFER_VISIBLE_BELL = "prefer-visible-bell";
+    /** tab completion: if candidates are more than list-max a question will be asked before displaying them */
     String LIST_MAX = "list-max";
+    /**
+     * tab completion: if candidates are less than menu-list-max
+     * they are displayed in a list below the field to be completed
+     */
+    String MENU_LIST_MAX = "menu-list-max";
+
     String DISABLE_HISTORY = "disable-history";
     String DISABLE_COMPLETION = "disable-completion";
     String EDITING_MODE = "editing-mode";
@@ -303,6 +311,7 @@ public interface LineReader {
     String WORDCHARS = "WORDCHARS";
     String REMOVE_SUFFIX_CHARS = "REMOVE_SUFFIX_CHARS";
     String SEARCH_TERMINATORS = "search-terminators";
+    /** Number of matching errors that are accepted by the completion matcher */
     String ERRORS = "errors";
     /** Property for the "others" group name */
     String OTHERS_GROUP_NAME = "OTHERS_GROUP_NAME";
@@ -310,12 +319,24 @@ public interface LineReader {
     String ORIGINAL_GROUP_NAME = "ORIGINAL_GROUP_NAME";
     /** Completion style for displaying groups name */
     String COMPLETION_STYLE_GROUP = "COMPLETION_STYLE_GROUP";
+
+    String COMPLETION_STYLE_LIST_GROUP = "COMPLETION_STYLE_LIST_GROUP";
     /** Completion style for displaying the current selected item */
     String COMPLETION_STYLE_SELECTION = "COMPLETION_STYLE_SELECTION";
+
+    String COMPLETION_STYLE_LIST_SELECTION = "COMPLETION_STYLE_LIST_SELECTION";
     /** Completion style for displaying the candidate description */
     String COMPLETION_STYLE_DESCRIPTION = "COMPLETION_STYLE_DESCRIPTION";
+
+    String COMPLETION_STYLE_LIST_DESCRIPTION = "COMPLETION_STYLE_LIST_DESCRIPTION";
     /** Completion style for displaying the matching part of candidates */
     String COMPLETION_STYLE_STARTING = "COMPLETION_STYLE_STARTING";
+
+    String COMPLETION_STYLE_LIST_STARTING = "COMPLETION_STYLE_LIST_STARTING";
+    /** Completion style for displaying the list */
+    String COMPLETION_STYLE_BACKGROUND = "COMPLETION_STYLE_BACKGROUND";
+
+    String COMPLETION_STYLE_LIST_BACKGROUND = "COMPLETION_STYLE_LIST_BACKGROUND";
     /**
      * Set the template for prompts for secondary (continuation) lines.
      * This is a prompt template as described in the class header.
@@ -338,7 +359,7 @@ public interface LineReader {
     String AMBIGUOUS_BINDING = "ambiguous-binding";
 
     /**
-     * Columns separated list of patterns that will not be saved in history.
+     * Colon separated list of patterns that will not be saved in history.
      */
     String HISTORY_IGNORE = "history-ignore";
 
@@ -370,10 +391,40 @@ public interface LineReader {
      */
     String FEATURES_MAX_BUFFER_SIZE = "features-max-buffer-size";
 
+    /**
+     * Min buffer size for tab auto-suggestions.
+     * For shorter buffer sizes auto-suggestions are not resolved.
+     */
+    String SUGGESTIONS_MIN_BUFFER_SIZE = "suggestions-min-buffer-size";
+
+    /**
+     * Max number of times a command can be repeated.
+     */
+    String MAX_REPEAT_COUNT = "max-repeat-count";
+
+    /**
+     * Number of spaces to display a tabulation, the default is 4.
+     */
+    String TAB_WIDTH = "tab-width";
+
+    /**
+     * Name of inputrc to read at line reader creation time.
+     */
+    String INPUT_RC_FILE_NAME = "input-rc-file-name";
+
+    /**
+     * Prefix to automatically delegate variables to system properties
+     */
+    String SYSTEM_PROPERTY_PREFIX = "system-property-prefix";
+
     Map<String, KeyMap<Binding>> defaultKeyMaps();
 
     enum Option {
         COMPLETE_IN_WORD,
+        /** use camel case completion matcher */
+        COMPLETE_MATCHER_CAMELCASE,
+        /** use type completion matcher */
+        COMPLETE_MATCHER_TYPO(true),
         DISABLE_EVENT_EXPANSION,
         HISTORY_VERIFY,
         HISTORY_IGNORE_SPACE(true),
@@ -386,9 +437,13 @@ public interface LineReader {
         AUTO_GROUP(true),
         AUTO_MENU(true),
         AUTO_LIST(true),
+        /** list candidates below the field to be completed */
+        AUTO_MENU_LIST,
         RECOGNIZE_EXACT,
         /** display group name before each group (else display all group names first) */
         GROUP(true),
+        /** when double tab to select candidate keep candidates grouped (else loose grouping) */
+        GROUP_PERSIST,
         /** if completion is case insensitive or not */
         CASE_INSENSITIVE,
         LIST_AMBIGUOUS,
@@ -414,7 +469,8 @@ public interface LineReader {
         DELAY_LINE_WRAP,
         AUTO_PARAM_SLASH(true),
         AUTO_REMOVE_SLASH(true),
-        USE_FORWARD_SLASH(false),
+        /** FileNameCompleter: Use '/' character as a file directory separator */
+        USE_FORWARD_SLASH,
         /** When hitting the <code>&lt;tab&gt;</code> key at the beginning of the line, insert a tabulation
          *  instead of completing.  This is mainly useful when {@link #BRACKETED_PASTE} is
          *  disabled, so that copy/paste of indented text does not trigger completion.
@@ -438,7 +494,9 @@ public interface LineReader {
 
         /** Show command options tab completion candidates for zero length word */
         EMPTY_WORD_OPTIONS(true),
-        ;
+
+        /** Disable the undo feature */
+        DISABLE_UNDO;
 
         private final boolean def;
 
@@ -448,6 +506,11 @@ public interface LineReader {
 
         Option(boolean def) {
             this.def = def;
+        }
+
+        public final boolean isSet(Map<Option, Boolean> options) {
+            Boolean b = options.get(this);
+            return b != null ? b : this.isDef();
         }
 
         public boolean isDef() {
@@ -489,8 +552,9 @@ public interface LineReader {
      * Equivalent to <code>readLine(null, null, null)</code>.
      *
      * @return the line read
-     * @throws UserInterruptException If the call was interrupted by the user.
-     * @throws EndOfFileException     If the end of the input stream was reached.
+     * @throws UserInterruptException if readLine was interrupted (using Ctrl-C for example)
+     * @throws EndOfFileException if an EOF has been found (using Ctrl-D for example)
+     * @throws java.io.IOError in case of other i/o errors
      */
     String readLine() throws UserInterruptException, EndOfFileException;
 
@@ -502,8 +566,9 @@ public interface LineReader {
      *
      * @param mask      The mask character, <code>null</code> or <code>0</code>.
      * @return          A line that is read from the terminal, can never be null.
-     * @throws UserInterruptException If the call was interrupted by the user.
-     * @throws EndOfFileException     If the end of the input stream was reached.
+     * @throws UserInterruptException if readLine was interrupted (using Ctrl-C for example)
+     * @throws EndOfFileException if an EOF has been found (using Ctrl-D for example)
+     * @throws java.io.IOError in case of other i/o errors
      */
     String readLine(Character mask) throws UserInterruptException, EndOfFileException;
 
@@ -515,8 +580,9 @@ public interface LineReader {
      *
      * @param prompt    The prompt to issue to the terminal, may be null.
      * @return          A line that is read from the terminal, can never be null.
-     * @throws UserInterruptException If the call was interrupted by the user.
-     * @throws EndOfFileException     If the end of the input stream was reached.
+     * @throws UserInterruptException if readLine was interrupted (using Ctrl-C for example)
+     * @throws EndOfFileException if an EOF has been found (using Ctrl-D for example)
+     * @throws java.io.IOError in case of other i/o errors
      */
     String readLine(String prompt) throws UserInterruptException, EndOfFileException;
 
@@ -529,8 +595,9 @@ public interface LineReader {
      * @param prompt    The prompt to issue to the terminal, may be null.
      * @param mask      The mask character, <code>null</code> or <code>0</code>.
      * @return          A line that is read from the terminal, can never be null.
-     * @throws UserInterruptException If the call was interrupted by the user.
-     * @throws EndOfFileException     If the end of the input stream was reached.
+     * @throws UserInterruptException if readLine was interrupted (using Ctrl-C for example)
+     * @throws EndOfFileException if an EOF has been found (using Ctrl-D for example)
+     * @throws java.io.IOError in case of other i/o errors
      */
     String readLine(String prompt, Character mask) throws UserInterruptException, EndOfFileException;
 
@@ -546,8 +613,9 @@ public interface LineReader {
      * @param mask      The character mask, may be null.
      * @param buffer    The default value presented to the user to edit, may be null.
      * @return          A line that is read from the terminal, can never be null.
-     * @throws UserInterruptException If the call was interrupted by the user.
-     * @throws EndOfFileException     If the end of the input stream was reached.
+     * @throws UserInterruptException if readLine was interrupted (using Ctrl-C for example)
+     * @throws EndOfFileException if an EOF has been found (using Ctrl-D for example)
+     * @throws java.io.IOError in case of other i/o errors
      */
     String readLine(String prompt, Character mask, String buffer) throws UserInterruptException, EndOfFileException;
 
@@ -568,10 +636,9 @@ public interface LineReader {
      * @throws UserInterruptException if readLine was interrupted (using Ctrl-C for example)
      * @throws EndOfFileException if an EOF has been found (using Ctrl-D for example)
      * @throws java.io.IOError in case of other i/o errors
-     * @throws UserInterruptException If the call was interrupted by the user.
-     * @throws EndOfFileException     If the end of the input stream was reached.
      */
-    String readLine(String prompt, String rightPrompt, Character mask, String buffer) throws UserInterruptException, EndOfFileException;
+    String readLine(String prompt, String rightPrompt, Character mask, String buffer)
+            throws UserInterruptException, EndOfFileException;
 
     /**
      * Read a line from the <i>in</i> {@link InputStream}, and return the line
@@ -590,10 +657,9 @@ public interface LineReader {
      * @throws UserInterruptException if readLine was interrupted (using Ctrl-C for example)
      * @throws EndOfFileException if an EOF has been found (using Ctrl-D for example)
      * @throws java.io.IOError in case of other i/o errors
-     * @throws UserInterruptException If the call was interrupted by the user.
-     * @throws EndOfFileException     If the end of the input stream was reached.
      */
-    String readLine(String prompt, String rightPrompt, MaskingCallback maskingCallback, String buffer) throws UserInterruptException, EndOfFileException;
+    String readLine(String prompt, String rightPrompt, MaskingCallback maskingCallback, String buffer)
+            throws UserInterruptException, EndOfFileException;
 
     /**
      * Prints a line above the prompt and redraw everything.
@@ -701,7 +767,11 @@ public interface LineReader {
 
     void addCommandsInBuffer(Collection<String> commands);
 
-    void editAndAddInBuffer(File file) throws Exception;
+    default void editAndAddInBuffer(File file) throws Exception {
+        editAndAddInBuffer(file != null ? file.toPath() : null);
+    }
+
+    void editAndAddInBuffer(Path file) throws Exception;
 
     String getLastBinding();
 
@@ -712,4 +782,9 @@ public interface LineReader {
     void setAutosuggestion(SuggestionType type);
 
     SuggestionType getAutosuggestion();
+
+    /**
+     * Clear any internal buffers.
+     */
+    void zeroOut();
 }

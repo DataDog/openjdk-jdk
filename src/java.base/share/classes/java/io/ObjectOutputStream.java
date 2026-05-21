@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 1996, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2024, Alibaba Group Holding Limited. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,18 +26,20 @@
 
 package java.io;
 
-import java.io.ObjectStreamClass.WeakClassKey;
-import java.lang.ref.ReferenceQueue;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
+import java.lang.runtime.ExactConversionsSupport;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.StringJoiner;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import static java.io.ObjectStreamClass.processQueue;
-import sun.reflect.misc.ReflectUtil;
+
+import jdk.internal.util.ByteArray;
+import jdk.internal.access.JavaLangAccess;
+import jdk.internal.access.SharedSecrets;
+
+import static jdk.internal.util.ModifiedUtf.putChar;
+import static jdk.internal.util.ModifiedUtf.utfLen;
 
 /**
  * An ObjectOutputStream writes primitive data types and graphs of Java objects
@@ -70,31 +73,35 @@ import sun.reflect.misc.ReflectUtil;
  * written.
  *
  * <p>For example to write an object that can be read by the example in
- * ObjectInputStream:
- * <br>
- * <pre>
- *      FileOutputStream fos = new FileOutputStream("t.tmp");
- *      ObjectOutputStream oos = new ObjectOutputStream(fos);
+ * {@link ObjectInputStream}:
+ * {@snippet lang="java":
+ *      try (FileOutputStream fos = new FileOutputStream("t.tmp");
+ *           ObjectOutputStream oos = new ObjectOutputStream(fos)) {
+ *          oos.writeObject("Today");
+ *          oos.writeObject(LocalDateTime.now());
+ *      } catch (Exception ex) {
+ *          // handle exception
+ *      }
+ * }
  *
- *      oos.writeInt(12345);
- *      oos.writeObject("Today");
- *      oos.writeObject(new Date());
+ * <p>Serializable classes that require special handling during the
+ * serialization and deserialization process should implement methods
+ * with the following signatures:
  *
- *      oos.close();
- * </pre>
+ * {@snippet lang="java":
+ *     private void readObject(java.io.ObjectInputStream stream)
+ *         throws IOException, ClassNotFoundException;
+ *     private void writeObject(java.io.ObjectOutputStream stream)
+ *         throws IOException;
+ *     private void readObjectNoData()
+ *         throws ObjectStreamException;
+ * }
  *
- * <p>Classes that require special handling during the serialization and
- * deserialization process must implement special methods with these exact
- * signatures:
- * <br>
- * <pre>
- * private void readObject(java.io.ObjectInputStream stream)
- *     throws IOException, ClassNotFoundException;
- * private void writeObject(java.io.ObjectOutputStream stream)
- *     throws IOException
- * private void readObjectNoData()
- *     throws ObjectStreamException;
- * </pre>
+ * <p>The method name, modifiers, return type, and number and type of
+ * parameters must match exactly for the method to be used by
+ * serialization or deserialization. The methods should only be
+ * declared to throw checked exceptions consistent with these
+ * signatures.
  *
  * <p>The writeObject method is responsible for writing the state of the object
  * for its particular class so that the corresponding readObject method can
@@ -153,6 +160,7 @@ import sun.reflect.misc.ReflectUtil;
  * <p>Records are serialized differently than ordinary serializable or externalizable
  * objects, see <a href="ObjectInputStream.html#record-serialization">record serialization</a>.
  *
+ * @spec serialization/index.html Java Object Serialization Specification
  * @author      Mike Warres
  * @author      Roger Riggs
  * @see java.io.DataOutput
@@ -166,16 +174,7 @@ import sun.reflect.misc.ReflectUtil;
 public class ObjectOutputStream
     extends OutputStream implements ObjectOutput, ObjectStreamConstants
 {
-
-    private static class Caches {
-        /** cache of subclass security audit results */
-        static final ConcurrentMap<WeakClassKey,Boolean> subclassAudits =
-            new ConcurrentHashMap<>();
-
-        /** queue for WeakReferences to audited subclasses */
-        static final ReferenceQueue<Class<?>> subclassAuditsQueue =
-            new ReferenceQueue<>();
-    }
+    private static final JavaLangAccess JLA = SharedSecrets.getJavaLangAccess();
 
     /** filter stream for handling block data conversion */
     private final BlockDataOutputStream bout;
@@ -214,9 +213,7 @@ public class ObjectOutputStream
      * as true or false for extended information about exception's place
      */
     private static final boolean extendedDebugInfo =
-        java.security.AccessController.doPrivileged(
-            new sun.security.action.GetBooleanAction(
-                "sun.io.serialization.extendedDebugInfo")).booleanValue();
+            Boolean.getBoolean("sun.io.serialization.extendedDebugInfo");
 
     /**
      * Creates an ObjectOutputStream that writes to the specified OutputStream.
@@ -225,24 +222,16 @@ public class ObjectOutputStream
      * ensure that constructors for receiving ObjectInputStreams will not block
      * when reading the header.
      *
-     * <p>If a security manager is installed, this constructor will check for
-     * the "enableSubclassImplementation" SerializablePermission when invoked
-     * directly or indirectly by the constructor of a subclass which overrides
-     * the ObjectOutputStream.putFields or ObjectOutputStream.writeUnshared
-     * methods.
-     *
      * @param   out output stream to write to
      * @throws  IOException if an I/O error occurs while writing stream header
-     * @throws  SecurityException if untrusted subclass illegally overrides
-     *          security-sensitive methods
      * @throws  NullPointerException if {@code out} is {@code null}
      * @since   1.4
      * @see     ObjectOutputStream#ObjectOutputStream()
      * @see     ObjectOutputStream#putFields()
      * @see     ObjectInputStream#ObjectInputStream(InputStream)
      */
+    @SuppressWarnings("this-escape")
     public ObjectOutputStream(OutputStream out) throws IOException {
-        verifySubclass();
         bout = new BlockDataOutputStream(out);
         handles = new HandleTable(10, (float) 3.00);
         subs = new ReplaceTable(10, (float) 3.00);
@@ -261,23 +250,9 @@ public class ObjectOutputStream
      * ObjectOutputStream to not have to allocate private data just used by
      * this implementation of ObjectOutputStream.
      *
-     * <p>If there is a security manager installed, this method first calls the
-     * security manager's {@code checkPermission} method with a
-     * {@code SerializablePermission("enableSubclassImplementation")}
-     * permission to ensure it's ok to enable subclassing.
-     *
-     * @throws  SecurityException if a security manager exists and its
-     *          {@code checkPermission} method denies enabling
-     *          subclassing.
      * @throws  IOException if an I/O error occurs while creating this stream
-     * @see SecurityManager#checkPermission
-     * @see java.io.SerializablePermission
      */
-    protected ObjectOutputStream() throws IOException, SecurityException {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null) {
-            sm.checkPermission(SUBCLASS_IMPLEMENTATION_PERMISSION);
-        }
+    protected ObjectOutputStream() throws IOException {
         bout = null;
         handles = null;
         subs = null;
@@ -399,12 +374,6 @@ public class ObjectOutputStream
      * rules described above only apply to the base-level object written with
      * writeUnshared, and not to any transitively referenced sub-objects in the
      * object graph to be serialized.
-     *
-     * <p>ObjectOutputStream subclasses which override this method can only be
-     * constructed in security contexts possessing the
-     * "enableSubclassImplementation" SerializablePermission; any attempt to
-     * instantiate such a subclass without this permission will cause a
-     * SecurityException to be thrown.
      *
      * @param   obj object to write to stream
      * @throws  NotSerializableException if an object in the graph to be
@@ -566,7 +535,7 @@ public class ObjectOutputStream
      * Object (as opposed to type Serializable) to allow for cases where
      * non-serializable objects are replaced by serializable ones.
      *
-     * <p>When a subclass is replacing objects it must insure that either a
+     * <p>When a subclass is replacing objects it must ensure that either a
      * complementary substitution must be made during deserialization or that
      * the substituted object is compatible with every field where the
      * reference will be stored.  Objects whose type is not a subclass of the
@@ -579,7 +548,7 @@ public class ObjectOutputStream
      * substituted or the original object.
      *
      * <p>Null can be returned as the object to be substituted, but may cause
-     * NullReferenceException in classes that contain references to the
+     * {@link NullPointerException} in classes that contain references to the
      * original object since they may be expecting an object instead of
      * null.
      *
@@ -597,34 +566,13 @@ public class ObjectOutputStream
      * enabled, the {@link #replaceObject} method is called for every object being
      * serialized.
      *
-     * <p>If object replacement is currently not enabled, and
-     * {@code enable} is true, and there is a security manager installed,
-     * this method first calls the security manager's
-     * {@code checkPermission} method with the
-     * {@code SerializablePermission("enableSubstitution")} permission to
-     * ensure that the caller is permitted to enable the stream to do replacement
-     * of objects written to the stream.
-     *
      * @param   enable true for enabling use of {@code replaceObject} for
      *          every object being serialized
      * @return  the previous setting before this method was invoked
-     * @throws  SecurityException if a security manager exists and its
-     *          {@code checkPermission} method denies enabling the stream
-     *          to do replacement of objects written to the stream.
-     * @see SecurityManager#checkPermission
-     * @see java.io.SerializablePermission
      */
-    protected boolean enableReplaceObject(boolean enable)
-        throws SecurityException
-    {
+    protected boolean enableReplaceObject(boolean enable) {
         if (enable == enableReplace) {
             return enable;
-        }
-        if (enable) {
-            SecurityManager sm = System.getSecurityManager();
-            if (sm != null) {
-                sm.checkPermission(SUBSTITUTION_PERMISSION);
-            }
         }
         enableReplace = enable;
         return !enableReplace;
@@ -649,10 +597,11 @@ public class ObjectOutputStream
      * stream.  Subclasses of ObjectOutputStream may override this method to
      * customize the way in which class descriptors are written to the
      * serialization stream.  The corresponding method in ObjectInputStream,
-     * {@code readClassDescriptor}, should then be overridden to
-     * reconstitute the class descriptor from its custom stream representation.
+     * {@link ObjectInputStream#readClassDescriptor readClassDescriptor}, should then be
+     * overridden to reconstitute the class descriptor from its custom stream representation.
      * By default, this method writes class descriptors according to the format
-     * defined in the Object Serialization specification.
+     * defined in the <a href="{@docRoot}/../specs/serialization/index.html">
+     * <cite>Java Object Serialization Specification</cite></a>.
      *
      * <p>Note that this method will only be called if the ObjectOutputStream
      * is not using the old serialization stream format (set by calling
@@ -663,6 +612,7 @@ public class ObjectOutputStream
      *
      * @param   desc class descriptor to write to the stream
      * @throws  IOException If an I/O error has occurred.
+     * @spec serialization/index.html Java Object Serialization Specification
      * @see java.io.ObjectInputStream#readClassDescriptor()
      * @see #useProtocolVersion(int)
      * @see java.io.ObjectStreamConstants#PROTOCOL_VERSION_1
@@ -681,6 +631,7 @@ public class ObjectOutputStream
      * @param   val the byte to be written to the stream
      * @throws  IOException If an I/O error has occurred.
      */
+    @Override
     public void write(int val) throws IOException {
         bout.write(val);
     }
@@ -692,6 +643,7 @@ public class ObjectOutputStream
      * @param   buf the data to be written
      * @throws  IOException If an I/O error has occurred.
      */
+    @Override
     public void write(byte[] buf) throws IOException {
         bout.write(buf, 0, buf.length, false);
     }
@@ -702,16 +654,15 @@ public class ObjectOutputStream
      * @param   buf the data to be written
      * @param   off the start offset in the data
      * @param   len the number of bytes that are written
-     * @throws  IOException If an I/O error has occurred.
+     * @throws  IOException {@inheritDoc}
+     * @throws  IndexOutOfBoundsException {@inheritDoc}
      */
+    @Override
     public void write(byte[] buf, int off, int len) throws IOException {
         if (buf == null) {
             throw new NullPointerException();
         }
-        int endoff = off + len;
-        if (off < 0 || len < 0 || endoff > buf.length || endoff < 0) {
-            throw new IndexOutOfBoundsException();
-        }
+        Objects.checkFromIndexSize(off, len, buf.length);
         bout.write(buf, off, len, false);
     }
 
@@ -719,8 +670,9 @@ public class ObjectOutputStream
      * Flushes the stream. This will write any buffered output bytes and flush
      * through to the underlying stream.
      *
-     * @throws  IOException If an I/O error has occurred.
+     * @throws  IOException {@inheritDoc}
      */
+    @Override
     public void flush() throws IOException {
         bout.flush();
     }
@@ -742,6 +694,7 @@ public class ObjectOutputStream
      *
      * @throws  IOException If an I/O error has occurred.
      */
+    @Override
     public void close() throws IOException {
         flush();
         clear();
@@ -760,7 +713,7 @@ public class ObjectOutputStream
     }
 
     /**
-     * Writes an 8 bit byte.
+     * Writes an 8-bit byte.
      *
      * @param   val the byte value to be written
      * @throws  IOException if I/O errors occur while writing to the underlying
@@ -771,7 +724,7 @@ public class ObjectOutputStream
     }
 
     /**
-     * Writes a 16 bit short.
+     * Writes a 16-bit short.
      *
      * @param   val the short value to be written
      * @throws  IOException if I/O errors occur while writing to the underlying
@@ -782,7 +735,7 @@ public class ObjectOutputStream
     }
 
     /**
-     * Writes a 16 bit char.
+     * Writes a 16-bit char.
      *
      * @param   val the char value to be written
      * @throws  IOException if I/O errors occur while writing to the underlying
@@ -793,7 +746,7 @@ public class ObjectOutputStream
     }
 
     /**
-     * Writes a 32 bit int.
+     * Writes a 32-bit int.
      *
      * @param   val the integer value to be written
      * @throws  IOException if I/O errors occur while writing to the underlying
@@ -804,7 +757,7 @@ public class ObjectOutputStream
     }
 
     /**
-     * Writes a 64 bit long.
+     * Writes a 64-bit long.
      *
      * @param   val the long value to be written
      * @throws  IOException if I/O errors occur while writing to the underlying
@@ -815,7 +768,7 @@ public class ObjectOutputStream
     }
 
     /**
-     * Writes a 32 bit float.
+     * Writes a 32-bit float.
      *
      * @param   val the float value to be written
      * @throws  IOException if I/O errors occur while writing to the underlying
@@ -826,7 +779,7 @@ public class ObjectOutputStream
     }
 
     /**
-     * Writes a 64 bit double.
+     * Writes a 64-bit double.
      *
      * @param   val the double value to be written
      * @throws  IOException if I/O errors occur while writing to the underlying
@@ -872,7 +825,7 @@ public class ObjectOutputStream
      *          stream
      */
     public void writeUTF(String str) throws IOException {
-        bout.writeUTF(str);
+        bout.writeUTFInternal(str, false);
     }
 
     /**
@@ -1014,7 +967,7 @@ public class ObjectOutputStream
          *         calling the {@link java.io.ObjectOutputStream#writeFields()}
          *         method.
          */
-        @Deprecated
+        @Deprecated(forRemoval = true, since = "1.4")
         public abstract void write(ObjectOutput out) throws IOException;
     }
 
@@ -1039,64 +992,6 @@ public class ObjectOutputStream
         } else {
             writeString(str, false);
         }
-    }
-
-    /**
-     * Verifies that this (possibly subclass) instance can be constructed
-     * without violating security constraints: the subclass must not override
-     * security-sensitive non-final methods, or else the
-     * "enableSubclassImplementation" SerializablePermission is checked.
-     */
-    private void verifySubclass() {
-        Class<?> cl = getClass();
-        if (cl == ObjectOutputStream.class) {
-            return;
-        }
-        SecurityManager sm = System.getSecurityManager();
-        if (sm == null) {
-            return;
-        }
-        processQueue(Caches.subclassAuditsQueue, Caches.subclassAudits);
-        WeakClassKey key = new WeakClassKey(cl, Caches.subclassAuditsQueue);
-        Boolean result = Caches.subclassAudits.get(key);
-        if (result == null) {
-            result = auditSubclass(cl);
-            Caches.subclassAudits.putIfAbsent(key, result);
-        }
-        if (!result) {
-            sm.checkPermission(SUBCLASS_IMPLEMENTATION_PERMISSION);
-        }
-    }
-
-    /**
-     * Performs reflective checks on given subclass to verify that it doesn't
-     * override security-sensitive non-final methods.  Returns TRUE if subclass
-     * is "safe", FALSE otherwise.
-     */
-    private static Boolean auditSubclass(Class<?> subcl) {
-        return AccessController.doPrivileged(
-            new PrivilegedAction<>() {
-                public Boolean run() {
-                    for (Class<?> cl = subcl;
-                         cl != ObjectOutputStream.class;
-                         cl = cl.getSuperclass())
-                    {
-                        try {
-                            cl.getDeclaredMethod(
-                                "writeUnshared", new Class<?>[] { Object.class });
-                            return Boolean.FALSE;
-                        } catch (NoSuchMethodException ex) {
-                        }
-                        try {
-                            cl.getDeclaredMethod("putFields", (Class<?>[]) null);
-                            return Boolean.FALSE;
-                        } catch (NoSuchMethodException ex) {
-                        }
-                    }
-                    return Boolean.TRUE;
-                }
-            }
-        );
     }
 
     /**
@@ -1240,12 +1135,6 @@ public class ObjectOutputStream
         }
     }
 
-    private boolean isCustomSubclass() {
-        // Return true if this class is a custom subclass of ObjectOutputStream
-        return getClass().getClassLoader()
-                   != ObjectOutputStream.class.getClassLoader();
-    }
-
     /**
      * Writes class descriptor representing a dynamic proxy class to stream.
      */
@@ -1263,9 +1152,6 @@ public class ObjectOutputStream
         }
 
         bout.setBlockDataMode(true);
-        if (cl != null && isCustomSubclass()) {
-            ReflectUtil.checkPackageAccess(cl);
-        }
         annotateProxyClass(cl);
         bout.setBlockDataMode(false);
         bout.writeByte(TC_ENDBLOCKDATA);
@@ -1292,9 +1178,6 @@ public class ObjectOutputStream
 
         Class<?> cl = desc.forClass();
         bout.setBlockDataMode(true);
-        if (cl != null && isCustomSubclass()) {
-            ReflectUtil.checkPackageAccess(cl);
-        }
         annotateClass(cl);
         bout.setBlockDataMode(false);
         bout.writeByte(TC_ENDBLOCKDATA);
@@ -1308,14 +1191,7 @@ public class ObjectOutputStream
      */
     private void writeString(String str, boolean unshared) throws IOException {
         handles.assign(unshared ? null : str);
-        long utflen = bout.getUTFLength(str);
-        if (utflen <= 0xFFFF) {
-            bout.writeByte(TC_STRING);
-            bout.writeUTF(str, utflen);
-        } else {
-            bout.writeByte(TC_LONGSTRING);
-            bout.writeLongUTF(str, utflen);
-        }
+        bout.writeUTFInternal(str, true);
     }
 
     /**
@@ -1414,7 +1290,7 @@ public class ObjectOutputStream
     }
 
     /**
-     * Writes representation of a "ordinary" (i.e., not a String, Class,
+     * Writes representation of an "ordinary" (i.e., not a String, Class,
      * ObjectStreamClass, array, or enum constant) serializable object to the
      * stream.
      */
@@ -1634,7 +1510,7 @@ public class ObjectOutputStream
         }
 
         public void put(String name, boolean val) {
-            Bits.putBoolean(primVals, getFieldOffset(name, Boolean.TYPE), val);
+            ByteArray.setBoolean(primVals, getFieldOffset(name, Boolean.TYPE), val);
         }
 
         public void put(String name, byte val) {
@@ -1642,27 +1518,27 @@ public class ObjectOutputStream
         }
 
         public void put(String name, char val) {
-            Bits.putChar(primVals, getFieldOffset(name, Character.TYPE), val);
+            ByteArray.setChar(primVals, getFieldOffset(name, Character.TYPE), val);
         }
 
         public void put(String name, short val) {
-            Bits.putShort(primVals, getFieldOffset(name, Short.TYPE), val);
+            ByteArray.setShort(primVals, getFieldOffset(name, Short.TYPE), val);
         }
 
         public void put(String name, int val) {
-            Bits.putInt(primVals, getFieldOffset(name, Integer.TYPE), val);
+            ByteArray.setInt(primVals, getFieldOffset(name, Integer.TYPE), val);
         }
 
         public void put(String name, float val) {
-            Bits.putFloat(primVals, getFieldOffset(name, Float.TYPE), val);
+            ByteArray.setFloat(primVals, getFieldOffset(name, Float.TYPE), val);
         }
 
         public void put(String name, long val) {
-            Bits.putLong(primVals, getFieldOffset(name, Long.TYPE), val);
+            ByteArray.setLong(primVals, getFieldOffset(name, Long.TYPE), val);
         }
 
         public void put(String name, double val) {
-            Bits.putDouble(primVals, getFieldOffset(name, Double.TYPE), val);
+            ByteArray.setDouble(primVals, getFieldOffset(name, Double.TYPE), val);
         }
 
         public void put(String name, Object val) {
@@ -1750,7 +1626,7 @@ public class ObjectOutputStream
      * bracketed by block data markers (see object serialization specification
      * for details).
      */
-    private static class BlockDataOutputStream
+    private static final class BlockDataOutputStream
         extends OutputStream implements DataOutput
     {
         /** maximum data block length */
@@ -1904,7 +1780,7 @@ public class ObjectOutputStream
                 out.write(hbuf, 0, 2);
             } else {
                 hbuf[0] = TC_BLOCKDATALONG;
-                Bits.putInt(hbuf, 1, len);
+                ByteArray.setInt(hbuf, 1, len);
                 out.write(hbuf, 0, 5);
             }
         }
@@ -1921,7 +1797,7 @@ public class ObjectOutputStream
             if (pos >= MAX_BLOCK_SIZE) {
                 drain();
             }
-            Bits.putBoolean(buf, pos++, v);
+            ByteArray.setBoolean(buf, pos++, v);
         }
 
         public void writeByte(int v) throws IOException {
@@ -1933,7 +1809,7 @@ public class ObjectOutputStream
 
         public void writeChar(int v) throws IOException {
             if (pos + 2 <= MAX_BLOCK_SIZE) {
-                Bits.putChar(buf, pos, (char) v);
+                ByteArray.setChar(buf, pos, (char) v);
                 pos += 2;
             } else {
                 dout.writeChar(v);
@@ -1942,7 +1818,7 @@ public class ObjectOutputStream
 
         public void writeShort(int v) throws IOException {
             if (pos + 2 <= MAX_BLOCK_SIZE) {
-                Bits.putShort(buf, pos, (short) v);
+                ByteArray.setShort(buf, pos, (short) v);
                 pos += 2;
             } else {
                 dout.writeShort(v);
@@ -1951,7 +1827,7 @@ public class ObjectOutputStream
 
         public void writeInt(int v) throws IOException {
             if (pos + 4 <= MAX_BLOCK_SIZE) {
-                Bits.putInt(buf, pos, v);
+                ByteArray.setInt(buf, pos, v);
                 pos += 4;
             } else {
                 dout.writeInt(v);
@@ -1960,7 +1836,7 @@ public class ObjectOutputStream
 
         public void writeFloat(float v) throws IOException {
             if (pos + 4 <= MAX_BLOCK_SIZE) {
-                Bits.putFloat(buf, pos, v);
+                ByteArray.setFloat(buf, pos, v);
                 pos += 4;
             } else {
                 dout.writeFloat(v);
@@ -1969,7 +1845,7 @@ public class ObjectOutputStream
 
         public void writeLong(long v) throws IOException {
             if (pos + 8 <= MAX_BLOCK_SIZE) {
-                Bits.putLong(buf, pos, v);
+                ByteArray.setLong(buf, pos, v);
                 pos += 8;
             } else {
                 dout.writeLong(v);
@@ -1978,33 +1854,34 @@ public class ObjectOutputStream
 
         public void writeDouble(double v) throws IOException {
             if (pos + 8 <= MAX_BLOCK_SIZE) {
-                Bits.putDouble(buf, pos, v);
+                ByteArray.setDouble(buf, pos, v);
                 pos += 8;
             } else {
                 dout.writeDouble(v);
             }
         }
 
-        public void writeBytes(String s) throws IOException {
-            int endoff = s.length();
-            int cpos = 0;
-            int csize = 0;
-            for (int off = 0; off < endoff; ) {
-                if (cpos >= csize) {
-                    cpos = 0;
-                    csize = Math.min(endoff - off, CHAR_BUF_SIZE);
-                    s.getChars(off, off + csize, cbuf, 0);
-                }
-                if (pos >= MAX_BLOCK_SIZE) {
+        @SuppressWarnings("deprecation")
+        void writeBytes(String s, int len) throws IOException {
+            int pos = this.pos;
+            for (int strpos = 0; strpos < len;) {
+                int rem = MAX_BLOCK_SIZE - pos;
+                int csize = Math.min(len - strpos, rem);
+                s.getBytes(strpos, strpos + csize, buf, pos);
+                pos += csize;
+                strpos += csize;
+
+                if (pos == MAX_BLOCK_SIZE) {
+                    this.pos = pos;
                     drain();
+                    pos = 0;
                 }
-                int n = Math.min(csize - cpos, MAX_BLOCK_SIZE - pos);
-                int stop = pos + n;
-                while (pos < stop) {
-                    buf[pos++] = (byte) cbuf[cpos++];
-                }
-                off += n;
             }
+            this.pos = pos;
+        }
+
+        public void writeBytes(String s) throws IOException {
+            writeBytes(s, s.length());
         }
 
         public void writeChars(String s) throws IOException {
@@ -2017,8 +1894,47 @@ public class ObjectOutputStream
             }
         }
 
-        public void writeUTF(String s) throws IOException {
-            writeUTF(s, getUTFLength(s));
+        public void writeUTF(String str) throws IOException {
+            writeUTFInternal(str, false);
+        }
+
+        private void writeUTFInternal(String str, boolean writeHeader) throws IOException {
+            int strlen = str.length();
+            int countNonZeroAscii = JLA.countNonZeroAscii(str);
+            long utflen = utfLen(str, countNonZeroAscii);
+            if (ExactConversionsSupport.isLongToCharExact(utflen)) {
+                if(writeHeader) {
+                    writeByte(TC_STRING);
+                }
+                writeShort((short)utflen);
+            } else {
+                if(writeHeader) {
+                    writeByte(TC_LONGSTRING);
+                }
+                writeLong(utflen);
+            }
+
+            if (countNonZeroAscii != 0) {
+                writeBytes(str, countNonZeroAscii);
+            }
+            if (countNonZeroAscii != strlen) {
+                writeMoreUTF(str, countNonZeroAscii);
+            }
+        }
+
+        private void writeMoreUTF(String str, int stroff) throws IOException {
+            int pos = this.pos;
+            for (int strlen = str.length(); stroff < strlen;) {
+                char c = str.charAt(stroff++);
+                int csize = c != 0 && c < 0x80 ? 1 : c >= 0x800 ? 3 : 2;
+                if (pos + csize >= MAX_BLOCK_SIZE) {
+                    this.pos = pos;
+                    drain();
+                    pos = 0;
+                }
+                pos = putChar(buf, pos, c);
+            }
+            this.pos = pos;
         }
 
 
@@ -2038,7 +1954,7 @@ public class ObjectOutputStream
                 }
                 int stop = Math.min(endoff, off + (MAX_BLOCK_SIZE - pos));
                 while (off < stop) {
-                    Bits.putBoolean(buf, pos++, v[off++]);
+                    ByteArray.setBoolean(buf, pos++, v[off++]);
                 }
             }
         }
@@ -2051,7 +1967,7 @@ public class ObjectOutputStream
                     int avail = (MAX_BLOCK_SIZE - pos) >> 1;
                     int stop = Math.min(endoff, off + avail);
                     while (off < stop) {
-                        Bits.putChar(buf, pos, v[off++]);
+                        ByteArray.setChar(buf, pos, v[off++]);
                         pos += 2;
                     }
                 } else {
@@ -2068,7 +1984,7 @@ public class ObjectOutputStream
                     int avail = (MAX_BLOCK_SIZE - pos) >> 1;
                     int stop = Math.min(endoff, off + avail);
                     while (off < stop) {
-                        Bits.putShort(buf, pos, v[off++]);
+                        ByteArray.setShort(buf, pos, v[off++]);
                         pos += 2;
                     }
                 } else {
@@ -2085,7 +2001,7 @@ public class ObjectOutputStream
                     int avail = (MAX_BLOCK_SIZE - pos) >> 2;
                     int stop = Math.min(endoff, off + avail);
                     while (off < stop) {
-                        Bits.putInt(buf, pos, v[off++]);
+                        ByteArray.setInt(buf, pos, v[off++]);
                         pos += 4;
                     }
                 } else {
@@ -2102,7 +2018,7 @@ public class ObjectOutputStream
                     int avail = (MAX_BLOCK_SIZE - pos) >> 2;
                     int stop = Math.min(endoff, off + avail);
                     while (off < stop) {
-                        Bits.putFloat(buf, pos, v[off++]);
+                        ByteArray.setFloat(buf, pos, v[off++]);
                         pos += 4;
                     }
                 } else {
@@ -2119,7 +2035,7 @@ public class ObjectOutputStream
                     int avail = (MAX_BLOCK_SIZE - pos) >> 3;
                     int stop = Math.min(endoff, off + avail);
                     while (off < stop) {
-                        Bits.putLong(buf, pos, v[off++]);
+                        ByteArray.setLong(buf, pos, v[off++]);
                         pos += 8;
                     }
                 } else {
@@ -2136,118 +2052,12 @@ public class ObjectOutputStream
                     int avail = (MAX_BLOCK_SIZE - pos) >> 3;
                     int stop = Math.min(endoff, off + avail);
                     while (off < stop) {
-                        Bits.putDouble(buf, pos, v[off++]);
+                        ByteArray.setDouble(buf, pos, v[off++]);
                         pos += 8;
                     }
                 } else {
                     dout.writeDouble(v[off++]);
                 }
-            }
-        }
-
-        /**
-         * Returns the length in bytes of the UTF encoding of the given string.
-         */
-        long getUTFLength(String s) {
-            int len = s.length();
-            long utflen = 0;
-            for (int off = 0; off < len; ) {
-                int csize = Math.min(len - off, CHAR_BUF_SIZE);
-                s.getChars(off, off + csize, cbuf, 0);
-                for (int cpos = 0; cpos < csize; cpos++) {
-                    char c = cbuf[cpos];
-                    if (c >= 0x0001 && c <= 0x007F) {
-                        utflen++;
-                    } else if (c > 0x07FF) {
-                        utflen += 3;
-                    } else {
-                        utflen += 2;
-                    }
-                }
-                off += csize;
-            }
-            return utflen;
-        }
-
-        /**
-         * Writes the given string in UTF format.  This method is used in
-         * situations where the UTF encoding length of the string is already
-         * known; specifying it explicitly avoids a prescan of the string to
-         * determine its UTF length.
-         */
-        void writeUTF(String s, long utflen) throws IOException {
-            if (utflen > 0xFFFFL) {
-                throw new UTFDataFormatException();
-            }
-            writeShort((int) utflen);
-            if (utflen == (long) s.length()) {
-                writeBytes(s);
-            } else {
-                writeUTFBody(s);
-            }
-        }
-
-        /**
-         * Writes given string in "long" UTF format.  "Long" UTF format is
-         * identical to standard UTF, except that it uses an 8 byte header
-         * (instead of the standard 2 bytes) to convey the UTF encoding length.
-         */
-        void writeLongUTF(String s) throws IOException {
-            writeLongUTF(s, getUTFLength(s));
-        }
-
-        /**
-         * Writes given string in "long" UTF format, where the UTF encoding
-         * length of the string is already known.
-         */
-        void writeLongUTF(String s, long utflen) throws IOException {
-            writeLong(utflen);
-            if (utflen == (long) s.length()) {
-                writeBytes(s);
-            } else {
-                writeUTFBody(s);
-            }
-        }
-
-        /**
-         * Writes the "body" (i.e., the UTF representation minus the 2-byte or
-         * 8-byte length header) of the UTF encoding for the given string.
-         */
-        private void writeUTFBody(String s) throws IOException {
-            int limit = MAX_BLOCK_SIZE - 3;
-            int len = s.length();
-            for (int off = 0; off < len; ) {
-                int csize = Math.min(len - off, CHAR_BUF_SIZE);
-                s.getChars(off, off + csize, cbuf, 0);
-                for (int cpos = 0; cpos < csize; cpos++) {
-                    char c = cbuf[cpos];
-                    if (pos <= limit) {
-                        if (c <= 0x007F && c != 0) {
-                            buf[pos++] = (byte) c;
-                        } else if (c > 0x07FF) {
-                            buf[pos + 2] = (byte) (0x80 | ((c >> 0) & 0x3F));
-                            buf[pos + 1] = (byte) (0x80 | ((c >> 6) & 0x3F));
-                            buf[pos + 0] = (byte) (0xE0 | ((c >> 12) & 0x0F));
-                            pos += 3;
-                        } else {
-                            buf[pos + 1] = (byte) (0x80 | ((c >> 0) & 0x3F));
-                            buf[pos + 0] = (byte) (0xC0 | ((c >> 6) & 0x1F));
-                            pos += 2;
-                        }
-                    } else {    // write one byte at a time to normalize block
-                        if (c <= 0x007F && c != 0) {
-                            write(c);
-                        } else if (c > 0x07FF) {
-                            write(0xE0 | ((c >> 12) & 0x0F));
-                            write(0x80 | ((c >> 6) & 0x3F));
-                            write(0x80 | ((c >> 0) & 0x3F));
-                        } else {
-                            write(0xC0 | ((c >> 6) & 0x1F));
-                            write(0x80 | ((c >> 0) & 0x3F));
-                        }
-                    }
-                }
-                off += csize;
             }
         }
     }
@@ -2256,7 +2066,7 @@ public class ObjectOutputStream
      * Lightweight identity hash table which maps objects to integer handles,
      * assigned in ascending order.
      */
-    private static class HandleTable {
+    private static final class HandleTable {
 
         /* number of mappings in table/next available handle */
         private int size;
@@ -2381,7 +2191,7 @@ public class ObjectOutputStream
      * Lightweight identity hash table which maps objects to replacement
      * objects.
      */
-    private static class ReplaceTable {
+    private static final class ReplaceTable {
 
         /* maps object -> index */
         private final HandleTable htab;
@@ -2445,7 +2255,7 @@ public class ObjectOutputStream
      * Stack to keep debug information about the state of the
      * serialization process, for embedding in exception messages.
      */
-    private static class DebugTraceInfoStack {
+    private static final class DebugTraceInfoStack {
         private final List<String> stack;
 
         DebugTraceInfoStack() {

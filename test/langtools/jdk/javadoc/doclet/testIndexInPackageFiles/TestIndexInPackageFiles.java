@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
 
 /*
  * @test
- * @bug 8213957 8213958
+ * @bug 8213957 8213958 8340565
  * @summary Test use of at-index in package-iinfo and doc-files
  * @library /tools/lib ../../lib
  * @modules jdk.javadoc/jdk.javadoc.internal.tool
@@ -40,7 +40,7 @@ import toolbox.ToolBox;
 public class TestIndexInPackageFiles extends JavadocTester {
 
     public static void main(String... args) throws Exception {
-        TestIndexInPackageFiles  tester = new TestIndexInPackageFiles ();
+        var tester = new TestIndexInPackageFiles ();
         tester.runTests();
     }
 
@@ -112,15 +112,32 @@ public class TestIndexInPackageFiles extends JavadocTester {
 
         checkOutput("index-all.html", true,
             """
-                <span class="search-tag-link"><a href="p/q/package-summary.html#test.name.1">test.name.1</a></span>""",
+                <a href="p/q/package-summary.html#test.name.1" class="search-tag-link">test.name.1</a>""",
             """
-                <span class="search-tag-link"><a href="p/q/doc-files/extra.html#test.name.2">test.name.2</a></span>""",
+                <a href="p/q/doc-files/extra.html#test.name.2" class="search-tag-link">test.name.2</a>""",
             """
-                <span class="search-tag-link"><a href="index.html#test.name.3">test.name.3</a></span> - Search tag in Overview</dt>""",
+                <a href="index.html#test.name.3" class="search-tag-link">test.name.3</a> - Search tag in Overview</dt>""",
             """
-                <span class="search-tag-link"><a href="p/q/package-summary.html#test.property.1">test.property.1</a></span>""",
+                <a href="p/q/package-summary.html#test.property.1" class="search-tag-link">test.property.1</a>""",
             """
-                <span class="search-tag-link"><a href="p/q/doc-files/extra.html#test.property.2">test.property.2</a></span>""");
+                <a href="p/q/doc-files/extra.html#test.property.2" class="search-tag-link">test.property.2</a>""");
+
+        checkOrder("search-tags.html",
+            """
+                <div class="col-first even-row-color">test.name.1</div>
+                <div class="col-second even-row-color">additional info</div>
+                <div class="col-last even-row-color">
+                <div class="block"><code><a href="p/q/package-summary.html#test.name.1">package p.q</a></code></div>""",
+            """
+                <div class="col-first odd-row-color">test.name.2</div>
+                <div class="col-second odd-row-color">additional info</div>
+                <div class="col-last odd-row-color">
+                <div class="block"><a href="p/q/doc-files/extra.html#test.name.2"><code>package p.q: </code>Extra</a></div>""",
+            """
+                <div class="col-first even-row-color">test.name.3</div>
+                <div class="col-second even-row-color">additional info</div>
+                <div class="col-last even-row-color">
+                <div class="block"><a href="index.html#test.name.3">Overview</a></div>""");
     }
 }
 

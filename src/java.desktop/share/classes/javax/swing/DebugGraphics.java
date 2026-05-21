@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -72,11 +72,24 @@ public class DebugGraphics extends Graphics {
     /**
      * Constructs a new debug graphics context that supports slowed
      * down drawing.
+     * <p>
+     * NOTE: This constructor should not be called by
+     * applications, it is for internal use only. When called directly
+     * it will create an un-usable instance.
      */
     public DebugGraphics() {
         super();
         buffer = null;
         xOffset = yOffset = 0;
+
+        //  Creates a Graphics context when the constructor is called.
+        if (this.graphics == null) {
+            StackWalker walker = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
+            if (walker.getCallerClass() != this.getClass()) {
+                BufferedImage bi = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB);
+                this.graphics = bi.createGraphics();
+            }
+        }
     }
 
     /**
@@ -1417,8 +1430,8 @@ public class DebugGraphics extends Graphics {
             Container container = (Container)component;
             int debugOptions = 0;
 
-            while (container != null && (container instanceof JComponent)) {
-                debugOptions |= info.getDebugOptions((JComponent)container);
+            while (container instanceof JComponent jc) {
+                debugOptions |= info.getDebugOptions(jc);
                 container = container.getParent();
             }
 
@@ -1479,14 +1492,12 @@ public class DebugGraphics extends Graphics {
     /** Returns DebugGraphicsInfo, or creates one if none exists.
       */
     static DebugGraphicsInfo info() {
-        DebugGraphicsInfo debugGraphicsInfo = (DebugGraphicsInfo)
-            SwingUtilities.appContextGet(debugGraphicsInfoKey);
-        if (debugGraphicsInfo == null) {
-            debugGraphicsInfo = new DebugGraphicsInfo();
-            SwingUtilities.appContextPut(debugGraphicsInfoKey,
-                                         debugGraphicsInfo);
+        synchronized (DebugGraphicsInfo.class) {
+            if (debugGraphicsInfo == null) {
+                debugGraphicsInfo = new DebugGraphicsInfo();
+            }
+            return debugGraphicsInfo;
         }
-        return debugGraphicsInfo;
     }
-    private static final Class<DebugGraphicsInfo> debugGraphicsInfoKey = DebugGraphicsInfo.class;
+    private static DebugGraphicsInfo debugGraphicsInfo;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,8 @@
 
 package java.awt;
 
+import java.io.Serial;
+
 /**
  * Thrown when code that is dependent on a keyboard, display, or mouse
  * is called in an environment that does not support a keyboard, display,
@@ -38,13 +40,17 @@ package java.awt;
  * @see GraphicsEnvironment#isHeadless
  */
 public class HeadlessException extends UnsupportedOperationException {
-    /*
-     * JDK 1.4 serialVersionUID
+
+    /**
+     * Use serialVersionUID from JDK 1.4 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = 167183644944358563L;
 
     /**
-     * Constructs new {@code HeadlessException} with empty message.
+     * Constructs a new {@code HeadlessException} with {@code null} as its detail message.
+     * The default headless message may replace {@code null} in some cases, as outlined below.
+     * <p>
      * For such {@code HeadlessException} the default headless error message
      * may be auto-generated for some platforms.
      * The text of the default headless message may depend on

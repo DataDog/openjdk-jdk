@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,6 +33,8 @@ import java.nio.charset.CharsetEncoder;
 import java.nio.charset.CoderResult;
 import java.util.Objects;
 
+import jdk.internal.access.JavaLangAccess;
+import jdk.internal.access.SharedSecrets;
 import jdk.internal.vm.annotation.IntrinsicCandidate;
 
 public class ISO_8859_1
@@ -64,6 +66,8 @@ public class ISO_8859_1
 
     private static class Decoder extends CharsetDecoder {
 
+        private static final JavaLangAccess JLA = SharedSecrets.getJavaLangAccess();
+
         private Decoder(Charset cs) {
             super(cs, 1.0f, 1.0f);
         }
@@ -72,29 +76,25 @@ public class ISO_8859_1
                                             CharBuffer dst)
         {
             byte[] sa = src.array();
-            int sp = src.arrayOffset() + src.position();
-            int sl = src.arrayOffset() + src.limit();
-            assert (sp <= sl);
-            sp = (sp <= sl ? sp : sl);
-            char[] da = dst.array();
-            int dp = dst.arrayOffset() + dst.position();
-            int dl = dst.arrayOffset() + dst.limit();
-            assert (dp <= dl);
-            dp = (dp <= dl ? dp : dl);
+            int soff = src.arrayOffset();
+            int sp = soff + src.position();
+            int sl = soff + src.limit();
 
-            try {
-                while (sp < sl) {
-                    byte b = sa[sp];
-                    if (dp >= dl)
-                        return CoderResult.OVERFLOW;
-                    da[dp++] = (char)(b & 0xff);
-                    sp++;
-                }
-                return CoderResult.UNDERFLOW;
-            } finally {
-                src.position(sp - src.arrayOffset());
-                dst.position(dp - dst.arrayOffset());
+            char[] da = dst.array();
+            int doff = dst.arrayOffset();
+            int dp = doff + dst.position();
+            int dl = doff + dst.limit();
+
+            int decodeLen = Math.min(sl - sp, dl - dp);
+            JLA.inflateBytesToChars(sa, sp, da, dp, decodeLen);
+            sp += decodeLen;
+            dp += decodeLen;
+            src.position(sp - soff);
+            dst.position(dp - doff);
+            if (sl - sp > dl - dp) {
+                return CoderResult.OVERFLOW;
             }
+            return CoderResult.UNDERFLOW;
         }
 
         private CoderResult decodeBufferLoop(ByteBuffer src,
@@ -135,26 +135,50 @@ public class ISO_8859_1
             return c <= '\u00FF';
         }
 
+        public boolean canEncode(CharSequence cs) {
+            int length = cs.length();
+            for (int i = 0; i < length; i++) {
+                if (!canEncode(cs.charAt(i))) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         public boolean isLegalReplacement(byte[] repl) {
             return true;  // we accept any byte value
         }
 
         private final Surrogate.Parser sgp = new Surrogate.Parser();
 
-        // Method possible replaced with a compiler intrinsic.
+        /**
+         * Encodes as many ISO-8859-1 codepoints as possible from the source
+         * character array into the destination byte array, assuming that
+         * the encoding is ISO-8859-1 compatible.
+         *
+         * @param sa the source character array
+         * @param sp the index of the source array to start reading from
+         * @param da the target byte array
+         * @param dp the index of the target array to start writing to
+         * @param len the maximum number of characters to be encoded
+         * @return the total number of characters successfully encoded
+         * @throws NullPointerException if any of the provided arrays is null
+         */
         private static int encodeISOArray(char[] sa, int sp,
                                           byte[] da, int dp, int len) {
-            if (len <= 0) {
+            // This method should tolerate invalid arguments, matching the lenient behavior of the VM intrinsic.
+            // Hence, using operator expressions instead of `Preconditions`, which throw on failure.
+            if ((sp | dp | len) < 0 ||
+                    sp >= sa.length ||      // Implicit null check on `sa`
+                    dp >= da.length) {      // Implicit null check on `da`
                 return 0;
             }
-            encodeISOArrayCheck(sa, sp, da, dp, len);
-            return implEncodeISOArray(sa, sp, da, dp, len);
+            int minLen = Math.min(len, Math.min(sa.length - sp, da.length - dp));
+            return encodeISOArray0(sa, sp, da, dp, minLen);
         }
 
         @IntrinsicCandidate
-        private static int implEncodeISOArray(char[] sa, int sp,
-                                              byte[] da, int dp, int len)
-        {
+        private static int encodeISOArray0(char[] sa, int sp, byte[] da, int dp, int len) {
             int i = 0;
             for (; i < len; i++) {
                 char c = sa[sp++];
@@ -163,30 +187,6 @@ public class ISO_8859_1
                 da[dp++] = (byte)c;
             }
             return i;
-        }
-
-        private static void encodeISOArrayCheck(char[] sa, int sp,
-                                                byte[] da, int dp, int len) {
-            Objects.requireNonNull(sa);
-            Objects.requireNonNull(da);
-
-            if (sp < 0 || sp >= sa.length) {
-                throw new ArrayIndexOutOfBoundsException(sp);
-            }
-
-            if (dp < 0 || dp >= da.length) {
-                throw new ArrayIndexOutOfBoundsException(dp);
-            }
-
-            int endIndexSP = sp + len - 1;
-            if (endIndexSP < 0 || endIndexSP >= sa.length) {
-                throw new ArrayIndexOutOfBoundsException(endIndexSP);
-            }
-
-            int endIndexDP = dp + len - 1;
-            if (endIndexDP < 0 || endIndexDP >= da.length) {
-                throw new ArrayIndexOutOfBoundsException(endIndexDP);
-            }
         }
 
         private CoderResult encodeArrayLoop(CharBuffer src,

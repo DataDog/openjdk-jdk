@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,12 +28,15 @@ package jdk.jfr.internal;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 
 final class ChunkInputStream extends InputStream {
     private final Iterator<RepositoryChunk> chunks;
+    private long unstreamedSize = 0;
     private RepositoryChunk currentChunk;
     private InputStream stream;
 
@@ -42,27 +45,37 @@ final class ChunkInputStream extends InputStream {
         for (RepositoryChunk c : chunks) {
             c.use(); // keep alive while we're reading.
             l.add(c);
+            unstreamedSize += c.getSize();
         }
 
         this.chunks = l.iterator();
-        nextStream();
+        if (!nextStream()) {
+            throw new IOException("Recording data missing on disk.");
+        }
     }
 
     @Override
     public int available() throws IOException {
+        long total = unstreamedSize;
         if (stream != null) {
-            return stream.available();
+            total += stream.available();
         }
-        return 0;
+        return total <= Integer.MAX_VALUE ? (int) total : Integer.MAX_VALUE;
     }
 
     private boolean nextStream() throws IOException {
-        if (!nextChunk()) {
-            return false;
+        while (nextChunk()) {
+            try {
+                stream = new BufferedInputStream(Files.newInputStream(currentChunk.getFile()));
+                unstreamedSize -= currentChunk.getSize();
+                return true;
+            } catch (IOException e) {
+                Logger.log(LogTag.JFR, LogLevel.INFO, "Could not open chunk file for stream: " + e.getMessage() + ". Skipping.");
+                // Release chunk if it can't be found/accessed.
+                closeChunk();
+            }
         }
-
-        stream = new BufferedInputStream(SecuritySupport.newFileInputStream(currentChunk.getFile()));
-        return true;
+        return false;
     }
 
     private boolean nextChunk() {
@@ -81,10 +94,7 @@ final class ChunkInputStream extends InputStream {
                 if (r != -1) {
                     return r;
                 }
-                stream.close();
-                currentChunk.release();
-                stream = null;
-                currentChunk = null;
+                closeStream();
             }
             if (!nextStream()) {
                 return -1;
@@ -93,24 +103,59 @@ final class ChunkInputStream extends InputStream {
     }
 
     @Override
-    public void close() throws IOException {
-        if (stream != null) {
-            stream.close();
-            stream = null;
+    public int read(byte[] buf, int off, int len) throws IOException {
+        Objects.checkFromIndexSize(off, len, buf.length);
+        if (len == 0) {
+            return 0;
         }
-        while (currentChunk != null) {
+
+        int totalRead = 0;
+        while (len > 0) {
+            if (stream == null) {
+                closeChunk();
+                if (!nextStream()) {
+                    return totalRead > 0 ? totalRead : -1;
+                }
+            }
+            int read = stream.read(buf, off, len);
+            if (read > -1) {
+                totalRead += read;
+                len -= read;
+                if (len == 0) {
+                    return totalRead;
+                }
+                off += read;
+            } else {
+                closeStream();
+            }
+        }
+        return totalRead;
+    }
+
+    private void closeStream() throws IOException {
+        try {
+            if (stream != null) {
+                stream.close();
+                stream = null;
+            }
+        } finally {
+            closeChunk();
+        }
+    }
+
+    private void closeChunk() {
+        if (currentChunk != null) {
             currentChunk.release();
             currentChunk = null;
-            if (!nextChunk()) {
-                return;
-            }
         }
     }
 
     @Override
-    @SuppressWarnings("deprecation")
-    protected void finalize() throws Throwable {
-        super.finalize();
-        close();
+    public void close() throws IOException {
+        closeStream();
+        while (chunks.hasNext()) {
+            RepositoryChunk c = chunks.next();
+            c.release();
+        }
     }
 }

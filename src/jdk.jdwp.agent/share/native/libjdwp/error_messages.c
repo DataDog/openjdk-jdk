@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -61,6 +61,8 @@
  *    NOTE: This function is at the lowest level of the call tree.
  *          Do not use the ERROR* macros here.
  */
+
+ATTRIBUTE_PRINTF(4, 0)
 static void
 vprint_message(FILE *fp, const char *prefix, const char *suffix,
                const char *format, va_list ap)
@@ -84,6 +86,7 @@ vprint_message(FILE *fp, const char *prefix, const char *suffix,
  *    NOTE: This function is at the lowest level of the call tree.
  *          Do not use the ERROR* macros here.
  */
+ATTRIBUTE_PRINTF(4, 5)
 void
 print_message(FILE *fp, const char *prefix,  const char *suffix,
               const char *format, ...)
@@ -96,6 +99,7 @@ print_message(FILE *fp, const char *prefix,  const char *suffix,
 }
 
 /* Generate error message */
+ATTRIBUTE_PRINTF(1, 2)
 void
 error_message(const char *format, ...)
 {
@@ -110,6 +114,7 @@ error_message(const char *format, ...)
 }
 
 /* Print plain message to stdout. */
+ATTRIBUTE_PRINTF(1, 2)
 void
 tty_message(const char *format, ...)
 {
@@ -175,6 +180,8 @@ jvmtiErrorText(jvmtiError error)
         CASE_RETURN_TEXT(JVMTI_ERROR_NAMES_DONT_MATCH)
         CASE_RETURN_TEXT(JVMTI_ERROR_UNSUPPORTED_REDEFINITION_CLASS_MODIFIERS_CHANGED)
         CASE_RETURN_TEXT(JVMTI_ERROR_UNSUPPORTED_REDEFINITION_METHOD_MODIFIERS_CHANGED)
+        CASE_RETURN_TEXT(JVMTI_ERROR_UNSUPPORTED_REDEFINITION_CLASS_ATTRIBUTE_CHANGED)
+        CASE_RETURN_TEXT(JVMTI_ERROR_UNSUPPORTED_OPERATION)
         CASE_RETURN_TEXT(JVMTI_ERROR_NOT_AVAILABLE)
         CASE_RETURN_TEXT(JVMTI_ERROR_MUST_POSSESS_CAPABILITY)
         CASE_RETURN_TEXT(JVMTI_ERROR_NULL_POINTER)
@@ -230,6 +237,7 @@ eventText(int i)
         CASE_RETURN_TEXT(EI_THREAD_START)
         CASE_RETURN_TEXT(EI_THREAD_END)
         CASE_RETURN_TEXT(EI_CLASS_PREPARE)
+        CASE_RETURN_TEXT(EI_CLASS_UNLOAD)
         CASE_RETURN_TEXT(EI_CLASS_LOAD)
         CASE_RETURN_TEXT(EI_FIELD_ACCESS)
         CASE_RETURN_TEXT(EI_FIELD_MODIFICATION)
@@ -238,7 +246,8 @@ eventText(int i)
         CASE_RETURN_TEXT(EI_METHOD_EXIT)
         CASE_RETURN_TEXT(EI_VM_INIT)
         CASE_RETURN_TEXT(EI_VM_DEATH)
-        CASE_RETURN_TEXT(EI_GC_FINISH)
+        CASE_RETURN_TEXT(EI_VIRTUAL_THREAD_START)
+        CASE_RETURN_TEXT(EI_VIRTUAL_THREAD_END)
         default: return "EVENT_unknown";
     }
 }

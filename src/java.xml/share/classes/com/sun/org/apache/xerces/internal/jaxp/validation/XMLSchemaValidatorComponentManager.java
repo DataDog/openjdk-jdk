@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2025, Oracle and/or its affiliates. All rights reserved.
  */
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
@@ -40,15 +40,18 @@ import com.sun.org.apache.xerces.internal.util.ParserConfigurationSettings;
 import com.sun.org.apache.xerces.internal.util.PropertyState;
 import com.sun.org.apache.xerces.internal.util.Status;
 import com.sun.org.apache.xerces.internal.util.SymbolTable;
-import com.sun.org.apache.xerces.internal.utils.XMLSecurityPropertyManager;
-import com.sun.org.apache.xerces.internal.utils.XMLSecurityManager;
 import com.sun.org.apache.xerces.internal.xni.NamespaceContext;
 import com.sun.org.apache.xerces.internal.xni.XNIException;
 import com.sun.org.apache.xerces.internal.xni.parser.XMLComponent;
 import com.sun.org.apache.xerces.internal.xni.parser.XMLComponentManager;
 import com.sun.org.apache.xerces.internal.xni.parser.XMLConfigurationException;
 import javax.xml.catalog.CatalogFeatures;
+import jdk.xml.internal.FeaturePropertyBase;
+import jdk.xml.internal.JdkConstants;
+import jdk.xml.internal.JdkXmlConfig;
 import jdk.xml.internal.JdkXmlUtils;
+import jdk.xml.internal.XMLSecurityManager;
+import jdk.xml.internal.XMLSecurityPropertyManager;
 import org.w3c.dom.ls.LSResourceResolver;
 import org.xml.sax.ErrorHandler;
 
@@ -56,6 +59,7 @@ import org.xml.sax.ErrorHandler;
  * <p>An implementation of XMLComponentManager for a schema validator.</p>
  *
  * @author Michael Glavassevich, IBM
+ * @LastModified: May 2025
  */
 final class XMLSchemaValidatorComponentManager extends ParserConfigurationSettings implements
         XMLComponentManager {
@@ -138,7 +142,7 @@ final class XMLSchemaValidatorComponentManager extends ParserConfigurationSettin
 
     /** Property identifier: security property manager. */
     private static final String XML_SECURITY_PROPERTY_MANAGER =
-            Constants.XML_SECURITY_PROPERTY_MANAGER;
+            JdkConstants.XML_SECURITY_PROPERTY_MANAGER;
 
     /** Property identifier: symbol table. */
     private static final String SYMBOL_TABLE =
@@ -265,7 +269,7 @@ final class XMLSchemaValidatorComponentManager extends ParserConfigurationSettin
                 SCHEMA_ELEMENT_DEFAULT,
                 SCHEMA_AUGMENT_PSVI,
                 XMLConstants.USE_CATALOG,
-                JdkXmlUtils.OVERRIDE_PARSER
+                JdkConstants.OVERRIDE_PARSER
         };
         addRecognizedFeatures(recognizedFeatures);
         fFeatures.put(DISALLOW_DOCTYPE_DECL_FEATURE, Boolean.FALSE);
@@ -273,7 +277,7 @@ final class XMLSchemaValidatorComponentManager extends ParserConfigurationSettin
         fFeatures.put(SCHEMA_ELEMENT_DEFAULT, Boolean.FALSE);
         fFeatures.put(SCHEMA_AUGMENT_PSVI, Boolean.TRUE);
         fFeatures.put(XMLConstants.USE_CATALOG, grammarContainer.getFeature(XMLConstants.USE_CATALOG));
-        fFeatures.put(JdkXmlUtils.OVERRIDE_PARSER, grammarContainer.getFeature(JdkXmlUtils.OVERRIDE_PARSER));
+        fFeatures.put(JdkConstants.OVERRIDE_PARSER, grammarContainer.getFeature(JdkConstants.OVERRIDE_PARSER));
 
         addRecognizedParamsAndSetDefaults(fEntityManager, grammarContainer);
         addRecognizedParamsAndSetDefaults(fErrorReporter, grammarContainer);
@@ -290,24 +294,19 @@ final class XMLSchemaValidatorComponentManager extends ParserConfigurationSettin
         fFeatures.put(UNPARSED_ENTITY_CHECKING, Boolean.TRUE);
 
         boolean secureProcessing = grammarContainer.getFeature(XMLConstants.FEATURE_SECURE_PROCESSING);
-        if (System.getSecurityManager() != null) {
-            _isSecureMode = true;
-            secureProcessing = true;
-        }
-
         fInitSecurityManager = (XMLSecurityManager)
                 grammarContainer.getProperty(SECURITY_MANAGER);
         if (fInitSecurityManager != null ) {
             fInitSecurityManager.setSecureProcessing(secureProcessing);
         } else {
-            fInitSecurityManager = new XMLSecurityManager(secureProcessing);
+            fInitSecurityManager = JdkXmlConfig.getInstance(false).getXMLSecurityManager(false);
         }
 
         setProperty(SECURITY_MANAGER, fInitSecurityManager);
 
         //pass on properties set on SchemaFactory
         fSecurityPropertyMgr = (XMLSecurityPropertyManager)
-                grammarContainer.getProperty(Constants.XML_SECURITY_PROPERTY_MANAGER);
+                grammarContainer.getProperty(JdkConstants.XML_SECURITY_PROPERTY_MANAGER);
         setProperty(XML_SECURITY_PROPERTY_MANAGER, fSecurityPropertyMgr);
 
         //initialize Catalog properties
@@ -315,8 +314,8 @@ final class XMLSchemaValidatorComponentManager extends ParserConfigurationSettin
             setProperty(f.getPropertyName(), grammarContainer.getProperty(f.getPropertyName()));
         }
 
-        setProperty(JdkXmlUtils.CDATA_CHUNK_SIZE,
-                grammarContainer.getProperty(JdkXmlUtils.CDATA_CHUNK_SIZE));
+        setProperty(JdkConstants.CDATA_CHUNK_SIZE,
+                grammarContainer.getProperty(JdkConstants.CDATA_CHUNK_SIZE));
     }
 
     /**
@@ -355,7 +354,7 @@ final class XMLSchemaValidatorComponentManager extends ParserConfigurationSettin
      * Set the state of a feature.
      *
      * @param featureId The unique identifier (URI) of the feature.
-     * @param state The requested state of the feature (true or false).
+     * @param value The value of the feature (true or false).
      *
      * @exception XMLConfigurationException If the requested feature is not known.
      */
@@ -363,7 +362,7 @@ final class XMLSchemaValidatorComponentManager extends ParserConfigurationSettin
         if (PARSER_SETTINGS.equals(featureId)) {
             throw new XMLConfigurationException(Status.NOT_SUPPORTED, featureId);
         }
-        else if (value == false && (VALIDATION.equals(featureId) || SCHEMA_VALIDATION.equals(featureId))) {
+        else if (!value && (VALIDATION.equals(featureId) || SCHEMA_VALIDATION.equals(featureId))) {
             throw new XMLConfigurationException(Status.NOT_SUPPORTED, featureId);
         }
         else if (USE_GRAMMAR_POOL_ONLY.equals(featureId) && value != fUseGrammarPoolOnly) {
@@ -379,9 +378,9 @@ final class XMLSchemaValidatorComponentManager extends ParserConfigurationSettin
 
             if (value) {
                 fSecurityPropertyMgr.setValue(XMLSecurityPropertyManager.Property.ACCESS_EXTERNAL_DTD,
-                        XMLSecurityPropertyManager.State.FSP, Constants.EXTERNAL_ACCESS_DEFAULT_FSP);
+                        FeaturePropertyBase.State.FSP, JdkConstants.EXTERNAL_ACCESS_DEFAULT_FSP);
                 fSecurityPropertyMgr.setValue(XMLSecurityPropertyManager.Property.ACCESS_EXTERNAL_SCHEMA,
-                        XMLSecurityPropertyManager.State.FSP, Constants.EXTERNAL_ACCESS_DEFAULT_FSP);
+                        FeaturePropertyBase.State.FSP, JdkConstants.EXTERNAL_ACCESS_DEFAULT_FSP);
                 setProperty(XML_SECURITY_PROPERTY_MANAGER, fSecurityPropertyMgr);
             }
 
@@ -454,18 +453,12 @@ final class XMLSchemaValidatorComponentManager extends ParserConfigurationSettin
             fComponents.put(propertyId, value);
             return;
         }
-        //check if the property is managed by security manager
-        if (fInitSecurityManager == null ||
-                !fInitSecurityManager.setLimit(propertyId, XMLSecurityManager.State.APIPROPERTY, value)) {
-            //check if the property is managed by security property manager
-            if (fSecurityPropertyMgr == null ||
-                    !fSecurityPropertyMgr.setValue(propertyId, XMLSecurityPropertyManager.State.APIPROPERTY, value)) {
-                //fall back to the existing property manager
-                if (!fInitProperties.containsKey(propertyId)) {
-                    fInitProperties.put(propertyId, super.getProperty(propertyId));
-                }
-                super.setProperty(propertyId, value);
+        if (!JdkXmlUtils.setProperty(fInitSecurityManager, fSecurityPropertyMgr, propertyId, value)) {
+            //fall back to the existing property manager
+            if (!fInitProperties.containsKey(propertyId)) {
+                fInitProperties.put(propertyId, super.getProperty(propertyId));
             }
+            super.setProperty(propertyId, value);
         }
     }
 

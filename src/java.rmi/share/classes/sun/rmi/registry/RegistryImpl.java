@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,7 +28,6 @@ package sun.rmi.registry;
 import java.io.ObjectInputFilter;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.PrivilegedAction;
 import java.security.Security;
 import java.util.ArrayList;
 import java.util.Enumeration;
@@ -37,7 +36,6 @@ import java.util.List;
 import java.util.MissingResourceException;
 import java.util.ResourceBundle;
 import java.io.File;
-import java.io.FilePermission;
 import java.io.IOException;
 import java.net.*;
 import java.rmi.*;
@@ -46,15 +44,6 @@ import java.rmi.server.ServerNotActiveException;
 import java.rmi.registry.Registry;
 import java.rmi.server.RMIClientSocketFactory;
 import java.rmi.server.RMIServerSocketFactory;
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.CodeSource;
-import java.security.Policy;
-import java.security.PrivilegedActionException;
-import java.security.PrivilegedExceptionAction;
-import java.security.PermissionCollection;
-import java.security.Permissions;
-import java.security.ProtectionDomain;
 import java.text.MessageFormat;
 
 import jdk.internal.access.SharedSecrets;
@@ -115,14 +104,12 @@ public class RegistryImpl extends java.rmi.server.RemoteServer
      * The registryFilter created from the value of the {@code "sun.rmi.registry.registryFilter"}
      * property.
      */
-    private static final ObjectInputFilter registryFilter =
-            AccessController.doPrivileged((PrivilegedAction<ObjectInputFilter>)RegistryImpl::initRegistryFilter);
+    private static final ObjectInputFilter registryFilter = initRegistryFilter();
 
     /**
      * Initialize the registryFilter from the security properties or system property; if any
      * @return an ObjectInputFilter, or null
      */
-    @SuppressWarnings("deprecation")
     private static ObjectInputFilter initRegistryFilter() {
         ObjectInputFilter filter = null;
         String props = System.getProperty(REGISTRY_FILTER_PROPNAME);
@@ -162,23 +149,8 @@ public class RegistryImpl extends java.rmi.server.RemoteServer
                         ObjectInputFilter serialFilter)
         throws RemoteException
     {
-        if (port == Registry.REGISTRY_PORT && System.getSecurityManager() != null) {
-            // grant permission for default port only.
-            try {
-                AccessController.doPrivileged(new PrivilegedExceptionAction<Void>() {
-                    public Void run() throws RemoteException {
-                        LiveRef lref = new LiveRef(id, port, csf, ssf);
-                        setup(new UnicastServerRef2(lref, serialFilter));
-                        return null;
-                    }
-                }, null, new SocketPermission("localhost:"+port, "listen,accept"));
-            } catch (PrivilegedActionException pae) {
-                throw (RemoteException)pae.getException();
-            }
-        } else {
-            LiveRef lref = new LiveRef(id, port, csf, ssf);
-            setup(new UnicastServerRef2(lref, serialFilter));
-        }
+        LiveRef lref = new LiveRef(id, port, csf, ssf);
+        setup(new UnicastServerRef2(lref, serialFilter));
     }
 
     /**
@@ -187,23 +159,8 @@ public class RegistryImpl extends java.rmi.server.RemoteServer
     public RegistryImpl(int port)
         throws RemoteException
     {
-        if (port == Registry.REGISTRY_PORT && System.getSecurityManager() != null) {
-            // grant permission for default port only.
-            try {
-                AccessController.doPrivileged(new PrivilegedExceptionAction<Void>() {
-                    public Void run() throws RemoteException {
-                        LiveRef lref = new LiveRef(id, port);
-                        setup(new UnicastServerRef(lref, RegistryImpl::registryFilter));
-                        return null;
-                    }
-                }, null, new SocketPermission("localhost:"+port, "listen,accept"));
-            } catch (PrivilegedActionException pae) {
-                throw (RemoteException)pae.getException();
-            }
-        } else {
-            LiveRef lref = new LiveRef(id, port);
-            setup(new UnicastServerRef(lref, RegistryImpl::registryFilter));
-        }
+        LiveRef lref = new LiveRef(id, port);
+        setup(new UnicastServerRef(lref, RegistryImpl::registryFilter));
     }
 
     /*
@@ -312,21 +269,8 @@ public class RegistryImpl extends java.rmi.server.RemoteServer
             /*
              * Get client host that this registry operation was made from.
              */
-            final String clientHostName = getClientHost();
-            InetAddress clientHost;
-
-            try {
-                clientHost = java.security.AccessController.doPrivileged(
-                    new java.security.PrivilegedExceptionAction<InetAddress>() {
-                        public InetAddress run()
-                            throws java.net.UnknownHostException
-                        {
-                            return InetAddress.getByName(clientHostName);
-                        }
-                    });
-            } catch (PrivilegedActionException pae) {
-                throw (java.net.UnknownHostException) pae.getException();
-            }
+            String clientHostName = getClientHost();
+            InetAddress clientHost = InetAddress.getByName(clientHostName);
 
             // if client not yet seen, make sure client allowed access
             if (allowedAccessCache.get(clientHost) == null) {
@@ -337,27 +281,16 @@ public class RegistryImpl extends java.rmi.server.RemoteServer
                 }
 
                 try {
-                    final InetAddress finalClientHost = clientHost;
-
-                    java.security.AccessController.doPrivileged(
-                        new java.security.PrivilegedExceptionAction<Void>() {
-                            public Void run() throws java.io.IOException {
-                                /*
-                                 * if a ServerSocket can be bound to the client's
-                                 * address then that address must be local
-                                 */
-                                (new ServerSocket(0, 10, finalClientHost)).close();
-                                allowedAccessCache.put(finalClientHost,
-                                                       finalClientHost);
-                                return null;
-                            }
-                    });
-                } catch (PrivilegedActionException pae) {
-                    // must have been an IOException
-
+                    /*
+                     * if a ServerSocket can be bound to the client's
+                     * address then that address must be local
+                     */
+                    (new ServerSocket(0, 10, clientHost)).close();
+                    allowedAccessCache.put(clientHost, clientHost);
+                } catch (IOException ioe) {
                     throw new AccessException(
                         op + " disallowed; origin " +
-                        clientHost + " is non-local host");
+                        clientHost + " is non-local host", ioe);
                 }
             }
         } catch (ServerNotActiveException ex) {
@@ -436,12 +369,11 @@ public class RegistryImpl extends java.rmi.server.RemoteServer
      *          {@link ObjectInputFilter.Status#REJECTED} if rejected,
      *          otherwise {@link ObjectInputFilter.Status#UNDECIDED}
      */
-    @SuppressWarnings("removal")
     private static ObjectInputFilter.Status registryFilter(ObjectInputFilter.FilterInfo filterInfo) {
         if (registryFilter != null) {
             ObjectInputFilter.Status status = registryFilter.checkInput(filterInfo);
             if (status != ObjectInputFilter.Status.UNDECIDED) {
-                // The Registry filter can override the built-in white-list
+                // The Registry filter can override the built-in allow-list
                 return status;
             }
         }
@@ -464,7 +396,6 @@ public class RegistryImpl extends java.rmi.server.RemoteServer
                     || UnicastRef.class.isAssignableFrom(clazz)
                     || RMIClientSocketFactory.class.isAssignableFrom(clazz)
                     || RMIServerSocketFactory.class.isAssignableFrom(clazz)
-                    || java.rmi.activation.ActivationID.class.isAssignableFrom(clazz)
                     || java.rmi.server.UID.class.isAssignableFrom(clazz)) {
                 return ObjectInputFilter.Status.ALLOWED;
             } else {
@@ -489,12 +420,6 @@ public class RegistryImpl extends java.rmi.server.RemoteServer
      * @since 9
      */
     public static RegistryImpl createRegistry(int regPort) throws RemoteException {
-        // Create and install the security manager if one is not installed
-        // already.
-        if (System.getSecurityManager() == null) {
-            System.setSecurityManager(new SecurityManager());
-        }
-
         /*
          * Fix bugid 4147561: When JDK tools are executed, the value of
          * the CLASSPATH environment variable for the shell in which they
@@ -524,19 +449,7 @@ public class RegistryImpl extends java.rmi.server.RemoteServer
 
         Thread.currentThread().setContextClassLoader(cl);
 
-        RegistryImpl registryImpl = null;
-        try {
-            registryImpl = AccessController.doPrivileged(
-                new PrivilegedExceptionAction<RegistryImpl>() {
-                    public RegistryImpl run() throws RemoteException {
-                        return new RegistryImpl(regPort);
-                    }
-                }, getAccessControlContext(regPort));
-        } catch (PrivilegedActionException ex) {
-            throw (RemoteException) ex.getException();
-        }
-
-        return registryImpl;
+        return new RegistryImpl(regPort);
     }
 
     /**
@@ -569,49 +482,5 @@ public class RegistryImpl extends java.rmi.server.RemoteServer
             e.printStackTrace();
         }
         System.exit(1);
-    }
-
-    /**
-     * Generates an AccessControlContext with minimal permissions.
-     * The approach used here is taken from the similar method
-     * getAccessControlContext() in the sun.applet.AppletPanel class.
-     */
-    private static AccessControlContext getAccessControlContext(int port) {
-        // begin with permissions granted to all code in current policy
-        PermissionCollection perms = AccessController.doPrivileged(
-            new java.security.PrivilegedAction<PermissionCollection>() {
-                public PermissionCollection run() {
-                    CodeSource codesource = new CodeSource(null,
-                        (java.security.cert.Certificate[]) null);
-                    Policy p = java.security.Policy.getPolicy();
-                    if (p != null) {
-                        return p.getPermissions(codesource);
-                    } else {
-                        return new Permissions();
-                    }
-                }
-            });
-
-        /*
-         * Anyone can connect to the registry and the registry can connect
-         * to and possibly download stubs from anywhere. Downloaded stubs and
-         * related classes themselves are more tightly limited by RMI.
-         */
-        perms.add(new SocketPermission("*", "connect,accept"));
-        perms.add(new SocketPermission("localhost:"+port, "listen,accept"));
-
-        perms.add(new RuntimePermission("accessClassInPackage.sun.jvmstat.*"));
-        perms.add(new RuntimePermission("accessClassInPackage.sun.jvm.hotspot.*"));
-
-        perms.add(new FilePermission("<<ALL FILES>>", "read"));
-
-        /*
-         * Create an AccessControlContext that consists of a single
-         * protection domain with only the permissions calculated above.
-         */
-        ProtectionDomain pd = new ProtectionDomain(
-            new CodeSource(null,
-                (java.security.cert.Certificate[]) null), perms);
-        return new AccessControlContext(new ProtectionDomain[] { pd });
     }
 }

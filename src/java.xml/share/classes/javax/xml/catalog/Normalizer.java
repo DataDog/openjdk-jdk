@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,15 +24,15 @@
  */
 package javax.xml.catalog;
 
-import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 /**
  * The Normalizer is responsible for normalizing Public and System Identifiers
  * as specified in section 6.2, 6.3 and 6.4 of the specification
- *  * <a
- * href="https://www.oasis-open.org/committees/download.php/14809/xml-catalogs.html">
+ * <a href="https://groups.oasis-open.org/higherlogic/ws/public/download/14810/xml-catalogs.pdf">
  * XML Catalogs, OASIS Standard V1.1, 7 October 2005</a>.
  *
  * @since 9
@@ -93,13 +93,9 @@ class Normalizer {
     static String encodeURN(String publicId) {
         String urn = normalizePublicId(publicId);
 
-        try {
-            urn = URLEncoder.encode(urn, "UTF-8");
-            urn = urn.replace("::", ";");
-            urn = urn.replace("//", ":");
-        } catch (UnsupportedEncodingException ex) {
-            CatalogMessages.reportRunTimeError(CatalogMessages.ERR_OTHER, ex);
-        }
+        urn = URLEncoder.encode(urn, UTF_8);
+        urn = urn.replace("::", ";");
+        urn = urn.replace("//", ":");
         return Util.URN + urn;
     }
 
@@ -119,13 +115,9 @@ class Normalizer {
         } else {
             return urn;
         }
-        try {
-            publicId = publicId.replace(":", "//");
-            publicId = publicId.replace(";", "::");
-            publicId = URLDecoder.decode(publicId, "UTF-8");
-        } catch (UnsupportedEncodingException ex) {
-            CatalogMessages.reportRunTimeError(CatalogMessages.ERR_OTHER, ex);
-        }
+        publicId = publicId.replace(":", "//");
+        publicId = publicId.replace(";", "::");
+        publicId = URLDecoder.decode(publicId, UTF_8);
 
         return publicId;
     }
@@ -141,14 +133,8 @@ class Normalizer {
             return null;
         }
 
-        byte[] bytes;
         uriref = uriref.trim();
-        try {
-            bytes = uriref.getBytes("UTF-8");
-        } catch (UnsupportedEncodingException uee) {
-            // this can't happen
-            return uriref;
-        }
+        byte[] bytes = uriref.getBytes(UTF_8);
 
         StringBuilder newRef = new StringBuilder(bytes.length);
         for (int count = 0; count < bytes.length; count++) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,8 @@
  * @bug 6762191 8222334
  * @summary Setting stack size to 16K causes segmentation fault
  * @compile TooSmallStackSize.java
+ * @comment VM fails to launch with minimum allowed stack size of 136k when asan is enabled
+ * @requires !vm.asan
  * @run main TooSmallStackSize
  */
 
@@ -162,7 +164,7 @@ public class TooSmallStackSize extends TestHelper {
         String min_stack_allowed = checkStack("64k");
 
         /*
-         * Try again with a the minimum stack size that was given in the error message
+         * Try again with the minimum stack size that was given in the error message
          */
         checkMinStackAllowed(min_stack_allowed);
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -61,9 +61,27 @@ public interface CaseTree extends Tree {
      * For default case, returns an empty list.
      *
      * @return labels for this case
-     * @since 12
+     *
+     * @since 14
      */
     List<? extends ExpressionTree> getExpressions();
+
+    /**
+     * Returns the labels for this case.
+     * For {@code default} case return a list with a single element, {@link DefaultCaseLabelTree}.
+     *
+     * @return labels for this case
+     * @since 21
+     */
+    List<? extends CaseLabelTree> getLabels();
+
+    /**
+     * The guard for the case.
+     *
+     * @return the guard
+     * @since 21
+     */
+    ExpressionTree getGuard();
 
     /**
      * For case with kind {@linkplain CaseKind#STATEMENT},
@@ -81,7 +99,8 @@ public interface CaseTree extends Tree {
      * {@linkplain CaseKind#STATEMENT}.
      *
      * @return case value or null
-     * @since 12
+     *
+     * @since 14
      */
     public default Tree getBody() {
         return null;
@@ -91,7 +110,8 @@ public interface CaseTree extends Tree {
      * Returns the kind of this case.
      *
      * @return the kind of this case
-     * @since 12
+     *
+     * @since 14
      */
     public default CaseKind getCaseKind() {
         return CaseKind.STATEMENT;
@@ -104,7 +124,7 @@ public interface CaseTree extends Tree {
      *     <li>RULE: {@code case <expression> -> <expression>/<statement>}</li>
      * </ul>
      *
-     * @since 12
+     * @since 14
      */
     public enum CaseKind {
         /**

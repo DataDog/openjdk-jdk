@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,25 +44,20 @@ public class ClassLoaderData extends VMObject {
   private static synchronized void initialize(TypeDataBase db) throws WrongTypeException {
     Type type      = db.lookupType("ClassLoaderData");
     classLoaderFieldOffset = type.getAddressField("_class_loader").getOffset();
+    theNullClassLoaderDataField = type.getAddressField("_the_null_class_loader_data");
     nextField = type.getAddressField("_next");
     klassesField = new MetadataField(type.getAddressField("_klasses"), 0);
     hasClassMirrorHolderField = new CIntField(type.getCIntegerField("_has_class_mirror_holder"), 0);
-    dictionaryField = type.getAddressField("_dictionary");
   }
 
   private static long classLoaderFieldOffset;
+  private static AddressField theNullClassLoaderDataField;
   private static AddressField nextField;
   private static MetadataField  klassesField;
   private static CIntField hasClassMirrorHolderField;
-  private static AddressField dictionaryField;
 
   public ClassLoaderData(Address addr) {
     super(addr);
-  }
-
-  public Dictionary dictionary() {
-      Address tmp = dictionaryField.getValue();
-      return (Dictionary) VMObjectFactory.newObject(Dictionary.class, tmp);
   }
 
   public static ClassLoaderData instantiateWrapperFor(Address addr) {
@@ -80,6 +75,10 @@ public class ClassLoaderData extends VMObject {
 
   public boolean gethasClassMirrorHolder() {
     return hasClassMirrorHolderField.getValue(this) != 0;
+  }
+
+  public static ClassLoaderData theNullClassLoaderData() {
+    return instantiateWrapperFor(theNullClassLoaderDataField.getValue());
   }
 
   public ClassLoaderData next() {
@@ -113,10 +112,5 @@ public class ClassLoaderData extends VMObject {
           }
           v.visit(l);
       }
-  }
-
-  /** Iterate over all klasses in the dictionary, including initiating loader. */
-  public void allEntriesDo(ClassLoaderDataGraph.ClassAndLoaderVisitor v) {
-      dictionary().allEntriesDo(v, getClassLoader());
   }
 }

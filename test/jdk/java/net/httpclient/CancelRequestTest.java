@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,50 +23,38 @@
 
 /*
  * @test
- * @bug 8245462 8229822
+ * @bug 8245462 8229822 8254786 8297075 8297149 8298340 8302635 8377181
  * @summary Tests cancelling the request.
- * @library /test/lib http2/server
+ * @library /test/lib /test/jdk/java/net/httpclient/lib
  * @key randomness
- * @build jdk.test.lib.net.SimpleSSLContext HttpServerAdapters
+ * @build jdk.httpclient.test.lib.common.HttpServerAdapters jdk.test.lib.net.SimpleSSLContext
  *        ReferenceTracker CancelRequestTest
- * @modules java.base/sun.net.www.http
- *          java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- * @run testng/othervm -Djdk.internal.httpclient.debug=true
+ * @run junit/othervm -Djdk.internal.httpclient.debug=true
  *                     -Djdk.httpclient.enableAllMethodRetry=true
- *                     CancelRequestTest
+ *                     ${test.main.class}
  */
 // *                     -Dseed=3582896013206826205L
 // *                     -Dseed=5784221742235559231L
-import com.sun.net.httpserver.HttpServer;
-import com.sun.net.httpserver.HttpsConfigurator;
-import com.sun.net.httpserver.HttpsServer;
+import jdk.internal.net.http.common.OperationTrackers.Tracker;
 import jdk.test.lib.RandomFactory;
 import jdk.test.lib.net.SimpleSSLContext;
-import org.testng.ITestContext;
-import org.testng.annotations.AfterClass;
-import org.testng.annotations.AfterTest;
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.BeforeTest;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 
 import javax.net.ssl.SSLContext;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
+import java.lang.ref.Reference;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
+import java.net.http.HttpOption.Http3DiscoveryMode;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandler;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -77,28 +65,51 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import java.util.concurrent.atomic.AtomicReference;
+import jdk.httpclient.test.lib.common.HttpServerAdapters;
 
-import static java.lang.System.arraycopy;
 import static java.lang.System.out;
+import static java.lang.System.err;
+import static java.net.http.HttpClient.Version.*;
+import static java.net.http.HttpOption.Http3DiscoveryMode.HTTP_3_URI_ONLY;
+import static java.net.http.HttpOption.H3_DISCOVERY;
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
+
+import org.junit.jupiter.api.AfterAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.extension.BeforeEachCallback;
+import org.junit.jupiter.api.extension.ExtensionContext;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.extension.TestWatcher;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 public class CancelRequestTest implements HttpServerAdapters {
 
     private static final Random random = RandomFactory.getRandom();
+    private static final ConcurrentHashMap<String, CountDownLatch> latches
+            = new ConcurrentHashMap<>();
 
-    SSLContext sslContext;
-    HttpTestServer httpTestServer;    // HTTP/1.1    [ 4 servers ]
-    HttpTestServer httpsTestServer;   // HTTPS/1.1
-    HttpTestServer http2TestServer;   // HTTP/2 ( h2c )
-    HttpTestServer https2TestServer;  // HTTP/2 ( h2  )
-    String httpURI;
-    String httpsURI;
-    String http2URI;
-    String https2URI;
+    private static final SSLContext sslContext = SimpleSSLContext.findSSLContext();
+    private static HttpTestServer httpTestServer;    // HTTP/1.1    [ 4 servers ]
+    private static HttpTestServer httpsTestServer;   // HTTPS/1.1
+    private static HttpTestServer http2TestServer;   // HTTP/2 ( h2c )
+    private static HttpTestServer https2TestServer;  // HTTP/2 ( h2  )
+    private static HttpTestServer h2h3TestServer;        // HTTP/3 ( h2 + h3 )
+    private static HttpTestServer h3TestServer;          // HTTP/3 ( h3 )
+    private static String httpURI;
+    private static String httpsURI;
+    private static String http2URI;
+    private static String https2URI;
+    private static String h2h3URI;
+    private static String h2h3Head;
+    private static String h3URI;
 
     static final long SERVER_LATENCY = 75;
     static final int MAX_CLIENT_DELAY = 75;
@@ -109,6 +120,7 @@ public class CancelRequestTest implements HttpServerAdapters {
     static volatile boolean tasksFailed;
     static final AtomicLong serverCount = new AtomicLong();
     static final AtomicLong clientCount = new AtomicLong();
+    static final AtomicLong requestCount = new AtomicLong();
     static final long start = System.nanoTime();
     public static String now() {
         long now = System.nanoTime() - start;
@@ -118,8 +130,8 @@ public class CancelRequestTest implements HttpServerAdapters {
         return String.format("[%d s, %d ms, %d ns] ", secs, mill, nan);
     }
 
-    final ReferenceTracker TRACKER = ReferenceTracker.INSTANCE;
-    private volatile HttpClient sharedClient;
+    private static final ReferenceTracker TRACKER = ReferenceTracker.INSTANCE;
+    private static volatile HttpClient sharedClient;
 
     static class TestExecutor implements Executor {
         final AtomicLong tasks = new AtomicLong();
@@ -145,28 +157,47 @@ public class CancelRequestTest implements HttpServerAdapters {
         }
     }
 
-    protected boolean stopAfterFirstFailure() {
+    private static boolean stopAfterFirstFailure() {
         return Boolean.getBoolean("jdk.internal.httpclient.debug");
     }
 
-    @BeforeMethod
-    void beforeMethod(ITestContext context) {
-        if (stopAfterFirstFailure() && context.getFailedTests().size() > 0) {
-            throw new RuntimeException("some tests failed");
+    static final class TestStopper implements TestWatcher, BeforeEachCallback {
+        final AtomicReference<String> failed = new AtomicReference<>();
+        TestStopper() { }
+        @Override
+        public void testFailed(ExtensionContext context, Throwable cause) {
+            if (stopAfterFirstFailure()) {
+                String msg = "Aborting due to: " + cause;
+                failed.compareAndSet(null, msg);
+                FAILURES.putIfAbsent(context.getDisplayName(), cause);
+                System.out.printf("%nTEST FAILED: %s%s%n\tAborting due to %s%n%n",
+                        now(), context.getDisplayName(), cause);
+                System.err.printf("%nTEST FAILED: %s%s%n\tAborting due to %s%n%n",
+                        now(), context.getDisplayName(), cause);
+            }
+        }
+
+        @Override
+        public void beforeEach(ExtensionContext context) {
+            String msg = failed.get();
+            Assumptions.assumeTrue(msg == null, msg);
         }
     }
 
-    @AfterClass
-    static final void printFailedTests() {
+    @RegisterExtension
+    static final TestStopper stopper = new TestStopper();
+
+    @AfterAll
+    static void printFailedTests() {
         out.println("\n=========================");
         try {
             out.printf("%n%sCreated %d servers and %d clients%n",
                     now(), serverCount.get(), clientCount.get());
             if (FAILURES.isEmpty()) return;
             out.println("Failed tests: ");
-            FAILURES.entrySet().forEach((e) -> {
-                out.printf("\t%s: %s%n", e.getKey(), e.getValue());
-                e.getValue().printStackTrace(out);
+            FAILURES.forEach((key, value) -> {
+                out.printf("\t%s: %s%n", key, value);
+                value.printStackTrace(out);
             });
             if (tasksFailed) {
                 System.out.println("WARNING: Some tasks failed");
@@ -176,17 +207,18 @@ public class CancelRequestTest implements HttpServerAdapters {
         }
     }
 
-    private String[] uris() {
+    private static String[] uris() {
         return new String[] {
                 httpURI,
                 httpsURI,
                 http2URI,
                 https2URI,
+                h2h3URI,
+                h3URI,
         };
     }
 
-    @DataProvider(name = "asyncurls")
-    public Object[][] asyncurls() {
+    public static Object[][] asyncurls() {
         String[] uris = uris();
         Object[][] result = new Object[uris.length * 2 * 3][];
         //Object[][] result = new Object[uris.length][];
@@ -206,8 +238,7 @@ public class CancelRequestTest implements HttpServerAdapters {
         return result;
     }
 
-    @DataProvider(name = "urls")
-    public Object[][] alltests() {
+    public static Object[][] alltests() {
         String[] uris = uris();
         Object[][] result = new Object[uris.length * 2][];
         //Object[][] result = new Object[uris.length][];
@@ -227,7 +258,7 @@ public class CancelRequestTest implements HttpServerAdapters {
 
     private HttpClient makeNewClient() {
         clientCount.incrementAndGet();
-        return TRACKER.track(HttpClient.newBuilder()
+        return TRACKER.track(newClientBuilderForH3()
                 .proxy(HttpClient.Builder.NO_PROXY)
                 .executor(executor)
                 .sslContext(sslContext)
@@ -247,6 +278,19 @@ public class CancelRequestTest implements HttpServerAdapters {
         }
     }
 
+    // set HTTP/3 version on the request when targeting
+    // an HTTP/3 server
+    private HttpRequest.Builder requestBuilder(String uri) {
+        var u = URI.create(uri+"?req="+requestCount.incrementAndGet());
+        var builder = HttpRequest.newBuilder(u);
+        if (uri.contains("h3")) {
+            builder.version(HTTP_3);
+        }
+        builder.setHeader("X-expect-exception", "true");
+        return builder;
+    }
+
+
     final static String BODY = "Some string | that ? can | be split ? several | ways.";
 
     // should accept SSLHandshakeException because of the connectionAborter
@@ -255,8 +299,12 @@ public class CancelRequestTest implements HttpServerAdapters {
     //     rewrap in "Request Cancelled" when the multi exchange was aborted...
     private static boolean isCancelled(Throwable t) {
         while (t instanceof ExecutionException) t = t.getCause();
-        if (t instanceof CancellationException) return true;
-        if (t instanceof IOException) return String.valueOf(t).contains("Request cancelled");
+        Throwable cause = t;
+        while (cause != null) {
+            if (cause instanceof CancellationException) return true;
+            if (cause instanceof IOException && String.valueOf(cause).contains("Request cancelled")) return true;
+            cause = cause.getCause();
+        }
         out.println("Not a cancellation exception: " + t);
         t.printStackTrace(out);
         return false;
@@ -272,7 +320,35 @@ public class CancelRequestTest implements HttpServerAdapters {
         }
     }
 
-    @Test(dataProvider = "asyncurls")
+    void headRequest(HttpClient client) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(URI.create(h2h3Head))
+                .version(HTTP_2)
+                .HEAD()
+                .build();
+        var resp = client.send(request, BodyHandlers.discarding());
+        assertEquals(200, resp.statusCode());
+    }
+
+    private static void releaseLatches() {
+        // release left over latches
+        for (var latch : latches.values()) {
+            latch.countDown();
+        }
+        latches.clear();
+    }
+
+    private static CountDownLatch addLatchFor(HttpRequest req) {
+        // release left over latches
+        releaseLatches();
+        String key = Objects.requireNonNull(req.uri().getRawQuery(), "query");
+        var latch = new CountDownLatch(1);
+        latches.put(key, latch);
+        out.println(now() + "CountDownLatch " + latch + " added for " + req.uri());
+        return latch;
+    }
+
+    @ParameterizedTest
+    @MethodSource("asyncurls")
     public void testGetSendAsync(String uri, boolean sameClient, boolean mayInterruptIfRunning)
             throws Exception {
         HttpClient client = null;
@@ -281,30 +357,41 @@ public class CancelRequestTest implements HttpServerAdapters {
         for (int i=0; i< ITERATION_COUNT; i++) {
             if (!sameClient || client == null)
                 client = newHttpClient(sameClient);
+            Tracker tracker = TRACKER.getTracker(client);
 
-            HttpRequest req = HttpRequest.newBuilder(URI.create(uri))
+            // Populate alt-svc registry with h3 service
+            if (uri.contains("h2h3")) headRequest(client);
+            Http3DiscoveryMode config = uri.contains("h3-only") ? h3TestServer.h3DiscoveryConfig() : null;
+            HttpRequest req = requestBuilder(uri)
                     .GET()
+                    .setOption(H3_DISCOVERY, config)
                     .build();
+            var requestLatch = addLatchFor(req);
+
             BodyHandler<String> handler = BodyHandlers.ofString();
             CountDownLatch latch = new CountDownLatch(1);
+            out.println(now() + "Sending (async): " + req.uri());
             CompletableFuture<HttpResponse<String>> response = client.sendAsync(req, handler);
             var cf1 = response.whenComplete((r,t) -> System.out.println(t));
             CompletableFuture<HttpResponse<String>> cf2 = cf1.whenComplete((r,t) -> latch.countDown());
+            out.println(now() + "iteration: " + i + ", req sent: " + req.uri());
             out.println("response: " + response);
             out.println("cf1: " + cf1);
             out.println("cf2: " + cf2);
             delay();
             cf1.cancel(mayInterruptIfRunning);
-            out.println("response after cancel: " + response);
+            out.println(now() + "response after cancel: " + response);
             out.println("cf1 after cancel: " + cf1);
             out.println("cf2 after cancel: " + cf2);
             try {
                 String body = cf2.get().body();
-                assertEquals(body, Stream.of(BODY.split("\\|")).collect(Collectors.joining()));
+                assertEquals(String.join("", BODY.split("\\|")), body);
                 throw new AssertionError("Expected CancellationException not received");
             } catch (ExecutionException x) {
-                out.println("Got expected exception: " + x);
+                out.println(now() + "Got expected exception: " + x);
                 assertTrue(isCancelled(x));
+            } finally {
+                requestLatch.countDown();
             }
 
             // Cancelling the request may cause an IOException instead...
@@ -312,7 +399,7 @@ public class CancelRequestTest implements HttpServerAdapters {
             try {
                 cf1.get();
             } catch (CancellationException | ExecutionException x) {
-                out.println("Got expected exception: " + x);
+                out.println(now() + "Got expected exception: " + x);
                 assertTrue(isCancelled(x));
                 hasCancellationException = x instanceof CancellationException;
             }
@@ -321,43 +408,63 @@ public class CancelRequestTest implements HttpServerAdapters {
             // completed yet - so wait for it here...
             try {
                 String body = response.get().body();
-                assertEquals(body, Stream.of(BODY.split("\\|")).collect(Collectors.joining()));
+                assertEquals(String.join("", BODY.split("\\|")), body);
                 if (mayInterruptIfRunning) {
                     // well actually - this could happen... In which case we'll need to
                     // increase the latency in the server handler...
                     throw new AssertionError("Expected Exception not received");
                 }
             } catch (ExecutionException x) {
-                assertEquals(response.isDone(), true);
+                assertTrue(response.isDone());
                 Throwable wrapped = x.getCause();
-                assertTrue(CancellationException.class.isAssignableFrom(wrapped.getClass()));
-                Throwable cause = wrapped.getCause();
-                out.println("CancellationException cause: " + x);
-                assertTrue(IOException.class.isAssignableFrom(cause.getClass()));
-                if (cause instanceof HttpConnectTimeoutException) {
-                    cause.printStackTrace(out);
-                    throw new RuntimeException("Unexpected timeout exception", cause);
-                }
+                Throwable cause = wrapped;
                 if (mayInterruptIfRunning) {
-                    out.println("Got expected exception: " + wrapped);
+                    if (CancellationException.class.isAssignableFrom(wrapped.getClass())) {
+                        cause = wrapped.getCause();
+                        out.println(now() + "CancellationException cause: " + x);
+                    } else if (!isCancelled(cause)) {
+                        throw new RuntimeException("Unexpected cause: " + cause);
+                    }
+                    if (cause instanceof HttpConnectTimeoutException) {
+                        cause.printStackTrace(out);
+                        throw new RuntimeException("Unexpected timeout exception", cause);
+                    }
+                }
+                if (!IOException.class.isInstance(cause)) {
+                    out.println(now() + "Unexpected cause: " + cause.getClass());
+                    cause.printStackTrace(out);
+                }
+                assertTrue(IOException.class.isAssignableFrom(cause.getClass()));
+                if (mayInterruptIfRunning) {
+                    out.println(now() + "Got expected exception: " + wrapped);
                     out.println("\tcause: " + cause);
                 } else {
-                    out.println("Unexpected exception: " + wrapped);
+                    out.println(now() + "Unexpected exception: " + wrapped);
                     wrapped.printStackTrace(out);
                     throw x;
                 }
             }
 
-            assertEquals(response.isDone(), true);
-            assertEquals(response.isCancelled(), false);
-            assertEquals(cf1.isCancelled(), hasCancellationException);
-            assertEquals(cf2.isDone(), true);
-            assertEquals(cf2.isCancelled(), false);
-            assertEquals(latch.getCount(), 0);
+            assertTrue(response.isDone());
+            assertFalse(response.isCancelled());
+            assertEquals(hasCancellationException, cf1.isCancelled());
+            assertTrue(cf2.isDone());
+            assertFalse(cf2.isCancelled());
+            assertEquals(0, latch.getCount());
+
+            var error = TRACKER.check(tracker, 1000,
+                    (t) -> t.getOutstandingOperations() > 0 || t.getOutstandingSubscribers() > 0,
+                    "subscribers for testGetSendAsync(%s)\n\t step [%s]".formatted(req.uri(), i),
+                    false);
+            Reference.reachabilityFence(client);
+            if (error != null) throw error;
         }
+        assert client != null;
+        if (!sameClient) client.close();
     }
 
-    @Test(dataProvider = "asyncurls")
+    @ParameterizedTest
+    @MethodSource("asyncurls")
     public void testPostSendAsync(String uri, boolean sameClient, boolean mayInterruptIfRunning)
             throws Exception {
         uri = uri + "/post";
@@ -366,20 +473,21 @@ public class CancelRequestTest implements HttpServerAdapters {
         for (int i=0; i< ITERATION_COUNT; i++) {
             if (!sameClient || client == null)
                 client = newHttpClient(sameClient);
+            Tracker tracker = TRACKER.getTracker(client);
 
             CompletableFuture<CompletableFuture<?>> cancelFuture = new CompletableFuture<>();
 
-            Iterable<byte[]> iterable = new Iterable<byte[]>() {
+            Iterable<byte[]> iterable = new Iterable<>() {
                 @Override
                 public Iterator<byte[]> iterator() {
                     // this is dangerous
-                    out.println("waiting for completion on: " + cancelFuture);
+                    out.println(now() + "waiting for completion on: " + cancelFuture);
                     boolean async = random.nextBoolean();
                     Runnable cancel = () -> {
-                        out.println("Cancelling from " + Thread.currentThread());
+                        out.println(now() + "Cancelling from " + Thread.currentThread());
                         var cf1 = cancelFuture.join();
                         cf1.cancel(mayInterruptIfRunning);
-                        out.println("cancelled " + cf1);
+                        out.println(now() + "cancelled " + cf1);
                     };
                     if (async) executor.execute(cancel);
                     else cancel.run();
@@ -387,28 +495,38 @@ public class CancelRequestTest implements HttpServerAdapters {
                 }
             };
 
-            HttpRequest req = HttpRequest.newBuilder(URI.create(uri))
+            // Populate alt-svc registry with h3 service
+            if (uri.contains("h2h3")) headRequest(client);
+            Http3DiscoveryMode config = uri.contains("h3-only") ? h3TestServer.h3DiscoveryConfig() : null;
+            HttpRequest req = requestBuilder(uri)
                     .POST(HttpRequest.BodyPublishers.ofByteArrays(iterable))
+                    .setOption(H3_DISCOVERY, config)
                     .build();
+            var requestLatch = addLatchFor(req);
+
             BodyHandler<String> handler = BodyHandlers.ofString();
             CountDownLatch latch = new CountDownLatch(1);
+            out.println(now() + "Sending (async): " + req.uri());
             CompletableFuture<HttpResponse<String>> response = client.sendAsync(req, handler);
-            var cf1 = response.whenComplete((r,t) -> System.out.println(t));
+            var cf1 = response.whenComplete((r,t) -> System.out.println(now() + t));
             CompletableFuture<HttpResponse<String>> cf2 = cf1.whenComplete((r,t) -> latch.countDown());
+            out.println(now() + "iteration: " + i + ", req sent: " + req.uri());
             out.println("response: " + response);
             out.println("cf1: " + cf1);
             out.println("cf2: " + cf2);
             cancelFuture.complete(cf1);
-            out.println("response after cancel: " + response);
+            out.println(now() + "response after cancel: " + response);
             out.println("cf1 after cancel: " + cf1);
             out.println("cf2 after cancel: " + cf2);
             try {
                 String body = cf2.get().body();
-                assertEquals(body, Stream.of(BODY.split("\\|")).collect(Collectors.joining()));
+                assertEquals(String.join("", BODY.split("\\|")), body);
                 throw new AssertionError("Expected CancellationException not received");
             } catch (ExecutionException x) {
-                out.println("Got expected exception: " + x);
+                out.println(now() + "Got expected exception: " + x);
                 assertTrue(isCancelled(x));
+            } finally {
+                requestLatch.countDown();
             }
 
             // Cancelling the request may cause an IOException instead...
@@ -416,7 +534,7 @@ public class CancelRequestTest implements HttpServerAdapters {
             try {
                 cf1.get();
             } catch (CancellationException | ExecutionException x) {
-                out.println("Got expected exception: " + x);
+                out.println(now() + "Got expected exception: " + x);
                 assertTrue(isCancelled(x));
                 hasCancellationException = x instanceof CancellationException;
             }
@@ -425,42 +543,57 @@ public class CancelRequestTest implements HttpServerAdapters {
             // completed yet - so wait for it here...
             try {
                 String body = response.get().body();
-                assertEquals(body, Stream.of(BODY.split("\\|")).collect(Collectors.joining()));
+                assertEquals(String.join("", BODY.split("\\|")), body);
                 if (mayInterruptIfRunning) {
                     // well actually - this could happen... In which case we'll need to
                     // increase the latency in the server handler...
                     throw new AssertionError("Expected Exception not received");
                 }
             } catch (ExecutionException x) {
-                assertEquals(response.isDone(), true);
+                assertTrue(response.isDone());
                 Throwable wrapped = x.getCause();
-                assertTrue(CancellationException.class.isAssignableFrom(wrapped.getClass()));
-                Throwable cause = wrapped.getCause();
+                Throwable cause = wrapped;
+                if (CancellationException.class.isAssignableFrom(wrapped.getClass())) {
+                    cause = wrapped.getCause();
+                    out.println(now() + "CancellationException cause: " + x);
+                } else if (!isCancelled(cause)) {
+                    throw new RuntimeException("Unexpected cause: " + cause);
+                }
                 assertTrue(IOException.class.isAssignableFrom(cause.getClass()));
                 if (cause instanceof HttpConnectTimeoutException) {
                     cause.printStackTrace(out);
                     throw new RuntimeException("Unexpected timeout exception", cause);
                 }
                 if (mayInterruptIfRunning) {
-                    out.println("Got expected exception: " + wrapped);
+                    out.println(now() + "Got expected exception: " + wrapped);
                     out.println("\tcause: " + cause);
                 } else {
-                    out.println("Unexpected exception: " + wrapped);
+                    out.println(now() + "Unexpected exception: " + wrapped);
                     wrapped.printStackTrace(out);
                     throw x;
                 }
             }
 
-            assertEquals(response.isDone(), true);
-            assertEquals(response.isCancelled(), false);
-            assertEquals(cf1.isCancelled(), hasCancellationException);
-            assertEquals(cf2.isDone(), true);
-            assertEquals(cf2.isCancelled(), false);
-            assertEquals(latch.getCount(), 0);
+            assertTrue(response.isDone());
+            assertFalse(response.isCancelled());
+            assertEquals(hasCancellationException, cf1.isCancelled());
+            assertTrue(cf2.isDone());
+            assertFalse(cf2.isCancelled());
+            assertEquals(0, latch.getCount());
+
+            var error = TRACKER.check(tracker, 1000,
+                    (t) -> t.getOutstandingOperations() > 0 || t.getOutstandingSubscribers() > 0,
+                    "subscribers for testPostSendAsync(%s)\n\t step [%s]".formatted(req.uri(), i),
+                    false);
+            Reference.reachabilityFence(client);
+            if (error != null) throw error;
         }
+        assert client != null;
+        if (!sameClient) client.close();
     }
 
-    @Test(dataProvider = "urls")
+    @ParameterizedTest
+    @MethodSource("alltests")
     public void testPostInterrupt(String uri, boolean sameClient)
             throws Exception {
         HttpClient client = null;
@@ -468,11 +601,15 @@ public class CancelRequestTest implements HttpServerAdapters {
         for (int i=0; i< ITERATION_COUNT; i++) {
             if (!sameClient || client == null)
                 client = newHttpClient(sameClient);
+            Tracker tracker = TRACKER.getTracker(client);
+
             Thread main = Thread.currentThread();
             CompletableFuture<Thread> interruptingThread = new CompletableFuture<>();
+            var uriStr = uri + "/post/i=" + i;
             Runnable interrupt = () -> {
                 Thread current = Thread.currentThread();
-                out.printf("%s Interrupting main from: %s (%s)", now(), current, uri);
+                out.printf("%s Interrupting main from: %s (%s)%n", now(), current, uriStr);
+                err.printf("%s Interrupting main from: %s (%s)%n", now(), current, uriStr);
                 interruptingThread.complete(current);
                 main.interrupt();
             };
@@ -483,78 +620,108 @@ public class CancelRequestTest implements HttpServerAdapters {
                 return List.of(BODY.getBytes(UTF_8)).iterator();
             };
 
-            HttpRequest req = HttpRequest.newBuilder(URI.create(uri))
+            // Populate alt-svc registry with h3 service
+            if (uri.contains("h2h3")) headRequest(client);
+            Http3DiscoveryMode config = uri.contains("h3-only") ? h3TestServer.h3DiscoveryConfig() : null;
+            HttpRequest req = requestBuilder(uriStr)
                     .POST(HttpRequest.BodyPublishers.ofByteArrays(iterable))
+                    .setOption(H3_DISCOVERY, config)
                     .build();
+            var requestLatch = addLatchFor(req);
+
             String body = null;
             Exception failed = null;
             try {
+                out.println(now() + "Sending: " + req.uri());
                 body = client.send(req, BodyHandlers.ofString()).body();
             } catch (Exception x) {
                 failed = x;
             }
-
+            requestLatch.countDown();
+            out.println(now() + req.uri() + ": got result or exception");
             if (failed instanceof InterruptedException) {
-                out.println("Got expected exception: " + failed);
+                out.println(now() + req.uri() + ": Got expected exception: " + failed);
             } else if (failed instanceof IOException) {
+                out.println(now() + req.uri() + ": got IOException: " + failed);
                 // that could be OK if the main thread was interrupted
-                // from the main thread: the interrupt status could have
+                // from the main thread: the interrupted status could have
                 // been caught by writing to the socket from the main
                 // thread.
-                if (interruptingThread.get() == main) {
-                    out.println("Accepting IOException: " + failed);
+                if (interruptingThread.isDone() && interruptingThread.get() == main) {
+                    out.println(now() + req.uri() + ": Accepting IOException: " + failed);
                     failed.printStackTrace(out);
                 } else {
+                    out.println(now() + req.uri() + ": unexpected exception: " + failed);
                     throw failed;
                 }
             } else if (failed != null) {
-                assertEquals(body, Stream.of(BODY.split("\\|")).collect(Collectors.joining()));
+                out.println(now() + req.uri() + ": unexpected exception: " + failed);
                 throw failed;
+            } else {
+                assert failed == null;
+                out.println(now() + req.uri() + ": got body: " + body);
+                assertEquals(String.join("", BODY.split("\\|")), body);
             }
+            out.println(now() + "next iteration");
+
+            var error = TRACKER.check(tracker, 2000,
+                    (t) -> t.getOutstandingOperations() > 0 || t.getOutstandingSubscribers() > 0,
+                    "subscribers for testPostInterrupt(%s)\n\t step [%s]".formatted(req.uri(), i),
+                    false);
+            Reference.reachabilityFence(client);
+            if (error != null) throw error;
         }
+        assert client != null;
+        if (!sameClient) client.close();
     }
 
 
 
-    @BeforeTest
-    public void setup() throws Exception {
-        sslContext = new SimpleSSLContext().get();
-        if (sslContext == null)
-            throw new AssertionError("Unexpected null sslContext");
-
+    @BeforeAll
+    public static void setup() throws Exception {
         // HTTP/1.1
         HttpTestHandler h1_chunkHandler = new HTTPSlowHandler();
-        InetSocketAddress sa = new InetSocketAddress(InetAddress.getLoopbackAddress(), 0);
-        httpTestServer = HttpTestServer.of(HttpServer.create(sa, 0));
+        httpTestServer = HttpTestServer.create(HTTP_1_1);
         httpTestServer.addHandler(h1_chunkHandler, "/http1/x/");
         httpURI = "http://" + httpTestServer.serverAuthority() + "/http1/x/";
 
-        HttpsServer httpsServer = HttpsServer.create(sa, 0);
-        httpsServer.setHttpsConfigurator(new HttpsConfigurator(sslContext));
-        httpsTestServer = HttpTestServer.of(httpsServer);
+        httpsTestServer = HttpTestServer.create(HTTP_1_1, sslContext);
         httpsTestServer.addHandler(h1_chunkHandler, "/https1/x/");
         httpsURI = "https://" + httpsTestServer.serverAuthority() + "/https1/x/";
 
         // HTTP/2
         HttpTestHandler h2_chunkedHandler = new HTTPSlowHandler();
 
-        http2TestServer = HttpTestServer.of(new Http2TestServer("localhost", false, 0));
+        http2TestServer = HttpTestServer.create(HTTP_2);
         http2TestServer.addHandler(h2_chunkedHandler, "/http2/x/");
         http2URI = "http://" + http2TestServer.serverAuthority() + "/http2/x/";
 
-        https2TestServer = HttpTestServer.of(new Http2TestServer("localhost", true, sslContext));
+        https2TestServer = HttpTestServer.create(HTTP_2, sslContext);
         https2TestServer.addHandler(h2_chunkedHandler, "/https2/x/");
         https2URI = "https://" + https2TestServer.serverAuthority() + "/https2/x/";
 
-        serverCount.addAndGet(4);
+        HttpTestHandler h3_chunkedHandler = new HTTPSlowHandler();
+        h2h3TestServer = HttpTestServer.create(HTTP_3, sslContext);
+        h2h3TestServer.addHandler(h3_chunkedHandler, "/h2h3/exec/");
+        h2h3URI = "https://" + h2h3TestServer.serverAuthority() + "/h2h3/exec/retry";
+        h2h3TestServer.addHandler(new HttpHeadOrGetHandler(), "/h2h3/head/");
+        h2h3Head = "https://" + h2h3TestServer.serverAuthority() + "/h2h3/head/";
+
+        h3TestServer = HttpTestServer.create(HTTP_3_URI_ONLY, sslContext);
+        h3TestServer.addHandler(h3_chunkedHandler, "/h3-only/exec/");
+        h3URI = "https://" + h3TestServer.serverAuthority() + "/h3-only/exec/retry";
+
+        serverCount.addAndGet(6);
         httpTestServer.start();
         httpsTestServer.start();
         http2TestServer.start();
         https2TestServer.start();
+        h2h3TestServer.start();
+        h3TestServer.start();
     }
 
-    @AfterTest
-    public void teardown() throws Exception {
+    @AfterAll
+    public static void teardown() throws Exception {
         String sharedClientName =
                 sharedClient == null ? null : sharedClient.toString();
         sharedClient = null;
@@ -565,10 +732,12 @@ public class CancelRequestTest implements HttpServerAdapters {
             httpsTestServer.stop();
             http2TestServer.stop();
             https2TestServer.stop();
+            h2h3TestServer.stop();
+            h3TestServer.stop();
         } finally {
             if (fail != null) {
                 if (sharedClientName != null) {
-                    System.err.println("Shared client name is: " + sharedClientName);
+                    System.err.println(now() + "Shared client name is: " + sharedClientName);
                 }
                 throw fail;
             }
@@ -587,9 +756,9 @@ public class CancelRequestTest implements HttpServerAdapters {
         @Override
         public void handle(HttpTestExchange t) throws IOException {
             try {
-                out.println("HTTPSlowHandler received request to " + t.getRequestURI());
-                System.err.println("HTTPSlowHandler received request to " + t.getRequestURI());
-
+                out.println(now() + "HTTPSlowHandler received request to " + t.getRequestURI());
+                System.err.println(now() + "HTTPSlowHandler received request to " + t.getRequestURI());
+                var requestLatch = latches.get(t.getRequestURI().getRawQuery());
                 boolean isThreadInterrupt = isThreadInterrupt(t);
                 byte[] req;
                 try (InputStream is = t.getRequestBody()) {
@@ -597,7 +766,7 @@ public class CancelRequestTest implements HttpServerAdapters {
                 }
                 t.sendResponseHeaders(200, -1); // chunked/variable
                 try (OutputStream os = t.getResponseBody()) {
-                    // lets split the response in several chunks...
+                    // let's split the response in several chunks...
                     String msg = (req != null && req.length != 0)
                             ? new String(req, UTF_8)
                             : BODY;
@@ -611,16 +780,29 @@ public class CancelRequestTest implements HttpServerAdapters {
                         } catch (InterruptedException x) {
                             // OK
                         }
-                        out.printf("Server wrote %d bytes%n", req.length);
+                        out.printf(now() + "Server wrote %d bytes%n", req.length);
+                    }
+                    if (requestLatch != null) {
+                        out.printf(now() + "Server awaiting latch %s for %s%n",
+                                requestLatch, t.getRequestURI());
+                        try {
+                            requestLatch.await();
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        out.printf(now() + " ...latch released%n");
                     }
                 }
+            } catch (IOException io) {
+                out.println(now() + "HTTPSlowHandler: IOexception is not unexpected: " + io);
+                throw io;
             } catch (Throwable e) {
-                out.println("HTTPSlowHandler: unexpected exception: " + e);
+                out.println(now() + "HTTPSlowHandler: unexpected exception: " + e);
                 e.printStackTrace();
                 throw e;
             } finally {
-                out.printf("HTTPSlowHandler reply sent: %s%n", t.getRequestURI());
-                System.err.printf("HTTPSlowHandler reply sent: %s%n", t.getRequestURI());
+                out.printf(now() + "HTTPSlowHandler reply sent: %s%n", t.getRequestURI());
+                System.err.printf(now() + "HTTPSlowHandler reply sent: %s%n", t.getRequestURI());
             }
         }
     }

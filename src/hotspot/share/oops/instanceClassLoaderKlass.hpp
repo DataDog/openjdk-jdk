@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,20 +37,19 @@ class ClassFileParser;
 // the list later?
 
 class InstanceClassLoaderKlass: public InstanceKlass {
-  friend class VMStructs;
   friend class InstanceKlass;
 public:
-  static const KlassID ID = InstanceClassLoaderKlassID;
+  static const KlassKind Kind = InstanceClassLoaderKlassKind;
 
 private:
-  InstanceClassLoaderKlass(const ClassFileParser& parser) : InstanceKlass(parser, InstanceKlass::_kind_class_loader, ID) {}
+  InstanceClassLoaderKlass(const ClassFileParser& parser) : InstanceKlass(parser, Kind) {}
 
 public:
-  InstanceClassLoaderKlass() { assert(DumpSharedSpaces || UseSharedSpaces, "only for CDS"); }
+  InstanceClassLoaderKlass();
 
   // Oop fields (and metadata) iterators
   //
-  // The InstanceClassLoaderKlass iterators also visit the CLD pointer (or mirror of anonymous klasses.)
+  // The InstanceClassLoaderKlass iterators also visit the CLD pointer
 
   // Forward iteration
   // Iterate over the oop fields and metadata.

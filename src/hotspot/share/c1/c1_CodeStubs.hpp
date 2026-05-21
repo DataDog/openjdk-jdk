@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,8 +26,8 @@
 #define SHARE_C1_C1_CODESTUBS_HPP
 
 #include "c1/c1_FrameMap.hpp"
-#include "c1/c1_IR.hpp"
 #include "c1/c1_Instruction.hpp"
+#include "c1/c1_IR.hpp"
 #include "c1/c1_LIR.hpp"
 #include "c1/c1_Runtime1.hpp"
 #include "code/nativeInst.hpp"
@@ -54,11 +54,10 @@ class CodeStub: public CompilationResourceObj {
   // code generation
   void assert_no_unbound_labels()                { assert(!_entry.is_unbound() && !_continuation.is_unbound(), "unbound label"); }
   virtual void emit_code(LIR_Assembler* e) = 0;
-  virtual CodeEmitInfo* info() const             { return NULL; }
+  virtual CodeEmitInfo* info() const             { return nullptr; }
   virtual bool is_exception_throw_stub() const   { return false; }
-  virtual bool is_range_check_stub() const       { return false; }
-  virtual bool is_divbyzero_stub() const         { return false; }
   virtual bool is_simple_exception_stub() const  { return false; }
+  virtual int nr_immediate_oops_patched() const  { return 0; }
 #ifndef PRODUCT
   virtual void print_name(outputStream* out) const = 0;
 #endif
@@ -67,15 +66,7 @@ class CodeStub: public CompilationResourceObj {
   Label* entry()                                 { return &_entry; }
   Label* continuation()                          { return &_continuation; }
   // for LIR
-  virtual void visit(LIR_OpVisitState* visit) {
-#ifndef PRODUCT
-    if (LIRTracePeephole && Verbose) {
-      tty->print("no visitor for ");
-      print_name(tty);
-      tty->cr();
-    }
-#endif
-  }
+  virtual void visit(LIR_OpVisitState* visit) = 0;
 };
 
 class CodeStubList: public GrowableArray<CodeStub*> {
@@ -119,6 +110,8 @@ class CounterOverflowStub: public CodeStub {
 
 public:
   CounterOverflowStub(CodeEmitInfo* info, int bci, LIR_Opr method) :  _info(info), _bci(bci), _method(method) {
+    FrameMap* f = Compilation::current()->frame_map();
+    f->update_reserved_argument_area_size(2 * BytesPerWord);
   }
 
   virtual void emit_code(LIR_Assembler* e);
@@ -134,36 +127,6 @@ public:
 
 };
 
-class ConversionStub: public CodeStub {
- private:
-  Bytecodes::Code _bytecode;
-  LIR_Opr         _input;
-  LIR_Opr         _result;
-
-  static float float_zero;
-  static double double_zero;
- public:
-  ConversionStub(Bytecodes::Code bytecode, LIR_Opr input, LIR_Opr result)
-    : _bytecode(bytecode), _input(input), _result(result) {
-    NOT_IA32( ShouldNotReachHere(); ) // used only on x86-32
-  }
-
-  Bytecodes::Code bytecode() { return _bytecode; }
-  LIR_Opr         input()    { return _input; }
-  LIR_Opr         result()   { return _result; }
-
-  virtual void emit_code(LIR_Assembler* e);
-  virtual void visit(LIR_OpVisitState* visitor) {
-    visitor->do_slow_case();
-    visitor->do_input(_input);
-    visitor->do_output(_result);
-  }
-#ifndef PRODUCT
-  virtual void print_name(outputStream* out) const { out->print("ConversionStub"); }
-#endif // PRODUCT
-};
-
-
 // Throws ArrayIndexOutOfBoundsException by default but can be
 // configured to throw IndexOutOfBoundsException in constructor
 class RangeCheckStub: public CodeStub {
@@ -175,13 +138,24 @@ class RangeCheckStub: public CodeStub {
 
  public:
   // For ArrayIndexOutOfBoundsException.
-  RangeCheckStub(CodeEmitInfo* info, LIR_Opr index, LIR_Opr array);
+  RangeCheckStub(CodeEmitInfo* info, LIR_Opr index, LIR_Opr array)
+    : _index(index), _array(array), _throw_index_out_of_bounds_exception(false) {
+    assert(info != nullptr, "must have info");
+    _info = new CodeEmitInfo(info);
+    FrameMap* f = Compilation::current()->frame_map();
+    f->update_reserved_argument_area_size(2 * BytesPerWord);
+  }
   // For IndexOutOfBoundsException.
-  RangeCheckStub(CodeEmitInfo* info, LIR_Opr index);
+  RangeCheckStub(CodeEmitInfo* info, LIR_Opr index)
+    : _index(index), _array(), _throw_index_out_of_bounds_exception(true) {
+    assert(info != nullptr, "must have info");
+    _info = new CodeEmitInfo(info);
+    FrameMap* f = Compilation::current()->frame_map();
+    f->update_reserved_argument_area_size(2 * BytesPerWord);
+  }
   virtual void emit_code(LIR_Assembler* e);
   virtual CodeEmitInfo* info() const             { return _info; }
   virtual bool is_exception_throw_stub() const   { return true; }
-  virtual bool is_range_check_stub() const       { return true; }
   virtual void visit(LIR_OpVisitState* visitor) {
     visitor->do_slow_case(_info);
     visitor->do_input(_index);
@@ -224,7 +198,6 @@ class DivByZeroStub: public CodeStub {
   virtual void emit_code(LIR_Assembler* e);
   virtual CodeEmitInfo* info() const             { return _info; }
   virtual bool is_exception_throw_stub() const   { return true; }
-  virtual bool is_divbyzero_stub() const         { return true; }
   virtual void visit(LIR_OpVisitState* visitor) {
     visitor->do_slow_case(_info);
   }
@@ -261,10 +234,10 @@ class NewInstanceStub: public CodeStub {
   LIR_Opr          _klass_reg;
   LIR_Opr          _result;
   CodeEmitInfo*    _info;
-  Runtime1::StubID _stub_id;
+  StubId           _stub_id;
 
  public:
-  NewInstanceStub(LIR_Opr klass_reg, LIR_Opr result, ciInstanceKlass* klass, CodeEmitInfo* info, Runtime1::StubID stub_id);
+  NewInstanceStub(LIR_Opr klass_reg, LIR_Opr result, ciInstanceKlass* klass, CodeEmitInfo* info, StubId stub_id);
   virtual void emit_code(LIR_Assembler* e);
   virtual CodeEmitInfo* info() const             { return _info; }
   virtual void visit(LIR_OpVisitState* visitor) {
@@ -346,7 +319,12 @@ class MonitorEnterStub: public MonitorAccessStub {
   CodeEmitInfo* _info;
 
  public:
-  MonitorEnterStub(LIR_Opr obj_reg, LIR_Opr lock_reg, CodeEmitInfo* info);
+  MonitorEnterStub(LIR_Opr obj_reg, LIR_Opr lock_reg, CodeEmitInfo* info)
+    : MonitorAccessStub(obj_reg, lock_reg) {
+    _info = new CodeEmitInfo(info);
+    FrameMap* f = Compilation::current()->frame_map();
+    f->update_reserved_argument_area_size(2 * BytesPerWord);
+  }
 
   virtual void emit_code(LIR_Assembler* e);
   virtual CodeEmitInfo* info() const             { return _info; }
@@ -363,21 +341,16 @@ class MonitorEnterStub: public MonitorAccessStub {
 
 class MonitorExitStub: public MonitorAccessStub {
  private:
-  bool _compute_lock;
   int  _monitor_ix;
 
  public:
-  MonitorExitStub(LIR_Opr lock_reg, bool compute_lock, int monitor_ix)
+  MonitorExitStub(LIR_Opr lock_reg, int monitor_ix)
     : MonitorAccessStub(LIR_OprFact::illegalOpr, lock_reg),
-      _compute_lock(compute_lock), _monitor_ix(monitor_ix) { }
+      _monitor_ix(monitor_ix) { }
   virtual void emit_code(LIR_Assembler* e);
   virtual void visit(LIR_OpVisitState* visitor) {
     assert(_obj_reg->is_illegal(), "unused");
-    if (_compute_lock) {
-      visitor->do_temp(_lock_reg);
-    } else {
-      visitor->do_input(_lock_reg);
-    }
+    visitor->do_temp(_lock_reg);
   }
 #ifndef PRODUCT
   virtual void print_name(outputStream* out) const { out->print("MonitorExitStub"); }
@@ -415,7 +388,7 @@ class PatchingStub: public CodeStub {
 
   PatchingStub(MacroAssembler* masm, PatchID id, int index = -1):
       _id(id)
-    , _info(NULL)
+    , _info(nullptr)
     , _index(index) {
     // force alignment of patch sites so we
     // can guarantee atomic writes to the patch site.
@@ -424,11 +397,18 @@ class PatchingStub: public CodeStub {
     masm->bind(_patch_site_entry);
   }
 
+  virtual int nr_immediate_oops_patched() const  {
+    if (_id == load_mirror_id || _id == load_appendix_id) {
+      return 1;
+    }
+    return 0;
+  }
+
   void install(MacroAssembler* masm, LIR_PatchCode patch_code, Register obj, CodeEmitInfo* info) {
     _info = info;
     _obj = obj;
     masm->bind(_patch_site_continuation);
-    _bytes_to_copy = masm->pc() - pc_start();
+    _bytes_to_copy = pointer_delta_as_int(masm->pc(), pc_start());
     if (_id == PatchingStub::access_field_id) {
       // embed a fixed offset to handle long patches which need to be offset by a word.
       // the patching code will just add the field offset field to this offset so
@@ -480,7 +460,10 @@ private:
 
 public:
   DeoptimizeStub(CodeEmitInfo* info, Deoptimization::DeoptReason reason, Deoptimization::DeoptAction action) :
-    _info(new CodeEmitInfo(info)), _trap_request(Deoptimization::make_trap_request(reason, action)) {}
+    _info(new CodeEmitInfo(info)), _trap_request(Deoptimization::make_trap_request(reason, action)) {
+    FrameMap* f = Compilation::current()->frame_map();
+    f->update_reserved_argument_area_size(2 * BytesPerWord);
+  }
 
   virtual void emit_code(LIR_Assembler* e);
   virtual CodeEmitInfo* info() const           { return _info; }
@@ -497,12 +480,14 @@ public:
 class SimpleExceptionStub: public CodeStub {
  private:
   LIR_Opr          _obj;
-  Runtime1::StubID _stub;
+  StubId           _stub;
   CodeEmitInfo*    _info;
 
  public:
-  SimpleExceptionStub(Runtime1::StubID stub, LIR_Opr obj, CodeEmitInfo* info):
+  SimpleExceptionStub(StubId stub, LIR_Opr obj, CodeEmitInfo* info):
     _obj(obj), _stub(stub), _info(info) {
+    FrameMap* f = Compilation::current()->frame_map();
+    f->update_reserved_argument_area_size(2 * BytesPerWord);
   }
 
   void set_obj(LIR_Opr obj) {
@@ -525,11 +510,8 @@ class SimpleExceptionStub: public CodeStub {
 
 
 class ArrayStoreExceptionStub: public SimpleExceptionStub {
- private:
-  CodeEmitInfo* _info;
-
  public:
-  ArrayStoreExceptionStub(LIR_Opr obj, CodeEmitInfo* info): SimpleExceptionStub(Runtime1::throw_array_store_exception_id, obj, info) {}
+  ArrayStoreExceptionStub(LIR_Opr obj, CodeEmitInfo* info): SimpleExceptionStub(StubId::c1_throw_array_store_exception_id, obj, info) {}
 #ifndef PRODUCT
   virtual void print_name(outputStream* out) const { out->print("ArrayStoreExceptionStub"); }
 #endif // PRODUCT
@@ -541,7 +523,10 @@ class ArrayCopyStub: public CodeStub {
   LIR_OpArrayCopy* _op;
 
  public:
-  ArrayCopyStub(LIR_OpArrayCopy* op): _op(op) { }
+  ArrayCopyStub(LIR_OpArrayCopy* op): _op(op) {
+    FrameMap* f = Compilation::current()->frame_map();
+    f->update_reserved_argument_area_size(arraycopystub_reserved_argument_area_size * BytesPerWord);
+  }
 
   LIR_Opr src() const                         { return _op->src(); }
   LIR_Opr src_pos() const                     { return _op->src_pos(); }

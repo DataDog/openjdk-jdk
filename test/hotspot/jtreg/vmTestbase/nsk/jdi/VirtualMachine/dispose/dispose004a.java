@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,6 @@
 
 package nsk.jdi.VirtualMachine.dispose;
 
-import nsk.share.*;
 import nsk.share.jpda.*;
 import nsk.share.jdi.*;
 
@@ -61,9 +60,15 @@ public class dispose004a {
     }
 
     //====================================================== test program
+
+    static Thread mainThread = null;
+    static Thread test_thread = null;
+
     //----------------------------------------------------   main method
 
     public static void main (String argv[]) {
+
+        mainThread = Thread.currentThread();
 
         for (int i=0; i<argv.length; i++) {
             if ( argv[i].equals("-vbs") || argv[i].equals("-verbose") ) {
@@ -96,8 +101,8 @@ public class dispose004a {
     //------------------------------------------------------  section tested
 
                 case 0:
-                         Threaddispose004a test_thread =
-                             new Threaddispose004a("testedThread");
+                         test_thread =
+                             JDIThreadFactory.newThread(new Threaddispose004a("testedThread"));
                          log1("       thread2 is created");
 
                          label:
@@ -137,9 +142,11 @@ public class dispose004a {
                                  break;
                              } else if (instruction.equals("check_alive")) {
                                  log1("checking on: thread2.isAlive");
-                                 if (test_thread.isAlive()) {
-                                     test_thread.resume();
+                                 if (!JDIUtils.waitForCompletion(test_thread)) {
                                      pipe.println("alive");
+                                     logErr("ERROR thread is alive after vm.dispose()");
+                                     exitCode = FAILED;
+                                     break;
                                  } else {
                                      pipe.println("not_alive");
                                  }
@@ -170,7 +177,7 @@ public class dispose004a {
     }
 }
 
-class Threaddispose004a extends Thread {
+class Threaddispose004a extends NamedTask {
 
     public Threaddispose004a(String threadName) {
         super(threadName);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,6 +46,7 @@ typedef struct eh_frame_info {
 typedef struct lib_info {
   char             name[BUF_SIZE];
   uintptr_t        base;
+  uintptr_t        end;
   uintptr_t        exec_start;
   uintptr_t        exec_end;
   eh_frame_info    eh_frame;
@@ -67,7 +68,7 @@ typedef struct map_info {
    off_t            offset;   // file offset of this mapping
    uintptr_t        vaddr;    // starting virtual address
    size_t           memsz;    // size of the mapping
-   uint32_t         flags;    // acces flags
+   uint32_t         flags;    // access flags
    struct map_info* next;
 } map_info;
 
@@ -94,6 +95,9 @@ struct core_data {
    // part of the class sharing workaround
    int                classes_jsa_fd; // file descriptor of class share archive
    uintptr_t          dynamic_addr;  // address of dynamic section of a.out
+   uintptr_t          vdso_addr;     // address of vDSO
+   off_t              vdso_offset;   // offset of vDSO in core
+   size_t             vdso_size;     // size of vDSO
    uintptr_t          ld_base_addr;  // base address of ld.so
    size_t             num_maps;  // number of maps.
    map_info*          maps;      // maps in a linked list
@@ -111,6 +115,10 @@ struct ps_prochandle {
    int                num_threads;
    thread_info*       threads;   // head of thread list
    struct core_data*  core;      // data only used for core dumps, NULL for process
+#ifdef __aarch64__
+   // true if the HWCAP_PACA variant of Pointer Authentication Code (PAC) is enabled.
+   bool               pac_enabled;
+#endif
 };
 
 #ifdef __cplusplus

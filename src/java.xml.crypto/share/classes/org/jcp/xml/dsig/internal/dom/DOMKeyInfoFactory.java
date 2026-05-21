@@ -21,18 +21,15 @@
  * under the License.
  */
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
- */
-/*
- * $Id: DOMKeyInfoFactory.java 1854026 2019-02-21 09:30:01Z coheigea $
+ * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
  */
 package org.jcp.xml.dsig.internal.dom;
 
 import java.math.BigInteger;
 import java.security.KeyException;
 import java.security.PublicKey;
-import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.DSAPublicKey;
+import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.RSAPublicKey;
 import java.util.List;
 
@@ -62,25 +59,29 @@ public final class DOMKeyInfoFactory extends KeyInfoFactory {
 
     public DOMKeyInfoFactory() { }
 
+    @Override
     @SuppressWarnings("rawtypes")
     public KeyInfo newKeyInfo(List content) {
         return newKeyInfo(content, null);
     }
 
+    @Override
     @SuppressWarnings({ "unchecked", "rawtypes" })
     public KeyInfo newKeyInfo(List content, String id) {
         return new DOMKeyInfo(content, id);
     }
 
+    @Override
     public KeyName newKeyName(String name) {
         return new DOMKeyName(name);
     }
 
+    @Override
     public KeyValue newKeyValue(PublicKey key)  throws KeyException {
         String algorithm = key.getAlgorithm();
         if ("DSA".equals(algorithm)) {
             return new DOMKeyValue.DSA((DSAPublicKey) key);
-        } else if ("RSA".equals(algorithm)) {
+        } else if ("RSA".equals(algorithm) || "RSASSA-PSS".equals(algorithm)) {
             return new DOMKeyValue.RSA((RSAPublicKey) key);
         } else if ("EC".equals(algorithm)) {
             return new DOMKeyValue.EC((ECPublicKey) key);
@@ -89,24 +90,29 @@ public final class DOMKeyInfoFactory extends KeyInfoFactory {
         }
     }
 
+    @Override
     public PGPData newPGPData(byte[] keyId) {
         return newPGPData(keyId, null, null);
     }
 
+    @Override
     @SuppressWarnings({ "rawtypes", "unchecked" })
     public PGPData newPGPData(byte[] keyId, byte[] keyPacket, List other) {
         return new DOMPGPData(keyId, keyPacket, other);
     }
 
+    @Override
     @SuppressWarnings({ "rawtypes", "unchecked" })
     public PGPData newPGPData(byte[] keyPacket, List other) {
         return new DOMPGPData(keyPacket, other);
     }
 
+    @Override
     public RetrievalMethod newRetrievalMethod(String uri) {
         return newRetrievalMethod(uri, null, null);
     }
 
+    @Override
     @SuppressWarnings({ "rawtypes", "unchecked" })
     public RetrievalMethod newRetrievalMethod(String uri, String type,
         List transforms) {
@@ -116,6 +122,7 @@ public final class DOMKeyInfoFactory extends KeyInfoFactory {
         return new DOMRetrievalMethod(uri, type, transforms);
     }
 
+    @Override
     @SuppressWarnings({ "rawtypes" })
     public X509Data newX509Data(List content) {
         return new DOMX509Data(content);
@@ -127,6 +134,7 @@ public final class DOMKeyInfoFactory extends KeyInfoFactory {
         return new DOMX509IssuerSerial(issuerName, serialNumber);
     }
 
+    @Override
     public boolean isFeatureSupported(String feature) {
         if (feature == null) {
             throw new NullPointerException();
@@ -135,6 +143,7 @@ public final class DOMKeyInfoFactory extends KeyInfoFactory {
         }
     }
 
+    @Override
     public URIDereferencer getURIDereferencer() {
         return DOMURIDereferencer.INSTANCE;
     }

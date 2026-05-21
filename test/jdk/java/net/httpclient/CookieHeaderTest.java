@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,29 +25,15 @@
  * @test
  * @bug 8199851
  * @summary Test for multiple vs single cookie header for HTTP/2 vs HTTP/1.1
- * @modules java.base/sun.net.www.http
- *          java.net.http/jdk.internal.net.http.common
- *          java.net.http/jdk.internal.net.http.frame
- *          java.net.http/jdk.internal.net.http.hpack
- *          java.logging
- *          jdk.httpserver
- * @library /test/lib http2/server
- * @build Http2TestServer
- * @build jdk.test.lib.net.SimpleSSLContext
- * @run testng/othervm
+ * @library /test/lib /test/jdk/java/net/httpclient/lib
+ * @build jdk.httpclient.test.lib.common.HttpServerAdapters jdk.test.lib.net.SimpleSSLContext
+ * @run junit/othervm
  *       -Djdk.tls.acknowledgeCloseNotify=true
  *       -Djdk.httpclient.HttpClient.log=trace,headers,requests
- *       CookieHeaderTest
+ *       ${test.main.class}
  */
 
-import com.sun.net.httpserver.HttpServer;
-import com.sun.net.httpserver.HttpsConfigurator;
-import com.sun.net.httpserver.HttpsServer;
 import jdk.test.lib.net.SimpleSSLContext;
-import org.testng.annotations.AfterTest;
-import org.testng.annotations.BeforeTest;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 
 import javax.net.ServerSocketFactory;
 import javax.net.ssl.SSLContext;
@@ -58,7 +44,6 @@ import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.io.Writer;
 import java.net.CookieHandler;
-import java.net.CookieManager;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -72,7 +57,6 @@ import java.net.http.HttpResponse.BodyHandlers;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -82,27 +66,39 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import jdk.httpclient.test.lib.common.HttpServerAdapters;
 
 import static java.lang.System.out;
+import static java.net.http.HttpClient.Version.HTTP_1_1;
+import static java.net.http.HttpClient.Version.HTTP_2;
+import static java.net.http.HttpClient.Version.HTTP_3;
+import static java.net.http.HttpOption.H3_DISCOVERY;
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
+
+import org.junit.jupiter.api.AfterAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 public class CookieHeaderTest implements HttpServerAdapters {
 
-    SSLContext sslContext;
-    HttpTestServer httpTestServer;        // HTTP/1.1    [ 6 servers ]
-    HttpTestServer httpsTestServer;       // HTTPS/1.1
-    HttpTestServer http2TestServer;       // HTTP/2 ( h2c )
-    HttpTestServer https2TestServer;      // HTTP/2 ( h2  )
-    DummyServer httpDummyServer;
-    DummyServer httpsDummyServer;
-    String httpURI;
-    String httpsURI;
-    String http2URI;
-    String https2URI;
-    String httpDummy;
-    String httpsDummy;
+    private static final SSLContext sslContext = SimpleSSLContext.findSSLContext();
+    private static HttpTestServer httpTestServer;        // HTTP/1.1    [ 6 servers ]
+    private static HttpTestServer httpsTestServer;       // HTTPS/1.1
+    private static HttpTestServer http2TestServer;       // HTTP/2 ( h2c )
+    private static HttpTestServer https2TestServer;      // HTTP/2 ( h2  )
+    private static HttpTestServer http3TestServer;       // HTTP/3 ( h3  )
+    private static DummyServer httpDummyServer;
+    private static DummyServer httpsDummyServer;
+    private static String httpURI;
+    private static String httpsURI;
+    private static String http2URI;
+    private static String https2URI;
+    private static String http3URI;
+    private static String httpDummy;
+    private static String httpsDummy;
 
     static final String MESSAGE = "Basic CookieHeaderTest message body";
     static final int ITERATIONS = 3;
@@ -115,15 +111,15 @@ public class CookieHeaderTest implements HttpServerAdapters {
         return String.format("[%d s, %d ms, %d ns] ", secs, mill, nan);
     }
 
-    @DataProvider(name = "positive")
-    public Object[][] positive() {
+    public static Object[][] positive() {
         return new Object[][] {
-                { httpURI, HttpClient.Version.HTTP_1_1  },
-                { httpsURI, HttpClient.Version.HTTP_1_1  },
-                { httpDummy, HttpClient.Version.HTTP_1_1 },
-                { httpsDummy, HttpClient.Version.HTTP_1_1 },
+                { httpURI, HTTP_1_1  },
+                { httpsURI, HTTP_1_1  },
+                { httpDummy, HTTP_1_1 },
+                { httpsDummy, HTTP_1_1 },
                 { httpURI, HttpClient.Version.HTTP_2  },
                 { httpsURI, HttpClient.Version.HTTP_2  },
+                { http3URI, HttpClient.Version.HTTP_3 },
                 { httpDummy, HttpClient.Version.HTTP_2 },
                 { httpsDummy, HttpClient.Version.HTTP_2 },
                 { http2URI, null  },
@@ -133,13 +129,14 @@ public class CookieHeaderTest implements HttpServerAdapters {
 
     static final AtomicLong requestCounter = new AtomicLong();
 
-    @Test(dataProvider = "positive")
+    @ParameterizedTest
+    @MethodSource("positive")
     void test(String uriString, HttpClient.Version version) throws Exception {
         out.printf("%n---- starting (%s) ----%n", uriString);
         ConcurrentHashMap<String, List<String>> cookieHeaders
                 = new ConcurrentHashMap<>();
         CookieHandler cookieManager = new TestCookieHandler(cookieHeaders);
-        HttpClient client = HttpClient.newBuilder()
+        HttpClient client = newClientBuilderForH3()
                 .followRedirects(Redirect.ALWAYS)
                 .cookieHandler(cookieManager)
                 .sslContext(sslContext)
@@ -159,6 +156,9 @@ public class CookieHeaderTest implements HttpServerAdapters {
         if (version != null) {
             requestBuilder.version(version);
         }
+        if (version == HTTP_3) {
+            requestBuilder.setOption(H3_DISCOVERY, http3TestServer.h3DiscoveryConfig());
+        }
         HttpRequest request = requestBuilder.build();
         out.println("Initial request: " + request.uri());
 
@@ -166,19 +166,27 @@ public class CookieHeaderTest implements HttpServerAdapters {
             out.println("iteration: " + i);
             HttpResponse<String> response = client.send(request, BodyHandlers.ofString());
 
-            out.println("  Got response: " + response);
+            out.println("  Got response: " + response + ", config=" + request.getOption(H3_DISCOVERY)
+                    + ", version=" + response.version());
             out.println("  Got body Path: " + response.body());
 
-            assertEquals(response.statusCode(), 200);
-            assertEquals(response.body(), MESSAGE);
-            assertEquals(response.headers().allValues("X-Request-Cookie"),
-                    cookies.stream()
-                            .filter(s -> !s.startsWith("LOC"))
-                            .collect(Collectors.toList()));
+            assertEquals(200, response.statusCode());
+            assertEquals(MESSAGE, response.body());
+            List<String> expectedCookieList = cookies.stream()
+                    .filter(s -> !s.startsWith("LOC")).toList();
+            List<String> actualCookieList = response.headers()
+                    .allValues("X-Request-Cookie");
+            assertEquals(expectedCookieList, actualCookieList);
+            if (version == HTTP_3 && i > 0) {
+                assertEquals(HTTP_3, response.version());
+            }
             requestBuilder = HttpRequest.newBuilder(uri)
                     .header("X-uuid", "uuid-" + requestCounter.incrementAndGet());
             if (version != null) {
                 requestBuilder.version(version);
+            }
+            if (version == HTTP_3) {
+                requestBuilder.setOption(H3_DISCOVERY, http3TestServer.h3DiscoveryConfig());
             }
             request = requestBuilder.build();
         }
@@ -186,32 +194,28 @@ public class CookieHeaderTest implements HttpServerAdapters {
 
     // -- Infrastructure
 
-    @BeforeTest
-    public void setup() throws Exception {
-        sslContext = new SimpleSSLContext().get();
-        if (sslContext == null)
-            throw new AssertionError("Unexpected null sslContext");
-
-        InetSocketAddress sa = new InetSocketAddress(InetAddress.getLoopbackAddress(), 0);
-
-        httpTestServer = HttpTestServer.of(HttpServer.create(sa, 0));
+    @BeforeAll
+    public static void setup() throws Exception {
+        httpTestServer = HttpTestServer.create(HTTP_1_1);
         httpTestServer.addHandler(new CookieValidationHandler(), "/http1/cookie/");
         httpURI = "http://" + httpTestServer.serverAuthority() + "/http1/cookie/retry";
-        HttpsServer httpsServer = HttpsServer.create(sa, 0);
-        httpsServer.setHttpsConfigurator(new HttpsConfigurator(sslContext));
-        httpsTestServer = HttpTestServer.of(httpsServer);
+        httpsTestServer = HttpTestServer.create(HTTP_1_1, sslContext);
         httpsTestServer.addHandler(new CookieValidationHandler(),"/https1/cookie/");
         httpsURI = "https://" + httpsTestServer.serverAuthority() + "/https1/cookie/retry";
 
-        http2TestServer = HttpTestServer.of(new Http2TestServer("localhost", false, 0));
+        http2TestServer = HttpTestServer.create(HTTP_2);
         http2TestServer.addHandler(new CookieValidationHandler(), "/http2/cookie/");
         http2URI = "http://" + http2TestServer.serverAuthority() + "/http2/cookie/retry";
-        https2TestServer = HttpTestServer.of(new Http2TestServer("localhost", true, sslContext));
+        https2TestServer = HttpTestServer.create(HTTP_2, sslContext);
         https2TestServer.addHandler(new CookieValidationHandler(), "/https2/cookie/");
         https2URI = "https://" + https2TestServer.serverAuthority() + "/https2/cookie/retry";
+        http3TestServer = HttpTestServer.create(HTTP_3, sslContext);
+        http3TestServer.addHandler(new CookieValidationHandler(), "/http3/cookie/");
+        http3URI = "https://" + http3TestServer.serverAuthority() + "/http3/cookie/retry";
 
 
         // DummyServer
+        InetSocketAddress sa = new InetSocketAddress(InetAddress.getLoopbackAddress(), 0);
         httpDummyServer = DummyServer.create(sa);
         httpsDummyServer = DummyServer.create(sa, sslContext);
         httpDummy = "http://" + httpDummyServer.serverAuthority() + "/http1/dummy/x";
@@ -221,12 +225,13 @@ public class CookieHeaderTest implements HttpServerAdapters {
         httpsTestServer.start();
         http2TestServer.start();
         https2TestServer.start();
+        http3TestServer.start();
         httpDummyServer.start();
         httpsDummyServer.start();
     }
 
-    @AfterTest
-    public void teardown() throws Exception {
+    @AfterAll
+    public static void teardown() throws Exception {
         httpTestServer.stop();
         httpsTestServer.stop();
         http2TestServer.stop();
@@ -279,7 +284,7 @@ public class CookieHeaderTest implements HttpServerAdapters {
             String uuid = uuids.get(0);
             // retrying
             if (closedRequests.putIfAbsent(uuid, t.getRequestURI().toString()) == null) {
-                if (t.getExchangeVersion() == HttpClient.Version.HTTP_1_1) {
+                if (t.getExchangeVersion() == HTTP_1_1) {
                     // Throwing an exception here only causes a retry
                     // with HTTP_1_1 - where it forces the server to close
                     // the connection.
@@ -307,7 +312,7 @@ public class CookieHeaderTest implements HttpServerAdapters {
             try (OutputStream os = t.getResponseBody()) {
                 List<String> cookie = t.getRequestHeaders().get("Cookie");
                 if (cookie != null) {
-                    if (version == HttpClient.Version.HTTP_1_1 || upgraded) {
+                    if (version == HTTP_1_1 || upgraded) {
                         if (cookie.size() == 1) {
                             cookie = List.of(cookie.get(0).split("; "));
                         } else if (cookie.size() > 1) {
@@ -331,8 +336,8 @@ public class CookieHeaderTest implements HttpServerAdapters {
                     (new RuntimeException(msg)).printStackTrace();
                     t.sendResponseHeaders(500, -1);
                     os.write(msg.getBytes(UTF_8));
-                } else if (cookie.size() == 2 && !cookie.get(1).equals("ORDER=BISCUITS")) {
-                    String msg = "Incorrect cookie header value:[" + cookie.get(0) + "]";
+                } else if (cookie.size() > 1 && !cookie.get(1).equals("ORDER=BISCUITS")) {
+                    String msg = "Incorrect cookie header value:[" + cookie.get(1) + "]";
                     (new RuntimeException(msg)).printStackTrace();
                     t.sendResponseHeaders(500, -1);
                     os.write(msg.getBytes(UTF_8));

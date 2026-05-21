@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -55,7 +55,7 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
         recordLock.lock();
         try {
             if (isClosed()) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl")) {
+                if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.SSL)) {
                     SSLLogger.warning("outbound has closed, ignore outbound " +
                         "alert message: " + Alert.nameOf(description));
                 }
@@ -63,13 +63,12 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
             }
 
             // use the buf of ByteArrayOutputStream
-            int position = headerSize + writeCipher.getExplicitNonceSize();
-            count = position;
+            count = headerSize + writeCipher.getExplicitNonceSize();
 
             write(level);
             write(description);
-            if (SSLLogger.isOn && SSLLogger.isOn("record")) {
-                SSLLogger.fine("WRITE: " + protocolVersion +
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.RECORD)) {
+                SSLLogger.fine("WRITE: " + protocolVersion.name +
                         " " + ContentType.ALERT.name +
                         "(" + Alert.nameOf(description) + ")" +
                         ", length = " + (count - headerSize));
@@ -82,7 +81,8 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
             deliverStream.write(buf, 0, count);    // may throw IOException
             deliverStream.flush();                 // may throw IOException
 
-            if (SSLLogger.isOn && SSLLogger.isOn("packet")) {
+            if (SSLLogger.isOn() &&
+                    SSLLogger.isOn(SSLLogger.Opt.RECORD_PACKET)) {
                 SSLLogger.fine("Raw write",
                         (new ByteArrayInputStream(buf, 0, count)));
             }
@@ -100,7 +100,7 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
         recordLock.lock();
         try {
             if (isClosed()) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl")) {
+                if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.SSL)) {
                     SSLLogger.warning("outbound has closed, ignore outbound " +
                             "handshake message",
                             ByteBuffer.wrap(source, offset, length));
@@ -128,7 +128,8 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
                     int limit = v2ClientHello.limit();
                     handshakeHash.deliver(record, 2, (limit - 2));
 
-                    if (SSLLogger.isOn && SSLLogger.isOn("record")) {
+                    if (SSLLogger.isOn() &&
+                            SSLLogger.isOn(SSLLogger.Opt.RECORD)) {
                         SSLLogger.fine(
                                 "WRITE: SSLv2 ClientHello message" +
                                 ", length = " + limit);
@@ -142,7 +143,8 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
                     deliverStream.write(record, 0, limit);
                     deliverStream.flush();
 
-                    if (SSLLogger.isOn && SSLLogger.isOn("packet")) {
+                    if (SSLLogger.isOn() &&
+                            SSLLogger.isOn(SSLLogger.Opt.RECORD_PACKET)) {
                         SSLLogger.fine("Raw write",
                                 (new ByteArrayInputStream(record, 0, limit)));
                     }
@@ -169,18 +171,18 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
 
             for (int limit = (offset + length); offset < limit;) {
 
-                int remains = (limit - offset) + (count - position);
-                int fragLen = Math.min(fragLimit, remains);
+                int remains = (limit - offset);
+                int fragLen = Math.min(fragLimit - count + position, remains);
 
                 // use the buf of ByteArrayOutputStream
                 write(source, offset, fragLen);
-                if (remains < fragLimit) {
+                if (remains < fragLen) {
                     return;
                 }
 
-                if (SSLLogger.isOn && SSLLogger.isOn("record")) {
+                if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.RECORD)) {
                     SSLLogger.fine(
-                            "WRITE: " + protocolVersion +
+                            "WRITE: " + protocolVersion.name +
                             " " + ContentType.HANDSHAKE.name +
                             ", length = " + (count - headerSize));
                 }
@@ -192,7 +194,8 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
                 deliverStream.write(buf, 0, count);    // may throw IOException
                 deliverStream.flush();                 // may throw IOException
 
-                if (SSLLogger.isOn && SSLLogger.isOn("packet")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.RECORD_PACKET)) {
                     SSLLogger.fine("Raw write",
                             (new ByteArrayInputStream(buf, 0, count)));
                 }
@@ -213,7 +216,7 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
         recordLock.lock();
         try {
             if (isClosed()) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl")) {
+                if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.SSL)) {
                     SSLLogger.warning("outbound has closed, ignore outbound " +
                         "change_cipher_spec message");
                 }
@@ -221,8 +224,7 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
             }
 
             // use the buf of ByteArrayOutputStream
-            int position = headerSize + writeCipher.getExplicitNonceSize();
-            count = position;
+            count = headerSize + writeCipher.getExplicitNonceSize();
 
             write((byte)1);         // byte 1: change_cipher_spec(
 
@@ -233,7 +235,8 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
             deliverStream.write(buf, 0, count);        // may throw IOException
             // deliverStream.flush();                  // flush in Finished
 
-            if (SSLLogger.isOn && SSLLogger.isOn("packet")) {
+            if (SSLLogger.isOn() &&
+                    SSLLogger.isOn(SSLLogger.Opt.RECORD_PACKET)) {
                 SSLLogger.fine("Raw write",
                         (new ByteArrayInputStream(buf, 0, count)));
             }
@@ -246,6 +249,11 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
     }
 
     @Override
+    void disposeWriteCipher() {
+        writeCipher.dispose();
+    }
+
+    @Override
     public void flush() throws IOException {
         recordLock.lock();
         try {
@@ -254,9 +262,9 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
                 return;
             }
 
-            if (SSLLogger.isOn && SSLLogger.isOn("record")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.RECORD)) {
                 SSLLogger.fine(
-                        "WRITE: " + protocolVersion +
+                        "WRITE: " + protocolVersion.name +
                         " " + ContentType.HANDSHAKE.name +
                         ", length = " + (count - headerSize));
             }
@@ -268,7 +276,8 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
             deliverStream.write(buf, 0, count);    // may throw IOException
             deliverStream.flush();                 // may throw IOException
 
-            if (SSLLogger.isOn && SSLLogger.isOn("packet")) {
+            if (SSLLogger.isOn() &&
+                    SSLLogger.isOn(SSLLogger.Opt.RECORD_PACKET)) {
                 SSLLogger.fine("Raw write",
                         (new ByteArrayInputStream(buf, 0, count)));
             }
@@ -290,7 +299,7 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
             }
 
             if (writeCipher.authenticator.seqNumOverflow()) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl")) {
+                if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.SSL)) {
                     SSLLogger.fine(
                         "sequence number extremely close to overflow " +
                         "(2^64-1 packets). Closing connection.");
@@ -327,9 +336,9 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
                 count = position;
                 write(source, offset, fragLen);
 
-                if (SSLLogger.isOn && SSLLogger.isOn("record")) {
+                if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.RECORD)) {
                     SSLLogger.fine(
-                            "WRITE: " + protocolVersion +
+                            "WRITE: " + protocolVersion.name +
                             " " + ContentType.APPLICATION_DATA.name +
                             ", length = " + (count - position));
                 }
@@ -342,7 +351,8 @@ final class SSLSocketOutputRecord extends OutputRecord implements SSLRecord {
                 deliverStream.write(buf, 0, count);    // may throw IOException
                 deliverStream.flush();                 // may throw IOException
 
-                if (SSLLogger.isOn && SSLLogger.isOn("packet")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.RECORD_PACKET)) {
                     SSLLogger.fine("Raw write",
                             (new ByteArrayInputStream(buf, 0, count)));
                 }

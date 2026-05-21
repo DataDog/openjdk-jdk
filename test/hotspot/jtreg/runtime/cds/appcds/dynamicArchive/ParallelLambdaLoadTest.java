@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,12 +28,14 @@
  * @requires vm.cds
  * @library /test/lib /test/hotspot/jtreg/runtime/cds/appcds
  *          /test/hotspot/jtreg/runtime/cds/appcds/dynamicArchive/test-classes
- * @build ParallelLambdaLoad sun.hotspot.WhiteBox LambdaVerification
- * @run driver ClassFileInstaller -jar parallel_lambda.jar ParallelLambdaLoad ThreadUtil DoSomething LambdaVerification
- * @run driver ClassFileInstaller -jar WhiteBox.jar sun.hotspot.WhiteBox
- * @run driver ClassFileInstaller sun.hotspot.WhiteBox
+ * @build ParallelLambdaLoad jdk.test.whitebox.WhiteBox LambdaVerification
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller -jar parallel_lambda.jar ParallelLambdaLoad ThreadUtil DoSomething LambdaVerification
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller -jar WhiteBox.jar jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run main/othervm -XX:+UnlockDiagnosticVMOptions -XX:+WhiteBoxAPI -Xbootclasspath/a:. ParallelLambdaLoadTest
  */
+
+import jdk.test.lib.helpers.ClassFileInstaller;
 
 public class ParallelLambdaLoadTest extends DynamicArchiveTestBase {
     public static void main(String[] args) throws Exception {
@@ -53,7 +55,7 @@ public class ParallelLambdaLoadTest extends DynamicArchiveTestBase {
             use_whitebox_jar,
             "-cp", appJar, mainClass)
             .assertNormalExit(output -> {
-                output.shouldContain("Archiving hidden ParallelLambdaLoad$$Lambda$")
+                output.shouldContain("Archiving hidden ParallelLambdaLoad$$Lambda")
                       .shouldHaveExitValue(0);
             });
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@
 #ifndef SHARE_OOPS_INSTANCEMIRRORKLASS_HPP
 #define SHARE_OOPS_INSTANCEMIRRORKLASS_HPP
 
-#include "classfile/systemDictionary.hpp"
+#include "classfile/vmClasses.hpp"
 #include "oops/instanceKlass.hpp"
 #include "runtime/handles.hpp"
 #include "utilities/macros.hpp"
@@ -41,31 +41,33 @@ class ClassFileParser;
 
 
 class InstanceMirrorKlass: public InstanceKlass {
-  friend class VMStructs;
   friend class InstanceKlass;
 
  public:
-  static const KlassID ID = InstanceMirrorKlassID;
+  static const KlassKind Kind = InstanceMirrorKlassKind;
 
  private:
   static int _offset_of_static_fields;
 
-  InstanceMirrorKlass(const ClassFileParser& parser) : InstanceKlass(parser, InstanceKlass::_kind_mirror, ID) {}
+  InstanceMirrorKlass(const ClassFileParser& parser) : InstanceKlass(parser, Kind) {}
+
+  template <class OopClosureType>
+  inline void do_metadata(oop obj, OopClosureType* closure);
 
  public:
-  InstanceMirrorKlass() { assert(DumpSharedSpaces || UseSharedSpaces, "only for CDS"); }
+  InstanceMirrorKlass();
 
   static InstanceMirrorKlass* cast(Klass* k) {
     return const_cast<InstanceMirrorKlass*>(cast(const_cast<const Klass*>(k)));
   }
 
   static const InstanceMirrorKlass* cast(const Klass* k) {
-    assert(InstanceKlass::cast(k)->is_mirror_instance_klass(), "cast to InstanceMirrorKlass");
+    assert(k->is_mirror_instance_klass(), "cast to InstanceMirrorKlass");
     return static_cast<const InstanceMirrorKlass*>(k);
   }
 
   // Returns the size of the instance including the extra static fields.
-  virtual int oop_size(oop obj) const;
+  size_t oop_size(oop obj) const override;
 
   // Static field offset is an offset into the Heap, should be converted by
   // based on UseCompressedOop for traversal
@@ -76,7 +78,7 @@ class InstanceMirrorKlass: public InstanceKlass {
   static void init_offset_of_static_fields() {
     // Cache the offset of the static fields in the Class instance
     assert(_offset_of_static_fields == 0, "once");
-    _offset_of_static_fields = InstanceMirrorKlass::cast(SystemDictionary::Class_klass())->size_helper() << LogHeapWordSize;
+    _offset_of_static_fields = InstanceMirrorKlass::cast(vmClasses::Class_klass())->size_helper() << LogHeapWordSize;
   }
 
   static int offset_of_static_fields() {
@@ -86,7 +88,7 @@ class InstanceMirrorKlass: public InstanceKlass {
   int compute_static_oop_field_count(oop obj);
 
   // Given a Klass return the size of the instance
-  int instance_size(Klass* k);
+  size_t instance_size(Klass* k);
 
   // allocation
   instanceOop allocate_instance(Klass* k, TRAPS);

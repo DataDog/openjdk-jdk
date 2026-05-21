@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,14 +25,14 @@
  * @test NullCheckDroppingsTest
  * @bug 8054492
  * @summary Casting can result in redundant null checks in generated code
- * @requires vm.hasJFR
- * @requires vm.flavor == "server" & !vm.emulatedClient & !vm.graal.enabled
+ * @requires vm.hasJFR & vm.flavor == "server" & !vm.graal.enabled & vm.flagless
+ *
  * @library /test/lib
  * @modules java.base/jdk.internal.misc
  *          java.management
  *
- * @build sun.hotspot.WhiteBox
- * @run driver ClassFileInstaller sun.hotspot.WhiteBox
+ * @build jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run main/othervm -Xbootclasspath/a:. -XX:+IgnoreUnrecognizedVMOptions -XX:+UnlockDiagnosticVMOptions -XX:+WhiteBoxAPI
  *                   -Xmixed -XX:-BackgroundCompilation -XX:-TieredCompilation -XX:CompileThreshold=1000
  *                   -XX:CompileCommand=exclude,compiler.intrinsics.klass.CastNullCheckDroppingsTest::runTest
@@ -46,8 +46,8 @@ import jdk.jfr.consumer.RecordedEvent;
 import jdk.test.lib.Platform;
 import jdk.test.lib.jfr.EventNames;
 import jdk.test.lib.jfr.Events;
-import sun.hotspot.WhiteBox;
-import sun.hotspot.code.NMethod;
+import jdk.test.whitebox.WhiteBox;
+import jdk.test.whitebox.code.NMethod;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandle;
@@ -90,8 +90,8 @@ public class CastNullCheckDroppingsTest {
     int[]   asink;
 
     public static void main(String[] args) throws Exception {
-        if (!Platform.isServer() || Platform.isEmulatedClient()) {
-            throw new Error("TESTBUG: Not server mode");
+        if (!Platform.isServer()) {
+            throw new Error("TESTBUG: Not server VM");
         }
         // Make sure background compilation is disabled
         if (WHITE_BOX.getBooleanVMFlag("BackgroundCompilation")) {
@@ -129,13 +129,13 @@ public class CastNullCheckDroppingsTest {
         t.runTest(methodClassCastNull, false, svalue);
         t.runTest(methodNullClassCast, false, svalue);
         t.runTest(methodClassCastObj,  false, svalue);
-        t.runTest(methodObjClassCast,  true,  svalue);
+        t.runTest(methodObjClassCast,  false, svalue);
         t.runTest(methodClassCastInt,  false, svalue);
-        t.runTest(methodIntClassCast,  true,  svalue);
+        t.runTest(methodIntClassCast,  false, svalue);
         t.runTest(methodClassCastint,  false, svalue);
         t.runTest(methodintClassCast,  false, svalue);
         t.runTest(methodClassCastPrim, false, svalue);
-        t.runTest(methodPrimClassCast, true,  svalue);
+        t.runTest(methodPrimClassCast, false, svalue);
         t.runTest(methodVarClassCast,  true,  objClass);
     }
 
@@ -356,7 +356,7 @@ public class CastNullCheckDroppingsTest {
         if (exist != mustExist) {
             System.err.println("events:");
             System.err.println(events);
-            throw new AssertionError("compilation must " + (mustExist ? "" : " not ") + " got deoptimized");
+            throw new AssertionError("compilation must " + (mustExist ? "" : " not ") + " get deoptimized");
         }
 
         if (mustExist && events.stream()

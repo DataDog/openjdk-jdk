@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,6 +21,7 @@
  * questions.
  */
 
+import javax.xml.XMLConstants;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
@@ -39,34 +40,35 @@ public class GTestResultParser {
     public GTestResultParser(Path file) {
         List<String> failedTests = new ArrayList<>();
         try (Reader r = Files.newBufferedReader(file)) {
-            try {
-                XMLStreamReader xmlReader = XMLInputFactory.newInstance()
-                                                           .createXMLStreamReader(r);
-                String testSuite = null;
-                String testCase = null;
-                while (xmlReader.hasNext()) {
-                    switch (xmlReader.next()) {
-                        case XMLStreamConstants.START_ELEMENT:
-                            switch (xmlReader.getLocalName()) {
-                                case "testsuite":
-                                    testSuite = xmlReader.getAttributeValue("", "name");
-                                    break;
-                                case "testcase":
-                                    testCase = xmlReader.getAttributeValue("", "name");
-                                    break;
-                                case "failure":
-                                    failedTests.add(testSuite + "::" + testCase);
-                                default:
-                                    // ignore
+            XMLInputFactory factory = XMLInputFactory.newInstance();
+            factory.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+            XMLStreamReader xmlReader = factory.createXMLStreamReader(r);
+            String testSuite = null;
+            String testCase = null;
+            while (xmlReader.hasNext()) {
+                int code = xmlReader.next();
+                if (code == XMLStreamConstants.START_ELEMENT) {
+                    switch (xmlReader.getLocalName()) {
+                        case "testsuite":
+                            testSuite = xmlReader.getAttributeValue("", "name");
+                            break;
+                        case "testcase":
+                            testCase = xmlReader.getAttributeValue("", "name");
+                            break;
+                        case "failure":
+                            String failedStr = testSuite + "::" + testCase;
+                            if (!failedTests.contains(failedStr)) {
+                                failedTests.add(failedStr);
                             }
                             break;
                         default:
                             // ignore
                     }
                 }
-            } catch (XMLStreamException e) {
-                throw new IllegalArgumentException("can't open parse xml " + file, e);
             }
+        } catch (XMLStreamException e) {
+            throw new IllegalArgumentException("can't open parse xml " + file, e);
         } catch (IOException e) {
             throw new IllegalArgumentException("can't open result file " + file, e);
         }

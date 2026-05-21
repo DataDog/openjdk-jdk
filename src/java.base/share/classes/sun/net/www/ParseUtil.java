@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,8 +37,11 @@ import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CharsetEncoder;
 import java.nio.charset.CoderResult;
 import java.nio.charset.CodingErrorAction;
+import java.util.HexFormat;
 
 import sun.nio.cs.UTF_8;
+import static jdk.internal.util.Exceptions.filterNonSocketInfo;
+import static jdk.internal.util.Exceptions.formatMsg;
 
 /**
  * A class that contains useful routines common to sun.net.www
@@ -46,6 +49,8 @@ import sun.nio.cs.UTF_8;
  */
 
 public final class ParseUtil {
+
+    private static final HexFormat HEX_UPPERCASE = HexFormat.of().withUpperCase();
 
     private ParseUtil() {}
 
@@ -168,6 +173,7 @@ public final class ParseUtil {
      * Returns a new String constructed from the specified String by replacing
      * the URL escape sequences and UTF8 encoding with the characters they
      * represent.
+     * @throws IllegalArgumentException if {@code s} could not be decoded
      */
     public static String decode(String s) {
         int n = s.length();
@@ -194,11 +200,14 @@ public final class ParseUtil {
             bb.clear();
             int ui = i;
             for (;;) {
-                assert (n - i >= 2);
+                if (n - i < 2) {
+                    throw new IllegalArgumentException("Malformed escape pair: " + s);
+                }
+
                 try {
                     bb.put(unescape(s, i));
-                } catch (NumberFormatException e) {
-                    throw new IllegalArgumentException();
+                } catch (NumberFormatException | IndexOutOfBoundsException e) {
+                    throw new IllegalArgumentException("Malformed escape pair: " + s);
                 }
                 i += 3;
                 if (i >= n)
@@ -222,49 +231,6 @@ public final class ParseUtil {
         return sb.toString();
     }
 
-    /**
-     * Returns a canonical version of the specified string.
-     */
-    public static String canonizeString(String file) {
-        int len = file.length();
-        if (len == 0 || (file.indexOf("./") == -1 && file.charAt(len - 1) != '.')) {
-            return file;
-        } else {
-            return doCanonize(file);
-        }
-    }
-
-    private static String doCanonize(String file) {
-        int i, lim;
-
-        // Remove embedded /../
-        while ((i = file.indexOf("/../")) >= 0) {
-            if ((lim = file.lastIndexOf('/', i - 1)) >= 0) {
-                file = file.substring(0, lim) + file.substring(i + 3);
-            } else {
-                file = file.substring(i + 3);
-            }
-        }
-        // Remove embedded /./
-        while ((i = file.indexOf("/./")) >= 0) {
-            file = file.substring(0, i) + file.substring(i + 2);
-        }
-        // Remove trailing ..
-        while (file.endsWith("/..")) {
-            i = file.indexOf("/..");
-            if ((lim = file.lastIndexOf('/', i - 1)) >= 0) {
-                file = file.substring(0, lim+1);
-            } else {
-                file = file.substring(0, i);
-            }
-        }
-        // Remove trailing .
-        if (file.endsWith("/."))
-            file = file.substring(0, file.length() -1);
-
-        return file;
-    }
-
     public static URL fileToEncodedURL(File file)
         throws MalformedURLException
     {
@@ -276,7 +242,9 @@ public final class ParseUtil {
         if (!path.endsWith("/") && file.isDirectory()) {
             path = path + "/";
         }
-        return new URL("file", "", path);
+        @SuppressWarnings("deprecation")
+        var result = new URL("file", "", path);
+        return result;
     }
 
     public static java.net.URI toURI(URL url) {
@@ -515,15 +483,9 @@ public final class ParseUtil {
         }
     }
 
-    private static final char[] hexDigits = {
-        '0', '1', '2', '3', '4', '5', '6', '7',
-        '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'
-    };
-
     private static void appendEscape(StringBuilder sb, byte b) {
         sb.append('%');
-        sb.append(hexDigits[(b >> 4) & 0x0f]);
-        sb.append(hexDigits[(b >> 0) & 0x0f]);
+        HEX_UPPERCASE.toHexDigits(sb, b);
     }
 
     // Tell whether the given character is permitted by the given mask pair
@@ -542,11 +504,27 @@ public final class ParseUtil {
     {
         if (scheme != null) {
             if (path != null && !path.isEmpty() && path.charAt(0) != '/')
-                throw new URISyntaxException(s,
+                throw new URISyntaxException(formatMsg("%s", filterNonSocketInfo(s)),
                                              "Relative path in absolute URI");
         }
     }
 
+    /**
+     * {@return true if the url is a file: URL for a 'local file' as defined by RFC 8089, Section 2}
+     *
+     * For unknown historical reasons, this method deviates from RFC 8089
+     * by allowing "~" as an alias for 'localhost'
+     *
+     * @param url the URL which may be a local file URL
+     */
+    public static boolean isLocalFileURL(URL url) {
+        if (url.getProtocol().equalsIgnoreCase("file")) {
+            String host = url.getHost();
+            return host == null || host.isEmpty() || host.equals("~") ||
+                    host.equalsIgnoreCase("localhost");
+        }
+        return false;
+    }
 
     // -- Character classes for parsing --
 

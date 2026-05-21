@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,9 +44,6 @@ package javax.lang.model.element;
  * @jls 8.8.3 Constructor Modifiers
  * @jls 9.1.1 Interface Modifiers
  *
- * @author Joseph D. Darcy
- * @author Scott Seligman
- * @author Peter von der Ah&eacute;
  * @since 1.6
  */
 
@@ -54,56 +51,120 @@ public enum Modifier {
 
     // Note java.lang.reflect.Modifier includes INTERFACE, but that's a VMism.
 
-    /** The modifier {@code public} */          PUBLIC,
-    /** The modifier {@code protected} */       PROTECTED,
-    /** The modifier {@code private} */         PRIVATE,
-    /** The modifier {@code abstract} */        ABSTRACT,
+    /**
+     * The modifier {@code public}
+     *
+     * @jls 6.6 Access Control
+     */
+    PUBLIC,
+
+    /**
+     * The modifier {@code protected}
+     *
+     * @jls 6.6 Access Control
+     */
+    PROTECTED,
+
+    /**
+     * The modifier {@code private}
+     *
+     * @jls 6.6 Access Control
+     */
+    PRIVATE,
+
+    /**
+     * The modifier {@code abstract}
+     *
+     * @jls 8.1.1.1 {@code abstract} Classes
+     * @jls 8.4.3.1 {@code abstract} Methods
+     * @jls 9.1.1.1 {@code abstract} Interfaces
+     */
+    ABSTRACT,
+
     /**
      * The modifier {@code default}
+     *
+     * @jls 9.4 Method Declarations
      * @since 1.8
      */
      DEFAULT,
-    /** The modifier {@code static} */          STATIC,
 
     /**
-     * {@preview Associated with sealed classes, a preview feature of the Java language.
+     * The modifier {@code static}
      *
-     *           This enum constant is associated with <i>sealed classes</i>, a preview
-     *           feature of the Java language. Preview features
-     *           may be removed in a future release, or upgraded to permanent
-     *           features of the Java language.}
-     *
-     * The modifier {@code sealed}
-     * @since 15
+     * @jls 8.1.1.4 {@code static} Classes
+     * @jls 8.3.1.1 {@code static} Fields
+     * @jls 8.4.3.2 {@code static} Methods
+     * @jls 9.1.1.3 {@code static} Interfaces
      */
-    @jdk.internal.PreviewFeature(feature=jdk.internal.PreviewFeature.Feature.SEALED_CLASSES,
-                                             essentialAPI=false)
+    STATIC,
+
+    /**
+     * The modifier {@code sealed}
+     *
+     * @jls 8.1.1.2 {@code sealed}, {@code non-sealed}, and {@code final} Classes
+     * @jls 9.1.1.4 {@code sealed} and {@code non-sealed} Interfaces
+     * @since 17
+     */
     SEALED,
 
     /**
-     * {@preview Associated with sealed classes, a preview feature of the Java language.
-     *
-     *           This enum constant is associated with <i>sealed classes</i>, a preview
-     *           feature of the Java language. Preview features
-     *           may be removed in a future release, or upgraded to permanent
-     *           features of the Java language.}
-     *
      * The modifier {@code non-sealed}
-     * @since 15
+     *
+     * @jls 8.1.1.2 {@code sealed}, {@code non-sealed}, and {@code final} Classes
+     * @jls 9.1.1.4 {@code sealed} and {@code non-sealed} Interfaces
+     * @since 17
      */
-    @jdk.internal.PreviewFeature(feature=jdk.internal.PreviewFeature.Feature.SEALED_CLASSES,
-            essentialAPI=false)
     NON_SEALED {
         public String toString() {
             return "non-sealed";
         }
     },
-    /** The modifier {@code final} */           FINAL,
-    /** The modifier {@code transient} */       TRANSIENT,
-    /** The modifier {@code volatile} */        VOLATILE,
-    /** The modifier {@code synchronized} */    SYNCHRONIZED,
-    /** The modifier {@code native} */          NATIVE,
-    /** The modifier {@code strictfp} */        STRICTFP;
+    /**
+     * The modifier {@code final}
+     *
+     * @jls 8.1.1.2 {@code sealed}, {@code non-sealed}, and {@code final} Classes
+     * @jls 8.3.1.2 {@code final} Fields
+     * @jls 8.4.3.3 {@code final} Methods
+     */
+    FINAL,
+
+    /**
+     * The modifier {@code transient}
+     *
+     * @jls 8.3.1.3 {@code transient} Fields
+     */
+    TRANSIENT,
+
+    /**
+     * The modifier {@code volatile}
+     *
+     * @jls 8.3.1.4 {@code volatile} Fields
+     */
+    VOLATILE,
+
+    /**
+     * The modifier {@code synchronized}
+     *
+     * @jls 8.4.3.6 {@code synchronized} Methods
+     */
+    SYNCHRONIZED,
+
+    /**
+     * The modifier {@code native}
+     *
+     * @jls 8.4.3.4 {@code native} Methods
+     */
+    NATIVE,
+
+    /**
+     * The modifier {@code strictfp}
+     *
+     * @jls 8.1.1.3 {@code strictfp} Classes
+     * @jls 8.4.3.5 {@code strictfp} Methods
+     * @jls 9.1.1.2 {@code strictfp} Interfaces
+     */
+    STRICTFP;
 
     /**
      * Returns this modifier's name as defined in <cite>The

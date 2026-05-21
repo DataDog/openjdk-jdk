@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2015, 2019 SAP SE. All rights reserved.
+ * Copyright (c) 2015, 2026, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2026 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,19 +23,23 @@
  *
  */
 
+#include "cppstdlib/cstdlib.hpp"
 #include "libodm_aix.hpp"
 #include "misc_aix.hpp"
-#include <stdlib.h>
+#include "runtime/arguments.hpp"
+#include "runtime/os.hpp"
+#include "utilities/permitForbiddenFunctions.hpp"
+
 #include <dlfcn.h>
 #include <string.h>
-#include "runtime/arguments.hpp"
-
 
 dynamicOdm::dynamicOdm() {
-  const char *libodmname = "/usr/lib/libodm.a(shr_64.o)";
-  _libhandle = dlopen(libodmname, RTLD_MEMBER | RTLD_NOW);
+  const char* libodmname = "/usr/lib/libodm.a(shr_64.o)";
+  char ebuf[512];
+  _libhandle = os::dll_load(libodmname, ebuf, sizeof(ebuf));
+
   if (!_libhandle) {
-    trcVerbose("Couldn't open %s", libodmname);
+    trcVerbose("Cannot load %s (error %s)", libodmname, ebuf);
     return;
   }
   _odm_initialize  = (fun_odm_initialize )dlsym(_libhandle, "odm_initialize" );
@@ -45,27 +49,26 @@ dynamicOdm::dynamicOdm() {
   _odm_terminate   = (fun_odm_terminate  )dlsym(_libhandle, "odm_terminate"  );
   if (!_odm_initialize || !_odm_set_path || !_odm_mount_class || !_odm_get_obj || !_odm_terminate) {
     trcVerbose("Couldn't find all required odm symbols from %s", libodmname);
-    dlclose(_libhandle);
-    _libhandle = NULL;
+    os::dll_unload(_libhandle);
+    _libhandle = nullptr;
     return;
   }
 }
 
 dynamicOdm::~dynamicOdm() {
-  if (_libhandle) { dlclose(_libhandle); }
+  if (_libhandle) { os::dll_unload(_libhandle); }
 }
 
 
-void odmWrapper::clean_data() { if (_data) { free(_data); _data = NULL; } }
+void odmWrapper::clean_data() { if (_data) { permit_forbidden_function::free(_data); _data = nullptr; } }
 
 
-int odmWrapper::class_offset(const char *field, bool is_aix_5)
+int odmWrapper::class_offset(const char *field)
 {
   assert(has_class(), "initialization");
   for (int i = 0; i < odm_class()->nelem; i++) {
     if (strcmp(odm_class()->elem[i].elemname, field) == 0) {
       int offset = odm_class()->elem[i].offset;
-      if (is_aix_5) { offset += LINK_VAL_OFFSET; }
       return offset;
     }
   }
@@ -84,11 +87,10 @@ void odmWrapper::determine_os_kernel_version(uint32_t* p_ver) {
     return;
   }
   int voff, roff, moff, foff;
-  bool is_aix_5 = (major_aix_version == 5);
-  voff = odm.class_offset("ver", is_aix_5);
-  roff = odm.class_offset("rel", is_aix_5);
-  moff = odm.class_offset("mod", is_aix_5);
-  foff = odm.class_offset("fix", is_aix_5);
+  voff = odm.class_offset("ver");
+  roff = odm.class_offset("rel");
+  moff = odm.class_offset("mod");
+  foff = odm.class_offset("fix");
   if (voff == -1 || roff == -1 || moff == -1 || foff == -1) {
     trcVerbose("try_determine_os_kernel_version: could not get offsets");
     return;

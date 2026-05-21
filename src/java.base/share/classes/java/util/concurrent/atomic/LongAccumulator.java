@@ -82,8 +82,10 @@ import java.util.function.LongBinaryOperator;
 public class LongAccumulator extends Striped64 implements Serializable {
     private static final long serialVersionUID = 7249069246863182397L;
 
+    /** @serial */
     @SuppressWarnings("serial") // Not statically typed as Serializable
     private final LongBinaryOperator function;
+    /** @serial */
     private final long identity;
 
     /**
@@ -108,14 +110,15 @@ public class LongAccumulator extends Striped64 implements Serializable {
         if ((cs = cells) != null
             || ((r = function.applyAsLong(b = base, x)) != b
                 && !casBase(b, r))) {
+            int index = getProbe();
             boolean uncontended = true;
             if (cs == null
                 || (m = cs.length - 1) < 0
-                || (c = cs[getProbe() & m]) == null
+                || (c = cs[index & m]) == null
                 || !(uncontended =
                      (r = function.applyAsLong(v = c.value, x)) == v
                      || c.cas(v, r)))
-                longAccumulate(x, function, uncontended);
+                longAccumulate(x, function, uncontended, index);
         }
     }
 
@@ -182,8 +185,7 @@ public class LongAccumulator extends Striped64 implements Serializable {
     }
 
     /**
-     * Returns the String representation of the current value.
-     * @return the String representation of the current value
+     * {@return the String representation of the current value}
      */
     public String toString() {
         return Long.toString(get());

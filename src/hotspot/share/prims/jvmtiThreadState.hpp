@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,9 +27,13 @@
 
 #include "jvmtifiles/jvmti.h"
 #include "memory/allocation.hpp"
+#include "oops/instanceKlass.hpp"
+#include "oops/oopHandle.hpp"
 #include "prims/jvmtiEventController.hpp"
 #include "prims/jvmtiExport.hpp"
-#include "runtime/thread.hpp"
+#include "runtime/javaThread.hpp"
+#include "runtime/mutexLocker.hpp"
+#include "runtime/threads.hpp"
 #include "utilities/growableArray.hpp"
 
 //
@@ -68,6 +72,47 @@ class JvmtiEnvThreadStateIterator : public StackObj {
   JvmtiEnvThreadState* next(JvmtiEnvThreadState* ets);
 };
 
+///////////////////////////////////////////////////////////////
+//
+// class VirtualThreadList
+//
+// Used for Virtual Threads Suspend/Resume management.
+// It's a list of thread IDs.
+//
+class VirtualThreadList : public GrowableArrayCHeap<int64_t, mtServiceability> {
+ public:
+  VirtualThreadList() : GrowableArrayCHeap<int64_t, mtServiceability>(0) {}
+  void invalidate() { clear(); }
+};
+
+///////////////////////////////////////////////////////////////
+//
+// class JvmtiVTSuspender
+//
+// Virtual Threads Suspend/Resume management
+//
+class JvmtiVTSuspender : AllStatic {
+ private:
+  // Suspend modes for virtual threads
+  typedef enum SR_Mode {
+    SR_none = 0,
+    SR_ind  = 1,
+    SR_all  = 2
+  } SR_Mode;
+
+  static SR_Mode _SR_mode;
+  static VirtualThreadList* _suspended_list;
+  static VirtualThreadList* _not_suspended_list;
+
+ public:
+  static void register_all_vthreads_suspend();
+  static void register_all_vthreads_resume();
+  static void register_vthread_suspend(int64_t id);
+  static void register_vthread_suspend(oop vt);
+  static void register_vthread_resume(oop vt);
+  static bool is_vthread_suspended(oop vt);
+  static bool is_vthread_suspended(int64_t thread_id);
+};
 
 ///////////////////////////////////////////////////////////////
 //
@@ -78,12 +123,21 @@ class JvmtiEnvThreadStateIterator : public StackObj {
 class JvmtiThreadState : public CHeapObj<mtInternal> {
  private:
   friend class JvmtiEnv;
+  // The _thread field is a link to the JavaThread associated with JvmtiThreadState.
+  // A platform (including carrier) thread should always have a stable link to its JavaThread.
+  // The _thread field of a virtual thread should point to the JavaThread when
+  // virtual thread is mounted. It should be set to null when it is unmounted.
   JavaThread        *_thread;
+  OopHandle         _thread_oop_h;
   // Jvmti Events that cannot be posted in their current context.
   JvmtiDeferredEventQueue* _jvmti_event_queue;
+  bool              _is_virtual;            // state belongs to a virtual thread
   bool              _hide_single_stepping;
+  bool              _pending_interp_only_mode;
   bool              _pending_step_for_popframe;
   bool              _pending_step_for_earlyret;
+  bool              _top_frame_is_exiting;
+  bool              _saved_interp_only_mode;
   int               _hide_level;
 
  public:
@@ -98,7 +152,7 @@ class JvmtiThreadState : public CHeapObj<mtInternal> {
 
   // Used to send class being redefined/retransformed and kind of transform
   // info to the class file load hook event handler.
-  Klass*                _class_being_redefined;
+  InstanceKlass*        _class_being_redefined;
   JvmtiClassLoadKind    _class_load_kind;
   GrowableArray<Klass*>* _classes_being_redefined;
 
@@ -116,24 +170,26 @@ class JvmtiThreadState : public CHeapObj<mtInternal> {
   JvmtiThreadState *_next;
   JvmtiThreadState *_prev;
 
-  // holds the current dynamic code event collector, NULL if no event collector in use
+  // holds the current dynamic code event collector, null if no event collector in use
   JvmtiDynamicCodeEventCollector* _dynamic_code_event_collector;
-  // holds the current vm object alloc event collector, NULL if no event collector in use
+  // holds the current vm object alloc event collector, null if no event collector in use
   JvmtiVMObjectAllocEventCollector* _vm_object_alloc_event_collector;
-  // holds the current sampled object alloc event collector, NULL if no event collector in use
+  // holds the current sampled object alloc event collector, null if no event collector in use
   JvmtiSampledObjectAllocEventCollector* _sampled_object_alloc_event_collector;
 
   // Should only be created by factory methods
-  JvmtiThreadState(JavaThread *thread);
+  JvmtiThreadState(JavaThread *thread, oop thread_oop);
 
   friend class JvmtiEnvThreadStateIterator;
   inline JvmtiEnvThreadState* head_env_thread_state();
   inline void set_head_env_thread_state(JvmtiEnvThreadState* ets);
 
+  static Atomic<bool> _seen_interp_only_mode; // interp_only_mode was requested at least once
+
  public:
   ~JvmtiThreadState();
 
-  // is event_type enabled and usable for this thread in any enviroments?
+  // is event_type enabled and usable for this thread in any environment?
   bool is_enabled(jvmtiEvent event_type) {
     return _thread_event_enable.is_enabled(event_type);
   }
@@ -149,12 +205,31 @@ class JvmtiThreadState : public CHeapObj<mtInternal> {
 
   static void periodic_clean_up();
 
+  // Return true if any thread has entered interp_only_mode at any point during the JVMs execution.
+  static bool seen_interp_only_mode() {
+    return _seen_interp_only_mode.load_acquire();
+  }
+
   void add_env(JvmtiEnvBase *env);
 
+  // The pending_interp_only_mode is set when the interp_only_mode is triggered.
+  // It is cleared by EnterInterpOnlyModeClosure handshake.
+  bool is_pending_interp_only_mode() {  return _pending_interp_only_mode; }
+  void set_pending_interp_only_mode(bool val) {
+    _seen_interp_only_mode.release_store(true);
+    _pending_interp_only_mode = val;
+  }
+
   // Used by the interpreter for fullspeed debugging support
-  bool is_interp_only_mode()                { return _thread->is_interp_only_mode(); }
+  bool is_interp_only_mode()                {
+    return _saved_interp_only_mode;
+  }
   void enter_interp_only_mode();
   void leave_interp_only_mode();
+
+  static void unbind_from(JvmtiThreadState* state, JavaThread* thread);
+  static void bind_to(JvmtiThreadState* state, JavaThread* thread);
+  static void process_pending_interp_only(JavaThread* current);
 
   // access to the linked list of all JVMTI thread states
   static JvmtiThreadState *first() {
@@ -176,7 +251,19 @@ class JvmtiThreadState : public CHeapObj<mtInternal> {
 
   int count_frames();
 
-  inline JavaThread *get_thread()      { return _thread;              }
+  inline JavaThread *get_thread()      {
+    assert(is_virtual() || _thread != nullptr, "sanity check");
+    return _thread;
+  }
+
+  // Needed for virtual threads as they can migrate to different JavaThread's.
+  // Also used for carrier threads to clear/restore _thread.
+  void set_thread(JavaThread* thread);
+  oop get_thread_oop();
+
+  void update_thread_oop_during_vm_start();
+
+  inline bool is_virtual() { return _is_virtual; } // the _thread is virtual
 
   inline bool is_exception_detected()  { return _exception_state == ES_DETECTED;  }
   inline bool is_exception_caught()    { return _exception_state == ES_CAUGHT;  }
@@ -224,21 +311,26 @@ class JvmtiThreadState : public CHeapObj<mtInternal> {
   bool is_pending_step_for_earlyret()  { return _pending_step_for_earlyret;  }
   void process_pending_step_for_earlyret();
 
+  // For synchronization between NotifyFramePop and FramePop posting code.
+  void set_top_frame_is_exiting() { _top_frame_is_exiting = true;  }
+  void clr_top_frame_is_exiting() { _top_frame_is_exiting = false; }
+  bool top_frame_is_exiting()     { return _top_frame_is_exiting;  }
+
   // Setter and getter method is used to send redefined class info
   // when class file load hook event is posted.
   // It is set while loading redefined class and cleared before the
   // class file load hook event is posted.
-  inline void set_class_being_redefined(Klass* k, JvmtiClassLoadKind kind) {
+  inline void set_class_being_redefined(InstanceKlass* k, JvmtiClassLoadKind kind) {
     _class_being_redefined = k;
     _class_load_kind = kind;
   }
 
   inline void clear_class_being_redefined() {
-    _class_being_redefined = NULL;
+    _class_being_redefined = nullptr;
     _class_load_kind = jvmti_class_load_kind_load;
   }
 
-  inline Klass* get_class_being_redefined() {
+  inline InstanceKlass* get_class_being_redefined() {
     return _class_being_redefined;
   }
 
@@ -277,23 +369,23 @@ class JvmtiThreadState : public CHeapObj<mtInternal> {
   //   used by the verifier, so there is no extra performance issue with it.
 
  private:
-  Klass* _the_class_for_redefinition_verification;
-  Klass* _scratch_class_for_redefinition_verification;
+  InstanceKlass* _the_class_for_redefinition_verification;
+  InstanceKlass* _scratch_class_for_redefinition_verification;
 
  public:
-  inline void set_class_versions_map(Klass* the_class,
-                                     Klass* scratch_class) {
+  inline void set_class_versions_map(InstanceKlass* the_class,
+                                     InstanceKlass* scratch_class) {
     _the_class_for_redefinition_verification = the_class;
     _scratch_class_for_redefinition_verification = scratch_class;
   }
 
-  inline void clear_class_versions_map() { set_class_versions_map(NULL, NULL); }
+  inline void clear_class_versions_map() { set_class_versions_map(nullptr, nullptr); }
 
   static inline
-  Klass* class_to_verify_considering_redefinition(Klass* klass,
-                                                    JavaThread *thread) {
+  InstanceKlass* class_to_verify_considering_redefinition(InstanceKlass* klass,
+                                                          JavaThread* thread) {
     JvmtiThreadState *state = thread->jvmti_thread_state();
-    if (state != NULL && state->_the_class_for_redefinition_verification != NULL) {
+    if (state != nullptr && state->_the_class_for_redefinition_verification != nullptr) {
       if (state->_the_class_for_redefinition_verification == klass) {
         klass = state->_scratch_class_for_redefinition_verification;
       }
@@ -301,18 +393,7 @@ class JvmtiThreadState : public CHeapObj<mtInternal> {
     return klass;
   }
 
-  // Todo: get rid of this!
- private:
-  bool _debuggable;
  public:
-  // Should the thread be enumerated by jvmtiInternal::GetAllThreads?
-  bool is_debuggable()                 { return _debuggable; }
-  // If a thread cannot be suspended (has no valid last_java_frame) then it gets marked !debuggable
-  void set_debuggable(bool debuggable) { _debuggable = debuggable; }
-
- public:
-
-  bool may_be_walked();
 
   // Thread local event collector setter and getter methods.
   JvmtiDynamicCodeEventCollector* get_dynamic_code_event_collector() {
@@ -347,11 +428,14 @@ class JvmtiThreadState : public CHeapObj<mtInternal> {
   void update_for_pop_top_frame();
 
   // already holding JvmtiThreadState_lock - retrieve or create JvmtiThreadState
-  // Can return NULL if JavaThread is exiting.
-  static JvmtiThreadState *state_for_while_locked(JavaThread *thread);
+  // Can return null if JavaThread is exiting.
+  // Callers are responsible to call recompute_thread_filtered() to update event bits
+  // if thread-filtered events are enabled globally.
+  static JvmtiThreadState *state_for_while_locked(JavaThread *thread, oop thread_oop = nullptr);
   // retrieve or create JvmtiThreadState
-  // Can return NULL if JavaThread is exiting.
-  static JvmtiThreadState *state_for(JavaThread *thread);
+  // Can return null if JavaThread is exiting.
+  // Calls recompute_thread_filtered() to update event bits if thread-filtered events are enabled globally.
+  static JvmtiThreadState *state_for(JavaThread *thread, Handle thread_handle = Handle());
 
   // JVMTI ForceEarlyReturn support
 
@@ -389,11 +473,11 @@ class JvmtiThreadState : public CHeapObj<mtInternal> {
   static ByteSize earlyret_oop_offset()   { return byte_offset_of(JvmtiThreadState, _earlyret_oop); }
   static ByteSize earlyret_value_offset() { return byte_offset_of(JvmtiThreadState, _earlyret_value); }
 
-  void oops_do(OopClosure* f, CodeBlobClosure* cf) NOT_JVMTI_RETURN; // GC support
-  void nmethods_do(CodeBlobClosure* cf) NOT_JVMTI_RETURN;
+  void oops_do(OopClosure* f, NMethodClosure* cf) NOT_JVMTI_RETURN; // GC support
+  void nmethods_do(NMethodClosure* cf) NOT_JVMTI_RETURN;
 
 public:
-  void set_should_post_on_exceptions(bool val) { _thread->set_should_post_on_exceptions_flag(val ? JNI_TRUE : JNI_FALSE); }
+  void set_should_post_on_exceptions(bool val);
 
   // Thread local event queue, which doesn't require taking the Service_lock.
   void enqueue_event(JvmtiDeferredEvent* event) NOT_JVMTI_RETURN;

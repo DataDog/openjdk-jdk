@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -54,20 +54,20 @@ import javax.net.SocketFactory;
  * @author Rosanna Lee
  */
 class ClientId {
-    final private int version;
-    final private String hostname;
-    final private int port;
-    final private String protocol;
-    final private Control[] bindCtls;
-    final private OutputStream trace;
-    final private String socketFactory;
-    final private int myHash;
-    final private int ctlHash;
+    private final int version;
+    private final String hostname;
+    private final int port;
+    private final String protocol;
+    private final Control[] bindCtls;
+    private final OutputStream trace;
+    private final String socketFactory;
+    private final int myHash;
+    private final int ctlHash;
 
     private SocketFactory factory = null;
     private Method sockComparator = null;
     private boolean isDefaultSockFactory = false;
-    final public static boolean debug = false;
+    public static final boolean debug = false;
 
     ClientId(int version, String hostname, int port, String protocol,
             Control[] bindCtls, OutputStream trace, String socketFactory) {
@@ -84,8 +84,8 @@ class ClientId {
         if ((socketFactory != null) &&
              !socketFactory.equals(LdapCtx.DEFAULT_SSL_FACTORY)) {
             try {
-                Class<?> socketFactoryClass =
-                        Obj.helper.loadClass(socketFactory);
+                Class<?> socketFactoryClass = Class.forName(socketFactory,
+                        true, Thread.currentThread().getContextClassLoader());
                 this.sockComparator = socketFactoryClass.getMethod(
                                 "compare", new Class<?>[]{Object.class, Object.class});
                 Method getDefault = socketFactoryClass.getMethod(

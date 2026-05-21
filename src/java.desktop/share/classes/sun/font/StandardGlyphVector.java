@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -197,21 +197,22 @@ public class StandardGlyphVector extends GlyphVector {
 
             // how do we know its a base glyph
             // for now, it is if the natural advance of the glyph is non-zero
-            Font2D f2d = FontUtilities.getFont2D(font);
-            FontStrike strike = f2d.getStrike(font, frc);
 
             float[] deltas = { trackPt.x, trackPt.y };
             for (int j = 0; j < deltas.length; ++j) {
                 float inc = deltas[j];
+                float prevPos = 0;
                 if (inc != 0) {
                     float delta = 0;
-                    for (int i = j, n = 0; n < glyphs.length; i += 2) {
-                        if (strike.getGlyphAdvance(glyphs[n++]) != 0) { // might be an inadequate test
+                    for (int i = j; i < positions.length; i += 2) {
+                        if (i == j || prevPos != positions[i]) {
+                            prevPos = positions[i];
                             positions[i] += delta;
                             delta += inc;
+                        } else if (prevPos == positions[i]) {
+                            positions[i] = positions[i - 2];
                         }
                     }
-                    positions[positions.length-2+j] += delta;
                 }
             }
         }
@@ -257,7 +258,7 @@ public class StandardGlyphVector extends GlyphVector {
      * because a GV caches a strike and glyph images suitable for its FRC.
      * LCD text isn't currently supported on all surfaces, in which case
      * standard AA must be used. This is most likely to occur when LCD text
-     * is requested and the surface is some non-standard type or hardward
+     * is requested and the surface is some non-standard type or hardware
      * surface for which there are no accelerated loops.
      * We can detect this as being AA=="ON" in the FontInfo and AA!="ON"
      * and AA!="GASP" in the FRC - since this only occurs for LCD text we don't
@@ -607,11 +608,13 @@ public class StandardGlyphVector extends GlyphVector {
         }
 
         Rectangle2D vb = getGlyphVisualBounds(ix).getBounds2D();
-        Point2D pt = getGlyphPosition(ix);
-        vb.setRect(vb.getMinX() - pt.getX(),
-                   vb.getMinY() - pt.getY(),
-                   vb.getWidth(),
-                   vb.getHeight());
+        if (!vb.isEmpty()) {
+            Point2D pt = getGlyphPosition(ix);
+            vb.setRect(vb.getMinX() - pt.getX(),
+                       vb.getMinY() - pt.getY(),
+                       vb.getWidth(),
+                       vb.getHeight());
+        }
         Point2D.Float adv =
             getGlyphStrike(ix).strike.getGlyphMetrics(glyphs[ix]);
         GlyphMetrics gm = new GlyphMetrics(true, adv.x, adv.y,

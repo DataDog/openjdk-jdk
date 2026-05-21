@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,12 +31,12 @@ import java.awt.EventQueue;
 import java.awt.font.TextHitInfo;
 import java.io.IOException;
 import java.io.ObjectInputStream;
+import java.io.Serial;
 import java.lang.annotation.Native;
 import java.text.AttributedCharacterIterator;
 import java.text.CharacterIterator;
 
 import sun.awt.AWTAccessor;
-import sun.awt.AppContext;
 import sun.awt.SunToolkit;
 
 /**
@@ -63,8 +63,9 @@ import sun.awt.SunToolkit;
 public class InputMethodEvent extends AWTEvent {
 
     /**
-     * Serial Version ID.
+     * Use serialVersionUID from JDK 1.4 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = 4727190874778922661L;
 
     /**
@@ -420,6 +421,7 @@ public class InputMethodEvent extends AWTEvent {
      *         not be found
      * @throws IOException if an I/O error occurs
      */
+    @Serial
     private void readObject(ObjectInputStream s) throws ClassNotFoundException, IOException {
         s.defaultReadObject();
         if (when == 0) {
@@ -433,7 +435,7 @@ public class InputMethodEvent extends AWTEvent {
      * belongs to.
      *
      * @param source the source of the event
-     * @exception  IllegalArgumentException  if source is null.
+     * @throws  IllegalArgumentException  if source is null.
      * @return most recent event time in the {@code EventQueue}
      */
     private static long getMostRecentEventTimeForSource(Object source) {
@@ -441,8 +443,7 @@ public class InputMethodEvent extends AWTEvent {
             // throw the IllegalArgumentException to conform to EventObject spec
             throw new IllegalArgumentException("null source");
         }
-        AppContext appContext = SunToolkit.targetToAppContext(source);
-        EventQueue eventQueue = SunToolkit.getSystemEventQueueImplPP(appContext);
+        EventQueue eventQueue = SunToolkit.getSystemEventQueueImplPP();
         return AWTAccessor.getEventQueueAccessor().getMostRecentEventTime(eventQueue);
     }
 }

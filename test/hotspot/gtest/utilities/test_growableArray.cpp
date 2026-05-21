@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,7 +21,6 @@
  * questions.
  */
 
-#include "precompiled.hpp"
 #include "memory/resourceArea.hpp"
 #include "utilities/growableArray.hpp"
 #include "unittest.hpp"
@@ -35,8 +34,8 @@ struct WithEmbeddedArray {
   // Arena allocated data array
   WithEmbeddedArray(Arena* arena, int initial_max) : _a(arena, initial_max, 0, 0) {}
   // CHeap allocated data array
-  WithEmbeddedArray(int initial_max, MEMFLAGS memflags) : _a(initial_max, memflags) {
-    assert(memflags != mtNone, "test requirement");
+  WithEmbeddedArray(int initial_max, MemTag mem_tag) : _a(initial_max, mem_tag) {
+    assert(mem_tag != mtNone, "test requirement");
   }
   WithEmbeddedArray(const GrowableArray<int>& other) : _a(other) {}
 };
@@ -50,8 +49,8 @@ protected:
     return array->on_C_heap();
   }
   template <typename E>
-  static bool elements_on_stack(const GrowableArray<E>* array) {
-    return array->on_stack();
+  static bool elements_on_resource_area(const GrowableArray<E>* array) {
+    return array->on_resource_area();
   }
   template <typename E>
   static bool elements_on_arena(const GrowableArray<E>* array) {
@@ -122,6 +121,43 @@ protected:
 
     // Check count
     ASSERT_EQ(counter, 10);
+  }
+
+  template <typename ArrayClass>
+  static void test_capacity(ArrayClass* a) {
+    ASSERT_EQ(a->length(), 0);
+    a->reserve(50);
+    ASSERT_EQ(a->length(), 0);
+    ASSERT_EQ(a->capacity(), 50);
+    for (int i = 0; i < 50; ++i) {
+      a->append(i);
+    }
+    ASSERT_EQ(a->length(), 50);
+    ASSERT_EQ(a->capacity(), 50);
+    a->append(50);
+    ASSERT_EQ(a->length(), 51);
+    int capacity = a->capacity();
+    ASSERT_GE(capacity, 51);
+    for (int i = 0; i < 30; ++i) {
+      a->pop();
+    }
+    ASSERT_EQ(a->length(), 21);
+    ASSERT_EQ(a->capacity(), capacity);
+    a->shrink_to_fit();
+    ASSERT_EQ(a->length(), 21);
+    ASSERT_EQ(a->capacity(), 21);
+
+    a->reserve(50);
+    ASSERT_EQ(a->length(), 21);
+    ASSERT_EQ(a->capacity(), 50);
+
+    a->clear();
+    ASSERT_EQ(a->length(), 0);
+    ASSERT_EQ(a->capacity(), 50);
+
+    a->shrink_to_fit();
+    ASSERT_EQ(a->length(), 0);
+    ASSERT_EQ(a->capacity(), 0);
   }
 
   template <typename ArrayClass>
@@ -196,11 +232,111 @@ protected:
     }
   }
 
+  template <typename ArrayClass>
+  static void test_remove_range(ArrayClass* a) {
+    // Seed initial
+    for (int i = 0; i < 10; i++) {
+      a->append(i);
+    }
+    ASSERT_EQ(a->length(), 10);
+
+    // Remove empty range from the non-empty list, should not modify the list.
+    a->remove_range(0, 0);
+    ASSERT_EQ(a->length(), 10);
+
+    // Remove one element from head, should result in [1 ... 9]
+    a->remove_range(0, 1);
+    ASSERT_EQ(a->length(), 9);
+    for (int i = 0; i < a->length(); i++) {
+      ASSERT_EQ(a->at(i), i + 1);
+    }
+
+    // Remove one element from tail, should result in [1 ... 8]
+    a->remove_range(8, 9);
+    ASSERT_EQ(a->length(), 8);
+    for (int i = 0; i < a->length(); i++) {
+      ASSERT_EQ(a->at(i), i + 1);
+    }
+
+    // Remove another empty range from the non-empty list, should not modify
+    a->remove_range(1, 1);
+    ASSERT_EQ(a->length(), 8);
+
+    // Remove some elements from the middle, should result in [1 2 7 8]
+    a->remove_range(2, 6);
+    ASSERT_EQ(a->length(), 4);
+    ASSERT_EQ(a->at(0), 1);
+    ASSERT_EQ(a->at(1), 2);
+    ASSERT_EQ(a->at(2), 7);
+    ASSERT_EQ(a->at(3), 8);
+
+    // Remove the rest of the elements one by one
+    a->remove_range(0, 1);
+    ASSERT_EQ(a->length(), 3);
+    ASSERT_EQ(a->at(0), 2);
+    ASSERT_EQ(a->at(1), 7);
+    ASSERT_EQ(a->at(2), 8);
+
+    a->remove_range(0, 1);
+    ASSERT_EQ(a->length(), 2);
+    ASSERT_EQ(a->at(0), 7);
+    ASSERT_EQ(a->at(1), 8);
+
+    a->remove_range(0, 1);
+    ASSERT_EQ(a->length(), 1);
+    ASSERT_EQ(a->at(0), 8);
+
+    a->remove_range(0, 1);
+    ASSERT_EQ(a->length(), 0);
+
+    // Remove elements from empty list with empty range, should be accepted
+    a->remove_range(0, 0);
+    ASSERT_EQ(a->length(), 0);
+  }
+
+  template <typename ArrayClass>
+  static void test_remove_till(ArrayClass* a) {
+    // Seed initial
+    for (int i = 0; i < 10; i++) {
+      a->append(i);
+    }
+    ASSERT_EQ(a->length(), 10);
+
+    // Remove empty range from non-empty list, should work
+    a->remove_till(0);
+    ASSERT_EQ(a->length(), 10);
+
+    // Remove one element from head, should result in [1 ... 9]
+    a->remove_till(1);
+    ASSERT_EQ(a->length(), 9);
+    for (int i = 0; i < a->length(); i++) {
+      ASSERT_EQ(a->at(i), i + 1);
+    }
+
+    // Remove two elements from head, should result in [3 ... 9]
+    a->remove_till(2);
+    ASSERT_EQ(a->length(), 7);
+    for (int i = 0; i < a->length(); i++) {
+      ASSERT_EQ(a->at(i), i + 3);
+    }
+
+    // Remove remaining elements, should result in []
+    a->remove_till(a->length());
+    ASSERT_EQ(a->length(), 0);
+
+    // Remove empty range from empty list, should work
+    a->remove_till(0);
+    ASSERT_EQ(a->length(), 0);
+  }
+
   // Supported by all GrowableArrays
   enum TestEnum {
     Append,
     Clear,
+    Capacity,
     Iterator,
+    RemoveRange,
+    RemoveTill
   };
 
   template <typename ArrayClass>
@@ -214,8 +350,20 @@ protected:
         test_clear(a);
         break;
 
+      case Capacity:
+        test_capacity(a);
+        break;
+
       case Iterator:
         test_iterator(a);
+        break;
+
+      case RemoveRange:
+        test_remove_range(a);
+        break;
+
+      case RemoveTill:
+        test_remove_till(a);
         break;
 
       default:
@@ -343,7 +491,7 @@ protected:
 
     // CHeap/CHeap allocated
     {
-      GrowableArray<int>* a = new (ResourceObj::C_HEAP, mtTest) GrowableArray<int>(max, mtTest);
+      GrowableArray<int>* a = new (mtTest) GrowableArray<int>(max, mtTest);
       modify_and_test(a, modify, test);
       delete a;
     }
@@ -402,8 +550,20 @@ TEST_VM_F(GrowableArrayTest, clear) {
   with_all_types_all_0(Clear);
 }
 
+TEST_VM_F(GrowableArrayTest, capacity) {
+  with_all_types_all_0(Capacity);
+}
+
 TEST_VM_F(GrowableArrayTest, iterator) {
   with_all_types_all_0(Iterator);
+}
+
+TEST_VM_F(GrowableArrayTest, remove_range) {
+  with_all_types_all_0(RemoveRange);
+}
+
+TEST_VM_F(GrowableArrayTest, remove_till) {
+  with_all_types_all_0(RemoveTill);
 }
 
 TEST_VM_F(GrowableArrayTest, copy) {
@@ -425,7 +585,7 @@ TEST_VM_F(GrowableArrayTest, where) {
     ResourceMark rm;
     GrowableArray<int>* a = new GrowableArray<int>();
     ASSERT_TRUE(a->allocated_on_res_area());
-    ASSERT_TRUE(elements_on_stack(a));
+    ASSERT_TRUE(elements_on_resource_area(a));
   }
 
   // Resource/CHeap allocated
@@ -439,7 +599,7 @@ TEST_VM_F(GrowableArrayTest, where) {
 
   // CHeap/CHeap allocated
   {
-    GrowableArray<int>* a = new (ResourceObj::C_HEAP, mtTest) GrowableArray<int>(0, mtTest);
+    GrowableArray<int>* a = new (mtTest) GrowableArray<int>(0, mtTest);
     ASSERT_TRUE(a->allocated_on_C_heap());
     ASSERT_TRUE(elements_on_C_heap(a));
     delete a;
@@ -452,14 +612,14 @@ TEST_VM_F(GrowableArrayTest, where) {
   {
     ResourceMark rm;
     GrowableArray<int> a(0);
-    ASSERT_TRUE(a.allocated_on_stack());
-    ASSERT_TRUE(elements_on_stack(&a));
+    ASSERT_TRUE(a.allocated_on_stack_or_embedded());
+    ASSERT_TRUE(elements_on_resource_area(&a));
   }
 
   // Stack/CHeap allocated
   {
     GrowableArray<int> a(0, mtTest);
-    ASSERT_TRUE(a.allocated_on_stack());
+    ASSERT_TRUE(a.allocated_on_stack_or_embedded());
     ASSERT_TRUE(elements_on_C_heap(&a));
   }
 
@@ -467,7 +627,7 @@ TEST_VM_F(GrowableArrayTest, where) {
   {
     Arena arena(mtTest);
     GrowableArray<int> a(&arena, 0, 0, 0);
-    ASSERT_TRUE(a.allocated_on_stack());
+    ASSERT_TRUE(a.allocated_on_stack_or_embedded());
     ASSERT_TRUE(elements_on_arena(&a));
   }
 
@@ -475,14 +635,14 @@ TEST_VM_F(GrowableArrayTest, where) {
   {
     ResourceMark rm;
     WithEmbeddedArray w(0);
-    ASSERT_TRUE(w._a.allocated_on_stack());
-    ASSERT_TRUE(elements_on_stack(&w._a));
+    ASSERT_TRUE(w._a.allocated_on_stack_or_embedded());
+    ASSERT_TRUE(elements_on_resource_area(&w._a));
   }
 
   // Embedded/CHeap allocated
   {
     WithEmbeddedArray w(0, mtTest);
-    ASSERT_TRUE(w._a.allocated_on_stack());
+    ASSERT_TRUE(w._a.allocated_on_stack_or_embedded());
     ASSERT_TRUE(elements_on_C_heap(&w._a));
   }
 
@@ -490,20 +650,20 @@ TEST_VM_F(GrowableArrayTest, where) {
   {
     Arena arena(mtTest);
     WithEmbeddedArray w(&arena, 0);
-    ASSERT_TRUE(w._a.allocated_on_stack());
+    ASSERT_TRUE(w._a.allocated_on_stack_or_embedded());
     ASSERT_TRUE(elements_on_arena(&w._a));
   }
 }
 
 TEST_VM_ASSERT_MSG(GrowableArrayAssertingTest, copy_with_embedded_cheap,
-    "Copying of CHeap arrays not supported") {
+    "assert.!on_C_heap... failed: Copying of CHeap arrays not supported") {
   WithEmbeddedArray s(1, mtTest);
   // Intentionally asserts that copy of CHeap arrays are not allowed
   WithEmbeddedArray c(s);
 }
 
 TEST_VM_ASSERT_MSG(GrowableArrayAssertingTest, assignment_with_embedded_cheap,
-    "Assignment of CHeap arrays not supported") {
+    "assert.!on_C_heap... failed: Assignment of CHeap arrays not supported") {
   WithEmbeddedArray s(1, mtTest);
   WithEmbeddedArray c(1, mtTest);
 
@@ -518,7 +678,7 @@ TEST(GrowableArrayCHeap, sanity) {
   {
     GrowableArrayCHeap<int, mtTest> a(0);
 #ifdef ASSERT
-    ASSERT_TRUE(a.allocated_on_stack());
+    ASSERT_TRUE(a.allocated_on_stack_or_embedded());
 #endif
     ASSERT_TRUE(a.is_empty());
 
@@ -554,4 +714,93 @@ TEST(GrowableArrayCHeap, sanity) {
     ASSERT_EQ(a->at(0), 1);
     delete a;
   }
+}
+
+TEST(GrowableArrayCHeap, find_if) {
+  struct Element {
+    int value;
+  };
+  GrowableArrayCHeap<Element, mtTest> array;
+  array.push({1});
+  array.push({2});
+  array.push({3});
+
+  {
+    int index = array.find_if([&](const Element& elem) {
+      return elem.value == 1;
+    });
+    ASSERT_EQ(index, 0);
+  }
+
+  {
+    int index = array.find_if([&](const Element& elem) {
+      return elem.value > 1;
+    });
+    ASSERT_EQ(index, 1);
+  }
+
+  {
+    int index = array.find_if([&](const Element& elem) {
+      return elem.value == 4;
+    });
+    ASSERT_EQ(index, -1);
+  }
+}
+
+TEST(GrowableArrayCHeap, find_from_end_if) {
+  struct Element {
+    int value;
+  };
+  GrowableArrayCHeap<Element, mtTest> array;
+  array.push({1});
+  array.push({2});
+  array.push({3});
+
+  {
+    int index = array.find_from_end_if([&](const Element& elem) {
+      return elem.value == 1;
+    });
+    ASSERT_EQ(index, 0);
+  }
+
+  {
+    int index = array.find_from_end_if([&](const Element& elem) {
+      return elem.value > 1;
+    });
+    ASSERT_EQ(index, 2);
+  }
+
+  {
+    int index = array.find_from_end_if([&](const Element& elem) {
+      return elem.value == 4;
+    });
+    ASSERT_EQ(index, -1);
+  }
+}
+
+TEST(GrowableArrayCHeap, returning_references_works_as_expected) {
+  GrowableArrayCHeap<int, mtTest> arr(8, 8, -1); // Pre-fill with 8 -1s
+  int& x = arr.at_grow(9, -1);
+  EXPECT_EQ(-1, arr.at(9));
+  EXPECT_EQ(-1, x);
+  x = 2;
+  EXPECT_EQ(2, arr.at(9));
+  int& x2 = arr.top();
+  EXPECT_EQ(2, arr.at(9));
+  x2 = 5;
+  EXPECT_EQ(5, arr.at(9));
+
+  int y = arr.at_grow(10, -1);
+  EXPECT_EQ(-1, arr.at(10));
+  y = arr.top();
+  EXPECT_EQ(-1, arr.at(10));
+
+  GrowableArrayCHeap<int, mtTest> arr2(1, 1, -1);
+  int& first = arr2.first();
+  int& last = arr2.last();
+  EXPECT_EQ(-1, first);
+  EXPECT_EQ(-1, last);
+  first = 5;
+  EXPECT_EQ(5, first);
+  EXPECT_EQ(5, last);
 }

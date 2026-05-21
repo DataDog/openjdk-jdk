@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,12 @@
 
 package jdk.test.lib;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.FilenameFilter;
 import java.io.IOException;
 import java.net.Inet6Address;
 import java.net.InetAddress;
@@ -33,33 +38,39 @@ import java.net.ServerSocket;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.net.UnknownHostException;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.CopyOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.AclEntry;
+import java.nio.file.attribute.AclEntryType;
+import java.nio.file.attribute.AclFileAttributeView;
 import java.nio.file.attribute.FileAttribute;
 import java.nio.channels.SocketChannel;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Objects;
 import java.util.Random;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.zip.CRC32C;
 
+import static java.lang.System.lineSeparator;
 import static jdk.test.lib.Asserts.assertTrue;
 import jdk.test.lib.process.ProcessTools;
 import jdk.test.lib.process.OutputAnalyzer;
@@ -93,6 +104,11 @@ public final class Utils {
      * Returns the value of 'test.src' system property.
      */
     public static final String TEST_SRC = System.getProperty("test.src", "").trim();
+
+    /**
+     * Returns the value of 'test.src.path' system property.
+     */
+    public static final String TEST_SRC_PATH = System.getProperty("test.src.path", "").trim();
 
     /**
      * Returns the value of 'test.root' system property.
@@ -130,6 +146,11 @@ public final class Utils {
     public static final String SEED_PROPERTY_NAME = "jdk.test.lib.random.seed";
 
     /**
+     * Returns the value of 'file.separator' system property
+     */
+    public static final String FILE_SEPARATOR = System.getProperty("file.separator");
+
+    /**
      * Random generator with predefined seed.
      */
     private static volatile Random RANDOM_GENERATOR;
@@ -152,16 +173,11 @@ public final class Utils {
            var v = Runtime.version();
            // promotable builds have build number, and it's greater than 0
            if (v.build().orElse(0) > 0) {
-               // promotable build -> use 1st 8 bytes of md5($version)
-               try {
-                   var md = MessageDigest.getInstance("MD5");
-                   var bytes = v.toString()
-                                .getBytes(StandardCharsets.UTF_8);
-                   bytes = md.digest(bytes);
-                   SEED = ByteBuffer.wrap(bytes).getLong();
-               } catch (NoSuchAlgorithmException e) {
-                   throw new Error(e);
-               }
+               // promotable build -> generate a seed based on the version string
+               var bytes = v.toString().getBytes(StandardCharsets.UTF_8);
+               var crc = new CRC32C();
+               crc.update(bytes);
+               SEED = crc.getValue();
            } else {
                // "personal" build -> use random seed
                SEED = new Random().nextLong();
@@ -359,17 +375,20 @@ public final class Utils {
             // which are incompatible with native Windows routines.
             // So on Windows test only addresses with numeric scope.
             // On other platforms test both symbolic and numeric scopes.
-            conf.ip6Addresses().forEach(addr6 -> {
-                try {
-                    result.add(Inet6Address.getByAddress(null, addr6.getAddress(), addr6.getScopeId()));
-                } catch (UnknownHostException e) {
-                    // cannot happen!
-                    throw new RuntimeException("Unexpected", e);
-                }
-                if (!Platform.isWindows()) {
-                    result.add(addr6);
-                }
-            });
+            conf.ip6Addresses()
+                    // test only IPv6 loopback and link-local addresses (JDK-8224775)
+                    .filter(addr -> addr.isLinkLocalAddress() || addr.isLoopbackAddress())
+                    .forEach(addr6 -> {
+                        try {
+                            result.add(Inet6Address.getByAddress(null, addr6.getAddress(), addr6.getScopeId()));
+                        } catch (UnknownHostException e) {
+                            // cannot happen!
+                            throw new RuntimeException("Unexpected", e);
+                        }
+                        if (!Platform.isWindows()) {
+                            result.add(addr6);
+                        }
+                    });
         } catch (IOException e) {
             // cannot happen!
             throw new RuntimeException("Unexpected", e);
@@ -378,7 +397,7 @@ public final class Utils {
     }
 
     /**
-     * Returns the free port on the local host.
+     * Returns the free port on the loopback address.
      *
      * @return The port number
      * @throws IOException if an I/O error occurs when opening the socket
@@ -462,24 +481,17 @@ public final class Utils {
         return new String(Files.readAllBytes(filePath));
     }
 
-    private static final char[] hexArray = new char[]{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
-
     /**
      * Returns hex view of byte array
      *
      * @param bytes byte array to process
      * @return space separated hexadecimal string representation of bytes
+     * @deprecated replaced by {@link java.util.HexFormat#ofDelimiter(String)
+     * HexFormat.ofDelimiter(" ").format (byte[], char)}.
      */
+     @Deprecated
      public static String toHexString(byte[] bytes) {
-         char[] hexView = new char[bytes.length * 3 - 1];
-         for (int i = 0; i < bytes.length - 1; i++) {
-             hexView[i * 3] = hexArray[(bytes[i] >> 4) & 0x0F];
-             hexView[i * 3 + 1] = hexArray[bytes[i] & 0x0F];
-             hexView[i * 3 + 2] = ' ';
-         }
-         hexView[hexView.length - 2] = hexArray[(bytes[bytes.length - 1] >> 4) & 0x0F];
-         hexView[hexView.length - 1] = hexArray[bytes[bytes.length - 1] & 0x0F];
-         return new String(hexView);
+         return HexFormat.ofDelimiter(" ").withUpperCase().formatHex(bytes);
      }
 
      /**
@@ -489,13 +501,7 @@ public final class Utils {
       * @return byte array
       */
      public static byte[] toByteArray(String hex) {
-         int length = hex.length();
-         byte[] bytes = new byte[length / 2];
-         for (int i = 0; i < length; i += 2) {
-             bytes[i / 2] = (byte) ((Character.digit(hex.charAt(i), 16) << 4)
-                     + Character.digit(hex.charAt(i + 1), 16));
-         }
-         return bytes;
+         return HexFormat.of().parseHex(hex);
      }
 
     /**
@@ -506,7 +512,7 @@ public final class Utils {
      * the seed based on string representation of {@link Runtime#version()} is used.
      * Otherwise, the seed is randomly generated.
      * The used seed printed to stdout.
-     *
+     * The printing is not in the synchronized block so as to prevent carrier threads starvation.
      * @return {@link java.util.Random} generator with particular seed.
      */
     public static Random getRandomInstance() {
@@ -514,10 +520,12 @@ public final class Utils {
             synchronized (Utils.class) {
                 if (RANDOM_GENERATOR == null) {
                     RANDOM_GENERATOR = new Random(SEED);
-                    System.out.printf("For random generator using seed: %d%n", SEED);
-                    System.out.printf("To re-run test with same seed value please add \"-D%s=%d\" to command line.%n", SEED_PROPERTY_NAME, SEED);
+                } else {
+                    return RANDOM_GENERATOR;
                 }
             }
+            System.out.printf("For random generator using seed: %d%n", SEED);
+            System.out.printf("To re-run test with same seed value please add \"-D%s=%d\" to command line.%n", SEED_PROPERTY_NAME, SEED);
         }
         return RANDOM_GENERATOR;
     }
@@ -808,6 +816,62 @@ public final class Utils {
     }
 
     /**
+     * Creates a file in {@code user.dir} and populates it with random ASCII
+     * characters of given length.
+     * <p>
+     * If the {@code user.dir} property is not set, {@code .} will be used.
+     * This choice of parent directory, compared to
+     * {@link Files#createTempFile(String, String, FileAttribute[])} using the
+     * {@code java.io.tmpdir} property, doesn't leave files behind in the
+     * {@code /tmp} directory of the test machine.
+     * </p>
+     *
+     * @param prefix the prefix string to be used in generating the file's name;
+     *               may be null
+     * @param suffix the suffix string to be used in generating the file's name;
+     *               may be null, in which case ".tmp" is used
+     * @param size the size in bytes of the temporary file to be populated
+     * @param attrs an optional list of file attributes to set atomically when creating the file
+     * @return the path to the newly created file that did not exist before this
+     *         method was invoked
+     * @throws IOException if an I/O error occurs or dir does not exist
+     * @throws IllegalArgumentException if size is negative
+     *
+     * @see #createTempFile(String, String, FileAttribute...)
+     */
+    public static Path createTempFileOfSize(String prefix, String suffix, long size, FileAttribute<?>... attrs) throws IOException {
+
+        // Check arguments
+        if (size < 0) {
+            throw new IllegalArgumentException("file size cannot be negative: " + size);
+        }
+
+        // Entropy ingredients
+        int prime1 = 2_147_483_647;
+        int prime2 = 1_047_483_649;
+        int seed = Long.hashCode(SEED);
+
+        // Create & populate the file
+        Path path = createTempFile(prefix, suffix, attrs);
+        try (BufferedWriter writer = Files.newBufferedWriter(path, StandardCharsets.US_ASCII)) {
+            long remainingSize = size;
+            for (int rowIndex = 0; remainingSize > 0; rowIndex++) {
+                for (int colIndex = 0; remainingSize > 0 && colIndex < 80; remainingSize--, colIndex++) {
+                    int r = ((rowIndex ^ seed) * prime1) ^ ((colIndex ^ seed) * prime2);
+                    char c = (char) (0x21 + Math.abs(r) % (0x7e - 0x21));
+                    writer.append(c);
+                }
+                if (remainingSize > lineSeparator().length()) {
+                    writer.write(lineSeparator());
+                    remainingSize -= lineSeparator().length();
+                }
+            }
+        }
+        return path;
+
+    }
+
+    /**
      * Creates an empty directory in "user.dir" or "."
      * <p>
      * This method is meant as a replacement for {@link Files#createTempDirectory(Path, String, FileAttribute...)}
@@ -825,5 +889,221 @@ public final class Utils {
     public static Path createTempDirectory(String prefix, FileAttribute<?>... attrs) throws IOException {
         Path dir = Paths.get(System.getProperty("user.dir", "."));
         return Files.createTempDirectory(dir, prefix, attrs);
+    }
+
+    /**
+     * Converts slashes in a pathname to backslashes
+     * if slashes is not the file separator.
+     */
+    public static String convertPath(String path) {
+        // No need to do the conversion if file separator is '/'
+        if (FILE_SEPARATOR.length() == 1 && FILE_SEPARATOR.charAt(0) == '/') {
+            return path;
+        }
+
+        char[] cs = path.toCharArray();
+        for (int i = 0; i < cs.length; i++) {
+            if (cs[i] == '/') {
+                cs[i] = '\\';
+            }
+        }
+        String newPath = new String(cs);
+        return newPath;
+    }
+
+    /**
+     * Return file directories that satisfy the specified filter.
+     *
+     * @param searchDirectory the base directory to search
+     * @param filter          a filename filter
+     * @return                file directories
+     */
+    public static List<Path> findFiles(Path searchDirectory,
+            FilenameFilter filter) {
+        return Arrays.stream(searchDirectory.toFile().listFiles(filter))
+                .map(f -> f.toPath())
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Copy files to the target path.
+     *
+     * @param source         the paths to the files to copy
+     * @param target         the path to the target files
+     * @param filenameMapper mapper function applied to filenames
+     * @param options        options specifying how the copy should be done
+     * @return               the paths to the target files
+     * @throws IOException   if error occurs
+     */
+    public static List<Path> copyFiles(List<Path> source, Path target,
+            Function<String, String> filenameMapper,
+            CopyOption... options) throws IOException {
+        List<Path> result = new ArrayList<>();
+
+        if (!target.toFile().exists()) {
+            Files.createDirectory(target);
+        }
+
+        for (Path file : source) {
+            if (!file.toFile().exists()) {
+                continue;
+            }
+
+            String baseName = file.getFileName().toString();
+
+            Path targetFile = target.resolve(filenameMapper.apply(baseName));
+            Files.copy(file, targetFile, options);
+            result.add(targetFile);
+        }
+        return result;
+    }
+
+    /**
+     * Copy files to the target path.
+     *
+     * @param source         the paths to the files to copy
+     * @param target         the path to the target files
+     * @param options        options specifying how the copy should be done
+     * @return               the paths to the target files
+     * @throws IOException   if error occurs
+     */
+    public static List<Path> copyFiles(List<Path> source, Path target,
+            CopyOption... options) throws IOException {
+        return copyFiles(source, target, (s) -> s, options);
+    }
+
+    /**
+     * Replace file string by applying the given mapper function.
+     *
+     * @param source        the file to read
+     * @param contentMapper the mapper function applied to file's content
+     * @throws IOException  if an I/O error occurs
+     */
+    public static void replaceFileString(Path source,
+            Function<String, String> contentMapper) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        String lineSep = System.getProperty("line.separator");
+
+        try (BufferedReader reader =
+                new BufferedReader(new FileReader(source.toFile()))) {
+
+            String line;
+
+            // read all and replace all at once??
+            while ((line = reader.readLine()) != null) {
+                sb.append(contentMapper.apply(line))
+                        .append(lineSep);
+            }
+        }
+
+        try (FileWriter writer = new FileWriter(source.toFile())) {
+            writer.write(sb.toString());
+        }
+    }
+
+    /**
+     * Replace files' string by applying the given mapper function.
+     *
+     * @param source        the file to read
+     * @param contentMapper the mapper function applied to files' content
+     * @throws IOException  if an I/O error occurs
+     */
+    public static void replaceFilesString(List<Path> source,
+            Function<String, String> contentMapper) throws IOException {
+        for (Path file : source) {
+            replaceFileString(file, contentMapper);
+        }
+    }
+
+    /**
+     * Grant file user access or full access to everyone.
+     *
+     * @param file   file to grant access
+     * @param userOnly true for user access, otherwise full access to everyone
+     * @throws IOException if error occurs
+     */
+    public static void grantFileAccess(Path file, boolean userOnly)
+            throws IOException {
+        Set<String> attr = file.getFileSystem().supportedFileAttributeViews();
+        if (attr.contains("posix")) {
+            String perms = userOnly ? "rwx------" : "rwxrwxrwx";
+            Files.setPosixFilePermissions(file, PosixFilePermissions.fromString(perms));
+        } else if (attr.contains("acl")) {
+            AclFileAttributeView view =
+                    Files.getFileAttributeView(file, AclFileAttributeView.class);
+            List<AclEntry> acl = new ArrayList<>();
+            for (AclEntry thisEntry : view.getAcl()) {
+                if (userOnly) {
+                    if (thisEntry.principal().getName()
+                            .equals(view.getOwner().getName())) {
+                        acl.add(allowAccess(thisEntry));
+                    } else if (thisEntry.type() == AclEntryType.ALLOW) {
+                        acl.add(revokeAccess(thisEntry));
+                    } else {
+                        acl.add(thisEntry);
+                    }
+                } else {
+                    if (thisEntry.type() != AclEntryType.ALLOW) {
+                        acl.add(allowAccess(thisEntry));
+                    } else {
+                        acl.add(thisEntry);
+                    }
+                }
+            }
+            view.setAcl(acl);
+        } else {
+            throw new RuntimeException("Unsupported file attributes: " + attr);
+        }
+    }
+
+    /**
+     * Return an ACL entry that revokes owner access.
+     *
+     * @param acl   original ACL entry to build from
+     * @return      an ACL entry that revokes all access
+     */
+    public static AclEntry revokeAccess(AclEntry acl) {
+        return buildAclEntry(acl, AclEntryType.DENY);
+    }
+
+    /**
+     * Return an ACL entry that allow owner access.
+     * @param acl   original ACL entry to build from
+     * @return      an ACL entry that allows all access
+     */
+    public static AclEntry allowAccess(AclEntry acl) {
+        return buildAclEntry(acl, AclEntryType.ALLOW);
+    }
+
+    /**
+     * Build an ACL entry with a given ACL entry type.
+     *
+     * @param acl   original ACL entry to build from
+     * @return      an ACL entry with a given ACL entry type
+     */
+    public static AclEntry buildAclEntry(AclEntry acl, AclEntryType type) {
+        return AclEntry.newBuilder(acl)
+                .setType(type)
+                .build();
+    }
+
+    /**
+     * Grant file user access.
+     *
+     * @param file   file to grant access
+     * @throws IOException if error occurs
+     */
+    public static void userAccess(Path file) throws IOException {
+        grantFileAccess(file, true);
+    }
+
+    /**
+     * Grant file full access to everyone.
+     *
+     * @param file   file to grant access
+     * @throws IOException if error occurs
+     */
+    public static void fullAccess(Path file) throws IOException {
+        grantFileAccess(file, false);
     }
 }

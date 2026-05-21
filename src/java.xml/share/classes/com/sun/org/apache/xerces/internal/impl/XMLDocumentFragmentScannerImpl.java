@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  */
 
 /*
@@ -28,9 +28,6 @@ import com.sun.org.apache.xerces.internal.util.XMLAttributesIteratorImpl;
 import com.sun.org.apache.xerces.internal.util.XMLChar;
 import com.sun.org.apache.xerces.internal.util.XMLStringBuffer;
 import com.sun.org.apache.xerces.internal.util.XMLSymbols;
-import com.sun.org.apache.xerces.internal.utils.XMLSecurityManager.Limit;
-import com.sun.org.apache.xerces.internal.utils.XMLSecurityManager;
-import com.sun.org.apache.xerces.internal.utils.XMLSecurityPropertyManager;
 import com.sun.org.apache.xerces.internal.xni.Augmentations;
 import com.sun.org.apache.xerces.internal.xni.QName;
 import com.sun.org.apache.xerces.internal.xni.XMLAttributes;
@@ -53,8 +50,12 @@ import javax.xml.XMLConstants;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.events.XMLEvent;
+import jdk.xml.internal.JdkConstants;
 import jdk.xml.internal.JdkXmlUtils;
 import jdk.xml.internal.SecuritySupport;
+import jdk.xml.internal.XMLSecurityManager;
+import jdk.xml.internal.XMLSecurityManager.Limit;
+import jdk.xml.internal.XMLSecurityPropertyManager;
 
 /**
  *
@@ -73,7 +74,7 @@ import jdk.xml.internal.SecuritySupport;
  * @author Eric Ye, IBM
  * @author Sunitha Reddy, SUN Microsystems
  *
- * @LastModified: Jan 2019
+ * @LastModified: Apr 2025
  */
 public class XMLDocumentFragmentScannerImpl
         extends XMLScanner
@@ -169,12 +170,12 @@ public class XMLDocumentFragmentScannerImpl
 
     /** Property identifier: Security property manager. */
     private static final String XML_SECURITY_PROPERTY_MANAGER =
-            Constants.XML_SECURITY_PROPERTY_MANAGER;
+            JdkConstants.XML_SECURITY_PROPERTY_MANAGER;
 
     /** access external dtd: file protocol
      *  For DOM/SAX, the secure feature is set to true by default
      */
-    final static String EXTERNAL_ACCESS_DEFAULT = Constants.EXTERNAL_ACCESS_DEFAULT;
+    final static String EXTERNAL_ACCESS_DEFAULT = JdkConstants.EXTERNAL_ACCESS_DEFAULT;
 
     // recognized features and properties
 
@@ -208,7 +209,7 @@ public class XMLDocumentFragmentScannerImpl
                 JdkXmlUtils.CATALOG_FILES,
                 JdkXmlUtils.CATALOG_PREFER,
                 JdkXmlUtils.CATALOG_RESOLVE,
-                JdkXmlUtils.CDATA_CHUNK_SIZE
+                JdkConstants.CDATA_CHUNK_SIZE
     };
 
     /** Property defaults. */
@@ -221,7 +222,7 @@ public class XMLDocumentFragmentScannerImpl
                 null,
                 null,
                 null,
-                JdkXmlUtils.CDATA_CHUNK_SIZE_DEFAULT
+                JdkConstants.CDATA_CHUNK_SIZE_DEFAULT
     };
 
 
@@ -325,6 +326,8 @@ public class XMLDocumentFragmentScannerImpl
     protected String fDeclaredEncoding =  null;
     /** Xerces Feature: Disallow doctype declaration. */
     protected boolean fDisallowDoctype = false;
+    // DTD Error Code
+    protected String fDTDErrorCode = null;
 
     /** Create entity reference nodes. */
     protected boolean fCreateEntityRefNodes = false;
@@ -339,6 +342,13 @@ public class XMLDocumentFragmentScannerImpl
      * of accessing external dtd or entity references
      */
     protected String fAccessExternalDTD = EXTERNAL_ACCESS_DEFAULT;
+
+    /**
+     * Properties to determine whether to use a user-specified Catalog:
+     * Feature USE_CATALOG, Resolve and Catalog File
+     */
+    protected boolean fUseCatalog = true;
+    protected String fCatalogFile;
 
     /**
      * standard uri conformant (strict uri).
@@ -627,8 +637,8 @@ public class XMLDocumentFragmentScannerImpl
         fAccessExternalDTD = spm.getValue(XMLSecurityPropertyManager.Property.ACCESS_EXTERNAL_DTD);
 
         fStrictURI = componentManager.getFeature(STANDARD_URI_CONFORMANT, false);
-        fChunkSize = JdkXmlUtils.getValue(componentManager.getProperty(JdkXmlUtils.CDATA_CHUNK_SIZE),
-                JdkXmlUtils.CDATA_CHUNK_SIZE_DEFAULT);
+        fChunkSize = JdkXmlUtils.getValue(componentManager.getProperty(JdkConstants.CDATA_CHUNK_SIZE),
+                JdkConstants.CDATA_CHUNK_SIZE_DEFAULT);
 
         resetCommon();
         //fEntityManager.test();
@@ -674,8 +684,8 @@ public class XMLDocumentFragmentScannerImpl
         fAccessExternalDTD = spm.getValue(XMLSecurityPropertyManager.Property.ACCESS_EXTERNAL_DTD);
 
         fSecurityManager = (XMLSecurityManager)propertyManager.getProperty(Constants.SECURITY_MANAGER);
-        fChunkSize = JdkXmlUtils.getValue(propertyManager.getProperty(JdkXmlUtils.CDATA_CHUNK_SIZE),
-                JdkXmlUtils.CDATA_CHUNK_SIZE_DEFAULT);
+        fChunkSize = JdkXmlUtils.getValue(propertyManager.getProperty(JdkConstants.CDATA_CHUNK_SIZE),
+                JdkConstants.CDATA_CHUNK_SIZE_DEFAULT);
         resetCommon();
     } // reset(XMLComponentManager)
 
@@ -791,7 +801,7 @@ public class XMLDocumentFragmentScannerImpl
         }
 
 
-                // Xerces properties
+        // Xerces properties
         if (propertyId.startsWith(Constants.XERCES_PROPERTY_PREFIX)) {
             String property = propertyId.substring(Constants.XERCES_PROPERTY_PREFIX.length());
             if (property.equals(Constants.ENTITY_MANAGER_PROPERTY)) {
@@ -1364,7 +1374,8 @@ public class XMLDocumentFragmentScannerImpl
                         fAttributes.getLength() > fElementAttributeLimit){
                     fErrorReporter.reportError(XMLMessageFormatter.XML_DOMAIN,
                                                  "ElementAttributeLimit",
-                                                 new Object[]{rawname, fElementAttributeLimit },
+                                                 new Object[]{rawname, fElementAttributeLimit,
+                                                     XMLSecurityManager.Limit.ELEMENT_ATTRIBUTE_LIMIT.systemProperty() },
                                                  XMLErrorReporter.SEVERITY_FATAL_ERROR );
                 }
 
@@ -1875,7 +1886,7 @@ public class XMLDocumentFragmentScannerImpl
             reportFatalError("MaxElementDepthLimit", new Object[]{elementName,
                 fLimitAnalyzer.getTotalValue(Limit.MAX_ELEMENT_DEPTH_LIMIT),
                 fSecurityManager.getLimit(Limit.MAX_ELEMENT_DEPTH_LIMIT),
-                "maxElementDepth"});
+                Limit.MAX_ELEMENT_DEPTH_LIMIT.systemProperty()});
         }
     }
 
@@ -2012,7 +2023,7 @@ public class XMLDocumentFragmentScannerImpl
     String checkAccess(String systemId, String allowedProtocols) throws IOException {
         String baseSystemId = fEntityScanner.getBaseSystemId();
         String expandedSystemId = XMLEntityManager.expandSystemId(systemId, baseSystemId, fStrictURI);
-        return SecuritySupport.checkAccess(expandedSystemId, allowedProtocols, Constants.ACCESS_EXTERNAL_ALL);
+        return SecuritySupport.checkAccess(expandedSystemId, allowedProtocols, JdkConstants.ACCESS_EXTERNAL_ALL);
     }
 
     //

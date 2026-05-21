@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,184 +26,74 @@
 #ifndef SHARE_RUNTIME_THREAD_INLINE_HPP
 #define SHARE_RUNTIME_THREAD_INLINE_HPP
 
-#include "runtime/atomic.hpp"
-#include "runtime/globals.hpp"
-#include "runtime/orderAccess.hpp"
-#include "runtime/os.inline.hpp"
-#include "runtime/safepoint.hpp"
 #include "runtime/thread.hpp"
 
-inline void Thread::set_suspend_flag(SuspendFlags f) {
-  uint32_t flags;
-  do {
-    flags = _suspend_flags;
-  }
-  while (Atomic::cmpxchg(&_suspend_flags, flags, (flags | f)) != flags);
-}
-inline void Thread::clear_suspend_flag(SuspendFlags f) {
-  uint32_t flags;
-  do {
-    flags = _suspend_flags;
-  }
-  while (Atomic::cmpxchg(&_suspend_flags, flags, (flags & ~f)) != flags);
-}
+#include "gc/shared/tlab_globals.hpp"
+#include "runtime/atomicAccess.hpp"
+#include "utilities/permitForbiddenFunctions.hpp"
 
-inline void Thread::set_has_async_exception() {
-  set_suspend_flag(_has_async_exception);
-}
-inline void Thread::clear_has_async_exception() {
-  clear_suspend_flag(_has_async_exception);
-}
-inline void Thread::set_trace_flag() {
-  set_suspend_flag(_trace_flag);
-}
-inline void Thread::clear_trace_flag() {
-  clear_suspend_flag(_trace_flag);
-}
-inline void Thread::set_obj_deopt_flag() {
-  set_suspend_flag(_obj_deopt);
-}
-inline void Thread::clear_obj_deopt_flag() {
-  clear_suspend_flag(_obj_deopt);
-}
+#ifdef MACOS_AARCH64
+#include "runtime/os.hpp"
+#endif
 
-inline jlong Thread::cooked_allocated_bytes() {
-  jlong allocated_bytes = Atomic::load_acquire(&_allocated_bytes);
+inline uint64_t Thread::cooked_allocated_bytes() const {
+  uint64_t allocated_bytes = AtomicAccess::load_acquire(&_allocated_bytes);
+  size_t used_bytes = 0;
   if (UseTLAB) {
-    size_t used_bytes = tlab().used_bytes();
-    if (used_bytes <= ThreadLocalAllocBuffer::max_size_in_bytes()) {
-      // Comparing used_bytes with the maximum allowed size will ensure
-      // that we don't add the used bytes from a semi-initialized TLAB
-      // ending up with incorrect values. There is still a race between
-      // incrementing _allocated_bytes and clearing the TLAB, that might
-      // cause double counting in rare cases.
-      return allocated_bytes + used_bytes;
-    }
+    // cooked_used_bytes() does its best to not return implausible values, but
+    // there is still a potential race between incrementing _allocated_bytes and
+    // clearing the TLAB, that might cause double-counting.
+    used_bytes = tlab().estimated_used_bytes();
   }
-  return allocated_bytes;
+  return allocated_bytes + used_bytes;
 }
 
 inline ThreadsList* Thread::cmpxchg_threads_hazard_ptr(ThreadsList* exchange_value, ThreadsList* compare_value) {
-  return (ThreadsList*)Atomic::cmpxchg(&_threads_hazard_ptr, compare_value, exchange_value);
+  return (ThreadsList*)AtomicAccess::cmpxchg(&_threads_hazard_ptr, compare_value, exchange_value);
 }
 
-inline ThreadsList* Thread::get_threads_hazard_ptr() {
-  return (ThreadsList*)Atomic::load_acquire(&_threads_hazard_ptr);
+inline ThreadsList* Thread::get_threads_hazard_ptr() const {
+  return (ThreadsList*)AtomicAccess::load_acquire(&_threads_hazard_ptr);
 }
 
 inline void Thread::set_threads_hazard_ptr(ThreadsList* new_list) {
-  Atomic::release_store_fence(&_threads_hazard_ptr, new_list);
+  AtomicAccess::release_store_fence(&_threads_hazard_ptr, new_list);
 }
 
-inline void JavaThread::set_ext_suspended() {
-  set_suspend_flag (_ext_suspended);
-}
-inline void JavaThread::clear_ext_suspended() {
-  clear_suspend_flag(_ext_suspended);
+#if defined(__APPLE__) && defined(AARCH64)
+
+static void dummy() { }
+
+inline void Thread::init_wx() {
+  assert(this == Thread::current(), "should only be called for current thread");
+  assert(!_wx_init, "second init");
+  _wx_state = WXWrite;
+  permit_forbidden_function::pthread_jit_write_protect_np(false);
+  os::current_thread_enable_wx(_wx_state);
+  // Side effect: preload base address of libjvm
+  guarantee(os::address_is_in_vm(CAST_FROM_FN_PTR(address, &dummy)), "must be");
+  DEBUG_ONLY(_wx_init = true);
 }
 
-inline void JavaThread::set_external_suspend() {
-  set_suspend_flag(_external_suspend);
-}
-inline void JavaThread::clear_external_suspend() {
-  clear_suspend_flag(_external_suspend);
-}
-
-inline void JavaThread::set_pending_async_exception(oop e) {
-  _pending_async_exception = e;
-  _special_runtime_exit_condition = _async_exception;
-  set_has_async_exception();
-}
-
-inline JavaThreadState JavaThread::thread_state() const    {
-#if defined(PPC64) || defined (AARCH64)
-  // Use membars when accessing volatile _thread_state. See
-  // Threads::create_vm() for size checks.
-  return (JavaThreadState) Atomic::load_acquire((volatile jint*)&_thread_state);
-#else
-  return _thread_state;
-#endif
+inline WXMode Thread::enable_wx(WXMode new_state) {
+  assert(this == Thread::current(), "should only be called for current thread");
+  assert(_wx_init, "should be inited");
+  WXMode old = _wx_state;
+  if (_wx_state != new_state) {
+    _wx_state = new_state;
+    switch (new_state) {
+      case WXWrite:
+      case WXExec:
+        os::current_thread_enable_wx(new_state);
+        break;
+      case WXArmedForWrite:
+        break;
+      default: ShouldNotReachHere();  break;
+    }
+  }
+  return old;
 }
 
-inline void JavaThread::set_thread_state(JavaThreadState s) {
-  assert(current_or_null() == NULL || current_or_null() == this,
-         "state change should only be called by the current thread");
-#if defined(PPC64) || defined (AARCH64)
-  // Use membars when accessing volatile _thread_state. See
-  // Threads::create_vm() for size checks.
-  Atomic::release_store((volatile jint*)&_thread_state, (jint)s);
-#else
-  _thread_state = s;
-#endif
-}
-
-inline void JavaThread::set_thread_state_fence(JavaThreadState s) {
-  set_thread_state(s);
-  OrderAccess::fence();
-}
-
-ThreadSafepointState* JavaThread::safepoint_state() const  {
-  return _safepoint_state;
-}
-
-void JavaThread::set_safepoint_state(ThreadSafepointState *state) {
-  _safepoint_state = state;
-}
-
-bool JavaThread::is_at_poll_safepoint() {
-  return _safepoint_state->is_at_poll_safepoint();
-}
-
-void JavaThread::enter_critical() {
-  assert(Thread::current() == this ||
-         (Thread::current()->is_VM_thread() &&
-         SafepointSynchronize::is_synchronizing()),
-         "this must be current thread or synchronizing");
-  _jni_active_critical++;
-}
-
-inline void JavaThread::set_done_attaching_via_jni() {
-  _jni_attach_state = _attached_via_jni;
-  OrderAccess::fence();
-}
-
-inline bool JavaThread::is_exiting() const {
-  // Use load-acquire so that setting of _terminated by
-  // JavaThread::exit() is seen more quickly.
-  TerminatedTypes l_terminated = (TerminatedTypes)
-      Atomic::load_acquire((volatile jint *) &_terminated);
-  return l_terminated == _thread_exiting || check_is_terminated(l_terminated);
-}
-
-inline bool JavaThread::is_terminated() const {
-  // Use load-acquire so that setting of _terminated by
-  // JavaThread::exit() is seen more quickly.
-  TerminatedTypes l_terminated = (TerminatedTypes)
-      Atomic::load_acquire((volatile jint *) &_terminated);
-  return check_is_terminated(l_terminated);
-}
-
-inline void JavaThread::set_terminated(TerminatedTypes t) {
-  // use release-store so the setting of _terminated is seen more quickly
-  Atomic::release_store((volatile jint *) &_terminated, (jint) t);
-}
-
-// special for Threads::remove() which is static:
-inline void JavaThread::set_terminated_value() {
-  // use release-store so the setting of _terminated is seen more quickly
-  Atomic::release_store((volatile jint *) &_terminated, (jint) _thread_terminated);
-}
-
-// Allow tracking of class initialization monitor use
-inline void JavaThread::set_class_to_be_initialized(InstanceKlass* k) {
-  assert((k == NULL && _class_to_be_initialized != NULL) ||
-         (k != NULL && _class_to_be_initialized == NULL), "incorrect usage");
-  assert(this == Thread::current(), "Only the current thread can set this field");
-  _class_to_be_initialized = k;
-}
-
-inline InstanceKlass* JavaThread::class_to_be_initialized() const {
-  return _class_to_be_initialized;
-}
+#endif // __APPLE__ && AARCH64
 
 #endif // SHARE_RUNTIME_THREAD_INLINE_HPP

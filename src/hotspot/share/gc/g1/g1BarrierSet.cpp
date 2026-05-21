@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,22 +22,24 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "gc/g1/g1BarrierSet.inline.hpp"
 #include "gc/g1/g1BarrierSetAssembler.hpp"
 #include "gc/g1/g1CardTable.inline.hpp"
 #include "gc/g1/g1CollectedHeap.inline.hpp"
+#include "gc/g1/g1HeapRegion.hpp"
+#include "gc/g1/g1RegionPinCache.inline.hpp"
 #include "gc/g1/g1SATBMarkQueueSet.hpp"
 #include "gc/g1/g1ThreadLocalData.hpp"
-#include "gc/g1/heapRegion.hpp"
 #include "gc/shared/satbMarkQueue.hpp"
 #include "logging/log.hpp"
+#include "memory/iterator.hpp"
 #include "oops/access.inline.hpp"
 #include "oops/compressedOops.inline.hpp"
 #include "oops/oop.inline.hpp"
 #include "runtime/interfaceSupport.inline.hpp"
+#include "runtime/javaThread.hpp"
 #include "runtime/orderAccess.hpp"
-#include "runtime/thread.inline.hpp"
+#include "runtime/threads.hpp"
 #include "utilities/macros.hpp"
 #ifdef COMPILER1
 #include "gc/g1/c1/g1BarrierSetC1.hpp"
@@ -49,33 +51,50 @@
 class G1BarrierSetC1;
 class G1BarrierSetC2;
 
-G1BarrierSet::G1BarrierSet(G1CardTable* card_table) :
+G1BarrierSet::G1BarrierSet(G1CardTable* card_table,
+                           G1CardTable* refinement_table) :
   CardTableBarrierSet(make_barrier_set_assembler<G1BarrierSetAssembler>(),
                       make_barrier_set_c1<G1BarrierSetC1>(),
                       make_barrier_set_c2<G1BarrierSetC2>(),
                       card_table,
                       BarrierSet::FakeRtti(BarrierSet::G1BarrierSet)),
   _satb_mark_queue_buffer_allocator("SATB Buffer Allocator", G1SATBBufferSize),
-  _dirty_card_queue_buffer_allocator("DC Buffer Allocator", G1UpdateBufferSize),
   _satb_mark_queue_set(&_satb_mark_queue_buffer_allocator),
-  _dirty_card_queue_set(&_dirty_card_queue_buffer_allocator),
-  _shared_dirty_card_queue(&_dirty_card_queue_set)
+  _refinement_table(refinement_table)
 {}
 
-void G1BarrierSet::enqueue(oop pre_val) {
-  // Nulls should have been already filtered.
-  assert(oopDesc::is_oop(pre_val, true), "Error");
-  G1ThreadLocalData::satb_mark_queue(Thread::current()).enqueue(pre_val);
+G1BarrierSet::~G1BarrierSet() {
+  delete refinement_table();
+}
+
+void G1BarrierSet::swap_global_card_table() {
+  G1CardTable* temp = static_cast<G1CardTable*>(card_table());
+  _card_table.store_relaxed(refinement_table());
+  _refinement_table.store_relaxed(temp);
+}
+
+void G1BarrierSet::update_card_table_base(Thread* thread) {
+#ifdef ASSERT
+  {
+    ResourceMark rm;
+    assert(thread->is_Java_thread(), "may only update card table base of JavaThreads, not %s", thread->name());
+  }
+#endif
+  G1ThreadLocalData::set_byte_map_base(thread, card_table()->byte_map_base());
 }
 
 template <class T> void
 G1BarrierSet::write_ref_array_pre_work(T* dst, size_t count) {
-  if (!_satb_mark_queue_set.is_active()) return;
+  G1SATBMarkQueueSet& queue_set = G1BarrierSet::satb_mark_queue_set();
+  if (!queue_set.is_active()) return;
+
+  SATBMarkQueue& queue = G1ThreadLocalData::satb_mark_queue(Thread::current());
+
   T* elem_ptr = dst;
   for (size_t i = 0; i < count; i++, elem_ptr++) {
     T heap_oop = RawAccess<>::oop_load(elem_ptr);
     if (!CompressedOops::is_null(heap_oop)) {
-      enqueue(CompressedOops::decode_not_null(heap_oop));
+      queue_set.enqueue_known_active(queue, CompressedOops::decode_not_null(heap_oop));
     }
   }
 }
@@ -92,38 +111,40 @@ void G1BarrierSet::write_ref_array_pre(narrowOop* dst, size_t count, bool dest_u
   }
 }
 
-void G1BarrierSet::write_ref_field_post_slow(volatile CardValue* byte) {
-  // In the slow path, we know a card is not young
-  assert(*byte != G1CardTable::g1_young_card_val(), "slow path invoked without filtering");
-  OrderAccess::storeload();
-  if (*byte != G1CardTable::dirty_card_val()) {
-    *byte = G1CardTable::dirty_card_val();
-    Thread* thr = Thread::current();
-    G1ThreadLocalData::dirty_card_queue(thr).enqueue(byte);
-  }
-}
-
-void G1BarrierSet::invalidate(MemRegion mr) {
+void G1BarrierSet::write_region(MemRegion mr) {
   if (mr.is_empty()) {
     return;
   }
-  volatile CardValue* byte = _card_table->byte_for(mr.start());
-  CardValue* last_byte = _card_table->byte_for(mr.last());
-  // skip initial young cards
-  for (; byte <= last_byte && *byte == G1CardTable::g1_young_card_val(); byte++);
 
-  if (byte <= last_byte) {
-    OrderAccess::storeload();
-    // Enqueue if necessary.
-    Thread* thr = Thread::current();
-    G1DirtyCardQueue& queue = G1ThreadLocalData::dirty_card_queue(thr);
-    for (; byte <= last_byte; byte++) {
-      CardValue bv = *byte;
-      if ((bv != G1CardTable::g1_young_card_val()) &&
-          (bv != G1CardTable::dirty_card_val())) {
-        *byte = G1CardTable::dirty_card_val();
-        queue.enqueue(byte);
-      }
+  // Skip writes to young gen.
+  if (G1CollectedHeap::heap()->heap_region_containing(mr.start())->is_young()) {
+    // MemRegion should not span multiple regions for arrays in young gen.
+    DEBUG_ONLY(G1HeapRegion* containing_hr = G1CollectedHeap::heap()->heap_region_containing(mr.start());)
+    assert(containing_hr->is_young(), "it should be young");
+    assert(containing_hr->is_in(mr.start()), "it should contain start");
+    assert(containing_hr->is_in(mr.last()), "it should also contain last");
+    return;
+  }
+
+  // We need to make sure that we get the start/end byte information for the area
+  // to mark from the same card table to avoid getting confused in the mark loop
+  // further below - we might execute while the global card table is being switched.
+  //
+  // It does not matter which card table we write to: at worst we may write to the
+  // new card table (after the switching), which means that we will catch the
+  // marks next time.
+  // If we write to the old card table (after the switching, then the refinement
+  // table) the oncoming handshake will do the memory synchronization.
+  CardTable* local_card_table = card_table();
+
+  volatile CardValue* byte = local_card_table->byte_for(mr.start());
+  CardValue* last_byte = local_card_table->byte_for(mr.last());
+
+  // Dirty cards only if necessary.
+  for (; byte <= last_byte; byte++) {
+    CardValue bv = *byte;
+    if (bv == G1CardTable::clean_card_val()) {
+      *byte = G1CardTable::dirty_card_val();
     }
   }
 }
@@ -139,23 +160,36 @@ void G1BarrierSet::on_thread_destroy(Thread* thread) {
 }
 
 void G1BarrierSet::on_thread_attach(Thread* thread) {
-  assert(!G1ThreadLocalData::satb_mark_queue(thread).is_active(), "SATB queue should not be active");
-  assert(G1ThreadLocalData::satb_mark_queue(thread).is_empty(), "SATB queue should be empty");
-  assert(G1ThreadLocalData::dirty_card_queue(thread).is_active(), "Dirty card queue should be active");
-  // Can't assert that the DCQ is empty.  There is early execution on
-  // the main thread, before it gets added to the threads list, which
-  // is where this is called.  That execution may enqueue dirty cards.
-
+  BarrierSet::on_thread_attach(thread);
+  SATBMarkQueue& satbq = G1ThreadLocalData::satb_mark_queue(thread);
+  assert(!satbq.is_active(), "SATB queue should not be active");
+  assert(satbq.buffer() == nullptr, "SATB queue should not have a buffer");
+  assert(satbq.index() == 0, "SATB queue index should be zero");
   // If we are creating the thread during a marking cycle, we should
   // set the active field of the SATB queue to true.  That involves
   // copying the global is_active value to this thread's queue.
-  bool is_satb_active = _satb_mark_queue_set.is_active();
-  G1ThreadLocalData::satb_mark_queue(thread).set_active(is_satb_active);
+  satbq.set_active(_satb_mark_queue_set.is_active());
+
+  if (thread->is_Java_thread()) {
+    assert(Threads_lock->is_locked(), "must be, synchronization with refinement.");
+    update_card_table_base(thread);
+  }
 }
 
 void G1BarrierSet::on_thread_detach(Thread* thread) {
   // Flush any deferred card marks.
   CardTableBarrierSet::on_thread_detach(thread);
-  G1ThreadLocalData::satb_mark_queue(thread).flush();
-  G1ThreadLocalData::dirty_card_queue(thread).on_thread_detach();
+  {
+    SATBMarkQueue& queue = G1ThreadLocalData::satb_mark_queue(thread);
+    G1BarrierSet::satb_mark_queue_set().flush_queue(queue);
+  }
+  {
+    G1RegionPinCache& cache = G1ThreadLocalData::pin_count_cache(thread);
+    cache.flush();
+  }
+}
+
+void G1BarrierSet::print_on(outputStream* st) const {
+  card_table()->print_on(st, "Card");
+  refinement_table()->print_on(st, "Refinement");
 }

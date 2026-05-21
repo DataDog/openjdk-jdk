@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,11 +21,11 @@
  * questions.
  */
 
-#include "precompiled.hpp"
+#include "cppstdlib/type_traits.hpp"
 #include "runtime/os.hpp"
 #include "utilities/align.hpp"
 #include "utilities/globalDefinitions.hpp"
-#include <type_traits>
+#include "utilities/ostream.hpp"
 #include "unittest.hpp"
 
 static ::testing::AssertionResult testPageAddress(
@@ -53,7 +53,7 @@ static ::testing::AssertionResult testPageAddress(
 }
 
 TEST_VM(globalDefinitions, clamp_address_in_page) {
-  const intptr_t page_sizes[] = {os::vm_page_size(), 4096, 8192, 65536, 2 * 1024 * 1024};
+  const intptr_t page_sizes[] = {static_cast<intptr_t>(os::vm_page_size()), 4096, 8192, 65536, 2 * 1024 * 1024};
   const int num_page_sizes = sizeof(page_sizes) / sizeof(page_sizes[0]);
 
   for (int i = 0; i < num_page_sizes; i++) {
@@ -190,41 +190,6 @@ TEST(globalDefinitions, byte_size_in_exact_unit) {
 #endif
 }
 
-#define EXPECT_EQ_LOG2(fn, type)                                \
-{                                                               \
-  int limit = sizeof (type) * BitsPerByte;                      \
-  if (std::is_signed<type>::value) {                            \
-    EXPECT_EQ(limit - 1, fn(std::numeric_limits<type>::min())); \
-    EXPECT_EQ(limit - 1, fn((type)-1));                         \
-    limit--;                                                    \
-  }                                                             \
-  {                                                             \
-    /* Test the all-1s bit patterns */                          \
-    type var = 1;                                               \
-    for (int i = 0; i < limit; i++, var = (var << 1) | 1) {     \
-      EXPECT_EQ(i, fn(var));                                    \
-    }                                                           \
-  }                                                             \
-  {                                                             \
-    /* Test the powers of 2 and powers + 1*/                    \
-    type var = 1;                                               \
-    for (int i = 0; i < limit; i++, var <<= 1) {                \
-      EXPECT_EQ(i, fn(var));                                    \
-      EXPECT_EQ(i, fn(var | 1));                                \
-    }                                                           \
-  }                                                             \
-}
-
-TEST(globalDefinitions, log2) {
-  EXPECT_EQ_LOG2(log2_intptr, uintptr_t);
-  EXPECT_EQ_LOG2(log2_intptr, intptr_t);
-  EXPECT_EQ_LOG2(log2_long, julong);
-  EXPECT_EQ_LOG2(log2_int, int);
-  EXPECT_EQ_LOG2(log2_jint, jint);
-  EXPECT_EQ_LOG2(log2_uint, uint);
-  EXPECT_EQ_LOG2(log2_jlong, jlong);
-}
-
 TEST(globalDefinitions, array_size) {
   const size_t test_size = 10;
 
@@ -250,4 +215,142 @@ TEST(globalDefinitions, array_size) {
     static_assert(6 == ARRAY_SIZE(test_array), "must be");
   }
 
+}
+
+#define check_format(format, value, expected)                  \
+  do {                                                         \
+    stringStream out;                                          \
+    out.print((format), (value));                              \
+    const char* result = out.base();                           \
+    EXPECT_STREQ((result), (expected)) << "Failed with"        \
+        << " format '"   << (format)   << "'"                  \
+        << " value '"    << (value);                           \
+  } while (false)
+
+TEST(globalDefinitions, format_specifiers) {
+  check_format(INT8_FORMAT_X_0,        (int8_t)0x01,      "0x01");
+  check_format(UINT8_FORMAT_X_0,       (uint8_t)0x01u,    "0x01");
+
+  check_format(INT16_FORMAT_X_0,       (int16_t)0x0123,   "0x0123");
+  check_format(UINT16_FORMAT_X_0,      (uint16_t)0x0123u, "0x0123");
+
+  check_format(INT32_FORMAT,           123,               "123");
+  check_format(INT32_FORMAT_X,         0x123,             "0x123");
+  check_format(INT32_FORMAT_X_0,       0x123,             "0x00000123");
+  check_format(INT32_FORMAT_W(5),      123,               "  123");
+  check_format(INT32_FORMAT_W(-5),     123,               "123  ");
+  check_format(UINT32_FORMAT,          123u,              "123");
+  check_format(UINT32_FORMAT_X,        0x123u,            "0x123");
+  check_format(UINT32_FORMAT_X_0,      0x123u,            "0x00000123");
+  check_format(UINT32_FORMAT_W(5),     123u,              "  123");
+  check_format(UINT32_FORMAT_W(-5),    123u,              "123  ");
+
+  check_format(INT64_FORMAT,           (int64_t)123,      "123");
+  check_format(INT64_FORMAT_X,         (int64_t)0x123,    "0x123");
+  check_format(INT64_FORMAT_X_0,       (int64_t)0x123,    "0x0000000000000123");
+  check_format(INT64_FORMAT_W(5),      (int64_t)123,      "  123");
+  check_format(INT64_FORMAT_W(-5),     (int64_t)123,      "123  ");
+
+  check_format(UINT64_FORMAT,          (uint64_t)123,     "123");
+  check_format(UINT64_FORMAT_X,        (uint64_t)0x123,   "0x123");
+  check_format(UINT64_FORMAT_X_0,      (uint64_t)0x123,   "0x0000000000000123");
+  check_format(UINT64_FORMAT_W(5),     (uint64_t)123,     "  123");
+  check_format(UINT64_FORMAT_W(-5),    (uint64_t)123,     "123  ");
+
+  check_format("%zd",                  (ssize_t)123,      "123");
+  check_format("%zd",                  (ssize_t)-123,     "-123");
+  check_format("%zd",                  (ssize_t)2147483647, "2147483647");
+  check_format("%zd",                  (ssize_t)-2147483647, "-2147483647");
+  check_format("%+zd",                 (ssize_t)123,      "+123");
+  check_format("%+zd",                 (ssize_t)-123,     "-123");
+  check_format("%+zd",                 (ssize_t)2147483647, "+2147483647");
+  check_format("%+zd",                 (ssize_t)-2147483647, "-2147483647");
+  check_format("%5zd",                 (ssize_t)123,      "  123");
+  check_format("%-5zd",                (ssize_t)123,      "123  ");
+  check_format("%zu",                  (size_t)123u,      "123");
+  check_format("0x%zx",                (size_t)0x123u,    "0x123");
+  check_format("%5zu",                 (size_t)123u,      "  123");
+  check_format("%-5zu",                (size_t)123u,      "123  ");
+  check_format(SIZE_FORMAT_X_0,        (size_t)0x123u,    "0x" LP64_ONLY("00000000") "00000123");
+
+  check_format("%zd",                  (intx)123,         "123");
+  check_format("%#zx",                 (intx)0x123,       "0x123");
+  check_format("%#zx",                 (intx)0x0,         "0");
+  check_format("0x%zx",                (intx)0x123,       "0x123");
+  check_format("0x%zx",                (intx)0x0,         "0x0");
+  check_format("%5zd",                 (intx)123,         "  123");
+  check_format("%-5zd",                (intx)123,         "123  ");
+
+  check_format("%zu",                  (uintx)123u,       "123");
+  check_format("%#zx",                 (uintx)0x123u,     "0x123");
+  check_format("%5zu",                 (uintx)123u,       "  123");
+  check_format("%-5zu",                (uintx)123u,       "123  ");
+
+  check_format(INTPTR_FORMAT,          (intptr_t)0x123,   "0x" LP64_ONLY("00000000") "00000123");
+  check_format(PTR_FORMAT,             (uintptr_t)0x123,  "0x" LP64_ONLY("00000000") "00000123");
+
+  // Check all platforms print this compatibly without leading 0x.
+  check_format(UINT64_FORMAT_0,        (u8)0x123,         "0000000000000123");
+}
+
+TEST(globalDefinitions, jlong_from) {
+  jlong val = jlong_from(0xFF, 0);
+  EXPECT_EQ(val, CONST64(0x00000000FF00000000));
+
+  val = jlong_from(0, 0xFF);
+  EXPECT_EQ(val, CONST64(0x00000000000000FF));
+
+  val = jlong_from(0xFFFFFFFF, 0);
+  EXPECT_EQ((julong)val, UCONST64(0xFFFFFFFF00000000));
+
+  val = jlong_from(0, 0xFFFFFFFF);
+  EXPECT_EQ(val, CONST64(0x00000000FFFFFFFF));
+
+  val = jlong_from(0, -1);
+  EXPECT_EQ(val, CONST64(0x00000000FFFFFFFF));
+
+  val = jlong_from(-1, 0);
+  EXPECT_EQ((julong)val, UCONST64(0xFFFFFFFF00000000));
+
+  val = jlong_from(-1, -1);
+  EXPECT_EQ((julong)val, UCONST64(0xFFFFFFFFFFFFFFFF));
+  EXPECT_EQ(val, CONST64(-1));
+
+  val = jlong_from(0xABCD, 0xEFEF);
+  EXPECT_EQ(val, CONST64(0x0000ABCD0000EFEF));
+}
+
+struct NoCopy {
+  int x;
+  NONCOPYABLE(NoCopy);
+};
+
+TEST(globalDefinitions, sizeof_auto) {
+  char x = 5;
+  char& y = x;
+  char* z = &x;
+  EXPECT_EQ(sizeof_auto(x), sizeof(x));
+  EXPECT_EQ(sizeof_auto(y), sizeof(y));
+  EXPECT_EQ(sizeof_auto(z), sizeof(z));
+
+  NoCopy nc{0};
+  sizeof_auto(nc);
+
+  static_assert(sizeof_auto(char[1LL])  == 1);
+  static_assert(sizeof_auto(char[std::numeric_limits<uint8_t>::max()  + 1LL]) == std::numeric_limits<uint8_t>::max()  + 1LL);
+  static_assert(sizeof_auto(char[std::numeric_limits<uint16_t>::max() + 1LL]) == std::numeric_limits<uint16_t>::max() + 1LL);
+#if defined(_LP64) && !defined(_WINDOWS)
+  // char array sometimes limited to 2 gig length on 32 bit platforms (signed), disabled for Windows because of compiler error C2148.
+  static_assert(sizeof_auto(char[std::numeric_limits<uint32_t>::max() + 1LL]) == std::numeric_limits<uint32_t>::max() + 1LL);
+#endif
+
+  static_assert(sizeof(sizeof_auto(char[std::numeric_limits<uint8_t>::max()]))        == sizeof(uint8_t));
+  static_assert(sizeof(sizeof_auto(char[std::numeric_limits<uint8_t>::max() + 1LL]))  == sizeof(uint16_t));
+  static_assert(sizeof(sizeof_auto(char[std::numeric_limits<uint16_t>::max()]))       == sizeof(uint16_t));
+  static_assert(sizeof(sizeof_auto(char[std::numeric_limits<uint16_t>::max() + 1LL])) == sizeof(uint32_t));
+#if defined(_LP64) && !defined(_WINDOWS)
+  // char array sometimes limited to 2 gig length on 32 bit platforms (signed), disabled for Windows because of compiler error C2148.
+  static_assert(sizeof(sizeof_auto(char[std::numeric_limits<uint32_t>::max()]))       == sizeof(uint32_t));
+  static_assert(sizeof(sizeof_auto(char[std::numeric_limits<uint32_t>::max() + 1LL])) == sizeof(uint64_t));
+#endif
 }

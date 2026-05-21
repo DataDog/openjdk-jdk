@@ -44,6 +44,7 @@ public class UnsyncByteArrayOutputStream extends OutputStream  {
         buf = new byte[INITIAL_SIZE];
     }
 
+    @Override
     public void write(byte[] arg0) {
         if ((VM_ARRAY_INDEX_MAX_VALUE - pos) < arg0.length) {
             throw new OutOfMemoryError("Required length exceeds implementation limit");
@@ -56,6 +57,7 @@ public class UnsyncByteArrayOutputStream extends OutputStream  {
         pos = newPos;
     }
 
+    @Override
     public void write(byte[] arg0, int arg1, int arg2) {
         if ((VM_ARRAY_INDEX_MAX_VALUE - pos) < arg2) {
             throw new OutOfMemoryError("Required length exceeds implementation limit");
@@ -68,6 +70,7 @@ public class UnsyncByteArrayOutputStream extends OutputStream  {
         pos = newPos;
     }
 
+    @Override
     public void write(int arg0) {
         if (VM_ARRAY_INDEX_MAX_VALUE - pos == 0) {
             throw new OutOfMemoryError("Required length exceeds implementation limit");
@@ -80,7 +83,7 @@ public class UnsyncByteArrayOutputStream extends OutputStream  {
     }
 
     public byte[] toByteArray() {
-        byte result[] = new byte[pos];
+        byte[] result = new byte[pos];
         System.arraycopy(buf, 0, result, 0, pos);
         return result;
     }
@@ -111,7 +114,7 @@ public class UnsyncByteArrayOutputStream extends OutputStream  {
                 newSize = VM_ARRAY_INDEX_MAX_VALUE;
             }
         }
-        byte newBuf[] = new byte[newSize];
+        byte[] newBuf = new byte[newSize];
         System.arraycopy(buf, 0, newBuf, 0, pos);
         buf = newBuf;
         size = newSize;

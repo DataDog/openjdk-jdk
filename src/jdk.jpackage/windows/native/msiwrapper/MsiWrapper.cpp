@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,17 +26,35 @@
 #include <algorithm>
 #include <windows.h>
 
+#include "WinApp.h"
+#include "Guid.h"
 #include "SysInfo.h"
+#include "MsiUtils.h"
 #include "FileUtils.h"
 #include "WinFileUtils.h"
 #include "Executor.h"
 #include "Resources.h"
-#include "WinErrorHandling.h"
 
 
-int __stdcall WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int nShowCmd)
-{
-    JP_TRY;
+namespace {
+int exitCode = -1;
+
+void launchApp() {
+    const auto cmdline = SysInfo::getCommandArgs();
+    if (std::find(cmdline.begin(), cmdline.end(), L"uninstall") != cmdline.end()) {
+        // This is uninstall request.
+
+        // Get product code of the product to uninstall.
+        const auto productCodeUtf8 = Resource(L"product_code", RT_RCDATA).binary();
+        const Guid productCode = Guid(std::string(
+                (const char*)productCodeUtf8.data(), productCodeUtf8.size()));
+
+        // Uninstall product.
+        msi::SuppressUI suppressUI;
+        exitCode = (int)msi::uninstall().setProductCode(productCode)(
+                                                    std::nothrow).getValue();
+        return;
+    }
 
     // Create temporary directory where to extract msi file.
     const auto tempMsiDir = FileUtils::createTempDirectory();
@@ -60,9 +78,12 @@ int __stdcall WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int nShowCmd)
     });
 
     // Install msi file.
-    return msiExecutor.execAndWaitForExit();
+    exitCode = msiExecutor.execAndWaitForExit();
+}
+} // namespace
 
-    JP_CATCH_ALL;
 
-    return -1;
+int WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int nShowCmd) {
+    app::wlaunch(std::nothrow, launchApp);
+    return exitCode;
 }

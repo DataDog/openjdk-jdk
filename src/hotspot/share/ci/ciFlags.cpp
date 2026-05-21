@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "ci/ciFlags.hpp"
 
 // ciFlags
@@ -86,14 +85,11 @@ void ciFlags::print_member_flags(outputStream* st) {
   if (is_abstract()) {
     st->print(",abstract");
   }
-  if (is_strict()) {
-    st->print(",strict");
-  }
 
 }
 
 // ------------------------------------------------------------------
 // ciFlags::print
 void ciFlags::print(outputStream* st) {
-  st->print(" flags=%x", _flags);
+  st->print(" flags=%x", _flags.as_unsigned_short());
 }

@@ -27,19 +27,23 @@
 
 #include "gc/shenandoah/heuristics/shenandoahHeuristics.hpp"
 
+/*
+ * This heuristic has simpler triggers than the adaptive heuristic. The
+ * size of the collection set is limited to 3/4 of available memory.
+ */
 class ShenandoahCompactHeuristics : public ShenandoahHeuristics {
 public:
-  ShenandoahCompactHeuristics();
+  explicit ShenandoahCompactHeuristics(ShenandoahSpaceInfo* space_info);
 
-  virtual bool should_start_gc();
+  bool should_start_gc() override;
 
-  virtual void choose_collection_set_from_regiondata(ShenandoahCollectionSet* cset,
-                                                     RegionData* data, size_t size,
-                                                     size_t actual_free);
+  void choose_collection_set_from_regiondata(ShenandoahCollectionSet* cset,
+                                             RegionData* data, size_t size,
+                                             size_t actual_free) override;
 
-  virtual const char* name()     { return "Compact"; }
-  virtual bool is_diagnostic()   { return false; }
-  virtual bool is_experimental() { return false; }
+  const char* name() override     { return "Compact"; }
+  bool is_diagnostic() override   { return false; }
+  bool is_experimental() override { return false; }
 };
 
 #endif // SHARE_GC_SHENANDOAH_HEURISTICS_SHENANDOAHCOMPACTHEURISTICS_HPP

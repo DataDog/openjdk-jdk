@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,25 +23,21 @@
  * questions.
  */
 
-
-
 package javax.swing;
 
-
-
-import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.locks.*;
-import java.awt.*;
-import java.awt.event.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.io.IOException;
+import java.io.InvalidObjectException;
+import java.io.ObjectInputStream;
+import java.io.Serial;
 import java.io.Serializable;
-import java.io.*;
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
+import java.util.EventListener;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
 import javax.swing.event.EventListenerList;
-
-
 
 /**
  * Fires one or more {@code ActionEvent}s at specified
@@ -157,7 +153,7 @@ public class Timer implements Serializable
     //    EventQueue and be pending (ie in the process of notifying the
     //    ActionListener). If we didn't do this it would allow for a
     //    situation where the app is taking too long to process the
-    //    actionPerformed, and thus we'ld end up queing a bunch of Runnables
+    //    actionPerformed, and thus we'd end up queueing a bunch of Runnables
     //    and the app would never return: not good. This of course implies
     //    you can get dropped events, but such is life.
     // notify is used to indicate if the ActionListener can be notified, when
@@ -177,8 +173,7 @@ public class Timer implements Serializable
     private final transient Lock lock = new ReentrantLock();
 
     // This field is maintained by TimerQueue.
-    // eventQueued can also be reset by the TimerQueue, but will only ever
-    // happen in applet case when TimerQueues thread is destroyed.
+    // eventQueued can also be reset by the TimerQueue
     // access to this field is synchronized on getLock() lock.
     transient TimerQueue.DelayedTimer delayedTimer = null;
 
@@ -209,23 +204,6 @@ public class Timer implements Serializable
             addActionListener(listener);
         }
     }
-
-    /*
-     * The timer's AccessControlContext.
-     */
-     private transient volatile AccessControlContext acc =
-            AccessController.getContext();
-
-    /**
-      * Returns the acc this timer was constructed with.
-      */
-     final AccessControlContext getAccessControlContext() {
-       if (acc == null) {
-           throw new SecurityException(
-                   "Timer is missing AccessControlContext");
-       }
-       return acc;
-     }
 
     /**
      * DoPostEvent is a runnable class that fires actionEvents to
@@ -340,7 +318,7 @@ public class Timer implements Serializable
      *          on this timer,
      *          or an empty array if no such
      *          listeners have been added
-     * @exception ClassCastException if <code>listenerType</code> doesn't
+     * @throws ClassCastException if <code>listenerType</code> doesn't
      *          specify a class or interface that implements
      *          <code>java.util.EventListener</code>
      *
@@ -437,7 +415,7 @@ public class Timer implements Serializable
     /**
      * Returns the {@code Timer}'s initial delay.
      *
-     * @return the {@code Timer}'s intial delay, in milliseconds
+     * @return the {@code Timer}'s initial delay, in milliseconds
      * @see #setInitialDelay
      * @see #setDelay
      */
@@ -609,13 +587,8 @@ public class Timer implements Serializable
 
 
     void post() {
-         if (notify.compareAndSet(false, true) || !coalesce) {
-             AccessController.doPrivileged(new PrivilegedAction<Void>() {
-                 public Void run() {
-                     SwingUtilities.invokeLater(doPostEvent);
-                     return null;
-                }
-            }, getAccessControlContext());
+        if (notify.compareAndSet(false, true) || !coalesce) {
+             SwingUtilities.invokeLater(doPostEvent);
         }
     }
 
@@ -623,10 +596,10 @@ public class Timer implements Serializable
         return lock;
     }
 
+    @Serial
     private void readObject(ObjectInputStream in)
         throws ClassNotFoundException, IOException
     {
-        this.acc = AccessController.getContext();
         ObjectInputStream.GetField f = in.readFields();
 
         EventListenerList newListenerList = (EventListenerList)
@@ -653,6 +626,7 @@ public class Timer implements Serializable
      * We have to use readResolve because we can not initialize final
      * fields for deserialized object otherwise
      */
+    @Serial
     private Object readResolve() {
         Timer timer = new Timer(getDelay(), null);
         timer.listenerList = listenerList;

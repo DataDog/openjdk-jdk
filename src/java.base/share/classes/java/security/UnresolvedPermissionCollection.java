@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,12 +29,13 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.ObjectStreamField;
+import java.io.InvalidObjectException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * A UnresolvedPermissionCollection stores a collection
+ * A {@code UnresolvedPermissionCollection} stores a collection
  * of UnresolvedPermission permissions.
  *
  * @see java.security.Permission
@@ -48,6 +49,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * @serial include
  */
 
+@SuppressWarnings("removal")
 final class UnresolvedPermissionCollection
 extends PermissionCollection
 implements java.io.Serializable
@@ -60,7 +62,7 @@ implements java.io.Serializable
     private transient ConcurrentHashMap<String, List<UnresolvedPermission>> perms;
 
     /**
-     * Create an empty UnresolvedPermissionCollection object.
+     * Create an empty {@code UnresolvedPermissionCollection} object.
      *
      */
     public UnresolvedPermissionCollection() {
@@ -68,34 +70,26 @@ implements java.io.Serializable
     }
 
     /**
-     * Adds a permission to this UnresolvedPermissionCollection.
+     * Adds a permission to this {@code UnresolvedPermissionCollection}.
      * The key for the hash is the unresolved permission's type (class) name.
      *
      * @param permission the Permission object to add.
      */
     @Override
     public void add(Permission permission) {
-        if (! (permission instanceof UnresolvedPermission))
+        if (!(permission instanceof UnresolvedPermission unresolvedPermission))
             throw new IllegalArgumentException("invalid permission: "+
                                                permission);
-        UnresolvedPermission up = (UnresolvedPermission) permission;
 
-        // Add permission to map. NOTE: cannot use lambda for
-        // remappingFunction parameter until JDK-8076596 is fixed.
-        perms.compute(up.getName(),
-            new java.util.function.BiFunction<>() {
-                @Override
-                public List<UnresolvedPermission> apply(String key,
-                                        List<UnresolvedPermission> oldValue) {
-                    if (oldValue == null) {
-                        List<UnresolvedPermission> v =
-                            new CopyOnWriteArrayList<>();
-                        v.add(up);
-                        return v;
-                    } else {
-                        oldValue.add(up);
-                        return oldValue;
-                    }
+        // Add permission to map.
+        perms.compute(unresolvedPermission.getName(), (key, oldValue) -> {
+                if (oldValue == null) {
+                    List<UnresolvedPermission> v = new CopyOnWriteArrayList<>();
+                    v.add(unresolvedPermission);
+                    return v;
+                } else {
+                    oldValue.add(unresolvedPermission);
+                    return oldValue;
                 }
             }
         );
@@ -110,7 +104,7 @@ implements java.io.Serializable
     }
 
     /**
-     * always returns false for unresolved permissions
+     * always returns {@code false} for unresolved permissions
      *
      */
     @Override
@@ -155,12 +149,12 @@ implements java.io.Serializable
     };
 
     /**
-     * @serialData Default field.
-     */
-    /*
      * Writes the contents of the perms field out as a Hashtable
      * in which the values are Vectors for
      * serialization compatibility with earlier releases.
+     *
+     * @param  out the {@code ObjectOutputStream} to which data is written
+     * @throws IOException if an I/O error occurs
      */
     @java.io.Serial
     private void writeObject(ObjectOutputStream out) throws IOException {
@@ -187,9 +181,13 @@ implements java.io.Serializable
         out.writeFields();
     }
 
-    /*
+    /**
      * Reads in a Hashtable in which the values are Vectors of
      * UnresolvedPermissions and saves them in the perms field.
+     *
+     * @param  in the {@code ObjectInputStream} from which data is read
+     * @throws IOException if an I/O error occurs
+     * @throws ClassNotFoundException if a serialized class cannot be loaded
      */
     @java.io.Serial
     private void readObject(ObjectInputStream in) throws IOException,
@@ -200,23 +198,32 @@ implements java.io.Serializable
         ObjectInputStream.GetField gfields = in.readFields();
 
         // Get permissions
-        @SuppressWarnings("unchecked")
         // writeObject writes a Hashtable<String, Vector<UnresolvedPermission>>
         // for the permissions key, so this cast is safe, unless the data is corrupt.
-        Hashtable<String, Vector<UnresolvedPermission>> permissions =
-                (Hashtable<String, Vector<UnresolvedPermission>>)
-                gfields.get("permissions", null);
-        perms = new ConcurrentHashMap<>(permissions.size()*2);
+        try {
+            @SuppressWarnings("unchecked")
+            Hashtable<String, Vector<UnresolvedPermission>> permissions =
+                    (Hashtable<String, Vector<UnresolvedPermission>>)
+                    gfields.get("permissions", null);
 
-        // Convert each entry (Vector) into a List
-        Set<Map.Entry<String, Vector<UnresolvedPermission>>> set = permissions.entrySet();
-        for (Map.Entry<String, Vector<UnresolvedPermission>> e : set) {
-            // Convert Vector into ArrayList
-            Vector<UnresolvedPermission> vec = e.getValue();
-            List<UnresolvedPermission> list = new CopyOnWriteArrayList<>(vec);
+            if (permissions == null) {
+                throw new InvalidObjectException("Invalid null permissions");
+            }
 
-            // Add to Hashtable being serialized
-            perms.put(e.getKey(), list);
+            perms = new ConcurrentHashMap<>(permissions.size()*2);
+
+            // Convert each entry (Vector) into a List
+            Set<Map.Entry<String, Vector<UnresolvedPermission>>> set = permissions.entrySet();
+            for (Map.Entry<String, Vector<UnresolvedPermission>> e : set) {
+                // Convert Vector into ArrayList
+                Vector<UnresolvedPermission> vec = e.getValue();
+                List<UnresolvedPermission> list = new CopyOnWriteArrayList<>(vec);
+
+                // Add to Hashtable being serialized
+                perms.put(e.getKey(), list);
+            }
+        } catch (ClassCastException cce) {
+            throw new InvalidObjectException("Invalid type for permissions");
         }
     }
 }

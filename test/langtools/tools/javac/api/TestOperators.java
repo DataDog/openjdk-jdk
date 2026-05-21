@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@
  * @test
  * @bug     6338064 6346249 6340951 6392177
  * @summary Tree API: can't determine kind of operator
- * @author  Peter von der Ah\u00e9
+ * @author  Peter von der Ahé
  * @library ../lib
  * @modules jdk.compiler
  * @build JavacTestingAbstractProcessor TestOperators
@@ -36,7 +36,6 @@ import java.util.Set;
 import javax.annotation.processing.*;
 import javax.lang.model.element.*;
 import javax.lang.model.util.*;
-import static javax.tools.Diagnostic.Kind.*;
 
 import com.sun.source.tree.*;
 import com.sun.source.util.Trees;
@@ -328,7 +327,7 @@ public class TestOperators extends JavacTestingAbstractProcessor {
                         testNode = returnNode.getExpression();
                     }
                     if (testNode.getKind() != kind) {
-                        log.printMessage(ERROR, testNode.getKind() + " != " + kind, e);
+                        log.printError(testNode.getKind() + " != " + kind, e);
                         throw new AssertionError(testNode);
                     }
                     System.err.format("OK: %32s %s%n", kind, testNode);

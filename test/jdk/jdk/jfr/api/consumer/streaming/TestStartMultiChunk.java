@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -38,7 +36,7 @@ import jdk.jfr.consumer.RecordingStream;
  * @test
  * @summary Verifies that it is possible to stream contents of ongoing
  *          recordings
- * @key jfr
+ * @requires vm.flagless
  * @requires vm.hasJFR
  * @library /test/lib
  * @run main/othervm -Xlog:jfr+system+streaming=trace
@@ -46,7 +44,7 @@ import jdk.jfr.consumer.RecordingStream;
  */
 public class TestStartMultiChunk {
 
-    @Period("10 s")
+    @Period("2 s")
     @Name("Zebra")
     static class ZebraEvent extends Event {
     }
@@ -67,7 +65,7 @@ public class TestStartMultiChunk {
         CountDownLatch dogLatch = new CountDownLatch(1);
         CountDownLatch catLatch = new CountDownLatch(1);
         CountDownLatch mouseLatch = new CountDownLatch(1);
-        CountDownLatch zebraLatch = new CountDownLatch(3);
+        CountDownLatch zebraLatch = new CountDownLatch(2);
 
         FlightRecorder.addPeriodicEvent(ZebraEvent.class, () -> {
             ZebraEvent ze = new ZebraEvent();

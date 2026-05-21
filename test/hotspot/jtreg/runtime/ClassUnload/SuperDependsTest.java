@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,14 +28,18 @@
  * @requires vm.opt.final.ClassUnloading
  * @modules java.base/jdk.internal.misc
  *          java.compiler
- * @library /runtime/testlibrary /test/lib
- * @build sun.hotspot.WhiteBox
+ * @library /test/lib
+ * @build jdk.test.whitebox.WhiteBox
  * @compile p2/c2.java MyDiffClassLoader.java
- * @run driver ClassFileInstaller sun.hotspot.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run main/othervm -Xbootclasspath/a:. -Xmn8m -XX:+UnlockDiagnosticVMOptions -Xlog:class+unload -XX:+WhiteBoxAPI SuperDependsTest
  */
-import sun.hotspot.WhiteBox;
+
+import jdk.test.whitebox.WhiteBox;
 import p2.*;
+import jdk.test.lib.classloader.ClassUnloadCommon;
+import java.util.List;
+import java.util.Set;
 
 public class SuperDependsTest {
     public static WhiteBox wb = WhiteBox.getWhiteBox();
@@ -73,9 +77,7 @@ public class SuperDependsTest {
     public static void main(String args[]) throws Throwable {
         SuperDependsTest d = new SuperDependsTest();
         d.test();
-        ClassUnloadCommon.triggerUnloading();  // should not unload anything
-        System.out.println("Should unload MyTest and p2.c2 just now");
-        ClassUnloadCommon.failIf(wb.isClassAlive(MY_TEST), "should be unloaded");
-        ClassUnloadCommon.failIf(wb.isClassAlive("p2.c2"), "should be unloaded");
+        Set<String> aliveClasses = ClassUnloadCommon.triggerUnloading(List.of(MY_TEST, "p2.c2"));
+        ClassUnloadCommon.failIf(!aliveClasses.isEmpty(), "should be unloaded: " + aliveClasses);
     }
 }

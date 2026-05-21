@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -64,26 +64,35 @@ import java.util.StringTokenizer;
     <code>MBeanServerPermission("createMBeanServer")</code> implies
     <code>MBeanServerPermission("newMBeanServer")</code>.
  *
+ * @apiNote
+ * This permission cannot be used for controlling access to resources
+ * as the Security Manager is no longer supported.
+ * Consequently this class is deprecated for removal in a future release.
+ *
+ * @deprecated This class was only useful in conjunction with the Security Manager,
+ * which is no longer supported. There is no replacement for this class.
+ *
  * @since 1.5
  */
+@Deprecated(since="25", forRemoval=true)
 public class MBeanServerPermission extends BasicPermission {
     private static final long serialVersionUID = -5661980843569388590L;
 
-    private final static int
+    private static final int
         CREATE = 0,
         FIND = 1,
         NEW = 2,
         RELEASE = 3,
         N_NAMES = 4;
 
-    private final static String[] names = {
+    private static final String[] names = {
         "createMBeanServer",
         "findMBeanServer",
         "newMBeanServer",
         "releaseMBeanServer",
     };
 
-    private final static int
+    private static final int
         CREATE_MASK = 1<<CREATE,
         FIND_MASK = 1<<FIND,
         NEW_MASK = 1<<NEW,
@@ -98,7 +107,7 @@ public class MBeanServerPermission extends BasicPermission {
      * permissions, we should consider doing this differently,
      * e.g. with a Map.
      */
-    private final static String[] canonicalNames = new String[1 << N_NAMES];
+    private static final String[] canonicalNames = new String[1 << N_NAMES];
 
     /*
      * The target names mask.  This is not private to avoid having to
@@ -330,6 +339,7 @@ public class MBeanServerPermission extends BasicPermission {
  * implementation from defining a PermissionCollection there with an
  * optimized "implies" method.
  */
+@SuppressWarnings("removal")
 class MBeanServerPermissionCollection extends PermissionCollection {
     /** @serial Null if no permissions in collection, otherwise a
         single permission that is the union of all permissions that

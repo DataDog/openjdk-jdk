@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,9 +26,11 @@
 #define SHARE_GC_SHARED_OOPSTORAGE_INLINE_HPP
 
 #include "gc/shared/oopStorage.hpp"
-#include "metaprogramming/conditional.hpp"
-#include "metaprogramming/isConst.hpp"
+
+#include "cppstdlib/type_traits.hpp"
+#include "memory/allocation.hpp"
 #include "oops/oop.hpp"
+#include "runtime/atomic.hpp"
 #include "runtime/safepoint.hpp"
 #include "utilities/align.hpp"
 #include "utilities/count_trailing_zeros.hpp"
@@ -41,8 +43,8 @@ class OopStorage::ActiveArray {
   friend class OopStorage::TestAccess;
 
   size_t _size;
-  volatile size_t _block_count;
-  mutable volatile int _refcount;
+  Atomic<size_t> _block_count;
+  mutable Atomic<int> _refcount;
   // Block* _blocks[1];            // Pseudo flexible array member.
 
   ActiveArray(size_t size);
@@ -57,7 +59,9 @@ class OopStorage::ActiveArray {
   Block** block_ptr(size_t index);
 
 public:
-  static ActiveArray* create(size_t size, AllocFailType alloc_fail = AllocFailStrategy::EXIT_OOM);
+  static ActiveArray* create(size_t size,
+                             MemTag mem_tag = mtGC,
+                             AllocFailType alloc_fail = AllocFailStrategy::EXIT_OOM);
   static void destroy(ActiveArray* ba);
 
   inline Block* at(size_t i) const;
@@ -101,7 +105,7 @@ inline OopStorage::Block** OopStorage::ActiveArray::block_ptr(size_t index) {
 }
 
 inline OopStorage::Block* OopStorage::ActiveArray::at(size_t index) const {
-  assert(index < _block_count, "precondition");
+  assert(index < _block_count.load_relaxed(), "precondition");
   return *block_ptr(index);
 }
 
@@ -132,19 +136,20 @@ class OopStorage::Block /* No base class, to avoid messing up alignment. */ {
   oop _data[BitsPerWord];
   static const unsigned _data_pos = 0; // Position of _data.
 
-  volatile uintx _allocated_bitmask; // One bit per _data element.
+  Atomic<uintx> _allocated_bitmask; // One bit per _data element.
   intptr_t _owner_address;
   void* _memory;              // Unaligned storage containing block.
   size_t _active_index;
   AllocationListEntry _allocation_list_entry;
-  Block* volatile _deferred_updates_next;
-  volatile uintx _release_refcount;
+  Atomic<Block*> _deferred_updates_next;
+  Atomic<uintx> _release_refcount;
 
   Block(const OopStorage* owner, void* memory);
-  ~Block();
+  ~Block() NOT_DEBUG(= default);
 
   void check_index(unsigned index) const;
   unsigned get_index(const oop* ptr) const;
+  void atomic_add_allocated(uintx add);
 
   template<typename F, typename BlockPtr>
   static bool iterate_impl(F f, BlockPtr b);
@@ -179,10 +184,14 @@ public:
   void set_active_index(size_t index);
   static size_t active_index_safe(const Block* block); // Returns 0 if access fails.
 
-  // Returns NULL if ptr is not in a block or not allocated in that block.
+  // Return block of owner containing ptr, if ptr is a valid entry of owner.
+  // If ptr is not a valid entry of owner then returns either null or a "false
+  // positive" pointer; see allocation_status.
+  // precondition: ptr != nullptr
   static Block* block_for_ptr(const OopStorage* owner, const oop* ptr);
 
   oop* allocate();
+  uintx allocate_all();
   static Block* new_block(const OopStorage* owner);
   static void delete_block(const Block& block);
 
@@ -190,6 +199,8 @@ public:
 
   template<typename F> bool iterate(F f);
   template<typename F> bool iterate(F f) const;
+
+  bool print_containing(const oop* addr, outputStream* st);
 }; // class Block
 
 inline OopStorage::Block* OopStorage::AllocationList::head() {
@@ -252,11 +263,11 @@ public:
   bool operator()(oop* ptr) const {
     bool result = true;
     oop v = *ptr;
-    if (v != NULL) {
+    if (v != nullptr) {
       if (_is_alive->do_object_b(v)) {
         result = _f(ptr);
       } else {
-        *ptr = NULL;            // Clear dead value.
+        *ptr = nullptr;            // Clear dead value.
       }
     }
     return result;
@@ -279,7 +290,7 @@ public:
 
   template<typename OopPtr>     // [const] oop*
   bool operator()(OopPtr ptr) const {
-    return (*ptr != NULL) ? _f(ptr) : true;
+    return (*ptr != nullptr) ? _f(ptr) : true;
   }
 
 private:
@@ -312,7 +323,7 @@ inline const oop* OopStorage::Block::get_pointer(unsigned index) const {
 }
 
 inline uintx OopStorage::Block::allocated_bitmask() const {
-  return _allocated_bitmask;
+  return _allocated_bitmask.load_relaxed();
 }
 
 inline uintx OopStorage::Block::bitmask_for_index(unsigned index) const {
@@ -355,8 +366,8 @@ inline bool OopStorage::iterate_impl(F f, Storage* storage) {
   assert_at_safepoint();
   // Propagate const/non-const iteration to the block layer, by using
   // const or non-const blocks as corresponding to Storage.
-  typedef typename Conditional<IsConst<Storage>::value, const Block*, Block*>::type BlockPtr;
-  ActiveArray* blocks = storage->_active_array;
+  using BlockPtr = std::conditional_t<std::is_const<Storage>::value, const Block*, Block*>;
+  ActiveArray* blocks = storage->_active_array.load_relaxed();
   size_t limit = blocks->block_count();
   for (size_t i = 0; i < limit; ++i) {
     BlockPtr block = blocks->at(i);

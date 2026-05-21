@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -51,17 +51,17 @@ inline void OrderAccess::release()    { compiler_barrier(); }
 
 inline void OrderAccess::fence() {
   // always use locked addl since mfence is sometimes expensive
-#ifdef AMD64
   __asm__ volatile ("lock; addl $0,0(%%rsp)" : : : "cc", "memory");
-#else
-  __asm__ volatile ("lock; addl $0,0(%%esp)" : : : "cc", "memory");
-#endif
   compiler_barrier();
 }
 
 inline void OrderAccess::cross_modify_fence_impl() {
-  int idx = 0;
-  __asm__ volatile ("cpuid " : "+a" (idx) : : "ebx", "ecx", "edx", "memory");
+  if (VM_Version::supports_serialize()) {
+    __asm__ volatile (".byte 0x0f, 0x01, 0xe8\n\t" : : :); //serialize
+  } else {
+    int idx = 0;
+    __asm__ volatile ("cpuid " : "+a" (idx) : : "ebx", "ecx", "edx", "memory");
+  }
 }
 
 #endif // OS_CPU_BSD_X86_ORDERACCESS_BSD_X86_HPP

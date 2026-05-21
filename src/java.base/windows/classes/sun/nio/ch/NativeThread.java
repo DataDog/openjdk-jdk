@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,18 +25,29 @@
 
 package sun.nio.ch;
 
+import java.util.concurrent.locks.LockSupport;
 
-// Signalling operations on native threads
+public class NativeThread {
+    private NativeThread() { }
 
-
-class NativeThread {
-
-    static long current() {
-        // return 0 to ensure that async close of blocking sockets will close
-        // the underlying socket.
-        return 0;
+    /**
+     * Returns the Thread to signal the current thread or {@code null} if the current
+     * thread cannot be signalled.
+     */
+    public static Thread threadToSignal() {
+        Thread thread = Thread.currentThread();
+        return thread.isVirtual() ? thread : null;
     }
 
-    static void signal(long nt) { }
-
+    /**
+     * Signals the given thread.
+     * @throws UnsupportedOperationException is not supported
+     */
+    public static void signal(Thread thread) {
+        if (thread.isVirtual()) {
+            LockSupport.unpark(thread);
+        } else {
+            throw new UnsupportedOperationException();
+        }
+    }
 }

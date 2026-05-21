@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,14 +25,10 @@
 
 package jdk.internal.misc;
 
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.ProtectionDomain;
-import java.security.PrivilegedAction;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * A thread that has no permissions, is not a member of any user-defined
+ * A thread that is not a member of any user-defined
  * ThreadGroup and supports the ability to erase ThreadLocals.
  */
 public final class InnocuousThread extends Thread {
@@ -40,8 +36,6 @@ public final class InnocuousThread extends Thread {
     private static final long THREAD_LOCALS;
     private static final long INHERITABLE_THREAD_LOCALS;
     private static final ThreadGroup INNOCUOUSTHREADGROUP;
-    private static final AccessControlContext ACC;
-    private static final long INHERITEDACCESSCONTROLCONTEXT;
     private static final long CONTEXTCLASSLOADER;
 
     private static final AtomicInteger threadNumber = new AtomicInteger(1);
@@ -50,7 +44,7 @@ public final class InnocuousThread extends Thread {
     }
 
     /**
-     * Returns a new InnocuousThread with an auto-generated thread name
+     * Returns a new InnocuousThread with an auto-generated thread name,
      * and its context class loader is set to the system class loader.
      */
     public static Thread newThread(Runnable target) {
@@ -62,16 +56,16 @@ public final class InnocuousThread extends Thread {
      * set to the system class loader.
      */
     public static Thread newThread(String name, Runnable target) {
-        return AccessController.doPrivileged(
-                new PrivilegedAction<Thread>() {
-                    @Override
-                    public Thread run() {
-                        return new InnocuousThread(INNOCUOUSTHREADGROUP,
-                                                   target,
-                                                   name,
-                                                   ClassLoader.getSystemClassLoader());
-                    }
-                });
+        return newThread(name, target, -1);
+    }
+    /**
+     * Returns a new InnocuousThread with its context class loader
+     * set to the system class loader. The thread priority will be
+     * set to the given priority.
+     */
+    public static Thread newThread(String name, Runnable target, int priority) {
+        return createThread(name, target, 0L,
+                ClassLoader.getSystemClassLoader(), priority);
     }
 
     /**
@@ -86,19 +80,39 @@ public final class InnocuousThread extends Thread {
      * Returns a new InnocuousThread with null context class loader.
      */
     public static Thread newSystemThread(String name, Runnable target) {
-        return AccessController.doPrivileged(
-                new PrivilegedAction<Thread>() {
-                    @Override
-                    public Thread run() {
-                        return new InnocuousThread(INNOCUOUSTHREADGROUP,
-                                                   target, name, null);
-                    }
-                });
+        return newSystemThread(name, target, -1);
     }
 
-    private InnocuousThread(ThreadGroup group, Runnable target, String name, ClassLoader tccl) {
-        super(group, target, name, 0L, false);
-        UNSAFE.putReferenceRelease(this, INHERITEDACCESSCONTROLCONTEXT, ACC);
+    /**
+     * Returns a new InnocuousThread with null context class loader.
+     * Thread priority is set to the given priority.
+     */
+    public static Thread newSystemThread(String name, Runnable target, int priority) {
+        return createThread(name, target, 0L, null, priority);
+    }
+
+    /**
+     * Returns a new InnocuousThread with null context class loader.
+     * Thread priority is set to the given priority.
+     */
+    public static Thread newSystemThread(String name, Runnable target,
+                                         long stackSize, int priority) {
+        return createThread(name, target, stackSize, null, priority);
+    }
+
+    private static Thread createThread(String name, Runnable target, long stackSize,
+                                       ClassLoader loader, int priority) {
+        Thread t = new InnocuousThread(INNOCUOUSTHREADGROUP,
+                target, name, stackSize, loader);
+        if (priority >= 0) {
+            t.setPriority(priority);
+        }
+        return t;
+    }
+
+    private InnocuousThread(ThreadGroup group, Runnable target, String name,
+                            long stackSize, ClassLoader tccl) {
+        super(group, target, name, stackSize, false);
         UNSAFE.putReferenceRelease(this, CONTEXTCLASSLOADER, tccl);
     }
 
@@ -138,10 +152,6 @@ public final class InnocuousThread extends Thread {
     // Use Unsafe to access Thread group and ThreadGroup parent fields
     static {
         try {
-            ACC = new AccessControlContext(new ProtectionDomain[] {
-                new ProtectionDomain(null, null)
-            });
-
             // Find and use topmost ThreadGroup as parent of new group
             UNSAFE = jdk.internal.misc.Unsafe.getUnsafe();
             Class<?> tk = Thread.class;
@@ -150,15 +160,11 @@ public final class InnocuousThread extends Thread {
             THREAD_LOCALS = UNSAFE.objectFieldOffset(tk, "threadLocals");
             INHERITABLE_THREAD_LOCALS = UNSAFE.objectFieldOffset
                     (tk, "inheritableThreadLocals");
-            INHERITEDACCESSCONTROLCONTEXT = UNSAFE.objectFieldOffset
-                (tk, "inheritedAccessControlContext");
             CONTEXTCLASSLOADER = UNSAFE.objectFieldOffset
                 (tk, "contextClassLoader");
 
-            long tg = UNSAFE.objectFieldOffset(tk, "group");
             long gp = UNSAFE.objectFieldOffset(gk, "parent");
-            ThreadGroup group = (ThreadGroup)
-                UNSAFE.getReference(Thread.currentThread(), tg);
+            ThreadGroup group = Thread.currentThread().getThreadGroup();
 
             while (group != null) {
                 ThreadGroup parent = (ThreadGroup)UNSAFE.getReference(group, gp);
@@ -166,14 +172,7 @@ public final class InnocuousThread extends Thread {
                     break;
                 group = parent;
             }
-            final ThreadGroup root = group;
-            INNOCUOUSTHREADGROUP = AccessController.doPrivileged(
-                new PrivilegedAction<ThreadGroup>() {
-                    @Override
-                    public ThreadGroup run() {
-                        return new ThreadGroup(root, "InnocuousThreadGroup");
-                    }
-                });
+            INNOCUOUSTHREADGROUP = new ThreadGroup(group, "InnocuousThreadGroup");
         } catch (Exception e) {
             throw new Error(e);
         }

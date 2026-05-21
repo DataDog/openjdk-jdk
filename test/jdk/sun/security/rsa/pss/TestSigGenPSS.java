@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,21 +21,28 @@
  * questions.
  */
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileInputStream;
+import jtreg.SkippedException;
+
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.security.*;
-import java.security.spec.*;
-import java.security.interfaces.*;
-import java.util.ArrayList;
+import java.security.KeyFactory;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
+import java.security.Provider;
+import java.security.PublicKey;
+import java.security.Security;
+import java.security.Signature;
+import java.security.SecureRandom;
+import java.security.spec.MGF1ParameterSpec;
+import java.security.spec.PSSParameterSpec;
+import java.util.HexFormat;
 import java.util.List;
 
 /*
  * @test
  * @bug 8146293
  * @summary Known Answer Tests based on NIST 186-3 at:
+ * @library /test/lib/
  * @compile SigRecord.java
  * @run main/othervm TestSigGenPSS
  */
@@ -50,7 +57,7 @@ public class TestSigGenPSS {
         int numBytes;
 
         MyKnownRandomSrc(String srcString) {
-            this.srcBytes = SigRecord.toByteArray(srcString);
+            this.srcBytes = HexFormat.of().parseHex(srcString);
             this.numBytes = this.srcBytes.length;
         }
         @Override
@@ -66,15 +73,14 @@ public class TestSigGenPSS {
     }
 
     public static void main(String[] args) throws Exception {
-        //for (Provider provider : Security.getProviders()) {
-        Provider p = Security.getProvider("SunRsaSign");
+        Provider p = Security.getProvider(
+                System.getProperty("test.provider.name", "SunRsaSign"));
         Signature sig;
         try {
             sig = Signature.getInstance("RSASSA-PSS", p);
         } catch (NoSuchAlgorithmException e) {
-            System.out.println("Skip testing RSASSA-PSS" +
-                " due to no support");
-            return;
+            throw new SkippedException("Skip testing RSASSA-PSS" +
+                                       " due to no support");
         }
 
         boolean success = true;
@@ -120,8 +126,8 @@ public class TestSigGenPSS {
         boolean success = true;
         for (SigRecord.SigVector v : vectors) {
             System.out.println("\tAgainst " + v.mdAlg);
-            byte[] msgBytes = SigRecord.toByteArray(v.msg);
-            byte[] expSigBytes = SigRecord.toByteArray(v.sig);
+            byte[] msgBytes = HexFormat.of().parseHex(v.msg);
+            byte[] expSigBytes = HexFormat.of().parseHex(v.sig);
 
             MyKnownRandomSrc saltSrc = new MyKnownRandomSrc(v.salt);
             sig.initSign(privKey, saltSrc);
@@ -145,7 +151,7 @@ public class TestSigGenPSS {
                 System.out.println("\tMsg          = " + v.msg);
                 System.out.println("\tSalt          = " + v.salt);
                 System.out.println("\tExpected Sig = " + v.sig);
-                System.out.println("\tActual Sig   = " + SigRecord.toHexString(actualSigBytes));
+                System.out.println("\tActual Sig   = " + HexFormat.of().formatHex(actualSigBytes));
             } else {
                 System.out.println("\t" + v.mdAlg + " Test Vector Passed");
             }

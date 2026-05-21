@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,7 +44,7 @@ public class BMPImageWriterSpi extends ImageWriterSpi {
     private static String [] readerSpiNames =
         {"com.sun.imageio.plugins.bmp.BMPImageReaderSpi"};
     private static String[] formatNames = {"bmp", "BMP"};
-    private static String[] entensions = {"bmp"};
+    private static String[] extensions = {"bmp"};
     private static String[] mimeType = {"image/bmp"};
 
     private boolean registered = false;
@@ -53,7 +53,7 @@ public class BMPImageWriterSpi extends ImageWriterSpi {
         super("Oracle Corporation",
               "1.0",
               formatNames,
-              entensions,
+              extensions,
               mimeType,
               "com.sun.imageio.plugins.bmp.BMPImageWriter",
               new Class<?>[] { ImageOutputStream.class },
@@ -66,10 +66,12 @@ public class BMPImageWriterSpi extends ImageWriterSpi {
               null, null);
     }
 
+    @Override
     public String getDescription(Locale locale) {
         return "Standard BMP Image Writer";
     }
 
+    @Override
     public void onRegistration(ServiceRegistry registry,
                                Class<?> category) {
         if (registered) {
@@ -79,6 +81,7 @@ public class BMPImageWriterSpi extends ImageWriterSpi {
         registered = true;
     }
 
+    @Override
     public boolean canEncodeImage(ImageTypeSpecifier type) {
         int dataType= type.getSampleModel().getDataType();
         if (dataType < DataBuffer.TYPE_BYTE || dataType > DataBuffer.TYPE_INT)
@@ -99,6 +102,7 @@ public class BMPImageWriterSpi extends ImageWriterSpi {
         return true;
     }
 
+    @Override
     public ImageWriter createWriterInstance(Object extension)
         throws IIOException {
         return new BMPImageWriter(this);

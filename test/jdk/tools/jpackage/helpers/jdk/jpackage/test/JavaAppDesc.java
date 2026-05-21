@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,12 +22,18 @@
  */
 package jdk.jpackage.test;
 
-import java.io.File;
 import java.nio.file.Path;
+import java.util.Objects;
+import java.util.stream.Stream;
 
 
 public final class JavaAppDesc {
     public JavaAppDesc() {
+    }
+
+    public JavaAppDesc setSrcJavaPath(Path v) {
+        srcJavaPath = v;
+        return this;
     }
 
     public JavaAppDesc setClassName(String v) {
@@ -55,13 +61,31 @@ public final class JavaAppDesc {
         return this;
     }
 
+    public Path srcJavaPath() {
+        return srcJavaPath;
+    }
+
+    public String srcClassName() {
+        String fname = srcJavaPath().getFileName().toString();
+        return fname.substring(0, fname.lastIndexOf('.'));
+    }
+
     public String className() {
         return qualifiedClassName;
     }
 
+    public String shortClassName() {
+        return qualifiedClassName.substring(qualifiedClassName.lastIndexOf('.') + 1);
+    }
+
+    Path classNameAsPath(String extension) {
+        final String[] pathComponents = qualifiedClassName.split("\\.");
+        pathComponents[pathComponents.length - 1] = shortClassName() + extension;
+        return Stream.of(pathComponents).map(Path::of).reduce(Path::resolve).get();
+    }
+
     public Path classFilePath() {
-        return Path.of(qualifiedClassName.replace(".", File.separator)
-                + ".class");
+        return classNameAsPath(".class");
     }
 
     public String moduleName() {
@@ -111,8 +135,53 @@ public final class JavaAppDesc {
     }
 
     @Override
+    public int hashCode() {
+        int hash = 5;
+        hash = 79 * hash + Objects.hashCode(this.srcJavaPath);
+        hash = 79 * hash + Objects.hashCode(this.qualifiedClassName);
+        hash = 79 * hash + Objects.hashCode(this.moduleName);
+        hash = 79 * hash + Objects.hashCode(this.bundleFileName);
+        hash = 79 * hash + Objects.hashCode(this.moduleVersion);
+        hash = 79 * hash + (this.withMainClass ? 1 : 0);
+        return hash;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null) {
+            return false;
+        }
+        if (getClass() != obj.getClass()) {
+            return false;
+        }
+        final JavaAppDesc other = (JavaAppDesc) obj;
+        if (this.withMainClass != other.withMainClass) {
+            return false;
+        }
+        if (!Objects.equals(this.qualifiedClassName, other.qualifiedClassName)) {
+            return false;
+        }
+        if (!Objects.equals(this.moduleName, other.moduleName)) {
+            return false;
+        }
+        if (!Objects.equals(this.bundleFileName, other.bundleFileName)) {
+            return false;
+        }
+        if (!Objects.equals(this.moduleVersion, other.moduleVersion)) {
+            return false;
+        }
+        return Objects.equals(this.srcJavaPath, other.srcJavaPath);
+    }
+
+    @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
+        if (srcJavaPath != null) {
+            sb.append(srcJavaPath.toString()).append('*');
+        }
         if (bundleFileName != null) {
             sb.append(bundleFileName).append(':');
         }
@@ -135,7 +204,7 @@ public final class JavaAppDesc {
      * Create Java application description form encoded string value.
      *
      * Syntax of encoded Java application description is
-     * [(jar_file|jmods_file|exploded_jmods_file):][module_name/]qualified_class_name[!][@module_version].
+     * [src_java_file*][(jar_file|jmods_file|exploded_jmods_file):][module_name/]qualified_class_name[!][@module_version].
      *
      * E.g.: `duke.jar:com.other/com.other.foo.bar.Buz!@3.7` encodes modular
      * application. Module name is `com.other`. Main class is
@@ -168,8 +237,16 @@ public final class JavaAppDesc {
             return desc;
         }
 
+        String srcJavaPathAndOther = Functional.identity(() -> {
+            String[] components = javaAppDesc.split("\\*", 2);
+            if (components.length == 2) {
+                desc.setSrcJavaPath(Path.of(components[0]));
+            }
+            return components[components.length - 1];
+        }).get();
+
         String moduleNameAndOther = Functional.identity(() -> {
-            String[] components = javaAppDesc.split(":", 2);
+            String[] components = srcJavaPathAndOther.split(":", 2);
             if (components.length == 2) {
                 desc.setBundleFileName(components[0]);
             }
@@ -191,7 +268,9 @@ public final class JavaAppDesc {
                         components[0].length() - 1);
                 desc.setWithMainClass(true);
             }
-            desc.setClassName(components[0]);
+            if (!components[0].isEmpty()) {
+                desc.setClassName(components[0]);
+            }
             if (components.length == 2) {
                 desc.setModuleVersion(components[1]);
             }
@@ -206,6 +285,7 @@ public final class JavaAppDesc {
         return desc;
     }
 
+    private Path srcJavaPath;
     private String qualifiedClassName;
     private String moduleName;
     private String bundleFileName;

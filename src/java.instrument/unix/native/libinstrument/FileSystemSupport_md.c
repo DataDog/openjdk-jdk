@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,7 +36,7 @@
 #define slash           '/'
 
 char* basePath(const char* path) {
-    char* last = strrchr(path, slash);
+    const char* last = strrchr(path, slash);
     if (last == NULL) {
         return (char*)path;
     } else {
@@ -100,7 +100,7 @@ static char* normalizePath(const char* pathname, int len, int off) {
 /* Check that the given pathname is normal.  If not, invoke the real
    normalizer on the part of the pathname that requires normalization.
    This way we iterate through the whole pathname string only once. */
-char* normalize(const char* pathname) {
+char* normalize_path(const char* pathname) {
     int i;
     int n = strlen(pathname);
     char prevChar = 0;

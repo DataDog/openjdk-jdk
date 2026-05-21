@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@
 package jdk.tools.jlink.internal;
 
 import java.io.*;
+import java.util.Optional;
 import java.util.spi.ToolProvider;
 
 public class Main {
@@ -44,11 +45,6 @@ public class Main {
      * @return an exit code. 0 means success, non-zero means an error occurred.
      */
     public static int run(PrintWriter out, PrintWriter err, String... args) {
-        if (System.getSecurityManager() != null) {
-            System.getSecurityManager().
-                    checkPermission(new JlinkPermission("jlink"));
-        }
-
         JlinkTask t = new JlinkTask();
         t.setLog(out, err);
         return t.run(args);
@@ -58,6 +54,12 @@ public class Main {
         @Override
         public String name() {
             return "jlink";
+        }
+
+        @Override
+        public Optional<String> description() {
+            TaskHelper taskHelper = new TaskHelper(TaskHelper.JLINK_BUNDLE);
+            return Optional.of(taskHelper.getMessage("jlink.description"));
         }
 
         @Override

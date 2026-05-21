@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,9 +38,9 @@ import java.io.ObjectOutputStream;
 import java.io.ObjectStreamClass;
 import java.io.InputStream;
 
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Hashtable;
-import java.util.Vector;
 import java.util.StringTokenizer;
 
 import java.lang.reflect.Proxy;
@@ -57,8 +57,19 @@ final class Obj {
 
     private Obj () {}; // Make sure no one can create one
 
-    // package private; used by Connection
-    static VersionHelper helper = VersionHelper.getVersionHelper();
+    /**
+     * Determines whether objects may be deserialized or reconstructed from a content of
+     * 'javaSerializedData', 'javaRemoteLocation' or 'javaReferenceAddress' LDAP attributes.
+     */
+    private static final boolean trustSerialData;
+
+    static {
+        // System property to control whether classes are allowed to be loaded from
+        // 'javaSerializedData', 'javaRemoteLocation' or 'javaReferenceAddress' attributes.
+        String trustSerialDataSp = System.getProperty(
+                "com.sun.jndi.ldap.object.trustSerialData", "false");
+        trustSerialData = "true".equalsIgnoreCase(trustSerialDataSp);
+    }
 
     // LDAP attributes used to support Java objects.
     static final String[] JAVA_ATTRIBUTES = {
@@ -205,13 +216,13 @@ final class Obj {
         } else {
             StringTokenizer parser =
                 new StringTokenizer((String)codebaseAttr.get());
-            Vector<String> vec = new Vector<>(10);
+            ArrayList<String> list = new ArrayList<>(10);
             while (parser.hasMoreTokens()) {
-                vec.addElement(parser.nextToken());
+                list.add(parser.nextToken());
             }
-            String[] answer = new String[vec.size()];
+            String[] answer = new String[list.size()];
             for (int i = 0; i < answer.length; i++) {
-                answer[i] = vec.elementAt(i);
+                answer[i] = list.get(i);
             }
             return answer;
         }
@@ -233,13 +244,20 @@ final class Obj {
         String[] codebases = getCodebases(attrs.get(JAVA_ATTRIBUTES[CODEBASE]));
         try {
             if ((attr = attrs.get(JAVA_ATTRIBUTES[SERIALIZED_DATA])) != null) {
-                ClassLoader cl = helper.getURLClassLoader(codebases);
+                if (!trustSerialData) {
+                    throw new NamingException("Object deserialization is not allowed");
+                }
+                ClassLoader cl = Thread.currentThread().getContextClassLoader();
                 return deserializeObject((byte[])attr.get(), cl);
             } else if ((attr = attrs.get(JAVA_ATTRIBUTES[REMOTE_LOC])) != null) {
+                 // javaRemoteLocation attribute (RMI stub will be created)
+                 if (!trustSerialData) {
+                     throw new NamingException("Object deserialization is not allowed");
+                 }
                 // For backward compatibility only
                 return decodeRmiObject(
                     (String)attrs.get(JAVA_ATTRIBUTES[CLASSNAME]).get(),
-                    (String)attr.get(), codebases);
+                    (String)attr.get());
             }
 
             attr = attrs.get(JAVA_ATTRIBUTES[OBJECT_CLASS]);
@@ -361,7 +379,7 @@ final class Obj {
      * @deprecated For backward compatibility only
      */
     private static Object decodeRmiObject(String className,
-        String rmiName, String[] codebases) throws NamingException {
+                                          String rmiName) throws NamingException {
             return new Reference(className, new StringRefAddr("URL", rmiName));
     }
 
@@ -403,14 +421,13 @@ final class Obj {
             int start, sep, posn;
             Base64.Decoder decoder = null;
 
-            ClassLoader cl = helper.getURLClassLoader(codebases);
+            ClassLoader cl = Thread.currentThread().getContextClassLoader();
 
             /*
-             * Temporary Vector for decoded RefAddr addresses - used to ensure
+             * Temporary array for decoded RefAddr addresses - used to ensure
              * unordered addresses are correctly re-ordered.
              */
-            Vector<RefAddr> refAddrList = new Vector<>();
-            refAddrList.setSize(attr.size());
+            RefAddr[] refAddrList = new RefAddr[attr.size()];
 
             for (NamingEnumeration<?> vals = attr.getAll(); vals.hasMore(); ) {
 
@@ -461,8 +478,14 @@ final class Obj {
                 // extract content
                 if (start == val.length()) {
                     // Empty content
-                    refAddrList.setElementAt(new StringRefAddr(type, null), posn);
+                    refAddrList[posn] = new StringRefAddr(type, null);
                 } else if (val.charAt(start) == separator) {
+                    // Check if deserialization of binary RefAddr is allowed from
+                    // 'javaReferenceAddress' LDAP attribute.
+                    if (!trustSerialData) {
+                        throw new NamingException("Object deserialization is not allowed");
+                    }
+
                     // Double separators indicate a non-StringRefAddr
                     // Content is a Base64-encoded serialized RefAddr
 
@@ -477,17 +500,17 @@ final class Obj {
                             decoder.decode(val.substring(start).getBytes()),
                             cl);
 
-                    refAddrList.setElementAt(ra, posn);
+                    refAddrList[posn] = ra;
                 } else {
                     // Single separator indicates a StringRefAddr
-                    refAddrList.setElementAt(new StringRefAddr(type,
-                        val.substring(start)), posn);
+                    refAddrList[posn] = new StringRefAddr(type,
+                        val.substring(start));
                 }
             }
 
             // Copy to real reference
-            for (int i = 0; i < refAddrList.size(); i++) {
-                ref.add(refAddrList.elementAt(i));
+            for (int i = 0; i < refAddrList.length; i++) {
+                ref.add(refAddrList[i]);
             }
         }
 

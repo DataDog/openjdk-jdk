@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,8 @@
 
 package java.awt;
 
+import java.io.Serial;
+
 /**
  * The {@code GridBagLayoutInfo} is an utility class for
  * {@code GridBagLayout} layout manager.
@@ -34,45 +36,46 @@ package java.awt;
  * @see       java.awt.GridBagConstraints
  * @since 1.6
  */
-public class GridBagLayoutInfo implements java.io.Serializable {
+public final class GridBagLayoutInfo implements java.io.Serializable {
 
-    /*
-     * serialVersionUID
+    /**
+     * Use serialVersionUID from JDK 1.6 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = -4899416460737170217L;
 
     /**
-     * The number of cells: horizontal and vertical.
+     * @serial The number of cells: horizontal and vertical.
      */
     int width, height;
 
     /**
-     * The starting point for layout.
+     * @serial The starting point for layout.
      */
     int startx, starty;
 
     /**
-     * The largest minWidth in each column.
+     * @serial The largest minWidth in each column.
      */
     int[] minWidth;
 
     /**
-     * The largest minHeight in each row.
+     * @serial The largest minHeight in each row.
      */
     int[] minHeight;
 
     /**
-     * The largest weight in each column.
+     * @serial The largest weight in each column.
      */
     double[] weightX;
 
     /**
-     * The largest weight in each row.
+     * @serial The largest weight in each row.
      */
     double[] weightY;
 
     /**
-     * Whether or not baseline layout has been requested and one of the
+     * @serial Whether or not baseline layout has been requested and one of the
      * components has a valid baseline.
      */
     boolean hasBaseline;
@@ -80,18 +83,18 @@ public class GridBagLayoutInfo implements java.io.Serializable {
     // These are only valid if hasBaseline is true and are indexed by
     // row.
     /**
-     * The type of baseline for a particular row. A mix of the
+     * @serial The type of baseline for a particular row. A mix of the
      * BaselineResizeBehavior constants {@code (1 << ordinal())}
      */
     short[] baselineType;
 
     /**
-     * Max ascent (baseline).
+     * @serial Max ascent (baseline).
      */
     int[] maxAscent;
 
     /**
-     * Max descent (height - baseline)
+     * @serial Max descent (height - baseline)
      */
     int[] maxDescent;
 

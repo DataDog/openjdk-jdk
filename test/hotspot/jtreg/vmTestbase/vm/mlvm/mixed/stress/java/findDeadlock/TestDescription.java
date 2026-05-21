@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -40,10 +40,19 @@
  * @library /vmTestbase
  *          /test/lib
  *
+ * @requires vm.compMode != "Xcomp"
+ *
  * @comment build test class and indify classes
  * @build vm.mlvm.mixed.stress.java.findDeadlock.INDIFY_Test
  * @run driver vm.mlvm.share.IndifiedClassesBuilder
- *
  * @run main/othervm -Xlog:gc,safepoint vm.mlvm.mixed.stress.java.findDeadlock.INDIFY_Test
+ *
+ * To see code that takes more time to safepoint run with:
+ * main/othervm -XX:+SafepointTimeout -XX:+UnlockDiagnosticVMOptions
+ *                   -XX:+AbortVMOnSafepointTimeout
+ *                   -XX:SafepointTimeoutDelay=500
+ *                   -XX:+PrintSystemDictionaryAtExit
+ *                   -Xlog:gc,safepoint
+ *                   vm.mlvm.mixed.stress.java.findDeadlock.INDIFY_Test
  */
 

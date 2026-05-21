@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -79,7 +79,12 @@ package java.lang;
  * <cite>Java Object Serialization Specification,</cite> Section 1.13,
  * "Serialization of Records"</a>.
  *
- * @jls 8.10 Record Types
+ * @apiNote
+ * A record class structure can be obtained at runtime via reflection.
+ * See {@link Class#isRecord()} and {@link Class#getRecordComponents()} for more details.
+ *
+ * @spec serialization/index.html Java Object Serialization Specification
+ * @jls 8.10 Record Classes
  * @since 16
  */
 public abstract class Record {
@@ -111,19 +116,23 @@ public abstract class Record {
      * <li> If the component is of a reference type, the component is
      * considered equal if and only if {@link
      * java.util.Objects#equals(Object,Object)
-     * Objects.equals(this.c(), r.c()} would return {@code true}.
+     * Objects.equals(this.c, r.c)} would return {@code true}.
      *
      * <li> If the component is of a primitive type, using the
      * corresponding primitive wrapper class {@code PW} (the
      * corresponding wrapper class for {@code int} is {@code
      * java.lang.Integer}, and so on), the component is considered
      * equal if and only if {@code
-     * PW.valueOf(this.c()).equals(PW.valueOf(r.c()))} would return
-     * {@code true}.
+     * PW.compare(this.c, r.c)} would return {@code 0}.
      *
      * </ul>
      *
-     * Apart from the semantics described above, the precise algorithm
+     * Note that these rules imply that {@linkplain
+     * Double##repEquivalence representation equivalence} is used for
+     * the equality comparison of both primitive floating-point values
+     * and wrapped floating-point values.
+     *
+     * <p>Apart from the semantics described above, the precise algorithm
      * used in the implicitly provided implementation is unspecified
      * and is subject to change. The implementation may or may not use
      * calls to the particular methods listed, and may or may not

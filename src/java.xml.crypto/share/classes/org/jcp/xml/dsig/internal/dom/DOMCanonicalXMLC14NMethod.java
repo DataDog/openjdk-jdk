@@ -21,18 +21,17 @@
  * under the License.
  */
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
- */
-/*
- * $Id: DOMCanonicalXMLC14NMethod.java 1854026 2019-02-21 09:30:01Z coheigea $
+ * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
  */
 package org.jcp.xml.dsig.internal.dom;
 
-import javax.xml.crypto.*;
-import javax.xml.crypto.dsig.*;
-import javax.xml.crypto.dsig.spec.TransformParameterSpec;
-
 import java.security.InvalidAlgorithmParameterException;
+
+import javax.xml.crypto.Data;
+import javax.xml.crypto.XMLCryptoContext;
+import javax.xml.crypto.dsig.CanonicalizationMethod;
+import javax.xml.crypto.dsig.TransformException;
+import javax.xml.crypto.dsig.spec.TransformParameterSpec;
 
 import com.sun.org.apache.xml.internal.security.c14n.Canonicalizer;
 import com.sun.org.apache.xml.internal.security.c14n.InvalidCanonicalizerException;
@@ -44,6 +43,7 @@ import com.sun.org.apache.xml.internal.security.c14n.InvalidCanonicalizerExcepti
  */
 public final class DOMCanonicalXMLC14NMethod extends ApacheCanonicalizer {
 
+    @Override
     public void init(TransformParameterSpec params)
         throws InvalidAlgorithmParameterException {
         if (params != null) {
@@ -52,6 +52,7 @@ public final class DOMCanonicalXMLC14NMethod extends ApacheCanonicalizer {
         }
     }
 
+    @Override
     public Data transform(Data data, XMLCryptoContext xc)
         throws TransformException {
 
@@ -62,10 +63,8 @@ public final class DOMCanonicalXMLC14NMethod extends ApacheCanonicalizer {
             DOMSubTreeData subTree = (DOMSubTreeData) data;
             if (subTree.excludeComments()) {
                 try {
-                    apacheCanonicalizer = Canonicalizer.getInstance
+                    canonicalizer = Canonicalizer.getInstance
                         (CanonicalizationMethod.INCLUSIVE);
-                    boolean secVal = Utils.secureValidation(xc);
-                    apacheCanonicalizer.setSecureValidation(secVal);
                 } catch (InvalidCanonicalizerException ice) {
                     throw new TransformException
                         ("Couldn't find Canonicalizer for: " +

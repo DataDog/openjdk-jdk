@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,9 +24,10 @@
 
 package sun.jvm.hotspot.debugger.bsd;
 
-import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.IntStream;
 
 import sun.jvm.hotspot.debugger.Address;
 import sun.jvm.hotspot.debugger.DebuggerBase;
@@ -63,6 +64,7 @@ import sun.jvm.hotspot.utilities.PlatformInfo;
     RuntimeException if they are called before the debugger is
     configured with the Java primitive type sizes. </P> */
 
+@SuppressWarnings("restricted")
 public class BsdDebuggerLocal extends DebuggerBase implements BsdDebugger {
     private boolean useGCC32ABI;
     private boolean attached;
@@ -75,9 +77,10 @@ public class BsdDebuggerLocal extends DebuggerBase implements BsdDebugger {
     // CDebugger support
     private BsdCDebugger cdbg;
 
-    // threadList and loadObjectList are filled by attach0 method
-    private List<ThreadProxy> threadList;
+    // loadObjectList is filled by attach0 method
     private List<LoadObject> loadObjectList;
+
+    private List<JavaThread> javaThreadList;
 
     // called by native method lookupByAddress0
     private ClosestSymbol createClosestSymbol(String name, long offset) {
@@ -85,16 +88,15 @@ public class BsdDebuggerLocal extends DebuggerBase implements BsdDebugger {
     }
 
     // called by native method attach0
-    private LoadObject createLoadObject(String fileName, long textsize,
+    private LoadObject createLoadObject(String fileName, long size,
                                         long base) {
-       File f = new File(fileName);
        Address baseAddr = newAddress(base);
-       return new SharedObject(this, fileName, f.length(), baseAddr);
+       return new SharedObject(this, fileName, size, baseAddr);
     }
 
     // native methods
 
-    private native static void init0()
+    private static native void init0()
                                 throws DebuggerException;
     private native void attach0(int pid)
                                 throws DebuggerException;
@@ -110,7 +112,7 @@ public class BsdDebuggerLocal extends DebuggerBase implements BsdDebugger {
                                 throws DebuggerException;
     private native byte[] readBytesFromProcess0(long address, long numBytes)
                                 throws DebuggerException;
-    public native static int  getAddressSize() ;
+    public static native int  getAddressSize() ;
 
     // Note on Bsd threads are really processes. When target process is
     // attached by a serviceability agent thread, only that thread can do
@@ -190,34 +192,12 @@ public class BsdDebuggerLocal extends DebuggerBase implements BsdDebugger {
                               boolean useCache) throws DebuggerException {
         this.machDesc = machDesc;
         utils = new DebuggerUtilities(machDesc.getAddressSize(),
-                                      machDesc.isBigEndian()) {
-           public void checkAlignment(long address, long alignment) {
-             // Need to override default checkAlignment because we need to
-             // relax alignment constraints on Bsd/x86
-             if ( (address % alignment != 0)
-                &&(alignment != 8 || address % 4 != 0)) {
-                throw new UnalignedAddressException(
-                        "Trying to read at address: "
-                      + addressValueToString(address)
-                      + " with alignment: " + alignment,
-                        address);
-             }
-           }
-        };
+                                      machDesc.isBigEndian(),
+                                      machDesc.supports32bitAlignmentOf64bitTypes());
 
         if (useCache) {
-            // FIXME: re-test necessity of cache on Bsd, where data
-            // fetching is faster
-            // Cache portion of the remote process's address space.
-            // Fetching data over the socket connection to dbx is slow.
-            // Might be faster if we were using a binary protocol to talk to
-            // dbx, but would have to test. For now, this cache works best
-            // if it covers the entire heap of the remote process. FIXME: at
-            // least should make this tunable from the outside, i.e., via
-            // the UI. This is a cache of 4096 4K pages, or 16 MB. The page
-            // size must be adjusted to be the hardware's page size.
-            // (FIXME: should pick this up from the debugger.)
-            initCache(4096, parseCacheNumPagesProperty(4096));
+            // This is a cache of 64k of 4K pages, or 256 MB.
+            initCache(4096, parseCacheNumPagesProperty(1024 * 64));
         }
 
         isDarwin = getOS().equals("darwin");
@@ -264,10 +244,21 @@ public class BsdDebuggerLocal extends DebuggerBase implements BsdDebugger {
         }
     }
 
+    private void fillJavaThreadList() {
+      // TODO: thread list on macOS is now supported for corefile only.
+      if (!isCore && isDarwin) {
+          javaThreadList = Collections.emptyList();
+      } else {
+          Threads threads = VM.getVM().getThreads();
+          javaThreadList = IntStream.range(0, threads.getNumberOfThreads())
+                                    .mapToObj(threads::getJavaThreadAt)
+                                    .toList();
+      }
+    }
+
     /** From the Debugger interface via JVMDebugger */
     public synchronized void attach(int processID) throws DebuggerException {
         checkAttached();
-        threadList = new ArrayList<>();
         loadObjectList = new ArrayList<>();
         class AttachTask implements WorkerThreadTask {
            int pid;
@@ -287,7 +278,6 @@ public class BsdDebuggerLocal extends DebuggerBase implements BsdDebugger {
     /** From the Debugger interface via JVMDebugger */
     public synchronized void attach(String execName, String coreName) {
         checkAttached();
-        threadList = new ArrayList<>();
         loadObjectList = new ArrayList<>();
         attach0(execName, coreName);
         attached = true;
@@ -301,7 +291,7 @@ public class BsdDebuggerLocal extends DebuggerBase implements BsdDebugger {
             return false;
         }
 
-        threadList = null;
+        javaThreadList = null;
         loadObjectList = null;
 
         if (isCore) {
@@ -496,30 +486,6 @@ public class BsdDebuggerLocal extends DebuggerBase implements BsdDebugger {
         }
     }
 
-    /** Need to override this to relax alignment checks on x86. */
-    public long readCInteger(long address, long numBytes, boolean isUnsigned)
-        throws UnmappedAddressException, UnalignedAddressException {
-        // Only slightly relaxed semantics -- this is a hack, but is
-        // necessary on x86 where it seems the compiler is
-        // putting some global 64-bit data on 32-bit boundaries
-        if (numBytes == 8) {
-            utils.checkAlignment(address, 4);
-        } else {
-            utils.checkAlignment(address, numBytes);
-        }
-        byte[] data = readBytes(address, numBytes);
-        return utils.dataToCInteger(data, isUnsigned);
-    }
-
-    // Overridden from DebuggerBase because we need to relax alignment
-    // constraints on x86
-    public long readJLong(long address)
-        throws UnmappedAddressException, UnalignedAddressException {
-        utils.checkAlignment(address, jintSize);
-        byte[] data = readBytes(address, jlongSize);
-        return utils.dataToJLong(data, jlongSize);
-    }
-
     //----------------------------------------------------------------------
     // Address access. Can not be package private, but should only be
     // accessed by the architecture-specific subpackages.
@@ -527,7 +493,7 @@ public class BsdDebuggerLocal extends DebuggerBase implements BsdDebugger {
     /** From the BsdDebugger interface */
     public long getAddressValue(Address addr) {
       if (addr == null) return 0;
-      return ((BsdAddress) addr).getValue();
+      return addr.asLongValue();
     }
 
     /** From the BsdDebugger interface */
@@ -539,7 +505,12 @@ public class BsdDebuggerLocal extends DebuggerBase implements BsdDebugger {
     /** From the BsdCDebugger interface */
     public List<ThreadProxy> getThreadList() {
       requireAttach();
-      return threadList;
+      if (javaThreadList == null) {
+        fillJavaThreadList();
+      }
+      return javaThreadList.stream()
+                           .map(JavaThread::getThreadProxy)
+                           .toList();
     }
 
     /** From the BsdCDebugger interface */
@@ -605,30 +576,22 @@ public class BsdDebuggerLocal extends DebuggerBase implements BsdDebugger {
         }
     }
 
-    public void writeBytesToProcess(long address, long numBytes, byte[] data)
-        throws UnmappedAddressException, DebuggerException {
-        // FIXME
-        throw new DebuggerException("Unimplemented");
-    }
-
     /** this functions used for core file reading and called from native attach0,
         it returns an array of long integers as
         [thread_id, stack_start, stack_end, thread_id, stack_start, stack_end, ....] for
-        all java threads recorded in Threads. Also adds the ThreadProxy to threadList */
+        all java threads recorded in Threads. */
     public long[] getJavaThreadsInfo() {
         requireAttach();
-        Threads threads = VM.getVM().getThreads();
-        int len = threads.getNumberOfThreads();
-        long[] result = new long[len * 3];    // triple
+        if (javaThreadList == null) {
+            fillJavaThreadList();
+        }
+        long[] result = new long[javaThreadList.size() * 3];    // triple
         long beg, end;
         int i = 0;
-        for (int k = 0; k < threads.getNumberOfThreads(); k++) {
-            JavaThread t = threads.getJavaThreadAt(k);
+        for (var t : javaThreadList) {
             end = t.getStackBaseValue();
             beg = end - t.getStackSize();
-            BsdThread bsdt = (BsdThread)t.getThreadProxy();
-            long uid = bsdt.getUniqueThreadId();
-            if (threadList != null) threadList.add(bsdt);
+            long uid = ((BsdThread)t.getThreadProxy()).getUniqueThreadId();
             result[i] = uid;
             result[i + 1] = beg;
             result[i + 2] = end;

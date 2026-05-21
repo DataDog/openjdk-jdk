@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -41,6 +41,9 @@ public class MalformedInputException
     @java.io.Serial
     private static final long serialVersionUID = -3438823399834806194L;
 
+    /**
+     * @serial The length of the input.
+     */
     private int inputLength;
 
     /**
@@ -53,16 +56,14 @@ public class MalformedInputException
     }
 
     /**
-     * Returns the length of the input.
-     * @return the length of the input
+     * {@return the length of the input}
      */
     public int getInputLength() {
         return inputLength;
     }
 
     /**
-     * Returns the message.
-     * @return the message
+     * {@return the message}
      */
     public String getMessage() {
         return "Input length = " + inputLength;

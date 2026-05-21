@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -20,8 +20,19 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+/* @test
+ * @bug 6599979
+ * @summary Ensure that re-assigning the alias works
+ * @library /test/lib ..
+ * @run testng/othervm SecretKeysBasic
+ */
+import jtreg.SkippedException;
+import org.testng.SkipException;
+import org.testng.annotations.BeforeClass;
+import org.testng.annotations.Test;
 
 import java.io.*;
+import java.nio.file.Path;
 import java.util.*;
 import java.security.*;
 import javax.crypto.*;
@@ -42,8 +53,22 @@ public class SecretKeysBasic extends PKCS11Test {
     private static final String KS_TYPE = "PKCS11";
     private static Provider provider;
 
-    public static void main(String[] args) throws Exception {
-        main(new SecretKeysBasic());
+    @BeforeClass
+    public void setUp() throws Exception {
+        copyNssCertKeyToClassesDir();
+        setCommonSystemProps();
+        System.setProperty("TOKEN", "nss");
+        System.setProperty("CUSTOM_P11_CONFIG", Path.of(BASE)
+                .resolve("BasicData").resolve("p11-nss.txt").toString());
+    }
+
+    @Test
+    public void testBasic() throws Exception {
+        try {
+            main(new SecretKeysBasic());
+        } catch (SkippedException se) {
+            throw new SkipException("One or more tests are skipped");
+        }
     }
 
     public void main(Provider p) throws Exception {
@@ -91,11 +116,14 @@ public class SecretKeysBasic extends PKCS11Test {
         // A bug in NSS 3.12 (Mozilla bug 471665) causes AES key lengths
         // to be read incorrectly.  Checking for improper 16 byte length
         // in key string.
-        if (isNSS(provider) && expected.getAlgorithm().equals("AES") &&
-                (getNSSVersion() >= 3.12 && getNSSVersion() <= 3.122)) {
-            System.out.println("NSS 3.12 bug returns incorrect AES key "+
-                    "length breaking key storage. Aborting...");
-            return true;
+        if (isNSS(provider) && expected.getAlgorithm().equals("AES")) {
+            Version version = getNSSVersion();
+            if (version.major() == 3 && version.minor() == 12
+                    && version.patch() <= 2) {
+                System.out.println("NSS 3.12 bug returns incorrect AES key " +
+                        "length breaking key storage. Aborting...");
+                return true;
+            }
         }
 
         if (saveBeforeCheck) {
@@ -143,7 +171,7 @@ public class SecretKeysBasic extends PKCS11Test {
     private static void doTest() throws Exception {
         // Make sure both NSS libraries are the same version.
         if (isNSS(provider) &&
-                (getLibsoftokn3Version() != getLibnss3Version())) {
+                (!getLibsoftokn3Version().equals(getLibnss3Version()))) {
             System.out.println("libsoftokn3 and libnss3 versions do not match.  Aborting test...");
             return;
         }

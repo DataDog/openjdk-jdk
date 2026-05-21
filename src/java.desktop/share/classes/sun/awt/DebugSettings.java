@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -110,15 +110,9 @@ public final class DebugSettings {
      */
     private synchronized void loadProperties() {
         // setup initial properties
-        java.security.AccessController.doPrivileged(
-            new java.security.PrivilegedAction<Void>() {
-                public Void run() {
-                    loadDefaultProperties();
-                    loadFileProperties();
-                    loadSystemProperties();
-                    return null;
-                }
-            });
+        loadDefaultProperties();
+        loadFileProperties();
+        loadSystemProperties();
 
         // echo the initial property settings to stdout
         if (log.isLoggable(PlatformLogger.Level.FINE)) {
@@ -133,7 +127,7 @@ public final class DebugSettings {
             String value = props.getProperty(key, "");
             pout.println(key + " = " + value);
         }
-        return new String(bout.toByteArray());
+        return bout.toString();
     }
 
     /*
@@ -172,9 +166,9 @@ public final class DebugSettings {
         File    propFile = new File(propPath);
         try {
             println("Reading debug settings from '" + propFile.getCanonicalPath() + "'...");
-            FileInputStream     fin = new FileInputStream(propFile);
-            props.load(fin);
-            fin.close();
+            try (FileInputStream fin = new FileInputStream(propFile)) {
+                props.load(fin);
+            }
         } catch ( FileNotFoundException fne ) {
             println("Did not find settings file.");
         } catch ( IOException ioe ) {

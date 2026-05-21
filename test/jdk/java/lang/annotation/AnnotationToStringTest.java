@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
 
 /*
  * @test
- * @bug 8162817 8168921
+ * @bug 8162817 8168921 8322218
  * @summary Test of toString on normal annotations
  */
 
@@ -31,7 +31,8 @@
 // test/langtools/tools/javac/processing/model/element/AnnotationToStringTest.java
 
 import java.lang.annotation.*;
-import java.lang.reflect.*;
+import java.lang.reflect.Field;
+import javax.lang.model.element.Modifier;
 import java.util.*;
 
 /**
@@ -161,6 +162,11 @@ public class AnnotationToStringTest {
 
     static class ArrayAnnotationHost {
         @ExpectedString(
+       "@EnumValue(NON_SEALED)") // toString and name differ
+        @EnumValue(Modifier.NON_SEALED)
+        public int f00;
+
+        @ExpectedString(
        "@BooleanArray({true, false, true})")
         @BooleanArray({true, false, true})
         public boolean[]   f0;
@@ -186,8 +192,8 @@ public class AnnotationToStringTest {
         public short[]     f4;
 
         @ExpectedString(
-       "@CharArray({'a', 'b', 'c', '\\''})")
-        @CharArray({'a', 'b', 'c', '\''})
+       "@CharArray({'a', 'b', 'c', '\\'', '\"'})")
+        @CharArray({'a', 'b', 'c', '\'', '"'})
         public char[]      f5;
 
         @ExpectedString(
@@ -203,8 +209,8 @@ public class AnnotationToStringTest {
         public long[]      f7;
 
         @ExpectedString(
-       "@StringArray({\"A\", \"B\", \"C\", \"\\\"Quote\\\"\"})")
-        @StringArray({"A", "B", "C", "\"Quote\""})
+       "@StringArray({\"A\", \"B\", \"C\", \"\\\"Quote\\\"\", \"'\", \"\\\"\"})")
+        @StringArray({"A", "B", "C", "\"Quote\"", "'", "\""})
         public String[]    f8;
 
         @ExpectedString(
@@ -213,8 +219,8 @@ public class AnnotationToStringTest {
         public Class<?>[]  f9;
 
         @ExpectedString(
-       "@EnumArray({SOURCE})")
-        @EnumArray({RetentionPolicy.SOURCE})
+       "@EnumArray({SEALED, NON_SEALED, PUBLIC})")
+        @EnumArray({Modifier.SEALED, Modifier.NON_SEALED, Modifier.PUBLIC})
         public RetentionPolicy[]  f10;
     }
 }
@@ -222,6 +228,11 @@ public class AnnotationToStringTest {
 // ------------ Supporting types ------------
 
 class Obj {}
+
+@Retention(RetentionPolicy.RUNTIME)
+@interface EnumValue {
+    Modifier value();
+}
 
 @Retention(RetentionPolicy.RUNTIME)
 @interface ExpectedString {
@@ -285,7 +296,7 @@ class Obj {}
 
 @Retention(RetentionPolicy.RUNTIME)
 @interface EnumArray {
-    RetentionPolicy[] value();
+    Modifier[] value();
 }
 
 @Retention(RetentionPolicy.RUNTIME)

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,8 @@
 
 package java.awt.color;
 
+import java.io.Serial;
+
 /**
  * This exception is thrown when an error occurs in accessing or processing an
  * {@code ICC_Profile} object.
@@ -34,15 +36,16 @@ public class ProfileDataException extends RuntimeException {
     /**
      * Use serialVersionUID from JDK 1.2 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = 7286140888240322498L;
 
     /**
      * Constructs a {@code ProfileDataException} with the specified detail
      * message.
      *
-     * @param  s the specified detail message
+     * @param  message the specified detail message, or {@code null}
      */
-    public ProfileDataException(String s) {
-        super(s);
+    public ProfileDataException(String message) {
+        super(message);
     }
 }

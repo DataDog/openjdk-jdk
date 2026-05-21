@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 #ifndef SHARE_OPTO_OPTOREG_HPP
 #define SHARE_OPTO_OPTOREG_HPP
 
+#include "utilities/globalDefinitions.hpp"
 #include "utilities/macros.hpp"
 
 // AdGlobals contains c2 specific register handling code as specified
@@ -36,7 +37,7 @@
 // non-SSA names.  A Register is represented as a number.  Non-regular values
 // (e.g., Control, Memory, I/O) use the Special register.  The actual machine
 // registers (as described in the ADL file for a machine) start at zero.
-// Stack-slots (spill locations) start at the nest Chunk past the last machine
+// Stack-slots (spill locations) start at the next Chunk past the last machine
 // register.
 //
 // Note that stack spill-slots are treated as a very large register set.
@@ -152,7 +153,7 @@ class OptoReg {
   }
 
   static OptoReg::Name stack0() {
-    return VMRegImpl::stack0->value();
+    return VMRegImpl::stack_0()->value();
   }
 
   static const char* regname(OptoReg::Name n) {
@@ -177,34 +178,60 @@ class OptoReg {
 // world, notably flags. [ But by design there is "space" in the VMReg world
 // for such registers they just may not be concrete ]. So if we were to use VMRegPair
 // then the VMReg world would have to have a representation for these registers
-// so that a OptoReg->VMReg->OptoReg would reproduce ther original OptoReg. As it
+// so that a OptoReg->VMReg->OptoReg would reproduce the original OptoReg. As it
 // stands if you convert a flag (condition code) to a VMReg you will get VMRegImpl::Bad
 // and converting that will return OptoReg::Bad losing the identity of the OptoReg.
 
 class OptoRegPair {
-  friend class VMStructs;
 private:
-  short _second;
-  short _first;
+  typedef short Name;
+  Name _second;
+  Name _first;
+
 public:
-  void set_bad (                   ) { _second = OptoReg::Bad; _first = OptoReg::Bad; }
-  void set1    ( OptoReg::Name n  ) { _second = OptoReg::Bad; _first = n; }
-  void set2    ( OptoReg::Name n  ) { _second = n + 1;       _first = n; }
-  void set_pair( OptoReg::Name second, OptoReg::Name first    ) { _second= second;    _first= first; }
-  void set_ptr ( OptoReg::Name ptr ) {
+  static constexpr bool can_fit(OptoReg::Name n) {
+    return n <= std::numeric_limits<OptoRegPair::Name>::max();
+  }
+  void set_bad() {
+    _second = OptoReg::Bad;
+    _first = OptoReg::Bad;
+  }
+  void set1(OptoReg::Name n) {
+    assert(can_fit(n), "overflow");
+    _second = OptoReg::Bad;
+    _first = n;
+  }
+  void set2(OptoReg::Name n) {
+    assert(can_fit(n + 1), "overflow");
+    assert(can_fit(n), "overflow");
+    _second = n + 1;
+    _first = n;
+  }
+  void set_pair(OptoReg::Name second, OptoReg::Name first) {
+    assert(can_fit(second), "overflow");
+    assert(can_fit(first), "overflow");
+    _second = second;
+    _first = first;
+  }
+  void set_ptr(OptoReg::Name ptr) {
 #ifdef _LP64
-    _second = ptr+1;
+    assert(can_fit(ptr + 1), "overflow");
+    _second = ptr + 1;
 #else
     _second = OptoReg::Bad;
 #endif
+    assert(can_fit(ptr), "overflow");
     _first = ptr;
   }
 
   OptoReg::Name second() const { return _second; }
   OptoReg::Name first() const { return _first; }
-  OptoRegPair(OptoReg::Name second, OptoReg::Name first) {  _second = second; _first = first; }
-  OptoRegPair(OptoReg::Name f) { _second = OptoReg::Bad; _first = f; }
-  OptoRegPair() { _second = OptoReg::Bad; _first = OptoReg::Bad; }
+  OptoRegPair(OptoReg::Name second, OptoReg::Name first) {
+    assert(can_fit(second), "overflow");
+    assert(can_fit(first), "overflow");
+    _second = second;
+    _first = first;
+  }
 };
 
 #endif // SHARE_OPTO_OPTOREG_HPP

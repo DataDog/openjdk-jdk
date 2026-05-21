@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,21 +25,21 @@
 
 package sun.net.www.protocol.jar;
 
-import java.io.InputStream;
-import java.io.IOException;
-import java.io.FileNotFoundException;
+import sun.net.www.protocol.file.FileURLConnection;
 import java.io.BufferedInputStream;
-import java.net.URL;
-import java.net.URLConnection;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.MalformedURLException;
-import java.net.UnknownServiceException;
-import java.util.Enumeration;
-import java.util.Map;
+import java.net.URL;
+import java.security.Permission;
 import java.util.List;
+import java.util.Map;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
-import java.util.jar.Manifest;
-import java.security.Permission;
+import static jdk.internal.util.Exceptions.filterJarName;
+import static jdk.internal.util.Exceptions.formatMsg;
+
 
 /**
  * @author Benjamin Renaud
@@ -47,25 +47,9 @@ import java.security.Permission;
  */
 public class JarURLConnection extends java.net.JarURLConnection {
 
-    private static final boolean debug = false;
-
     /* the Jar file factory. It handles both retrieval and caching.
      */
     private static final JarFileFactory factory = JarFileFactory.getInstance();
-
-    /* the url for the Jar file */
-    private URL jarFileURL;
-
-    /* the permission to get this JAR file. This is the actual, ultimate,
-     * permission, returned by the jar file factory.
-     */
-    private Permission permission;
-
-    /* the url connection for the JAR file */
-    private URLConnection jarFileURLConnection;
-
-    /* the entry name, if any */
-    private String entryName;
 
     /* the JarEntry */
     private JarEntry jarEntry;
@@ -80,12 +64,10 @@ public class JarURLConnection extends java.net.JarURLConnection {
     throws MalformedURLException, IOException {
         super(url);
 
-        jarFileURL = getJarFileURL();
-        jarFileURLConnection = jarFileURL.openConnection();
+        jarFileURLConnection = getJarFileURL().openConnection();
         // whether, or not, the embedded URL should use the cache will depend
         // on this instance's cache value
         jarFileURLConnection.setUseCaches(useCaches);
-        entryName = getEntryName();
     }
 
     public JarFile getJarFile() throws IOException {
@@ -98,6 +80,9 @@ public class JarURLConnection extends java.net.JarURLConnection {
         return jarEntry;
     }
 
+    @Override
+    @Deprecated(since = "25", forRemoval = true)
+    @SuppressWarnings("removal")
     public Permission getPermission() throws IOException {
         return jarFileURLConnection.getPermission();
     }
@@ -110,42 +95,69 @@ public class JarURLConnection extends java.net.JarURLConnection {
             try {
                 super.close();
             } finally {
-                if (!getUseCaches()) {
-                    jarFile.close();
+                try {
+                    if (!getUseCaches()) {
+                        jarFile.close();
+                    }
+                } finally {
+                    if (jarFileURLConnection instanceof FileURLConnection fileURLConnection) {
+                        fileURLConnection.closeInputStream();
+                    }
                 }
             }
         }
     }
 
-
-
     public void connect() throws IOException {
         if (!connected) {
+            boolean useCaches = getUseCaches();
+            String entryName = getEntryName();
+
             /* the factory call will do the security checks */
-            jarFile = factory.get(getJarFileURL(), getUseCaches());
+            URL url = getJarFileURL();
+            // if we have an entry name, and the jarfile is local,
+            // don't put the jar into the cache until after we have
+            // validated that the entry name exists
+            jarFile = entryName == null
+                    ? factory.get(url, useCaches)
+                    : factory.getOrCreate(url, useCaches);
+
+            if ((entryName != null)) {
+                jarEntry = (JarEntry) jarFile.getEntry(entryName);
+                if (jarEntry == null) {
+                    try {
+                        // only close the jar file if it isn't in the
+                        // cache. If the jar file is local, it won't be
+                        // in the cache yet, and so will be closed here.
+                        factory.closeIfNotCached(url, jarFile);
+                    } catch (Exception e) {
+                    }
+                    throw new FileNotFoundException(
+                        formatMsg("JAR entry %s not found in jar file %s",
+                                  filterJarName(entryName),
+                                  filterJarName(jarFile.getName())));
+                }
+            }
+
+            // we have validated that the entry exists.
+            // if useCaches was requested, update the cache now.
+            if (useCaches && entryName != null) {
+                // someone may have beat us and updated the cache
+                // already - in which case - cacheIfAbsent will
+                // return false. cacheIfAbsent returns true if
+                // our jarFile is in the cache when the method
+                // returns, whether because it put it there or
+                // because it found it there.
+                useCaches = factory.cacheIfAbsent(url, jarFile);
+            }
 
             /* we also ask the factory the permission that was required
              * to get the jarFile, and set it as our permission.
              */
-            if (getUseCaches()) {
+            if (useCaches) {
                 boolean oldUseCaches = jarFileURLConnection.getUseCaches();
                 jarFileURLConnection = factory.getConnection(jarFile);
                 jarFileURLConnection.setUseCaches(oldUseCaches);
-            }
-
-            if ((entryName != null)) {
-                jarEntry = (JarEntry)jarFile.getEntry(entryName);
-                if (jarEntry == null) {
-                    try {
-                        if (!getUseCaches()) {
-                            jarFile.close();
-                        }
-                    } catch (Exception e) {
-                    }
-                    throw new FileNotFoundException("JAR entry " + entryName +
-                                                    " not found in " +
-                                                    jarFile.getName());
-                }
             }
             connected = true;
         }
@@ -156,13 +168,15 @@ public class JarURLConnection extends java.net.JarURLConnection {
 
         InputStream result = null;
 
+        String entryName = getEntryName();
         if (entryName == null) {
             throw new IOException("no entry name specified");
         } else {
             if (jarEntry == null) {
-                throw new FileNotFoundException("JAR entry " + entryName +
-                                                " not found in " +
-                                                jarFile.getName());
+                throw new FileNotFoundException(
+                    formatMsg("JAR entry %s not found in jar file %s",
+                              filterJarName(entryName),
+                              filterJarName(jarFile.getName())));
             }
             result = new JarURLInputStream (jarFile.getInputStream(jarEntry));
         }
@@ -181,10 +195,10 @@ public class JarURLConnection extends java.net.JarURLConnection {
         try {
             connect();
             if (jarEntry == null) {
-                /* if the URL referes to an archive */
+                /* if the URL refers to an archive */
                 result = jarFileURLConnection.getContentLengthLong();
             } else {
-                /* if the URL referes to an archive entry */
+                /* if the URL refers to an archive entry */
                 result = getJarEntry().getSize();
             }
         } catch (IOException e) {
@@ -196,7 +210,7 @@ public class JarURLConnection extends java.net.JarURLConnection {
         Object result = null;
 
         connect();
-        if (entryName == null) {
+        if (getEntryName() == null) {
             result = jarFile;
         } else {
             result = super.getContent();
@@ -206,6 +220,7 @@ public class JarURLConnection extends java.net.JarURLConnection {
 
     public String getContentType() {
         if (contentType == null) {
+            String entryName = getEntryName();
             if (entryName == null) {
                 contentType = "x-java/jar";
             } else {
@@ -365,7 +380,7 @@ public class JarURLConnection extends java.net.JarURLConnection {
      * Returns the default value of a <code>URLConnection</code>'s
      * <code>useCaches</code> flag.
      * <p>
-     * Ths default is "sticky", being a part of the static state of all
+     * The default is "sticky", being a part of the static state of all
      * URLConnections.  This flag applies to the next, and all following
      * URLConnections that are created.
      *

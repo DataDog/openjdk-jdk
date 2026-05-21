@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,15 +22,22 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+
 package com.sun.imageio.plugins.common;
 
 import java.awt.color.ColorSpace;
+import java.io.Serial;
 
 /**
  * Singleton class representing a simple, mathematically defined CMYK
  * color space.
  */
 public final class SimpleCMYKColorSpace extends ColorSpace {
+
+    /**
+     * Use serialVersionUID from JDK 9 for interoperability.
+     */
+    @Serial
     private static final long serialVersionUID = 5387117338644522424L;
 
     private static ColorSpace theInstance = null;
@@ -51,14 +58,17 @@ public final class SimpleCMYKColorSpace extends ColorSpace {
         csRGB = ColorSpace.getInstance(ColorSpace.CS_LINEAR_RGB);
     }
 
+    @Override
     public boolean equals(Object o) {
-        return o != null && o instanceof SimpleCMYKColorSpace;
+        return o instanceof SimpleCMYKColorSpace;
     }
 
+    @Override
     public int hashCode() {
-        return theInstance.hashCode();
+        return System.identityHashCode(theInstance);
     }
 
+    @Override
     public float[] toRGB(float[] colorvalue) {
         float C = colorvalue[0];
         float M = colorvalue[1];
@@ -90,6 +100,7 @@ public final class SimpleCMYKColorSpace extends ColorSpace {
         return rgbvalue;
     }
 
+    @Override
     public float[] fromRGB(float[] rgbvalue) {
         // Convert from sRGB to linear RGB.
         for (int i = 0; i < 3; i++) {
@@ -121,10 +132,12 @@ public final class SimpleCMYKColorSpace extends ColorSpace {
         return new float[] {C, M, Y, K};
     }
 
+    @Override
     public float[] toCIEXYZ(float[] colorvalue) {
         return csRGB.toCIEXYZ(toRGB(colorvalue));
     }
 
+    @Override
     public float[] fromCIEXYZ(float[] xyzvalue) {
         return fromRGB(csRGB.fromCIEXYZ(xyzvalue));
     }

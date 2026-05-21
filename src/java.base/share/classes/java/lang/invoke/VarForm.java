@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,9 @@
  */
 package java.lang.invoke;
 
+import jdk.internal.vm.annotation.DontInline;
 import jdk.internal.vm.annotation.ForceInline;
+import jdk.internal.vm.annotation.Hidden;
 import jdk.internal.vm.annotation.Stable;
 
 import java.lang.invoke.VarHandle.AccessMode;
@@ -33,18 +35,26 @@ import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 
+import static java.lang.invoke.MethodHandleNatives.Constants.REF_invokeStatic;
+import static java.lang.invoke.MethodHandleStatics.UNSAFE;
+
 /**
  * A var handle form containing a set of member name, one for each operation.
  * Each member characterizes a static method.
  */
 final class VarForm {
 
+    // implClass must be initialized when the member names are accessed!
+    final Class<?> implClass;
+
     final @Stable MethodType[] methodType_table;
 
     final @Stable MemberName[] memberName_table;
 
     VarForm(Class<?> implClass, Class<?> receiver, Class<?> value, Class<?>... intermediate) {
-        this.methodType_table = new MethodType[VarHandle.AccessType.values().length];
+        this.methodType_table = new MethodType[VarHandle.AccessType.COUNT];
+        this.memberName_table = new MemberName[VarHandle.AccessMode.COUNT];
+        this.implClass = implClass;
         if (receiver == null) {
             initMethodTypes(value, intermediate);
         } else {
@@ -53,37 +63,64 @@ final class VarForm {
             System.arraycopy(intermediate, 0, coordinates, 1, intermediate.length);
             initMethodTypes(value, coordinates);
         }
-
-        // TODO lazily calculate
-        this.memberName_table = linkFromStatic(implClass);
     }
 
+    VarForm(Class<?> implClass, VarForm methodTypeSource) {
+        this.implClass = implClass;
+        // reuse initMethodTypes result from methodTypeSource
+        this.methodType_table = methodTypeSource.methodType_table;
+        this.methodType_V_table = methodTypeSource.methodType_V_table;
+        this.memberName_table = new MemberName[VarHandle.AccessMode.COUNT];
+        assert assertMethodTypeTableInitialized() : implClass;
+    }
+
+    // Used by IndirectVarHandle
     VarForm(Class<?> value, Class<?>[] coordinates) {
-        this.methodType_table = new MethodType[VarHandle.AccessType.values().length];
+        this.methodType_table = new MethodType[VarHandle.AccessType.COUNT];
         this.memberName_table = null;
+        this.implClass = null;
         initMethodTypes(value, coordinates);
     }
 
     void initMethodTypes(Class<?> value, Class<?>... coordinates) {
-        // (Receiver, <Intermediates>)Value
-        methodType_table[VarHandle.AccessType.GET.ordinal()] =
-                MethodType.methodType(value, coordinates).erase();
+        Class<?> erasedValue = MethodTypeForm.canonicalize(value, MethodTypeForm.ERASE);
+        Class<?>[] erasedCoordinates = MethodTypeForm.canonicalizeAll(coordinates, MethodTypeForm.ERASE);
 
-        // (Receiver, <Intermediates>, Value)void
-        methodType_table[VarHandle.AccessType.SET.ordinal()] =
-                MethodType.methodType(void.class, coordinates).appendParameterTypes(value).erase();
+        if (erasedValue != null) {
+            value = erasedValue;
+        }
+        if (erasedCoordinates != null) {
+            coordinates = erasedCoordinates;
+        }
+
+        MethodType type = MethodType.methodType(value, coordinates);
+
+        // (Receiver, <Intermediates>)Value
+        methodType_table[VarHandle.AccessType.GET.ordinal()] = type;
 
         // (Receiver, <Intermediates>, Value)Value
-        methodType_table[VarHandle.AccessType.GET_AND_UPDATE.ordinal()] =
-                MethodType.methodType(value, coordinates).appendParameterTypes(value).erase();
+        type = methodType_table[VarHandle.AccessType.GET_AND_UPDATE.ordinal()] =
+                type.appendParameterTypes(value);
+
+        // (Receiver, <Intermediates>, Value)void
+        methodType_table[VarHandle.AccessType.SET.ordinal()] = type.changeReturnType(void.class);
+
+        // (Receiver, <Intermediates>, Value, Value)Value
+        type = methodType_table[VarHandle.AccessType.COMPARE_AND_EXCHANGE.ordinal()] =
+                type.appendParameterTypes(value);
 
         // (Receiver, <Intermediates>, Value, Value)boolean
         methodType_table[VarHandle.AccessType.COMPARE_AND_SET.ordinal()] =
-                MethodType.methodType(boolean.class, coordinates).appendParameterTypes(value, value).erase();
+                type.changeReturnType(boolean.class);
+    }
 
-        // (Receiver, <Intermediates>, Value, Value)Value
-        methodType_table[VarHandle.AccessType.COMPARE_AND_EXCHANGE.ordinal()] =
-                MethodType.methodType(value, coordinates).appendParameterTypes(value, value).erase();
+    private boolean assertMethodTypeTableInitialized() {
+        if (methodType_table == null)
+            return false;
+        for (int i = 0; i < VarHandle.AccessType.COUNT; i++) {
+            assert methodType_table[i] != null : implClass + " " + VarHandle.AccessType.values()[i];
+        }
+        return true;
     }
 
     @ForceInline
@@ -92,15 +129,38 @@ final class VarForm {
     }
 
     @ForceInline
+    @Hidden
     final MemberName getMemberName(int mode) {
-        // TODO calculate lazily
+        // Can be simplified by calling getMemberNameOrNull, but written in this
+        // form to improve interpreter/coldpath performance.
         MemberName mn = memberName_table[mode];
         if (mn == null) {
-            throw new UnsupportedOperationException();
+            mn = resolveMemberName(mode);
+            if (mn == null) {
+                throw new UnsupportedOperationException(AccessMode.valueFromOrdinal(mode).methodName());
+            }
         }
         return mn;
     }
 
+    @ForceInline
+    final MemberName getMemberNameOrNull(int mode) {
+        MemberName mn = memberName_table[mode];
+        if (mn == null) {
+            mn = resolveMemberName(mode);
+        }
+        return mn;
+    }
+
+    @DontInline
+    MemberName resolveMemberName(int mode) {
+        AccessMode value = AccessMode.valueFromOrdinal(mode);
+        String methodName = value.methodName();
+        MethodType type = methodType_table[value.at.ordinal()].insertParameterTypes(0, VarHandle.class);
+        assert !UNSAFE.shouldBeInitialized(implClass) : implClass;
+        return memberName_table[mode] = MethodHandles.Lookup.IMPL_LOOKUP
+            .resolveOrNull(REF_invokeStatic, implClass, methodName, type);
+    }
 
     @Stable
     MethodType[] methodType_V_table;
@@ -124,26 +184,5 @@ final class VarForm {
             table = getMethodType_V_init();
         }
         return table[type];
-    }
-
-
-    /**
-     * Link all signature polymorphic methods.
-     */
-    private static MemberName[] linkFromStatic(Class<?> implClass) {
-        MemberName[] table = new MemberName[AccessMode.values().length];
-
-        for (Class<?> c = implClass; c != VarHandle.class; c = c.getSuperclass()) {
-            for (Method m : c.getDeclaredMethods()) {
-                if (Modifier.isStatic(m.getModifiers())) {
-                    AccessMode am = AccessMode.methodNameToAccessMode.get(m.getName());
-                    if (am != null) {
-                        assert table[am.ordinal()] == null;
-                        table[am.ordinal()] = new MemberName(m);
-                    }
-                }
-            }
-        }
-        return table;
     }
 }

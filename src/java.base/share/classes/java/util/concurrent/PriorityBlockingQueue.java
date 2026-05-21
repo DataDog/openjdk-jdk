@@ -53,6 +53,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import jdk.internal.access.SharedSecrets;
+import jdk.internal.invoke.MhUtil;
 import jdk.internal.util.ArraysSupport;
 
 /**
@@ -87,7 +88,7 @@ import jdk.internal.util.ArraysSupport;
  * <pre> {@code
  * class FIFOEntry<E extends Comparable<? super E>>
  *     implements Comparable<FIFOEntry<E>> {
- *   static final AtomicLong seq = new AtomicLong(0);
+ *   static final AtomicLong seq = new AtomicLong();
  *   final long seqNum;
  *   final E entry;
  *   public FIFOEntry(E entry) {
@@ -159,12 +160,12 @@ public class PriorityBlockingQueue<E> extends AbstractQueue<E>
     private transient Comparator<? super E> comparator;
 
     /**
-     * Lock used for all public operations.
+     * @serial Lock used for all public operations.
      */
     private final ReentrantLock lock = new ReentrantLock();
 
     /**
-     * Condition for blocking when empty.
+     * @serial Condition for blocking when empty.
      */
     @SuppressWarnings("serial") // Classes implementing Condition may be serializable.
     private final Condition notEmpty = lock.newCondition();
@@ -175,7 +176,7 @@ public class PriorityBlockingQueue<E> extends AbstractQueue<E>
     private transient volatile int allocationSpinLock;
 
     /**
-     * A plain PriorityQueue used only for serialization,
+     * @serial A plain PriorityQueue used only for serialization,
      * to maintain compatibility with previous versions
      * of this class. Non-null only during serialization/deserialization.
      */
@@ -226,7 +227,7 @@ public class PriorityBlockingQueue<E> extends AbstractQueue<E>
     /**
      * Creates a {@code PriorityBlockingQueue} containing the elements
      * in the specified collection.  If the specified collection is a
-     * {@link SortedSet} or a {@link PriorityQueue}, this
+     * {@link SortedSet} or a {@link PriorityBlockingQueue}, this
      * priority queue will be ordered according to the same ordering.
      * Otherwise, this priority queue will be ordered according to the
      * {@linkplain Comparable natural ordering} of its elements.
@@ -290,7 +291,9 @@ public class PriorityBlockingQueue<E> extends AbstractQueue<E>
         if (allocationSpinLock == 0 &&
             ALLOCATIONSPINLOCK.compareAndSet(this, 0, 1)) {
             try {
-                int growth = oldCap < 64 ? oldCap + 2 : oldCap >> 1;
+                int growth = (oldCap < 64)
+                    ? (oldCap + 2) // grow faster if small
+                    : (oldCap >> 1);
                 int newCap = ArraysSupport.newLength(oldCap, 1, growth);
                 if (queue == array)
                     newArray = new Object[newCap];
@@ -1091,15 +1094,8 @@ public class PriorityBlockingQueue<E> extends AbstractQueue<E>
     }
 
     // VarHandle mechanics
-    private static final VarHandle ALLOCATIONSPINLOCK;
-    static {
-        try {
-            MethodHandles.Lookup l = MethodHandles.lookup();
-            ALLOCATIONSPINLOCK = l.findVarHandle(PriorityBlockingQueue.class,
-                                                 "allocationSpinLock",
-                                                 int.class);
-        } catch (ReflectiveOperationException e) {
-            throw new ExceptionInInitializerError(e);
-        }
-    }
+    private static final VarHandle ALLOCATIONSPINLOCK =
+            MhUtil.findVarHandle(
+                    MethodHandles.lookup(), "allocationSpinLock", int.class);
+
 }

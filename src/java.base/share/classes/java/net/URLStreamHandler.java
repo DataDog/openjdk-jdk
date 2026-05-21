@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,13 +26,12 @@
 package java.net;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.File;
-import java.io.OutputStream;
-import java.util.Hashtable;
+import java.util.Locale;
 import java.util.Objects;
 import sun.net.util.IPAddressUtil;
-import sun.net.www.ParseUtil;
+
+import static jdk.internal.util.Exceptions.formatMsg;
+import static jdk.internal.util.Exceptions.filterNonSocketInfo;
 
 /**
  * The abstract class {@code URLStreamHandler} is the common
@@ -134,6 +133,10 @@ public abstract class URLStreamHandler {
      *                  end of the string or the position of the
      *                  "{@code #}" character, if present. All information
      *                  after the sharp sign indicates an anchor.
+     * @throws IllegalArgumentException if the implementation of the protocol
+     *                  handler rejects any of the given parameters
+     * @throws NullPointerException if {@code u} is {@code null},
+     *                  or if {@code start < limit} and {@code spec} is {@code null}
      */
     protected void parseURL(URL u, String spec, int start, int limit) {
         // These fields may receive context content if this was relative URL
@@ -158,13 +161,12 @@ public abstract class URLStreamHandler {
             queryOnly = queryStart == start;
             if ((queryStart != -1) && (queryStart < limit)) {
                 query = spec.substring(queryStart+1, limit);
-                if (limit > queryStart)
-                    limit = queryStart;
+                limit = queryStart;
                 spec = spec.substring(0, queryStart);
             }
         }
 
-        int i = 0;
+        int i;
         // Parse the authority part if any
         boolean isUNCName = (start <= limit - 4) &&
                         (spec.charAt(start) == '/') &&
@@ -207,7 +209,7 @@ public abstract class URLStreamHandler {
                         if (!IPAddressUtil.
                             isIPv6LiteralAddress(host.substring(1, ind))) {
                             throw new IllegalArgumentException(
-                                "Invalid host: "+ host);
+                                formatMsg("Invalid host%s", filterNonSocketInfo(host).prefixWith(": ")));
                         }
 
                         port = -1 ;
@@ -221,12 +223,14 @@ public abstract class URLStreamHandler {
                                 }
                             } else {
                                 throw new IllegalArgumentException(
-                                    "Invalid authority field: " + authority);
+                                    formatMsg("Invalid authority field%s",
+                                               filterNonSocketInfo(authority).prefixWith(": ")));
                             }
                         }
                     } else {
                         throw new IllegalArgumentException(
-                            "Invalid authority field: " + authority);
+                            formatMsg("Invalid authority field%s",
+                                       filterNonSocketInfo(authority).prefixWith(": ")));
                     }
                 } else {
                     ind = host.indexOf(':');
@@ -249,7 +253,7 @@ public abstract class URLStreamHandler {
             start = i;
             // If the authority is defined then the path is defined by the
             // spec only; See RFC 2396 Section 5.2.4.
-            if (authority != null && !authority.isEmpty())
+            if (!authority.isEmpty())
                 path = "";
         }
 
@@ -259,26 +263,27 @@ public abstract class URLStreamHandler {
 
         // Parse the file path if any
         if (start < limit) {
+            String specStr = spec.substring(start, limit);
             if (spec.charAt(start) == '/') {
-                path = spec.substring(start, limit);
+                path = specStr;
             } else if (path != null && !path.isEmpty()) {
                 isRelPath = true;
                 int ind = path.lastIndexOf('/');
-                String separator = "";
-                if (ind == -1 && authority != null)
-                    separator = "/";
-                path = path.substring(0, ind + 1) + separator +
-                         spec.substring(start, limit);
-
+                if (ind == -1 && authority != null) {
+                    path = "/".concat(specStr);
+                } else {
+                    path = path.substring(0, ind + 1).concat(specStr);
+                }
             } else {
-                path = spec.substring(start, limit);
-                path = (authority != null) ? "/" + path : path;
+                path = (authority != null) ? "/".concat(specStr) : specStr;
             }
         } else if (queryOnly && path != null) {
             int ind = path.lastIndexOf('/');
-            if (ind < 0)
-                ind = 0;
-            path = path.substring(0, ind) + "/";
+            if (ind < 0) {
+                path = "/";
+            } else {
+                path = path.substring(0, ind + 1);
+            }
         }
         if (path == null)
             path = "";
@@ -299,7 +304,7 @@ public abstract class URLStreamHandler {
                  */
                 if (i > 0 && (limit = path.lastIndexOf('/', i - 1)) >= 0 &&
                     (path.indexOf("/../", limit) != 0)) {
-                    path = path.substring(0, limit) + path.substring(i + 3);
+                    path = path.substring(0, limit).concat(path.substring(i + 3));
                     i = 0;
                 } else {
                     i = i + 3;
@@ -375,7 +380,7 @@ public abstract class URLStreamHandler {
         } else {
             String host = u.getHost();
             if (host != null)
-                h += host.toLowerCase().hashCode();
+                h += host.toLowerCase(Locale.ROOT).hashCode();
         }
 
         // Generate the file part.
@@ -443,23 +448,8 @@ public abstract class URLStreamHandler {
      * IP address.
      * @since 1.3
      */
-    protected synchronized InetAddress getHostAddress(URL u) {
-        if (u.hostAddress != null)
-            return u.hostAddress;
-
-        String host = u.getHost();
-        if (host == null || host.isEmpty()) {
-            return null;
-        } else {
-            try {
-                u.hostAddress = InetAddress.getByName(host);
-            } catch (UnknownHostException ex) {
-                return null;
-            } catch (SecurityException se) {
-                return null;
-            }
-        }
-        return u.hostAddress;
+    protected InetAddress getHostAddress(URL u) {
+        return u.getHostAddress();
     }
 
     /**
@@ -491,14 +481,33 @@ public abstract class URLStreamHandler {
      * @return  a string representation of the {@code URL} argument.
      */
     protected String toExternalForm(URL u) {
-        String s;
+        // The fast paths and branch-free concatenations in this method are here for
+        // a reason and should not be updated without checking performance figures.
+
+        // Optionality, subtly different for authority
+        boolean emptyAuth = u.getAuthority() == null || u.getAuthority().isEmpty();
+        boolean emptyPath = u.getPath() == null;
+        boolean emptyQuery = u.getQuery() == null;
+        boolean emptyRef = u.getRef() == null;
+        var path = emptyPath ? "" : u.getPath();
+        // Fast paths for empty components
+        if (emptyQuery && emptyRef) {
+            return emptyAuth
+                    ? (u.getProtocol() + ":" + path)
+                    : (u.getProtocol() + "://" + u.getAuthority() + path);
+        }
+        // Prefer locals for efficient concatenation
+        var authSep = emptyAuth ? ":" : "://";
+        var auth = emptyAuth ? "" : u.getAuthority();
+        var querySep = emptyQuery ? "" : "?";
+        var query = emptyQuery ? "" : u.getQuery();
+        var refSep = emptyRef ? "" : "#";
+        var ref = emptyRef ? "" : u.getRef();
         return u.getProtocol()
-            + ':'
-            + ((s = u.getAuthority()) != null && !s.isEmpty()
-               ? "//" + s : "")
-            + ((s = u.getPath()) != null ? s : "")
-            + ((s = u.getQuery()) != null ? '?' + s : "")
-            + ((s = u.getRef()) != null ? '#' + s : "");
+                + authSep + auth
+                + path
+                + querySep + query
+                + refSep + ref;
     }
 
     /**
@@ -517,6 +526,9 @@ public abstract class URLStreamHandler {
      * @param   ref       the reference.
      * @throws          SecurityException       if the protocol handler of the URL is
      *                                  different from this one
+     * @throws IllegalArgumentException if the implementation of the protocol
+     *                    handler rejects any of the given parameters
+     * @throws NullPointerException if {@code u} is {@code null}
      * @since 1.3
      */
     protected void setURL(URL u, String protocol, String host, int port,
@@ -524,10 +536,23 @@ public abstract class URLStreamHandler {
                              String query, String ref) {
         if (this != u.handler) {
             throw new SecurityException("handler for url different from " +
-                                        "this handler");
-        } else if (host != null && u.isBuiltinStreamHandler(this)) {
-            String s = IPAddressUtil.checkHostString(host);
-            if (s != null) throw new IllegalArgumentException(s);
+                    "this handler");
+        }
+        // if early parsing, perform additional checks here rather than waiting
+        // for openConnection()
+        boolean earlyURLParsing = IPAddressUtil.earlyURLParsing();
+        boolean isBuiltInHandler = u.isBuiltinStreamHandler(this);
+        if (host != null && isBuiltInHandler) {
+            String errMsg = IPAddressUtil.checkHostString(host);
+            if (errMsg != null) throw new IllegalArgumentException(errMsg);
+        }
+        if (userInfo != null && isBuiltInHandler && earlyURLParsing) {
+            String errMsg = IPAddressUtil.checkUserInfo(userInfo);
+            if (errMsg != null) throw new IllegalArgumentException(errMsg);
+        }
+        if (authority != null && isBuiltInHandler && earlyURLParsing) {
+            String errMsg = IPAddressUtil.checkAuth(authority);
+            if (errMsg != null) throw new IllegalArgumentException(errMsg);
         }
         // ensure that no one can reset the protocol on a given URL.
         u.set(u.getProtocol(), host, port, authority, userInfo, path, query, ref);
@@ -546,6 +571,9 @@ public abstract class URLStreamHandler {
      * @param   ref       the reference.
      * @throws          SecurityException       if the protocol handler of the URL is
      *                                  different from this one
+     * @throws IllegalArgumentException if the implementation of the protocol
+     *                    handler rejects any of the given parameters
+     * @throws NullPointerException if {@code u} is {@code null}
      * @deprecated Use setURL(URL, String, String, int, String, String, String,
      *             String);
      */

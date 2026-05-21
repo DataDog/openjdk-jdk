@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,6 @@ import java.awt.Shape;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Path2D;
 import java.awt.geom.PathIterator;
-import java.security.AccessController;
 import java.util.Arrays;
 import sun.awt.geom.PathConsumer2D;
 import static sun.java2d.marlin.MarlinUtils.logInfo;
@@ -40,7 +39,6 @@ import sun.java2d.ReentrantContextProviderTL;
 import sun.java2d.pipe.AATileGenerator;
 import sun.java2d.pipe.Region;
 import sun.java2d.pipe.RenderingEngine;
-import sun.security.action.GetPropertyAction;
 
 /**
  * Marlin RendererEngine implementation (derived from Pisces)
@@ -65,7 +63,7 @@ public final class DMarlinRenderingEngine extends RenderingEngine
     private enum NormMode {
         ON_WITH_AA {
             @Override
-            PathIterator getNormalizingPathIterator(final DRendererContext rdrCtx,
+            PathIterator getNormalizingPathIterator(final RendererContext rdrCtx,
                                                     final PathIterator src)
             {
                 // NormalizingPathIterator NearestPixelCenter:
@@ -74,7 +72,7 @@ public final class DMarlinRenderingEngine extends RenderingEngine
         },
         ON_NO_AA{
             @Override
-            PathIterator getNormalizingPathIterator(final DRendererContext rdrCtx,
+            PathIterator getNormalizingPathIterator(final RendererContext rdrCtx,
                                                     final PathIterator src)
             {
                 // NearestPixel NormalizingPathIterator:
@@ -83,7 +81,7 @@ public final class DMarlinRenderingEngine extends RenderingEngine
         },
         OFF{
             @Override
-            PathIterator getNormalizingPathIterator(final DRendererContext rdrCtx,
+            PathIterator getNormalizingPathIterator(final RendererContext rdrCtx,
                                                     final PathIterator src)
             {
                 // return original path iterator if normalization is disabled:
@@ -91,7 +89,7 @@ public final class DMarlinRenderingEngine extends RenderingEngine
             }
         };
 
-        abstract PathIterator getNormalizingPathIterator(DRendererContext rdrCtx,
+        abstract PathIterator getNormalizingPathIterator(RendererContext rdrCtx,
                                                          PathIterator src);
     }
 
@@ -129,7 +127,7 @@ public final class DMarlinRenderingEngine extends RenderingEngine
                                     float[] dashes,
                                     float dashphase)
     {
-        final DRendererContext rdrCtx = getRendererContext();
+        final RendererContext rdrCtx = getRendererContext();
         try {
             // initialize a large copyable Path2D to avoid a lot of array growing:
             final Path2D.Double p2d = rdrCtx.getPath2D();
@@ -151,7 +149,7 @@ public final class DMarlinRenderingEngine extends RenderingEngine
             return new Path2D.Double(p2d);
 
         } finally {
-            // recycle the DRendererContext instance
+            // recycle the RendererContext instance
             returnRendererContext(rdrCtx);
         }
     }
@@ -170,16 +168,20 @@ public final class DMarlinRenderingEngine extends RenderingEngine
      * {@code antialias} boolean parameter is true.
      * <p>
      * The geometry of the widened path is forwarded to the indicated
-     * {@link DPathConsumer2D} object as it is calculated.
+     * {@link PathConsumer2D} object as it is calculated.
      *
      * @param src the source path to be widened
-     * @param bs the {@code BasicSroke} object specifying the
+     * @param at the transform to be applied to the shape and the
+     *           stroke attributes
+     * @param bs the {@code BasicStroke} object specifying the
      *           decorations to be applied to the widened path
+     * @param thin true if the transformed stroke attributes are smaller
+     *             than the minimum dropout pen width
      * @param normalize indicates whether stroke normalization should
      *                  be applied
      * @param antialias indicates whether or not adjustments appropriate
      *                  to antialiased rendering should be applied
-     * @param consumer the {@code DPathConsumer2D} instance to forward
+     * @param consumer the {@code PathConsumer2D} instance to forward
      *                 the widened geometry to
      * @since 1.7
      */
@@ -192,21 +194,100 @@ public final class DMarlinRenderingEngine extends RenderingEngine
                          boolean antialias,
                          final PathConsumer2D consumer)
     {
+        strokeTo(src, at, null, bs, thin, normalize, antialias, consumer);
+    }
+
+    /**
+     * Sends the geometry for a widened path as specified by the parameters
+     * to the specified consumer.
+     * <p>
+     * The specified {@code src} {@link Shape} is widened according
+     * to the parameters specified by the {@link BasicStroke} object.
+     * Adjustments are made to the path as appropriate for the
+     * {@link java.awt.RenderingHints#VALUE_STROKE_NORMALIZE} hint if the
+     * {@code normalize} boolean parameter is true.
+     * Adjustments are made to the path as appropriate for the
+     * {@link java.awt.RenderingHints#VALUE_ANTIALIAS_ON} hint if the
+     * {@code antialias} boolean parameter is true.
+     * <p>
+     * The geometry of the widened path is forwarded to the indicated
+     * {@link PathConsumer2D} object as it is calculated.
+     *
+     * @param src the source path to be widened
+     * @param at the transform to be applied to the shape and the
+     *           stroke attributes
+     * @param clip the current clip in effect in device coordinates
+     * @param bs the {@code BasicStroke} object specifying the
+     *           decorations to be applied to the widened path
+     * @param thin true if the transformed stroke attributes are smaller
+     *             than the minimum dropout pen width
+     * @param normalize indicates whether stroke normalization should
+     *                  be applied
+     * @param antialias indicates whether or not adjustments appropriate
+     *                  to antialiased rendering should be applied
+     * @param consumer the {@code PathConsumer2D} instance to forward
+     *                 the widened geometry to
+     * @since 17
+     */
+/*    @Override (only for 17+) */
+    public void strokeTo(Shape src,
+                         AffineTransform at,
+                         Region clip,
+                         BasicStroke bs,
+                         boolean thin,
+                         boolean normalize,
+                         boolean antialias,
+                         final PathConsumer2D consumer)
+    {
+        // Test if at is identity:
+        final AffineTransform _at = (at != null && !at.isIdentity()) ? at
+                                    : null;
+
         final NormMode norm = (normalize) ?
                 ((antialias) ? NormMode.ON_WITH_AA : NormMode.ON_NO_AA)
                 : NormMode.OFF;
 
-        final DRendererContext rdrCtx = getRendererContext();
+        final RendererContext rdrCtx = getRendererContext();
         try {
-            strokeTo(rdrCtx, src, at, bs, thin, norm, antialias,
+            if ((clip != null) &&
+                    (DO_CLIP || (DO_CLIP_RUNTIME_ENABLE && MarlinProperties.isDoClipAtRuntime()))) {
+                // Define the initial clip bounds:
+                final double[] clipRect = rdrCtx.clipRect;
+
+                // Adjust the clipping rectangle with the renderer offsets
+                final double rdrOffX = 0.25d; // LBO: is it correct for AA or non AA cases ?
+                final double rdrOffY = 0.25d; // see NearestPixelQuarter (depends on normalization ?)
+
+                // add a small rounding error:
+                final double margin = 1e-3d;
+
+                clipRect[0] = clip.getLoY()
+                                - margin + rdrOffY;
+                clipRect[1] = clip.getLoY() + clip.getHeight()
+                                + margin + rdrOffY;
+                clipRect[2] = clip.getLoX()
+                                - margin + rdrOffX;
+                clipRect[3] = clip.getLoX() + clip.getWidth()
+                                + margin + rdrOffX;
+
+                if (MarlinConst.DO_LOG_CLIP) {
+                    MarlinUtils.logInfo("clipRect (clip): "
+                                        + Arrays.toString(rdrCtx.clipRect));
+                }
+
+                // Enable clipping:
+                rdrCtx.doClip = true;
+            }
+
+            strokeTo(rdrCtx, src, _at, bs, thin, norm, antialias,
                      rdrCtx.p2dAdapter.init(consumer));
         } finally {
-            // recycle the DRendererContext instance
+            // recycle the RendererContext instance
             returnRendererContext(rdrCtx);
         }
     }
 
-    void strokeTo(final DRendererContext rdrCtx,
+    void strokeTo(final RendererContext rdrCtx,
                   Shape src,
                   AffineTransform at,
                   BasicStroke bs,
@@ -307,7 +388,7 @@ public final class DMarlinRenderingEngine extends RenderingEngine
         return (lw / widthScale);
     }
 
-    void strokeTo(final DRendererContext rdrCtx,
+    void strokeTo(final RendererContext rdrCtx,
                   Shape src,
                   AffineTransform at,
                   double width,
@@ -411,7 +492,7 @@ public final class DMarlinRenderingEngine extends RenderingEngine
             at = null;
         }
 
-        final DTransformingPathConsumer2D transformerPC2D = rdrCtx.transformerPC2D;
+        final TransformingPathConsumer2D transformerPC2D = rdrCtx.transformerPC2D;
 
         if (DO_TRACE_PATH) {
             // trace Stroker:
@@ -446,7 +527,7 @@ public final class DMarlinRenderingEngine extends RenderingEngine
                 rdrCtx.stroker.disableClipping();
             }
 
-        } else if (rdrCtx.doClip && (caps != Stroker.CAP_BUTT)) {
+        } else if (rdrCtx.doClip && (caps != CAP_BUTT)) {
             if (DO_TRACE_PATH) {
                 pc2d = transformerPC2D.traceClosedPathDetector(pc2d);
             }
@@ -483,7 +564,7 @@ public final class DMarlinRenderingEngine extends RenderingEngine
     }
 
     private static boolean nearZero(final double num) {
-        return Math.abs(num) < 2.0d * Math.ulp(num);
+        return Math.abs(num) < 2.0d * Helpers.ulp(num);
     }
 
     abstract static class NormalizingPathIterator implements PathIterator {
@@ -641,7 +722,7 @@ public final class DMarlinRenderingEngine extends RenderingEngine
         }
     }
 
-    private static void pathTo(final DRendererContext rdrCtx, final PathIterator pi,
+    private static void pathTo(final RendererContext rdrCtx, final PathIterator pi,
                                DPathConsumer2D pc2d)
     {
         if (USE_PATH_SIMPLIFIER) {
@@ -827,17 +908,17 @@ public final class DMarlinRenderingEngine extends RenderingEngine
                                               int[] bbox)
     {
         MarlinTileGenerator ptg = null;
-        DRenderer r = null;
+        Renderer r = null;
 
-        final DRendererContext rdrCtx = getRendererContext();
+        final RendererContext rdrCtx = getRendererContext();
         try {
             if (DO_CLIP || (DO_CLIP_RUNTIME_ENABLE && MarlinProperties.isDoClipAtRuntime())) {
                 // Define the initial clip bounds:
                 final double[] clipRect = rdrCtx.clipRect;
 
                 // Adjust the clipping rectangle with the renderer offsets
-                final double rdrOffX = DRenderer.RDR_OFFSET_X;
-                final double rdrOffY = DRenderer.RDR_OFFSET_Y;
+                final double rdrOffX = Renderer.RDR_OFFSET_X;
+                final double rdrOffY = Renderer.RDR_OFFSET_Y;
 
                 // add a small rounding error:
                 final double margin = 1e-3d;
@@ -950,9 +1031,9 @@ public final class DMarlinRenderingEngine extends RenderingEngine
         }
 
         MarlinTileGenerator ptg = null;
-        DRenderer r = null;
+        Renderer r = null;
 
-        final DRendererContext rdrCtx = getRendererContext();
+        final RendererContext rdrCtx = getRendererContext();
         try {
             r = rdrCtx.renderer.init(clip.getLoX(), clip.getLoY(),
                                      clip.getWidth(), clip.getHeight(),
@@ -999,7 +1080,7 @@ public final class DMarlinRenderingEngine extends RenderingEngine
 
     /**
      * Returns the minimum pen width that the antialiasing rasterizer
-     * can represent without dropouts occuring.
+     * can represent without dropouts occurring.
      * @since 1.7
      */
     @Override
@@ -1021,24 +1102,23 @@ public final class DMarlinRenderingEngine extends RenderingEngine
         }
     }
 
-    // --- DRendererContext handling ---
-    // use ThreadLocal or ConcurrentLinkedQueue to get one DRendererContext
+    // --- RendererContext handling ---
+    // use ThreadLocal or ConcurrentLinkedQueue to get one RendererContext
     private static final boolean USE_THREAD_LOCAL;
 
     // reference type stored in either TL or CLQ
     static final int REF_TYPE;
 
-    // Per-thread DRendererContext
-    private static final ReentrantContextProvider<DRendererContext> RDR_CTX_PROVIDER;
+    // Per-thread RendererContext
+    private static final ReentrantContextProvider<RendererContext> RDR_CTX_PROVIDER;
 
     // Static initializer to use TL or CLQ mode
     static {
         USE_THREAD_LOCAL = MarlinProperties.isUseThreadLocal();
 
         // Soft reference by default:
-        final String refType = AccessController.doPrivileged(
-                            new GetPropertyAction("sun.java2d.renderer.useRef",
-                            "soft"));
+        final String refType = System.getProperty("sun.java2d.renderer.useRef",
+                            "soft");
         switch (refType) {
             default:
             case "soft":
@@ -1053,19 +1133,19 @@ public final class DMarlinRenderingEngine extends RenderingEngine
         }
 
         if (USE_THREAD_LOCAL) {
-            RDR_CTX_PROVIDER = new ReentrantContextProviderTL<DRendererContext>(REF_TYPE)
+            RDR_CTX_PROVIDER = new ReentrantContextProviderTL<RendererContext>(REF_TYPE)
                 {
                     @Override
-                    protected DRendererContext newContext() {
-                        return DRendererContext.createContext();
+                    protected RendererContext newContext() {
+                        return RendererContext.createContext();
                     }
                 };
         } else {
-            RDR_CTX_PROVIDER = new ReentrantContextProviderCLQ<DRendererContext>(REF_TYPE)
+            RDR_CTX_PROVIDER = new ReentrantContextProviderCLQ<RendererContext>(REF_TYPE)
                 {
                     @Override
-                    protected DRendererContext newContext() {
-                        return DRendererContext.createContext();
+                    protected RendererContext newContext() {
+                        return RendererContext.createContext();
                     }
                 };
         }
@@ -1114,6 +1194,10 @@ public final class DMarlinRenderingEngine extends RenderingEngine
         logInfo("sun.java2d.renderer.pixelHeight      = "
                 + MarlinConst.INITIAL_PIXEL_HEIGHT);
 
+        logInfo("sun.java2d.renderer.profile          = "
+                + (MarlinProperties.isProfileQuality() ?
+                    "quality" : "speed"));
+
         logInfo("sun.java2d.renderer.subPixel_log2_X  = "
                 + MarlinConst.SUBPIXEL_LG_POSITIONS_X);
         logInfo("sun.java2d.renderer.subPixel_log2_Y  = "
@@ -1147,6 +1231,11 @@ public final class DMarlinRenderingEngine extends RenderingEngine
         logInfo("sun.java2d.renderer.pathSimplifier.pixTol = "
                 + MarlinProperties.getPathSimplifierPixelTolerance());
 
+        logInfo("sun.java2d.renderer.stroker.joinError= "
+                + MarlinProperties.getStrokerJoinError());
+        logInfo("sun.java2d.renderer.stroker.joinStyle= "
+                + MarlinProperties.getStrokerJoinStyle());
+
         logInfo("sun.java2d.renderer.clip             = "
                 + MarlinProperties.isDoClip());
         logInfo("sun.java2d.renderer.clip.runtime.enable = "
@@ -1164,6 +1253,11 @@ public final class DMarlinRenderingEngine extends RenderingEngine
                 + MarlinConst.DO_MONITORS);
         logInfo("sun.java2d.renderer.doChecks         = "
                 + MarlinConst.DO_CHECKS);
+
+        logInfo("sun.java2d.renderer.skip_rdr         = "
+                + MarlinProperties.isSkipRenderer());
+        logInfo("sun.java2d.renderer.skip_pipe        = "
+                + MarlinProperties.isSkipRenderTiles());
 
         // logging parameters
         logInfo("sun.java2d.renderer.useLogger        = "
@@ -1184,26 +1278,26 @@ public final class DMarlinRenderingEngine extends RenderingEngine
                 + MarlinProperties.getQuadDecD2());
 
         logInfo("Renderer settings:");
-        logInfo("CUB_DEC_BND  = " + DRenderer.CUB_DEC_BND);
-        logInfo("CUB_INC_BND  = " + DRenderer.CUB_INC_BND);
-        logInfo("QUAD_DEC_BND = " + DRenderer.QUAD_DEC_BND);
+        logInfo("SORT         = " + MergeSort.SORT_TYPE);
+        logInfo("CUB_DEC_BND  = " + Renderer.CUB_DEC_BND);
+        logInfo("CUB_INC_BND  = " + Renderer.CUB_INC_BND);
+        logInfo("QUAD_DEC_BND = " + Renderer.QUAD_DEC_BND);
 
         logInfo("INITIAL_EDGES_CAPACITY               = "
                 + MarlinConst.INITIAL_EDGES_CAPACITY);
         logInfo("INITIAL_CROSSING_COUNT               = "
-                + DRenderer.INITIAL_CROSSING_COUNT);
+                + Renderer.INITIAL_CROSSING_COUNT);
 
         logInfo("=========================================================="
                 + "=====================");
     }
 
     /**
-     * Get the DRendererContext instance dedicated to the current thread
-     * @return DRendererContext instance
+     * Get the RendererContext instance dedicated to the current thread
+     * @return RendererContext instance
      */
-    @SuppressWarnings({"unchecked"})
-    static DRendererContext getRendererContext() {
-        final DRendererContext rdrCtx = RDR_CTX_PROVIDER.acquire();
+    static RendererContext getRendererContext() {
+        final RendererContext rdrCtx = RDR_CTX_PROVIDER.acquire();
         if (DO_MONITORS) {
             rdrCtx.stats.mon_pre_getAATileGenerator.start();
         }
@@ -1211,10 +1305,10 @@ public final class DMarlinRenderingEngine extends RenderingEngine
     }
 
     /**
-     * Reset and return the given DRendererContext instance for reuse
-     * @param rdrCtx DRendererContext instance
+     * Reset and return the given RendererContext instance for reuse
+     * @param rdrCtx RendererContext instance
      */
-    static void returnRendererContext(final DRendererContext rdrCtx) {
+    static void returnRendererContext(final RendererContext rdrCtx) {
         rdrCtx.dispose();
 
         if (DO_MONITORS) {

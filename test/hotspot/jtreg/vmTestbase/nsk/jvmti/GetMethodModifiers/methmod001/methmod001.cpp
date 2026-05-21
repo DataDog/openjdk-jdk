@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,8 +24,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "jvmti.h"
-#include "agent_common.h"
-#include "JVMTITools.h"
+#include "agent_common.hpp"
+#include "JVMTITools.hpp"
 
 extern "C" {
 
@@ -41,9 +41,8 @@ extern "C" {
 #define ACC_SYNCHRONIZED  0x020
 #define ACC_NATIVE        0x100
 #define ACC_ABSTRACT      0x400
-#define ACC_STRICT        0x800
 
-static jvmtiEnv *jvmti = NULL;
+static jvmtiEnv *jvmti = nullptr;
 static jvmtiEventCallbacks callbacks;
 static jint result = PASSED;
 static jboolean printdump = JNI_FALSE;
@@ -57,7 +56,6 @@ void printModifiers(jint mod) {
     if (mod & ACC_SYNCHRONIZED) printf(" SYNCHRONIZED");
     if (mod & ACC_NATIVE) printf(" NATIVE");
     if (mod & ACC_ABSTRACT) printf(" ABSTRACT");
-    if (mod & ACC_STRICT) printf(" STRICT");
     printf(" (0x%0x)\n", mod);
 }
 
@@ -72,7 +70,7 @@ void checkMeth(jvmtiEnv *jvmti_env, JNIEnv *env, jclass cl,
     } else {
         mid = env->GetMethodID(cl, name, sig);
     }
-    if (mid == NULL) {
+    if (mid == nullptr) {
         printf("Cannot find MethodID for \"%s%s\"\n", name, sig);
         result = STATUS_FAILED;
         return;
@@ -137,12 +135,12 @@ jint Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
     jint res;
     jvmtiError err;
 
-    if (options != NULL && strcmp(options, "printdump") == 0) {
+    if (options != nullptr && strcmp(options, "printdump") == 0) {
         printdump = JNI_TRUE;
     }
 
     res = jvm->GetEnv((void **) &jvmti, JVMTI_VERSION_1_1);
-    if (res != JNI_OK || jvmti == NULL) {
+    if (res != JNI_OK || jvmti == nullptr) {
         printf("Wrong result of a valid call to GetEnv!\n");
         return JNI_ERR;
     }
@@ -156,7 +154,7 @@ jint Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
     }
 
     err = jvmti->SetEventNotificationMode(JVMTI_ENABLE,
-        JVMTI_EVENT_CLASS_LOAD, NULL);
+        JVMTI_EVENT_CLASS_LOAD, nullptr);
     if (err != JVMTI_ERROR_NONE) {
         printf("Failed to enable event JVMTI_EVENT_CLASS_LOAD: %s (%d)\n",
                TranslateError(err), err);
@@ -171,7 +169,6 @@ JNIEXPORT jint JNICALL Java_nsk_jvmti_GetMethodModifiers_methmod001_check(JNIEnv
 
     checkMeth(jvmti, env, cls, "<init>", "()V", 0,  ACC_PUBLIC);
     checkMeth(jvmti, env, cls, "meth_1", "(C)C", 0,  ACC_PRIVATE);
-    checkMeth(jvmti, env, cls, "meth_2", "(FF)F", 0,  ACC_STRICT);
     checkMeth(jvmti, env, cls, "check", "()I", 1,  ACC_NATIVE |  ACC_STATIC);
     clsId = env->FindClass("nsk/jvmti/GetMethodModifiers/methmod001a");
     checkMeth(jvmti, env, clsId, "meth_new", "()Lnsk/jvmti/GetMethodModifiers/methmod001;", 0,  ACC_SYNCHRONIZED);

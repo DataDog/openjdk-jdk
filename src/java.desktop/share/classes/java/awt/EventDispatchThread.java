@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -202,13 +202,9 @@ class EventDispatchThread extends Thread {
 
             eq.dispatchEvent(event);
         }
-        catch (ThreadDeath death) {
-            doDispatch = false;
-            throw death;
-        }
         catch (InterruptedException interruptedException) {
-            doDispatch = false; // AppContext.dispose() interrupts all
-                                // Threads in the AppContext
+            // keep this catch case for compatibility
+            doDispatch = false;
         }
         catch (Throwable e) {
             processException(e);

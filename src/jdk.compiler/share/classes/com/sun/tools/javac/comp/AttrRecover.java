@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,6 +34,8 @@ import com.sun.tools.javac.code.Type.ErrorType;
 import com.sun.tools.javac.code.TypeTag;
 import com.sun.tools.javac.code.Types;
 import com.sun.tools.javac.comp.Attr.ResultInfo;
+import com.sun.tools.javac.comp.Check.CheckContext;
+import com.sun.tools.javac.comp.Check.NestedCheckContext;
 import com.sun.tools.javac.comp.DeferredAttr.AttrMode;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.JCTree.JCBlock;
@@ -66,6 +68,7 @@ public class AttrRecover {
     protected static final Context.Key<AttrRecover> attrRepairKey = new Context.Key<>();
 
     final Attr attr;
+    final Check chk;
     final DeferredAttr deferredAttr;
     final Names names;
     final TreeMaker make;
@@ -79,10 +82,12 @@ public class AttrRecover {
         return instance;
     }
 
+    @SuppressWarnings("this-escape")
     protected AttrRecover(Context context) {
         context.put(attrRepairKey, this);
 
         attr = Attr.instance(context);
+        chk = Check.instance(context);
         deferredAttr = DeferredAttr.instance(context);
         names = Names.instance(context);
         make = TreeMaker.instance(context);
@@ -112,11 +117,6 @@ public class AttrRecover {
                             ? formals.head : ((ArrayType) formals.head).elemtype;
                     if (arg.hasTag(JCTree.Tag.LAMBDA)) {
                         final JCTree.JCLambda lambda = (JCLambda) arg;
-                        if (lambda.paramKind == JCLambda.ParameterKind.IMPLICIT) {
-                            for (JCVariableDecl var : lambda.params) {
-                                var.vartype = null; //reset type
-                            }
-                        }
                         if (types.isFunctionalInterface(formal)) {
                             Type functionalType = types.findDescriptorType(formal);
                             boolean voidCompatible = functionalType.getReturnType().hasTag(TypeTag.VOID);
@@ -150,13 +150,15 @@ public class AttrRecover {
                                 @Override
                                 public void visitLambda(JCLambda tree) {
                                     //do not touch nested lambdas
+                                    result = tree;
                                 }
                                 @Override
                                 public void visitClassDef(JCClassDecl tree) {
                                     //do not touch nested classes
+                                    result = tree;
                                 }
                             }.translate(lambda.body);
-                            if (!voidCompatible) {
+                            if (!voidCompatible && lambda.body.hasTag(Tag.BLOCK)) {
                                 JCReturn ret = make.Return(make.Erroneous().setType(syms.errType));
                                 ((JCBlock) lambda.body).stats = ((JCBlock) lambda.body).stats.append(ret);
                                 rollback.append(() -> {
@@ -189,11 +191,17 @@ public class AttrRecover {
                 while (pats.length() < args.length()) {
                     pats = pats.append(syms.errType);
                 }
+                CheckContext recoveryCheckContext = new NestedCheckContext(todo.resultInfo.checkContext) {
+                    @Override
+                    public void report(JCDiagnostic.DiagnosticPosition pos, JCDiagnostic details) {
+                        chk.basicHandler.report(pos, details);
+                    }
+                };
                 owntype = attr.checkMethod(todo.site, todo.candSym,
-                                 attr.new ResultInfo(todo.resultInfo.pkind, todo.resultInfo.pt.getReturnType(), todo.resultInfo.checkContext, todo.resultInfo.checkMode),
+                                 attr.new ResultInfo(todo.resultInfo.pkind, todo.resultInfo.pt.getReturnType(), recoveryCheckContext, todo.resultInfo.checkMode),
                                  todo.env, args, pats,
                                  todo.resultInfo.pt.getTypeArguments());
-                rollback.stream().forEach(Runnable::run);
+                rollback.forEach(Runnable::run);
             } else {
                 owntype = basicMethodInvocationRecovery(todo.tree, todo.site, todo.errSym, todo.env, todo.resultInfo);
             }
@@ -243,8 +251,8 @@ public class AttrRecover {
                     break;
             }
             for (Object a : d.getArgs()) {
-                if (a instanceof JCDiagnostic) {
-                    diags = diags.prepend((JCDiagnostic) a);
+                if (a instanceof JCDiagnostic diagnostic) {
+                    diags = diags.prepend(diagnostic);
                 }
             }
         }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,7 +29,6 @@ import java.net.*;
 import java.util.*;
 import java.util.regex.*;
 import sun.jvm.hotspot.code.*;
-import sun.jvm.hotspot.c1.*;
 import sun.jvm.hotspot.code.*;
 import sun.jvm.hotspot.debugger.*;
 import sun.jvm.hotspot.interpreter.*;
@@ -89,8 +88,6 @@ public class VM {
   private FileMapInfo  fileMapInfo;
   private Bytes        bytes;
 
-  /** Flag indicating if AOT is enabled in the build */
-  private boolean      hasAOT;
   /** Flag indicating if JVMTI support is included in the build */
   private boolean      isJvmtiSupported;
   /** Flags indicating whether we are attached to a core, C1, or C2 build */
@@ -100,6 +97,7 @@ public class VM {
   private boolean      isLP64;
   private int          bytesPerLong;
   private int          bytesPerWord;
+  private int          logBytesPerWord;
   private int          objectAlignmentInBytes;
   private int          minObjAlignmentInBytes;
   private int          logMinObjAlignmentInBytes;
@@ -121,13 +119,11 @@ public class VM {
   private static int   Flags_WAS_SET_ON_COMMAND_LINE;
   /** This is only present in a non-core build */
   private CodeCache    codeCache;
-  /** This is only present in a C1 build */
-  private Runtime1     runtime1;
   /** These constants come from globalDefinitions.hpp */
   private int          invocationEntryBCI;
   private ReversePtrs  revPtrs;
   private VMRegImpl    vmregImpl;
-  private int          reserveForAllocationPrefetch;
+  private int          labAlignmentReserve;
 
   // System.getProperties from debuggee VM
   private Properties   sysProps;
@@ -139,16 +135,16 @@ public class VM {
   private Flag[] commandLineFlags;
   private Map<String, Flag> flagsMap;
 
-  private static Type intType;
-  private static Type uintType;
-  private static Type intxType;
-  private static Type uintxType;
-  private static Type sizetType;
-  private static Type uint64tType;
+  private static CIntegerType intType;
+  private static CIntegerType uintType;
+  private static CIntegerType intxType;
+  private static CIntegerType uintxType;
+  private static CIntegerType sizetType;
+  private static CIntegerType uint64tType;
   private static CIntegerType boolType;
   private Boolean sharingEnabled;
   private Boolean compressedOopsEnabled;
-  private Boolean compressedKlassPointersEnabled;
+  private Boolean compactObjectHeadersEnabled;
 
   // command line flags supplied to VM - see struct JVMFlag in jvmFlag.hpp
   public static final class Flag {
@@ -360,26 +356,26 @@ public class VM {
      if (System.getProperty("sun.jvm.hotspot.runtime.VM.disableVersionCheck") == null) {
         // read sa build version.
         String versionProp = "sun.jvm.hotspot.runtime.VM.saBuildVersion";
-        String saVersion = saProps.getProperty(versionProp);
-        if (saVersion == null)
+        String versionPropVal = saProps.getProperty(versionProp);
+        if (versionPropVal == null) {
            throw new RuntimeException("Missing property " + versionProp);
+        }
 
-        // Strip nonproduct VM version substring (note: saVersion doesn't have it).
-        String vmVersion = vmRelease.replaceAll("(-fastdebug)|(-debug)|(-jvmg)|(-optimized)|(-profiled)","");
+        var saVersion = Runtime.Version.parse(versionPropVal);
+        var vmVersion = Runtime.Version.parse(vmRelease);
 
         if (saVersion.equals(vmVersion)) {
            // Exact match
            return;
         }
-        if (saVersion.indexOf('-') == saVersion.lastIndexOf('-') &&
-            vmVersion.indexOf('-') == vmVersion.lastIndexOf('-')) {
+        if (!saVersion.equalsIgnoreOptional(vmVersion)) {
            // Throw exception if different release versions:
-           // <major>.<minor>-b<n>
-           throw new VMVersionMismatchException(saVersion, vmRelease);
+           // <version>+<build>
+           throw new VMVersionMismatchException(saVersion, vmVersion);
         } else {
            // Otherwise print warning to allow mismatch not release versions
            // during development.
-           System.err.println("WARNING: Hotspot VM version " + vmRelease +
+           System.err.println("WARNING: Hotspot VM version " + vmVersion +
                               " does not match with SA version " + saVersion +
                               "." + " You may see unexpected results. ");
         }
@@ -433,28 +429,28 @@ public class VM {
        vmRelease = CStringUtilities.getString(releaseAddr);
        Address vmInternalInfoAddr = vmVersion.getAddressField("_s_internal_vm_info_string").getValue();
        vmInternalInfo = CStringUtilities.getString(vmInternalInfoAddr);
-
-       Type threadLocalAllocBuffer = db.lookupType("ThreadLocalAllocBuffer");
-       CIntegerType intType = (CIntegerType) db.lookupType("int");
-       CIntegerField reserveForAllocationPrefetchField = threadLocalAllocBuffer.getCIntegerField("_reserve_for_allocation_prefetch");
-       reserveForAllocationPrefetch = (int)reserveForAllocationPrefetchField.getCInteger(intType);
     } catch (Exception exp) {
        throw new RuntimeException("can't determine target's VM version : " + exp.getMessage());
     }
 
     checkVMVersion(vmRelease);
 
-    invocationEntryBCI = db.lookupIntConstant("InvocationEntryBci").intValue();
+    // Initialize common primitive types
+    intType = (CIntegerType) db.lookupType("int");
+    uintType = (CIntegerType) db.lookupType("uint");
+    intxType = (CIntegerType) db.lookupType("intx");
+    uintxType = (CIntegerType) db.lookupType("uintx");
+    sizetType = (CIntegerType) db.lookupType("size_t");
+    uint64tType = (CIntegerType) db.lookupType("uint64_t");
+    boolType = (CIntegerType) db.lookupType("bool");
 
-    // We infer AOT if _method @ methodCounters is declared.
-    {
-      Type type = db.lookupType("MethodCounters");
-      if (type.getField("_method", false, false) == null) {
-        hasAOT = false;
-      } else {
-        hasAOT = true;
-      }
-    }
+    Type threadLocalAllocBuffer = db.lookupType("ThreadLocalAllocBuffer");
+
+    Type collectedHeap = db.lookupType("CollectedHeap");
+    CIntegerField labAlignmentReserveField = collectedHeap.getCIntegerField("_lab_alignment_reserve");
+    labAlignmentReserve = (int)labAlignmentReserveField.getCInteger(sizetType);
+
+    invocationEntryBCI = db.lookupIntConstant("InvocationEntryBci").intValue();
 
     // We infer the presence of JVMTI from the presence of the InstanceKlass::_breakpoints field.
     {
@@ -476,7 +472,7 @@ public class VM {
         usingServerCompiler = false;
       } else {
         // Determine whether C2 is present
-        if (db.lookupType("Matcher", false) != null) {
+        if (db.lookupIntConstant("COMPILER2") != null) {
           usingServerCompiler = true;
         } else {
           usingClientCompiler = true;
@@ -489,6 +485,7 @@ public class VM {
     }
     bytesPerLong = db.lookupIntConstant("BytesPerLong").intValue();
     bytesPerWord = db.lookupIntConstant("BytesPerWord").intValue();
+    logBytesPerWord = db.lookupIntConstant("LogBytesPerWord").intValue();
     heapWordSize = db.lookupIntConstant("HeapWordSize").intValue();
     Flags_DEFAULT = db.lookupIntConstant("JVMFlagOrigin::DEFAULT").intValue();
     Flags_COMMAND_LINE = db.lookupIntConstant("JVMFlagOrigin::COMMAND_LINE").intValue();
@@ -503,22 +500,12 @@ public class VM {
     Flags_WAS_SET_ON_COMMAND_LINE = db.lookupIntConstant("JVMFlag::WAS_SET_ON_COMMAND_LINE").intValue();
     oopSize  = db.lookupIntConstant("oopSize").intValue();
 
-    intType = db.lookupType("int");
-    uintType = db.lookupType("uint");
-    intxType = db.lookupType("intx");
-    uintxType = db.lookupType("uintx");
-    sizetType = db.lookupType("size_t");
-    uint64tType = db.lookupType("uint64_t");
-    boolType = (CIntegerType) db.lookupType("bool");
-
     minObjAlignmentInBytes = getObjectAlignmentInBytes();
-    if (minObjAlignmentInBytes == 8) {
-      logMinObjAlignmentInBytes = 3;
-    } else if (minObjAlignmentInBytes == 16) {
-      logMinObjAlignmentInBytes = 4;
-    } else {
-      throw new RuntimeException("Object alignment " + minObjAlignmentInBytes + " not yet supported");
+    if ((minObjAlignmentInBytes & (minObjAlignmentInBytes - 1)) != 0) {
+      throw new RuntimeException("Object alignment " + minObjAlignmentInBytes + " is not power of two");
     }
+
+    logMinObjAlignmentInBytes = Integer.numberOfTrailingZeros(minObjAlignmentInBytes);
 
     if (isCompressedOopsEnabled()) {
       // Size info for oops within java objects is fixed
@@ -527,11 +514,7 @@ public class VM {
       heapOopSize = (int)getOopSize();
     }
 
-    if (isCompressedKlassPointersEnabled()) {
-      klassPtrSize = (int)getIntSize();
-    } else {
-      klassPtrSize = (int)getOopSize(); // same as an oop
-    }
+    klassPtrSize = (int)getIntSize();
   }
 
   /** This could be used by a reflective runtime system */
@@ -662,7 +645,7 @@ public class VM {
   }
 
   // Convenience function for conversions
-  static public long getAddressValue(Address addr) {
+  public static long getAddressValue(Address addr) {
     return VM.getVM().getDebugger().getAddressValue(addr);
   }
 
@@ -700,6 +683,10 @@ public class VM {
     return bytesPerWord;
   }
 
+  public int getLogBytesPerWord() {
+    return logBytesPerWord;
+  }
+
   /** Get minimum object alignment in bytes. */
   public int getMinObjAlignmentInBytes() {
     return minObjAlignmentInBytes;
@@ -733,16 +720,6 @@ public class VM {
       shorts */
   public int buildIntFromShorts(short low, short high) {
     return (((int) high) << 16) | (((int) low) & 0xFFFF);
-  }
-
-  /** Utility routine for building a long from two "unsigned" 32-bit
-      ints in <b>platform-dependent</b> order */
-  public long buildLongFromIntsPD(int oneHalf, int otherHalf) {
-    if (isBigEndian) {
-      return (((long) otherHalf) << 32) | (((long) oneHalf) & 0x00000000FFFFFFFFL);
-    } else{
-      return (((long) oneHalf) << 32) | (((long) otherHalf) & 0x00000000FFFFFFFFL);
-    }
   }
 
   public TypeDataBase getTypeDataBase() {
@@ -841,11 +818,6 @@ public class VM {
     return isBigEndian;
   }
 
-  /** Returns true if AOT is enabled, false otherwise */
-  public boolean hasAOT() {
-    return hasAOT;
-  }
-
   /** Returns true if JVMTI is supported, false otherwise */
   public boolean isJvmtiSupported() {
     return isJvmtiSupported;
@@ -883,17 +855,6 @@ public class VM {
     return codeCache;
   }
 
-  /** Should only be called for C1 builds */
-  public Runtime1 getRuntime1() {
-    if (Assert.ASSERTS_ENABLED) {
-      Assert.that(isClientCompiler(), "C1 builds only");
-    }
-    if (runtime1 == null) {
-      runtime1 = new Runtime1();
-    }
-    return runtime1;
-  }
-
   /** Test to see whether we're in debugging mode (NOTE: this really
       should not be tested by this code; currently only used in
       StackFrameStream) */
@@ -910,9 +871,7 @@ public class VM {
   }
 
   /** Indicates whether a given program counter is in Java code. This
-      includes but is not spanned by the interpreter and code cache.
-      Only used in the debugging system, for implementing
-      JavaThread.currentFrameGuess() on x86. */
+      includes but is not spanned by the interpreter and code cache. */
   public boolean isJavaPCDbg(Address addr) {
     // FIXME: this is not a complete enough set: must include areas
     // like vtable stubs
@@ -948,15 +907,19 @@ public class VM {
     return vmInternalInfo;
   }
 
-  public int getReserveForAllocationPrefetch() {
-    return reserveForAllocationPrefetch;
+  public int getLabAlignmentReserve() {
+    return labAlignmentReserve;
   }
 
   public boolean isSharingEnabled() {
     if (sharingEnabled == null) {
-      Flag flag = getCommandLineFlag("UseSharedSpaces");
-      sharingEnabled = (flag == null)? Boolean.FALSE :
-          (flag.getBool()? Boolean.TRUE: Boolean.FALSE);
+        Address address = VM.getVM().getDebugger().lookup(null, "UseSharedSpaces");
+        if (address == null && getOS().equals("win32")) {
+            // On Win32 symbols are prefixed with the dll name. So look for
+            // UseSharedSpaces as a symbol in jvm.dll.
+            address = VM.getVM().getDebugger().lookup(null, "jvm!UseSharedSpaces");
+        }
+        sharingEnabled = address.getJBooleanAt(0);
     }
     return sharingEnabled.booleanValue();
   }
@@ -970,19 +933,19 @@ public class VM {
     return compressedOopsEnabled.booleanValue();
   }
 
-  public boolean isCompressedKlassPointersEnabled() {
-    if (compressedKlassPointersEnabled == null) {
-        Flag flag = getCommandLineFlag("UseCompressedClassPointers");
-        compressedKlassPointersEnabled = (flag == null) ? Boolean.FALSE:
+  public boolean isCompactObjectHeadersEnabled() {
+    if (compactObjectHeadersEnabled == null) {
+        Flag flag = getCommandLineFlag("UseCompactObjectHeaders");
+        compactObjectHeadersEnabled = (flag == null) ? Boolean.FALSE:
              (flag.getBool()? Boolean.TRUE: Boolean.FALSE);
     }
-    return compressedKlassPointersEnabled.booleanValue();
+    return compactObjectHeadersEnabled.booleanValue();
   }
 
   public int getObjectAlignmentInBytes() {
     if (objectAlignmentInBytes == 0) {
         Flag flag = getCommandLineFlag("ObjectAlignmentInBytes");
-        objectAlignmentInBytes = (flag == null) ? 8 : (int)flag.getIntx();
+        objectAlignmentInBytes = (flag == null) ? 8 : (int)flag.getInt();
     }
     return objectAlignmentInBytes;
   }
@@ -1016,7 +979,7 @@ public class VM {
         flagsMap.put(flags[i].getName(), flags[i]);
       }
     }
-    return (Flag) flagsMap.get(name);
+    return flagsMap.get(name);
   }
 
   private static final String cmdFlagTypes[] = {

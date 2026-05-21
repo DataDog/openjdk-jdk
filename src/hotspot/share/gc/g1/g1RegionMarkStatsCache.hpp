@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,29 +26,38 @@
 #define SHARE_GC_G1_G1REGIONMARKSTATSCACHE_HPP
 
 #include "memory/allocation.hpp"
+#include "oops/oop.hpp"
+#include "runtime/atomic.hpp"
 #include "utilities/debug.hpp"
 #include "utilities/globalDefinitions.hpp"
 #include "utilities/pair.hpp"
 
 // Per-Region statistics gathered during marking.
 //
-// This includes
+// These include:
 // * the number of live words gathered during marking for the area from bottom
-// to ntams. This is an exact measure.
-// The code corrects later for the live data between ntams and top.
+//   to tams. This is an exact measure. The code corrects later for the live data
+//   between tams and top.
+// * the number of incoming references found during marking. This is an approximate
+//   value because we do not mark through all objects.
 struct G1RegionMarkStats {
-  size_t _live_words;
+  Atomic<size_t> _live_words;
+  Atomic<size_t> _incoming_refs;
 
   // Clear all members.
   void clear() {
-    _live_words = 0;
+    _live_words.store_relaxed(0);
+    _incoming_refs.store_relaxed(0);
   }
-  // Clear all members after a marking overflow. Nothing to do as the live words
-  // are updated by the atomic mark. We do not remark objects after overflow.
+  // Clear all members after a marking overflow. Only needs to clear the number of
+  // incoming references as all objects will be rescanned, while the live words are
+  // gathered whenever a thread can mark an object, which is synchronized.
   void clear_during_overflow() {
+    _incoming_refs.store_relaxed(0);
   }
 
-  bool is_clear() const { return _live_words == 0; }
+  size_t live_words() const { return _live_words.load_relaxed(); }
+  size_t incoming_refs() const { return _incoming_refs.load_relaxed(); }
 };
 
 // Per-marking thread cache for the region mark statistics.
@@ -69,13 +78,9 @@ private:
     uint _region_idx;
     G1RegionMarkStats _stats;
 
-    void clear() {
-      _region_idx = 0;
+    void clear(uint idx = 0) {
+      _region_idx = idx;
       _stats.clear();
-    }
-
-    bool is_clear() const {
-      return _region_idx == 0 && _stats.is_clear();
     }
   };
 
@@ -90,7 +95,7 @@ private:
   // Evict a given element of the statistics cache.
   void evict(uint idx);
 
-  size_t _num_cache_entries_mask;
+  const uint _num_cache_entries_mask;
 
   uint hash(uint idx) {
     return idx & _num_cache_entries_mask;
@@ -98,13 +103,29 @@ private:
 
   G1RegionMarkStatsCacheEntry* find_for_add(uint region_idx);
 public:
+  // Number of entries in the per-task stats entry. This value seems enough
+  // to have a very low cache miss rate.
+  static const uint RegionMarkStatsCacheSize = 1024;
+
+  // Initialize cache. Does not reset the cache immediately to avoid the cost
+  // during startup.
   G1RegionMarkStatsCache(G1RegionMarkStats* target, uint num_cache_entries);
 
   ~G1RegionMarkStatsCache();
 
+  void add_live_words(oop obj);
   void add_live_words(uint region_idx, size_t live_words) {
     G1RegionMarkStatsCacheEntry* const cur = find_for_add(region_idx);
-    cur->_stats._live_words += live_words;
+    // This method is only ever called single-threaded, so we do not need atomic
+    // update here.
+    cur->_stats._live_words.store_relaxed(cur->_stats.live_words() + live_words);
+  }
+
+  void inc_incoming_refs(uint region_idx) {
+    G1RegionMarkStatsCacheEntry* const cur = find_for_add(region_idx);
+    // This method is only ever called single-threaded, so we do not need atomic
+    // update here.
+    cur->_stats._incoming_refs.store_relaxed(cur->_stats.incoming_refs() + 1u);
   }
 
   void reset(uint region_idx) {
@@ -118,7 +139,8 @@ public:
   // Evict all remaining statistics, returning cache hits and misses.
   Pair<size_t, size_t> evict_all();
 
-  // Reset all cache entries to their default values.
+  // Reset liveness of all cache entries to their default values,
+  // initialize _region_idx to avoid initial cache miss.
   void reset();
 
   size_t hits() const { return _cache_hits; }

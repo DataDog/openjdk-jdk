@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,11 +22,10 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "logging/log.hpp"
+#include "runtime/javaThread.hpp"
 #include "runtime/os.inline.hpp"
 #include "runtime/stackOverflow.hpp"
-#include "runtime/thread.hpp"
 #include "utilities/align.hpp"
 #include "utilities/globalDefinitions.hpp"
 
@@ -39,19 +38,20 @@ void StackOverflow::initialize_stack_zone_sizes() {
   // Stack zone sizes must be page aligned.
   size_t page_size = os::vm_page_size();
 
-  // We need to adapt the configured number of stack protection pages given
-  // in 4K pages to the actual os page size. We must do this before setting
-  // up minimal stack sizes etc. in os::init_2().
-  size_t alignment = 4*K;
+  // We need to adapt the configured number of stack protection pages to the
+  // actual OS page size. We must do this before setting up minimal stack
+  // sizes etc. in os::init_2(). The option values are given in 4K units,
+  // matching the smallest page size in supported platforms.
+  size_t unit = 4*K;
 
   assert(_stack_red_zone_size == 0, "This should be called only once.");
-  _stack_red_zone_size = align_up(StackRedPages * alignment, page_size);
+  _stack_red_zone_size = align_up(StackRedPages * unit, page_size);
 
   assert(_stack_yellow_zone_size == 0, "This should be called only once.");
-  _stack_yellow_zone_size = align_up(StackYellowPages * alignment, page_size);
+  _stack_yellow_zone_size = align_up(StackYellowPages * unit, page_size);
 
   assert(_stack_reserved_zone_size == 0, "This should be called only once.");
-  _stack_reserved_zone_size = align_up(StackReservedPages * alignment, page_size);
+  _stack_reserved_zone_size = align_up(StackReservedPages * unit, page_size);
 
   // The shadow area is not allocated or protected, so
   // it needs not be page aligned.
@@ -63,7 +63,7 @@ void StackOverflow::initialize_stack_zone_sizes() {
   // suffices to touch all pages. (Some pages are banged
   // several times, though.)
   assert(_stack_shadow_zone_size == 0, "This should be called only once.");
-  _stack_shadow_zone_size = align_up(StackShadowPages * alignment, page_size);
+  _stack_shadow_zone_size = align_up(StackShadowPages * unit, page_size);
 }
 
 bool StackOverflow::stack_guards_enabled() const {
@@ -80,8 +80,7 @@ void StackOverflow::create_stack_guard_pages() {
   if (!os::uses_stack_guard_pages() ||
       _stack_guard_state != stack_guard_unused ||
       (DisablePrimordialThreadGuardPages && os::is_primordial_thread())) {
-      log_info(os, thread)("Stack guard page creation for thread "
-                           UINTX_FORMAT " disabled", os::current_thread_id());
+      log_info(os, thread)("Stack guard page creation for thread %zu disabled", os::current_thread_id());
     return;
   }
   address low_addr = stack_end();
@@ -90,8 +89,8 @@ void StackOverflow::create_stack_guard_pages() {
   assert(is_aligned(low_addr, os::vm_page_size()), "Stack base should be the start of a page");
   assert(is_aligned(len, os::vm_page_size()), "Stack size should be a multiple of page size");
 
-  int must_commit = os::must_commit_stack_guard_pages();
-  // warning("Guarding at " PTR_FORMAT " for len " SIZE_FORMAT "\n", low_addr, len);
+  bool must_commit = os::must_commit_stack_guard_pages();
+  // warning("Guarding at " PTR_FORMAT " for len %zu\n", low_addr, len);
 
   if (must_commit && !os::create_stack_guard_pages((char *) low_addr, len)) {
     log_warning(os, thread)("Attempt to allocate stack guard pages failed.");
@@ -106,7 +105,7 @@ void StackOverflow::create_stack_guard_pages() {
     vm_exit_out_of_memory(len, OOM_MPROTECT_ERROR, "memory to guard stack pages");
   }
 
-  log_debug(os, thread)("Thread " UINTX_FORMAT " stack guard pages activated: "
+  log_debug(os, thread)("Thread %zu stack guard pages activated: "
     PTR_FORMAT "-" PTR_FORMAT ".",
     os::current_thread_id(), p2i(low_addr), p2i(low_addr + len));
 }
@@ -117,13 +116,8 @@ void StackOverflow::remove_stack_guard_pages() {
   size_t len = stack_guard_zone_size();
 
   if (os::must_commit_stack_guard_pages()) {
-    if (os::remove_stack_guard_pages((char *) low_addr, len)) {
-      _stack_guard_state = stack_guard_unused;
-    } else {
-      log_warning(os, thread)("Attempt to deallocate stack guard pages failed ("
-        PTR_FORMAT "-" PTR_FORMAT ").", p2i(low_addr), p2i(low_addr + len));
-      return;
-    }
+    os::remove_stack_guard_pages((char *) low_addr, len);
+    _stack_guard_state = stack_guard_unused;
   } else {
     if (_stack_guard_state == stack_guard_unused) return;
     if (os::unguard_memory((char *) low_addr, len)) {
@@ -135,7 +129,7 @@ void StackOverflow::remove_stack_guard_pages() {
     }
   }
 
-  log_debug(os, thread)("Thread " UINTX_FORMAT " stack guard pages removed: "
+  log_debug(os, thread)("Thread %zu stack guard pages removed: "
     PTR_FORMAT "-" PTR_FORMAT ".",
     os::current_thread_id(), p2i(low_addr), p2i(low_addr + len));
 }
@@ -210,20 +204,6 @@ void StackOverflow::disable_stack_yellow_reserved_zone() {
     _stack_guard_state = stack_guard_yellow_reserved_disabled;
   } else {
     warning("Attempt to unguard stack yellow zone failed.");
-  }
-}
-
-void StackOverflow::enable_stack_red_zone() {
-  // The base notation is from the stacks point of view, growing downward.
-  // We need to adjust it to work correctly with guard_memory()
-  assert(_stack_guard_state != stack_guard_unused, "must be using guard pages.");
-  address base = stack_red_zone_base() - stack_red_zone_size();
-
-  guarantee(base < stack_base(), "Error calculating stack red zone");
-  guarantee(base < os::current_stack_pointer(), "Error calculating stack red zone");
-
-  if (!os::guard_memory((char *) base, stack_red_zone_size())) {
-    warning("Attempt to guard stack red zone failed.");
   }
 }
 

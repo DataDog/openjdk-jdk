@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -47,9 +47,8 @@ class PhaseChaitin;
 //------------------------------LRG--------------------------------------------
 // Live-RanGe structure.
 class LRG : public ResourceObj {
-  friend class VMStructs;
 public:
-  static const uint AllStack_size = 0xFFFFF; // This mask size is used to tell that the mask of this LRG supports stack positions
+  static const uint INFINITE_STACK_SIZE = 0xFFFFF; // This mask size is used to tell that the mask of this LRG supports stack positions
   enum { SPILL_REG=29999 };     // Register number of a spilled LRG
 
   double _cost;                 // 2 for loads/1 for stores times block freq
@@ -64,6 +63,7 @@ public:
 
   uint _risk_bias;              // Index of LRG which we want to avoid color
   uint _copy_bias;              // Index of LRG which we want to share color
+  uint _copy_bias2;             // Index of second LRG which we want to share color
 
   uint _next;                   // Index of next LRG in linked list
   uint _prev;                   // Index of prev LRG in linked list
@@ -83,15 +83,15 @@ public:
   // set makes it not valid.
   void set_degree( uint degree ) {
     _eff_degree = degree;
-    debug_only(_degree_valid = 1;)
-    assert(!_mask.is_AllStack() || (_mask.is_AllStack() && lo_degree()), "_eff_degree can't be bigger than AllStack_size - _num_regs if the mask supports stack registers");
+    DEBUG_ONLY(_degree_valid = 1;)
+    assert(!_mask.is_infinite_stack() || (_mask.is_infinite_stack() && lo_degree()), "_eff_degree can't be bigger than INFINITE_STACK_SIZE - _num_regs if the mask supports stack registers");
   }
   // Made a change that hammered degree
-  void invalid_degree() { debug_only(_degree_valid=0;) }
+  void invalid_degree() { DEBUG_ONLY(_degree_valid=0;) }
   // Incrementally modify degree.  If it was correct, it should remain correct
   void inc_degree( uint mod ) {
     _eff_degree += mod;
-    assert(!_mask.is_AllStack() || (_mask.is_AllStack() && lo_degree()), "_eff_degree can't be bigger than AllStack_size - _num_regs if the mask supports stack registers");
+    assert(!_mask.is_infinite_stack() || (_mask.is_infinite_stack() && lo_degree()), "_eff_degree can't be bigger than INFINITE_STACK_SIZE - _num_regs if the mask supports stack registers");
   }
   // Compute the degree between 2 live ranges
   int compute_degree( LRG &l ) const;
@@ -104,11 +104,11 @@ public:
 
 private:
   RegMask _mask;                // Allowed registers for this LRG
-  uint _mask_size;              // cache of _mask.Size();
+  uint _mask_size;              // cache of _mask.size();
 public:
-  int compute_mask_size() const { return _mask.is_AllStack() ? AllStack_size : _mask.Size(); }
+  int compute_mask_size() const { return _mask.is_infinite_stack() ? INFINITE_STACK_SIZE : _mask.size(); }
   void set_mask_size( int size ) {
-    assert((size == (int)AllStack_size) || (size == (int)_mask.Size()), "");
+    assert((size == (int)INFINITE_STACK_SIZE) || (size == (int)_mask.size()), "");
     _mask_size = size;
 #ifdef ASSERT
     _msize_valid=1;
@@ -129,19 +129,22 @@ public:
   // count of bits in the current mask.
   int get_invalid_mask_size() const { return _mask_size; }
   const RegMask &mask() const { return _mask; }
-  void set_mask( const RegMask &rm ) { _mask = rm; debug_only(_msize_valid=0;)}
-  void AND( const RegMask &rm ) { _mask.AND(rm); debug_only(_msize_valid=0;)}
-  void SUBTRACT( const RegMask &rm ) { _mask.SUBTRACT(rm); debug_only(_msize_valid=0;)}
-  void Clear()   { _mask.Clear()  ; debug_only(_msize_valid=1); _mask_size = 0; }
-  void Set_All() { _mask.Set_All(); debug_only(_msize_valid=1); _mask_size = RegMask::CHUNK_SIZE; }
+  void set_mask(const RegMask& rm) { _mask.assignFrom(rm); DEBUG_ONLY(_msize_valid = 0;) }
+  void init_mask(Arena* arena) { new (&_mask) RegMask(arena); }
+  void and_with( const RegMask &rm ) { _mask.and_with(rm); DEBUG_ONLY(_msize_valid=0;)}
+  void subtract( const RegMask &rm ) { _mask.subtract(rm); DEBUG_ONLY(_msize_valid=0;)}
+  void subtract_inner(const RegMask& rm) { _mask.subtract_inner(rm); DEBUG_ONLY(_msize_valid = 0;) }
+  void clear()   { _mask.clear()  ; DEBUG_ONLY(_msize_valid=1); _mask_size = 0; }
+  void set_all() { _mask.set_all(); DEBUG_ONLY(_msize_valid = 1); _mask_size = _mask.rm_size_in_bits(); }
+  bool rollover() { DEBUG_ONLY(_msize_valid = 1); _mask_size = _mask.rm_size_in_bits(); return _mask.rollover(); }
 
-  void Insert( OptoReg::Name reg ) { _mask.Insert(reg);  debug_only(_msize_valid=0;) }
-  void Remove( OptoReg::Name reg ) { _mask.Remove(reg);  debug_only(_msize_valid=0;) }
-  void clear_to_sets()  { _mask.clear_to_sets(_num_regs); debug_only(_msize_valid=0;) }
+  void insert( OptoReg::Name reg ) { _mask.insert(reg);  DEBUG_ONLY(_msize_valid=0;) }
+  void remove( OptoReg::Name reg ) { _mask.remove(reg);  DEBUG_ONLY(_msize_valid=0;) }
+  void clear_to_sets()  { _mask.clear_to_sets(_num_regs); DEBUG_ONLY(_msize_valid=0;) }
 
 private:
   // Number of registers this live range uses when it colors
-  uint16_t _num_regs;           // 2 for Longs and Doubles, 1 for all else
+  uint16_t _num_regs;           // byte size of the value divided by slot size which is 4
                                 // except _num_regs is kill count for fat_proj
 
   // For scalable register, num_regs may not be the actual physical register size.
@@ -163,11 +166,11 @@ public:
   bool is_scalable() {
 #ifdef ASSERT
     if (_is_scalable) {
-      // Should only be a vector for now, but it could also be a RegVMask in future.
-      assert(_is_vector && (_num_regs == RegMask::SlotsPerVecA), "unexpected scalable reg");
+      assert((_is_vector && (_num_regs == RegMask::SlotsPerVecA)) ||
+             (_is_predicate && (_num_regs == RegMask::SlotsPerRegVectMask)), "unexpected scalable reg");
     }
 #endif
-    return _is_scalable;
+    return Matcher::implements_scalable_vector && _is_scalable;
   }
 
 private:
@@ -195,6 +198,7 @@ public:
   uint   _is_oop:1,             // Live-range holds an oop
          _is_float:1,           // True if in float registers
          _is_vector:1,          // True if in vector registers
+         _is_predicate:1,       // True if in mask/predicate registers
          _is_scalable:1,        // True if register size is scalable
                                 //      e.g. Arm SVE vector/predicate registers.
          _was_spilled1:1,       // True if prior spilling on def
@@ -216,7 +220,7 @@ public:
 
 
   // Alive if non-zero, dead if zero
-  bool alive() const { return _def != NULL; }
+  bool alive() const { return _def != nullptr; }
   bool is_multidef() const { return _def == NodeSentinel; }
   bool is_singledef() const { return _def != NodeSentinel; }
 
@@ -235,7 +239,6 @@ public:
 // abstract!  It needs abstraction so I can fiddle with the implementation to
 // get even more speed.
 class PhaseIFG : public Phase {
-  friend class VMStructs;
   // Current implementation: a triangular adjacency list.
 
   // Array of adjacency-lists, indexed by live-range number
@@ -246,6 +249,9 @@ class PhaseIFG : public Phase {
 
   // Live range structure goes here
   LRG *_lrgs;                   // Array of LRG structures
+
+  // Keep track of number of edges to allow bailing out on very large IFGs
+  uint _edges;
 
 public:
   // Largest live-range number
@@ -259,10 +265,10 @@ public:
   PhaseIFG( Arena *arena );
   void init( uint maxlrg );
 
-  // Add edge between a and b.  Returns true if actually addded.
+  // Add edge between a and b.  Returns true if actually added.
   int add_edge( uint a, uint b );
 
-  // Test for edge existance
+  // Test for edge existence
   int test_edge( uint a, uint b ) const;
 
   // Square-up matrix for faster Union
@@ -291,7 +297,7 @@ public:
 #endif
 
   //--------------- Live Range Accessors
-  LRG &lrgs(uint idx) const { assert(idx < _maxlrg, "oob"); return _lrgs[idx]; }
+  LRG &lrgs(uint idx) const { assert(idx < _maxlrg, "oob: index %u not smaller than %u", idx, _maxlrg); return _lrgs[idx]; }
 
   // Compute and set effective degree.  Might be folded into SquareUp().
   void Compute_Effective_Degree();
@@ -347,7 +353,8 @@ public:
     return _names.at(idx);
   }
 
-  uint live_range_id(const Node *node) const {
+  uint live_range_id(const Node* node) const {
+    precond(node != nullptr);
     return _names.at(node->_idx);
   }
 
@@ -416,7 +423,6 @@ public:
 //------------------------------Chaitin----------------------------------------
 // Briggs-Chaitin style allocation, mostly.
 class PhaseChaitin : public PhaseRegAlloc {
-  friend class VMStructs;
 
   int _trip_cnt;
   int _alternate;
@@ -443,7 +449,7 @@ class PhaseChaitin : public PhaseRegAlloc {
 
   // Helper functions for Split()
   uint split_DEF(Node *def, Block *b, int loc, uint max, Node **Reachblock, Node **debug_defs, GrowableArray<uint> splits, int slidx );
-  uint split_USE(MachSpillCopyNode::SpillType spill_type, Node *def, Block *b, Node *use, uint useidx, uint max, bool def_down, bool cisc_sp, GrowableArray<uint> splits, int slidx );
+  int split_USE(MachSpillCopyNode::SpillType spill_type, Node *def, Block *b, Node *use, uint useidx, uint max, bool def_down, bool cisc_sp, GrowableArray<uint> splits, int slidx );
 
   //------------------------------clone_projs------------------------------------
   // After cloning some rematerialized instruction, clone any MachProj's that
@@ -477,7 +483,7 @@ class PhaseChaitin : public PhaseRegAlloc {
 
   Block **_blks;                // Array of blocks sorted by frequency for coalescing
 
-  float _high_frequency_lrg;    // Frequency at which LRG will be spilled for debug info
+  double _high_frequency_lrg;   // Frequency at which LRG will be spilled for debug info
 
 #ifndef PRODUCT
   bool _trace_spilling;
@@ -494,7 +500,7 @@ public:
   // Do all the real work of allocate
   void Register_Allocate();
 
-  float high_frequency_lrg() const { return _high_frequency_lrg; }
+  double high_frequency_lrg() const { return _high_frequency_lrg; }
 
   // Used when scheduling info generated, not in general register allocation
   bool _scheduling_info_generated;
@@ -620,7 +626,7 @@ private:
       void check_pressure_at_fatproj(uint fatproj_location, RegMask& fatproj_mask) {
         // this pressure is only valid at this instruction, i.e. we don't need to lower
         // the register pressure since the fat proj was never live before (going backwards)
-        uint new_pressure = current_pressure() + fatproj_mask.Size();
+        uint new_pressure = current_pressure() + fatproj_mask.size();
         if (new_pressure > final_pressure()) {
           _final_pressure = new_pressure;
         }
@@ -696,9 +702,11 @@ private:
   // Return TRUE if any spills occurred.
   uint Select( );
   // Helper function for select which allows biased coloring
-  OptoReg::Name choose_color( LRG &lrg, int chunk );
+  OptoReg::Name choose_color(LRG& lrg);
   // Helper function which implements biasing heuristic
-  OptoReg::Name bias_color( LRG &lrg, int chunk );
+  OptoReg::Name bias_color(LRG& lrg);
+  // Helper function which implements color biasing
+  OptoReg::Name select_bias_lrg_color(LRG& lrg);
 
   // Split uncolorable live ranges
   // Return new number of live ranges
@@ -730,8 +738,8 @@ private:
   int yank_if_dead_recurse(Node *old, Node *orig_old, Block *current_block,
       Node_List *value, Node_List *regnd);
   int yank( Node *old, Block *current_block, Node_List *value, Node_List *regnd );
-  int elide_copy( Node *n, int k, Block *current_block, Node_List &value, Node_List &regnd, bool can_change_regs );
-  int use_prior_register( Node *copy, uint idx, Node *def, Block *current_block, Node_List &value, Node_List &regnd );
+  int elide_copy( Node *n, int k, Block *current_block, Node_List *value, Node_List *regnd, bool can_change_regs );
+  int use_prior_register( Node *copy, uint idx, Node *def, Block *current_block, Node_List *value, Node_List *regnd );
   bool may_be_copy_of_callee( Node *def ) const;
 
   // If nreg already contains the same constant as val then eliminate it
@@ -746,7 +754,7 @@ private:
     Node* _def;
     Node* _first_use;
   public:
-    RegDefUse() : _def(NULL), _first_use(NULL) { }
+    RegDefUse() : _def(nullptr), _first_use(nullptr) { }
     Node* def() const       { return _def;       }
     Node* first_use() const { return _first_use; }
 
@@ -757,8 +765,8 @@ private:
       }
     }
     void clear() {
-      _def = NULL;
-      _first_use = NULL;
+      _def = nullptr;
+      _first_use = nullptr;
     }
   };
   typedef GrowableArray<RegDefUse> RegToDefUseMap;
@@ -802,7 +810,7 @@ private:
 
 public:
   void dump_frame() const;
-  char *dump_register(const Node* n, char* buf) const;
+  char *dump_register(const Node* n, char* buf, size_t buf_size) const;
 private:
   static void print_chaitin_statistics();
 #endif // not PRODUCT

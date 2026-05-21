@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -323,7 +323,7 @@ const char* symbol_for_pc(struct ps_prochandle* ph, uintptr_t addr, uintptr_t* p
 sa_thread_info* add_thread_info(struct ps_prochandle* ph, pthread_t pthread_id, lwpid_t lwp_id) {
   sa_thread_info* newthr;
   if ( (newthr = (sa_thread_info*) calloc(1, sizeof(sa_thread_info))) == NULL) {
-    print_debug("can't allocate memory for thread_info\n");
+    print_error("can't allocate memory for thread_info\n");
     return NULL;
   }
 
@@ -484,6 +484,21 @@ uintptr_t get_lib_base(struct ps_prochandle* ph, int index) {
     lib = lib->next;
   }
   return (uintptr_t)NULL;
+}
+
+// get address range of lib
+void get_lib_addr_range(struct ps_prochandle* ph, int index, uintptr_t* base, uintptr_t* memsz) {
+  int count = 0;
+  lib_info* lib = ph->libs;
+  while (lib) {
+    if (count == index) {
+      *base = lib->base;
+      *memsz = lib->memsz;
+      return;
+    }
+    count++;
+    lib = lib->next;
+  }
 }
 
 bool find_lib(struct ps_prochandle* ph, const char *lib_name) {

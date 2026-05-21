@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,14 +38,13 @@ import java.awt.datatransfer.Transferable;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.io.Serial;
 import java.io.Serializable;
-import java.security.AccessController;
 import java.util.EventListener;
 
 import sun.awt.AWTAccessor;
 import sun.awt.AWTAccessor.DragSourceContextAccessor;
 import sun.awt.dnd.SunDragSourceContextPeer;
-import sun.security.action.GetIntegerAction;
 
 /**
  * The {@code DragSource} is the entity responsible
@@ -117,6 +116,10 @@ import sun.security.action.GetIntegerAction;
 
 public class DragSource implements Serializable {
 
+    /**
+     * Use serialVersionUID from JDK 1.4 for interoperability.
+     */
+    @Serial
     private static final long serialVersionUID = 6236096958971414066L;
 
     /*
@@ -212,7 +215,7 @@ public class DragSource implements Serializable {
      * the underlying platform.
      *
      * @return the platform DragSource
-     * @exception HeadlessException if GraphicsEnvironment.isHeadless()
+     * @throws HeadlessException if GraphicsEnvironment.isHeadless()
      *            returns true
      * @see java.awt.GraphicsEnvironment#isHeadless
      */
@@ -225,14 +228,12 @@ public class DragSource implements Serializable {
     }
 
     /**
-     * Reports
-     * whether or not drag
-     * {@code Image} support
-     * is available on the underlying platform.
+     * Reports whether or not drag {@code Image} support is available on the
+     * underlying platform.
      *
-     * @return if the Drag Image support is available on this platform
+     * @return {@code true} if the Drag Image support is available on this
+     *         platform, otherwise {@code false}
      */
-
     public static boolean isDragImageSupported() {
         Toolkit t = Toolkit.getDefaultToolkit();
 
@@ -250,7 +251,7 @@ public class DragSource implements Serializable {
     /**
      * Creates a new {@code DragSource}.
      *
-     * @exception HeadlessException if GraphicsEnvironment.isHeadless()
+     * @throws HeadlessException if GraphicsEnvironment.isHeadless()
      *            returns true
      * @see java.awt.GraphicsEnvironment#isHeadless
      */
@@ -496,8 +497,8 @@ public class DragSource implements Serializable {
      *
      * @param <T> the type of {@code DragGestureRecognizer} to create
      * @param recognizerAbstractClass the requested abstract type
-     * @param actions                 the permitted source drag actions
      * @param c                       the {@code Component} target
+     * @param actions                 the permitted source drag actions
      * @param dgl        the {@code DragGestureListener} to notify
      *
      * @return the new {@code DragGestureRecognizer} or {@code null}
@@ -677,7 +678,7 @@ public class DragSource implements Serializable {
      *          <code><em>Foo</em>Listener</code>s on this
      *          {@code DragSource}, or an empty array if no such listeners
      *          have been added
-     * @exception ClassCastException if {@code listenerType}
+     * @throws ClassCastException if {@code listenerType}
      *          doesn't specify a class or interface that implements
      *          {@code java.util.EventListener}
      *
@@ -818,6 +819,7 @@ public class DragSource implements Serializable {
      *      </ul>.
      * @since 1.4
      */
+    @Serial
     private void writeObject(ObjectOutputStream s) throws IOException {
         s.defaultWriteObject();
 
@@ -857,6 +859,7 @@ public class DragSource implements Serializable {
      * @see java.awt.datatransfer.SystemFlavorMap#getDefaultFlavorMap
      * @since 1.4
      */
+    @Serial
     private void readObject(ObjectInputStream s)
       throws ClassNotFoundException, IOException {
         s.defaultReadObject();
@@ -902,8 +905,7 @@ public class DragSource implements Serializable {
      * @since 1.5
      */
     public static int getDragThreshold() {
-        int ts = AccessController.doPrivileged(
-                new GetIntegerAction("awt.dnd.drag.threshold", 0)).intValue();
+        int ts = Integer.getInteger("awt.dnd.drag.threshold", 0);
         if (ts > 0) {
             return ts;
         } else {

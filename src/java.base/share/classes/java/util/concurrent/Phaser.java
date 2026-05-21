@@ -35,6 +35,8 @@
 
 package java.util.concurrent;
 
+import jdk.internal.invoke.MhUtil;
+
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.concurrent.atomic.AtomicReference;
@@ -148,6 +150,12 @@ import java.util.concurrent.locks.LockSupport;
  * returns snapshots of these state queries in a form convenient for
  * informal monitoring.
  *
+ * <p>Memory consistency effects: Actions prior to any form of arrive
+ * method <a href="package-summary.html#MemoryVisibility">
+ * <i>happen-before</i></a> a corresponding phase advance and
+ * onAdvance actions (if present), which in turn <i>happen-before</i>
+ * actions following the phase advance.
+ *
  * <p><b>Sample usages:</b>
  *
  * <p>A {@code Phaser} may be used instead of a {@code CountDownLatch}
@@ -245,7 +253,7 @@ import java.util.concurrent.locks.LockSupport;
  * be appropriate for extremely small per-phase task bodies (thus
  * high rates), or up to hundreds for extremely large ones.
  *
- * <p><b>Implementation notes</b>: This implementation restricts the
+ * <p><b>Implementation notes:</b> This implementation restricts the
  * maximum number of parties to 65535. Attempts to register additional
  * parties result in {@code IllegalStateException}. However, you can and
  * should create tiered phasers to accommodate arbitrarily large sets
@@ -919,7 +927,7 @@ public class Phaser {
      * <pre> {@code
      * Phaser phaser = new Phaser() {
      *   protected boolean onAdvance(int phase, int parties) { return false; }
-     * }}</pre>
+     * };}</pre>
      *
      * @param phase the current phase number on entry to this method,
      * before this phaser is advanced
@@ -1131,17 +1139,11 @@ public class Phaser {
     }
 
     // VarHandle mechanics
-    private static final VarHandle STATE;
+    private static final VarHandle STATE = MhUtil.findVarHandle(
+            MethodHandles.lookup(), "state", long.class);
     static {
-        try {
-            MethodHandles.Lookup l = MethodHandles.lookup();
-            STATE = l.findVarHandle(Phaser.class, "state", long.class);
-        } catch (ReflectiveOperationException e) {
-            throw new ExceptionInInitializerError(e);
-        }
-
         // Reduce the risk of rare disastrous classloading in first call to
-        // LockSupport.park: https://bugs.openjdk.java.net/browse/JDK-8074773
+        // LockSupport.park: https://bugs.openjdk.org/browse/JDK-8074773
         Class<?> ensureLoaded = LockSupport.class;
     }
 }

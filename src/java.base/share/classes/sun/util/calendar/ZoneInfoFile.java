@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,9 +33,8 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.StreamCorruptedException;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -43,14 +42,13 @@ import java.util.Calendar;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.SimpleTimeZone;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
 import java.util.zip.CRC32;
 
 import jdk.internal.util.StaticProperty;
-import sun.security.action.GetPropertyAction;
 
 /**
  * Loads TZDB time-zone rules for j.u.TimeZone
@@ -62,22 +60,15 @@ public final class ZoneInfoFile {
     /**
      * Gets all available IDs supported in the Java run-time.
      *
-     * @return a set of time zone IDs.
+     * @return an array of time zone IDs.
      */
     public static String[] getZoneIds() {
-        int len = regions.length + oldMappings.length;
-        if (!USE_OLDMAPPING) {
-            len += 3;    // EST/HST/MST not in tzdb.dat
-        }
+        var shortIDs = ZoneId.SHORT_IDS.keySet();
+        int len = regions.length + shortIDs.size();
         String[] ids = Arrays.copyOf(regions, len);
         int i = regions.length;
-        if (!USE_OLDMAPPING) {
-            ids[i++] = "EST";
-            ids[i++] = "HST";
-            ids[i++] = "MST";
-        }
-        for (int j = 0; j < oldMappings.length; j++) {
-            ids[i++] = oldMappings[j][0];
+        for (var id : shortIDs) {
+            ids[i++] = id;
         }
         return ids;
     }
@@ -102,9 +93,33 @@ public final class ZoneInfoFile {
         // sorted list, though the specification does not
         // specify it. Keep the same behavior for better
         // compatibility.
-        String[] list = ids.toArray(new String[ids.size()]);
+        String[] list = ids.toArray(new String[0]);
         Arrays.sort(list);
         return list;
+    }
+
+    /**
+     * Gets all available IDs supported in the Java run-time.
+     *
+     * @return a stream of time zone IDs.
+     */
+    public static Stream<String> zoneIds() {
+        return Stream.concat(Arrays.stream(regions),
+                ZoneId.SHORT_IDS.keySet().stream());
+    }
+
+    /**
+     * Gets all available IDs that have the same value as the
+     * specified raw GMT offset.
+     *
+     * @param rawOffset  the GMT offset in milliseconds. This
+     *                   value should not include any daylight saving time.
+     * @return a stream of time zone IDs.
+     */
+    public static Stream<String> zoneIds(int rawOffset) {
+        return zoneIds()
+                .filter(id -> getZoneInfo(id).getRawOffset() == rawOffset)
+                .sorted(); // Sort the IDs, see getZoneIds(int)
     }
 
     public static ZoneInfo getZoneInfo(String zoneId) {
@@ -125,10 +140,7 @@ public final class ZoneInfoFile {
             if (zi != null) {
                 return zi;
             }
-            String zid = zoneId;
-            if (aliases.containsKey(zoneId)) {
-                zid = aliases.get(zoneId);
-            }
+            String zid = aliases.getOrDefault(zoneId, zoneId);
             int index = Arrays.binarySearch(regions, zid);
             if (index < 0) {
                 return null;
@@ -178,26 +190,33 @@ public final class ZoneInfoFile {
 
     public static String toCustomID(int gmtOffset) {
         char sign;
-        int offset = gmtOffset / 60000;
+        int offset = gmtOffset / 1_000;
         if (offset >= 0) {
             sign = '+';
         } else {
             sign = '-';
             offset = -offset;
         }
-        int hh = offset / 60;
-        int mm = offset % 60;
+        int hh = offset / 3_600;
+        int mm = (offset % 3_600) / 60;
+        int ss = offset % 60;
 
         char[] buf = new char[] { 'G', 'M', 'T', sign, '0', '0', ':', '0', '0' };
         if (hh >= 10) {
-            buf[4] += hh / 10;
+            buf[4] += (char)(hh / 10);
         }
-        buf[5] += hh % 10;
+        buf[5] += (char)(hh % 10);
         if (mm != 0) {
-            buf[7] += mm / 10;
-            buf[8] += mm % 10;
+            buf[7] += (char)(mm / 10);
+            buf[8] += (char)(mm % 10);
         }
-        return new String(buf);
+        var id = new String(buf);
+        if (ss != 0) {
+            buf[7] = (char)('0' + ss / 10);
+            buf[8] = (char)('0' + ss % 10);
+            id += new String(buf, 6, 3);
+        }
+        return id;
     }
 
     ///////////////////////////////////////////////////////////
@@ -206,91 +225,36 @@ public final class ZoneInfoFile {
 
     private static String versionId;
     private static final Map<String, ZoneInfo> zones = new ConcurrentHashMap<>();
-    private static Map<String, String> aliases = new HashMap<>();
+    private static final Map<String, String> aliases = new HashMap<>();
 
     private static byte[][] ruleArray;
     private static String[] regions;
     private static int[] indices;
 
-    // Flag for supporting JDK backward compatible IDs, such as "EST".
-    private static final boolean USE_OLDMAPPING;
-
-    private static String[][] oldMappings = new String[][] {
-        { "ACT", "Australia/Darwin" },
-        { "AET", "Australia/Sydney" },
-        { "AGT", "America/Argentina/Buenos_Aires" },
-        { "ART", "Africa/Cairo" },
-        { "AST", "America/Anchorage" },
-        { "BET", "America/Sao_Paulo" },
-        { "BST", "Asia/Dhaka" },
-        { "CAT", "Africa/Harare" },
-        { "CNT", "America/St_Johns" },
-        { "CST", "America/Chicago" },
-        { "CTT", "Asia/Shanghai" },
-        { "EAT", "Africa/Addis_Ababa" },
-        { "ECT", "Europe/Paris" },
-        { "IET", "America/Indiana/Indianapolis" },
-        { "IST", "Asia/Kolkata" },
-        { "JST", "Asia/Tokyo" },
-        { "MIT", "Pacific/Apia" },
-        { "NET", "Asia/Yerevan" },
-        { "NST", "Pacific/Auckland" },
-        { "PLT", "Asia/Karachi" },
-        { "PNT", "America/Phoenix" },
-        { "PRT", "America/Puerto_Rico" },
-        { "PST", "America/Los_Angeles" },
-        { "SST", "Pacific/Guadalcanal" },
-        { "VST", "Asia/Ho_Chi_Minh" },
-    };
-
     static {
-        String oldmapping = GetPropertyAction
-                .privilegedGetProperty("sun.timezone.ids.oldmapping", "false")
-                .toLowerCase(Locale.ROOT);
-        USE_OLDMAPPING = (oldmapping.equals("yes") || oldmapping.equals("true"));
-        AccessController.doPrivileged(new PrivilegedAction<Void>() {
-            public Void run() {
-                try {
-                    String libDir = StaticProperty.javaHome() + File.separator + "lib";
-                    try (DataInputStream dis = new DataInputStream(
-                             new BufferedInputStream(new FileInputStream(
-                                 new File(libDir, "tzdb.dat"))))) {
-                        load(dis);
-                    }
-                } catch (Exception x) {
-                    throw new Error(x);
-                }
-                return null;
+        loadTZDB();
+    }
+
+    private static void loadTZDB() {
+        try {
+            String libDir = StaticProperty.javaHome() + File.separator + "lib";
+            try (DataInputStream dis = new DataInputStream(
+                     new BufferedInputStream(new FileInputStream(
+                         new File(libDir, "tzdb.dat"))))) {
+                load(dis);
             }
-        });
-    }
-
-    private static void addOldMapping() {
-        for (String[] alias : oldMappings) {
-            aliases.put(alias[0], alias[1]);
+        } catch (Exception x) {
+            throw new Error(x);
         }
-        if (USE_OLDMAPPING) {
-            aliases.put("EST", "America/New_York");
-            aliases.put("MST", "America/Denver");
-            aliases.put("HST", "Pacific/Honolulu");
-        } else {
-            zones.put("EST", new ZoneInfo("EST", -18000000));
-            zones.put("MST", new ZoneInfo("MST", -25200000));
-            zones.put("HST", new ZoneInfo("HST", -36000000));
-        }
-    }
-
-    public static boolean useOldMapping() {
-       return USE_OLDMAPPING;
     }
 
     /**
      * Loads the rules from a DateInputStream
      *
      * @param dis  the DateInputStream to load, not null
-     * @throws Exception if an error occurs
+     * @throws IOException if an error occurs
      */
-    private static void load(DataInputStream dis) throws ClassNotFoundException, IOException {
+    private static void load(DataInputStream dis) throws IOException {
         if (dis.readByte() != 1) {
             throw new StreamCorruptedException("File format not recognised");
         }
@@ -330,7 +294,7 @@ public final class ZoneInfoFile {
             }
         }
         // remove the following ids from the map, they
-        // are exclued from the "old" ZoneInfo
+        // are excluded from the "old" ZoneInfo
         zones.remove("ROC");
         for (int i = 0; i < versionCount; i++) {
             int aliasCount = dis.readShort();
@@ -342,7 +306,7 @@ public final class ZoneInfoFile {
             }
         }
         // old us time-zone names
-        addOldMapping();
+        aliases.putAll(ZoneId.SHORT_IDS);
     }
 
     /////////////////////////Ser/////////////////////////////////
@@ -397,19 +361,20 @@ public final class ZoneInfoFile {
     // ZoneInfo starts with UTC1900
     private static final long UTC1900 = -2208988800L;
 
-    // ZoneInfo ends with   UTC2037
-    // LocalDateTime.of(2038, 1, 1, 0, 0, 0).toEpochSecond(ZoneOffset.UTC) - 1;
-    private static final long UTC2037 = 2145916799L;
+    // ZoneInfo ends with   UTC2100
+    // LocalDateTime.of(2101, 1, 1, 0, 0, 0).toEpochSecond(ZoneOffset.UTC) - 1;
+    private static final long UTC2100 = 4133980799L;
 
-    // ZoneInfo has an ending entry for 2037, this need to be offset by
+    // ZoneInfo has an ending entry for 2100, this need to be offset by
     // a "rawOffset"
-    // LocalDateTime.of(2037, 1, 1, 0, 0, 0).toEpochSecond(ZoneOffset.UTC));
-    private static final long LDT2037 = 2114380800L;
+    // LocalDateTime.of(2100, 1, 1, 0, 0, 0).toEpochSecond(ZoneOffset.UTC);
+    private static final long LDT2100 = 4102444800L;
 
-    //Current time. Used to determine future GMToffset transitions
+    //Current time. Used to determine future GMT offset transitions
     private static final long CURRT = System.currentTimeMillis()/1000;
 
-    /* Get a ZoneInfo instance.
+    /**
+     * Get a ZoneInfo instance.
      *
      * @param standardTransitions  the standard transitions, not null
      * @param standardOffsets  the standard offsets, not null
@@ -458,10 +423,9 @@ public final class ZoneInfoFile {
             }
             if (i < savingsInstantTransitions.length) {
                 // javazic writes the last GMT offset into index 0!
-                if (i < savingsInstantTransitions.length) {
-                    offsets[0] = standardOffsets[standardOffsets.length - 1] * 1000;
-                    nOffsets = 1;
-                }
+                offsets[0] = standardOffsets[standardOffsets.length - 1] * 1000;
+                nOffsets = 1;
+
                 // ZoneInfo has a beginning entry for 1900.
                 // Only add it if this is not the only one in table
                 nOffsets = addTrans(transitions, nTrans++,
@@ -473,7 +437,7 @@ public final class ZoneInfoFile {
 
             for (; i < savingsInstantTransitions.length; i++) {
                 long trans = savingsInstantTransitions[i];
-                if (trans > UTC2037) {
+                if (trans > UTC2100) {
                     // no trans beyond LASTYEAR
                     lastyear = LASTYEAR;
                     break;
@@ -569,16 +533,12 @@ public final class ZoneInfoFile {
                     // ZoneRulesBuilder adjusts < 0 case (-1, for last, don't have
                     // "<=" case yet) to positive value if not February (it appears
                     // we don't have February cutoff in tzdata table yet)
-                    // Ideally, if JSR310 can just pass in the nagative and
+                    // Ideally, if JSR310 can just pass in the negative and
                     // we can then pass in the dom = -1, dow > 0 into ZoneInfo
                     //
                     // hacking, assume the >=24 is the result of ZRB optimization for
-                    // "last", it works for now. From tzdata2020d this hacking
-                    // will not work for Asia/Gaza and Asia/Hebron which follow
-                    // Palestine DST rules.
-                    if (dom < 0 || dom >= 24 &&
-                                   !(zoneId.equals("Asia/Gaza") ||
-                                     zoneId.equals("Asia/Hebron"))) {
+                    // "last", it works for now.
+                    if (dom < 0 || dom >= 24) {
                         params[1] = -1;
                         params[2] = toCalendarDOW[dow];
                     } else {
@@ -600,9 +560,7 @@ public final class ZoneInfoFile {
                     params[7] = 0;
                 } else {
                     // hacking: see comment above
-                    if (dom < 0 || dom >= 24 &&
-                                   !(zoneId.equals("Asia/Gaza") ||
-                                     zoneId.equals("Asia/Hebron"))) {
+                    if (dom < 0 || dom >= 24) {
                         params[6] = -1;
                         params[7] = toCalendarDOW[dow];
                     } else {
@@ -614,40 +572,23 @@ public final class ZoneInfoFile {
                 params[9] = toSTZTime[endRule.timeDefinition];
                 dstSavings = (startRule.offsetAfter - startRule.offsetBefore) * 1000;
 
-                // Note: known mismatching -> Asia/Amman
+                // Note: known mismatching -> Africa/Cairo
                 // ZoneInfo :      startDayOfWeek=5     <= Thursday
-                //                 startTime=86400000   <= 24 hours
-                // This:           startDayOfWeek=6
-                //                 startTime=0
-                // Similar workaround needs to be applied to Africa/Cairo and
-                // its endDayOfWeek and endTime
-                // Below is the workarounds, it probably slows down everyone a little
-                if (params[2] == 6 && params[3] == 0 &&
-                    (zoneId.equals("Asia/Amman"))) {
-                    params[2] = 5;
-                    params[3] = 86400000;
+                //                 startTime=86400000   <= 24:00
+                // This:           startDayOfWeek=6     <= Friday
+                //                 startTime=0          <= 0:00
+                if (zoneId.equals("Africa/Cairo") &&
+                        params[7] == Calendar.FRIDAY && params[8] == 0) {
+                    params[7] = Calendar.THURSDAY;
+                    params[8] = SECONDS_PER_DAY * 1000;
                 }
-                // Additional check for startDayOfWeek=6 and starTime=86400000
-                // is needed for Asia/Amman;
-                if (params[2] == 7 && params[3] == 0 &&
-                     (zoneId.equals("Asia/Amman"))) {
-                    params[2] = 6;        // Friday
-                    params[3] = 86400000; // 24h
-                }
-                //endDayOfWeek and endTime workaround
-                if (params[7] == 6 && params[8] == 0 &&
-                    (zoneId.equals("Africa/Cairo"))) {
-                    params[7] = 5;
-                    params[8] = 86400000;
-                }
-
             } else if (nTrans > 0) {  // only do this if there is something in table already
                 if (lastyear < LASTYEAR) {
-                    // ZoneInfo has an ending entry for 2037
+                    // ZoneInfo has an ending entry for 2100
                     //long trans = OffsetDateTime.of(LASTYEAR, 1, 1, 0, 0, 0, 0,
                     //                               ZoneOffset.ofTotalSeconds(rawOffset/1000))
                     //                           .toEpochSecond();
-                    long trans = LDT2037 - rawOffset/1000;
+                    long trans = LDT2100 - rawOffset/1000;
 
                     int offsetIndex = indexOf(offsets, 0, nOffsets, rawOffset/1000);
                     if (offsetIndex == nOffsets)
@@ -736,9 +677,7 @@ public final class ZoneInfoFile {
                 for (i = 0; i < transitions.length; i++) {
                     long val = transitions[i];
                     int dst = (int)((val >>> DST_NSHIFT) & 0xfL);
-                    int saving = (dst == 0) ? 0 : offsets[dst];
                     int index = (int)(val & OFFSET_MASK);
-                    int offset = offsets[index];
                     long second = (val >> TRANSITION_NSHIFT);
                     // javazic uses "index of the offset in offsets",
                     // instead of the real offset value itself to
@@ -805,13 +744,11 @@ public final class ZoneInfoFile {
         int marchDoy0 = (int) doyEst;
         // convert march-based values back to january-based
         int marchMonth0 = (marchDoy0 * 5 + 2) / 153;
-        int month = (marchMonth0 + 2) % 12 + 1;
-        int dom = marchDoy0 - (marchMonth0 * 306 + 5) / 10 + 1;
         yearEst += marchMonth0 / 10;
         return (int)yearEst;
     }
 
-    private static final int toCalendarDOW[] = new int[] {
+    private static final int[] toCalendarDOW = new int[] {
         -1,
         Calendar.MONDAY,
         Calendar.TUESDAY,
@@ -822,7 +759,7 @@ public final class ZoneInfoFile {
         Calendar.SUNDAY
     };
 
-    private static final int toSTZTime[] = new int[] {
+    private static final int[] toSTZTime = new int[] {
         SimpleTimeZone.UTC_TIME,
         SimpleTimeZone.WALL_TIME,
         SimpleTimeZone.STANDARD_TIME,
@@ -832,7 +769,9 @@ public final class ZoneInfoFile {
     private static final long DST_MASK = 0xf0L;
     private static final int  DST_NSHIFT = 4;
     private static final int  TRANSITION_NSHIFT = 12;
-    private static final int  LASTYEAR = 2037;
+    // The `last` year that transitions are accounted for. If there are
+    // rules that go beyond this LASTYEAR, the value needs to be expanded.
+    private static final int  LASTYEAR = 2100;
 
     // from: 0 for offset lookup, 1 for dstsvings lookup
     private static int indexOf(int[] offsets, int from, int nOffsets, int offset) {
@@ -846,8 +785,8 @@ public final class ZoneInfoFile {
     }
 
     // return updated nOffsets
-    private static int addTrans(long transitions[], int nTrans,
-                                int offsets[], int nOffsets,
+    private static int addTrans(long[] transitions, int nTrans,
+                                int[] offsets, int nOffsets,
                                 long trans, int offset, int stdOffset) {
         int offsetIndex = indexOf(offsets, 0, nOffsets, offset);
         if (offsetIndex == nOffsets)
@@ -889,12 +828,12 @@ public final class ZoneInfoFile {
     }
 
     // A simple/raw version of j.t.ZoneOffsetTransitionRule
+    // timeEndOfDay is included in secondOfDay as "86,400" secs.
     private static class ZoneOffsetTransitionRule {
         private final int month;
         private final byte dom;
         private final int dow;
         private final int secondOfDay;
-        private final boolean timeEndOfDay;
         private final int timeDefinition;
         private final int standardOffset;
         private final int offsetBefore;
@@ -912,9 +851,7 @@ public final class ZoneInfoFile {
             this.dom = (byte)(((data & (63 << 22)) >>> 22) - 32);
             this.dow = dowByte == 0 ? -1 : dowByte;
             this.secondOfDay = timeByte == 31 ? in.readInt() : timeByte * 3600;
-            this.timeEndOfDay = timeByte == 24;
             this.timeDefinition = (data & (3 << 12)) >>> 12;
-
             this.standardOffset = stdByte == 255 ? in.readInt() : (stdByte - 128) * 900;
             this.offsetBefore = beforeByte == 3 ? in.readInt() : standardOffset + beforeByte * 1800;
             this.offsetAfter = afterByte == 3 ? in.readInt() : standardOffset + afterByte * 1800;
@@ -933,9 +870,6 @@ public final class ZoneInfoFile {
                     epochDay = nextOrSame(epochDay, dow);
                 }
             }
-            if (timeEndOfDay) {
-                epochDay += 1;
-            }
             int difference = 0;
             switch (timeDefinition) {
                 case 0:    // UTC
@@ -952,7 +886,7 @@ public final class ZoneInfoFile {
         }
 
         static final boolean isLeapYear(int year) {
-            return ((year & 3) == 0) && ((year % 100) != 0 || (year % 400) == 0);
+            return CalendarUtils.isGregorianLeapYear(year);
         }
 
         static final int lengthOfMonth(int year, int month) {

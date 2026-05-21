@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,24 +25,23 @@
 
 package sun.nio.cs;
 
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.io.Writer;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
-import java.nio.channels.WritableByteChannel;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetEncoder;
 import java.nio.charset.CoderResult;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.IllegalCharsetNameException;
+import java.nio.charset.UnsupportedCharsetException;
 
-public class StreamEncoder extends Writer
-{
+public final class StreamEncoder extends Writer {
 
-    private static final int DEFAULT_BYTE_BUFFER_SIZE = 8192;
+    private static final int INITIAL_BYTE_BUFFER_CAPACITY = 512;
+    private static final int MAX_BYTE_BUFFER_CAPACITY = 8192;
 
     private volatile boolean closed;
 
@@ -57,14 +56,11 @@ public class StreamEncoder extends Writer
                                                       String charsetName)
         throws UnsupportedEncodingException
     {
-        String csn = charsetName;
-        if (csn == null)
-            csn = Charset.defaultCharset().name();
         try {
-            if (Charset.isSupported(csn))
-                return new StreamEncoder(out, lock, Charset.forName(csn));
-        } catch (IllegalCharsetNameException x) { }
-        throw new UnsupportedEncodingException (csn);
+            return new StreamEncoder(out, lock, Charset.forName(charsetName));
+        } catch (IllegalCharsetNameException | UnsupportedCharsetException x) {
+            throw new UnsupportedEncodingException (charsetName);
+        }
     }
 
     public static StreamEncoder forOutputStreamWriter(OutputStream out,
@@ -81,16 +77,11 @@ public class StreamEncoder extends Writer
         return new StreamEncoder(out, lock, enc);
     }
 
-
-    // Factory for java.nio.channels.Channels.newWriter
-
-    public static StreamEncoder forEncoder(WritableByteChannel ch,
-                                           CharsetEncoder enc,
-                                           int minBufferCap)
+    public static StreamEncoder forOutputStreamWriter(OutputStream out,
+                                                      CharsetEncoder enc)
     {
-        return new StreamEncoder(ch, enc, minBufferCap);
+        return new StreamEncoder(out, enc);
     }
-
 
     // -- Public methods corresponding to those in OutputStreamWriter --
 
@@ -114,12 +105,12 @@ public class StreamEncoder extends Writer
     }
 
     public void write(int c) throws IOException {
-        char cbuf[] = new char[1];
+        char[] cbuf = new char[1];
         cbuf[0] = (char) c;
         write(cbuf, 0, 1);
     }
 
-    public void write(char cbuf[], int off, int len) throws IOException {
+    public void write(char[] cbuf, int off, int len) throws IOException {
         synchronized (lock) {
             ensureOpen();
             if ((off < 0) || (off > cbuf.length) || (len < 0) ||
@@ -136,7 +127,7 @@ public class StreamEncoder extends Writer
         /* Check the len before creating a char buffer */
         if (len < 0)
             throw new IndexOutOfBoundsException();
-        char cbuf[] = new char[len];
+        char[] cbuf = new char[len];
         str.getChars(off, off + len, cbuf, 0);
         write(cbuf, 0, len);
     }
@@ -179,13 +170,12 @@ public class StreamEncoder extends Writer
 
     // -- Charset-based stream encoder impl --
 
-    private Charset cs;
-    private CharsetEncoder encoder;
+    private final Charset cs;
+    private final CharsetEncoder encoder;
     private ByteBuffer bb;
+    private final int maxBufferCapacity;
 
-    // Exactly one of these is non-null
     private final OutputStream out;
-    private WritableByteChannel ch;
 
     // Leftover first char in a surrogate pair
     private boolean haveLeftoverChar = false;
@@ -194,37 +184,29 @@ public class StreamEncoder extends Writer
 
     private StreamEncoder(OutputStream out, Object lock, Charset cs) {
         this(out, lock,
-         cs.newEncoder()
-         .onMalformedInput(CodingErrorAction.REPLACE)
-         .onUnmappableCharacter(CodingErrorAction.REPLACE));
+            cs.newEncoder()
+                .onMalformedInput(CodingErrorAction.REPLACE)
+                .onUnmappableCharacter(CodingErrorAction.REPLACE));
     }
 
     private StreamEncoder(OutputStream out, Object lock, CharsetEncoder enc) {
         super(lock);
         this.out = out;
-        this.ch = null;
         this.cs = enc.charset();
         this.encoder = enc;
 
-        // This path disabled until direct buffers are faster
-        if (false && out instanceof FileOutputStream) {
-                ch = ((FileOutputStream)out).getChannel();
-        if (ch != null)
-                    bb = ByteBuffer.allocateDirect(DEFAULT_BYTE_BUFFER_SIZE);
-        }
-            if (ch == null) {
-        bb = ByteBuffer.allocate(DEFAULT_BYTE_BUFFER_SIZE);
-        }
+        this.bb = ByteBuffer.allocate(INITIAL_BYTE_BUFFER_CAPACITY);
+        this.maxBufferCapacity = MAX_BYTE_BUFFER_CAPACITY;
     }
 
-    private StreamEncoder(WritableByteChannel ch, CharsetEncoder enc, int mbc) {
-        this.out = null;
-        this.ch = ch;
+    private StreamEncoder(OutputStream out, CharsetEncoder enc) {
+        super();
+        this.out = out;
         this.cs = enc.charset();
         this.encoder = enc;
-        this.bb = ByteBuffer.allocate(mbc < 0
-                                  ? DEFAULT_BYTE_BUFFER_SIZE
-                                  : mbc);
+
+        this.bb = ByteBuffer.allocate(INITIAL_BYTE_BUFFER_CAPACITY);
+        this.maxBufferCapacity = MAX_BYTE_BUFFER_CAPACITY;
     }
 
     private void writeBytes() throws IOException {
@@ -234,16 +216,11 @@ public class StreamEncoder extends Writer
         assert (pos <= lim);
         int rem = (pos <= lim ? lim - pos : 0);
 
-            if (rem > 0) {
-        if (ch != null) {
-            if (ch.write(bb) != rem)
-                assert false : rem;
-        } else {
+        if (rem > 0) {
             out.write(bb.array(), bb.arrayOffset() + pos, rem);
         }
-        }
         bb.clear();
-        }
+    }
 
     private void flushLeftoverChar(CharBuffer cb, boolean endOfInput)
         throws IOException
@@ -283,7 +260,7 @@ public class StreamEncoder extends Writer
         haveLeftoverChar = false;
     }
 
-    void implWrite(char cbuf[], int off, int len)
+    void implWrite(char[] cbuf, int off, int len)
         throws IOException
     {
         CharBuffer cb = CharBuffer.wrap(cbuf, off, len);
@@ -296,6 +273,8 @@ public class StreamEncoder extends Writer
         if (haveLeftoverChar) {
             flushLeftoverChar(cb, false);
         }
+
+        growByteBufferIfNeeded(cb.remaining());
 
         while (cb.hasRemaining()) {
             CoderResult cr = encoder.encode(cb, bb, false);
@@ -316,20 +295,35 @@ public class StreamEncoder extends Writer
         }
     }
 
+    /**
+     * Grows bb to a capacity to allow len characters be encoded.
+     */
+    void growByteBufferIfNeeded(int len) throws IOException {
+        int cap = bb.capacity();
+        if (cap < maxBufferCapacity) {
+            int maxBytes = len * Math.round(encoder.maxBytesPerChar());
+            int newCap = Math.min(maxBytes, maxBufferCapacity);
+            if (newCap > cap) {
+                implFlushBuffer();
+                bb = ByteBuffer.allocate(newCap);
+            }
+        }
+    }
+
     void implFlushBuffer() throws IOException {
-        if (bb.position() > 0)
-        writeBytes();
+        if (bb.position() > 0) {
+            writeBytes();
+        }
     }
 
     void implFlush() throws IOException {
         implFlushBuffer();
-        if (out != null)
         out.flush();
     }
 
     void implClose() throws IOException {
-        flushLeftoverChar(null, true);
-        try {
+        try (out) {
+            flushLeftoverChar(null, true);
             for (;;) {
                 CoderResult cr = encoder.flush(bb);
                 if (cr.isUnderflow())
@@ -344,15 +338,7 @@ public class StreamEncoder extends Writer
 
             if (bb.position() > 0)
                 writeBytes();
-            if (ch != null)
-                ch.close();
-            else {
-                try {
-                    out.flush();
-                } finally {
-                    out.close();
-                }
-            }
+            out.flush();
         } catch (IOException x) {
             encoder.reset();
             throw x;

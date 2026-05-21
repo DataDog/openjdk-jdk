@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,6 +35,7 @@ import java.nio.BufferUnderflowException;
 import java.lang.ref.WeakReference;
 import java.nio.charset.CoderMalfunctionError;                  // javadoc
 import java.util.Arrays;
+import jdk.internal.util.ArraysSupport;
 
 
 /**
@@ -96,10 +97,10 @@ import java.util.Arrays;
  *
 #if[encoder]
  * is initially set to the $coder$'s default replacement, which often
- * (but not always) has the initial value&nbsp;$defaultReplName$;
+ * (but not always) has the initial value&nbsp;<code>{</code>&nbsp;<code>(byte)'?'</code>&nbsp;<code>}</code>;
 #end[encoder]
 #if[decoder]
- * has the initial value $defaultReplName$;
+ * has the initial value <code>"&#92;uFFFD"</code>;
 #end[decoder]
  *
  * its value may be changed via the {@link #replaceWith($replFQType$)
@@ -183,6 +184,7 @@ public abstract class Charset$Coder$ {
      *          If the preconditions on the parameters do not hold
      */
     {#if[encoder]?protected:private}
+    @SuppressWarnings("this-escape")
     Charset$Coder$(Charset cs,
                    float average$ItypesPerOtype$,
                    float max$ItypesPerOtype$,
@@ -210,7 +212,12 @@ public abstract class Charset$Coder$ {
     /**
      * Initializes a new $coder$.  The new $coder$ will have the given
      * $otypes-per-itype$ values and its replacement will be the
-     * $replTypeName$ $defaultReplName$.
+#if[encoder]
+     * byte array <code>{</code>&nbsp;<code>(byte)'?'</code>&nbsp;<code>}</code>.
+#end[encoder]
+#if[decoder]
+     * string <code>"&#92;uFFFD"</code>.
+#end[decoder]
      *
      * @param  cs
      *         The charset that created this $coder$
@@ -232,7 +239,12 @@ public abstract class Charset$Coder$ {
     {
         this(cs,
              average$ItypesPerOtype$, max$ItypesPerOtype$,
-             $defaultRepl$);
+#if[encoder]
+             new byte[] { (byte)'?' });
+#end[encoder]
+#if[decoder]
+             "\uFFFD");
+#end[decoder]
     }
 
     /**
@@ -791,11 +803,31 @@ public abstract class Charset$Coder$ {
      *          position cannot be mapped to an equivalent $otype$ sequence and
      *          the current unmappable-character action is {@link
      *          CodingErrorAction#REPORT}
+     *
+     * @throws  CharacterCodingException
+     *          {@code MalformedInputException} if the $itype$ sequence starting at the
+     *          input buffer's current position is $notLegal$ and the current
+     *          malformed-input action is {@code CodingErrorAction.REPORT};
+     *          {@code UnmappableCharacterException} if the $itype$ sequence starting at
+     *          the input buffer's current position cannot be mapped to an
+     *          equivalent $otype$ sequence and the current unmappable-character
+     *          action is {@code CodingErrorAction.REPORT}
+     *
+     * @throws  OutOfMemoryError
+     *          If the output $otype$ buffer for the requested size of the input
+     *          $itype$ buffer cannot be allocated
      */
     public final $Otype$Buffer $code$($Itype$Buffer in)
         throws CharacterCodingException
     {
-        int n = (int)(in.remaining() * average$ItypesPerOtype$());
+        return $code$(in, true);
+    }
+
+    private $Otype$Buffer $code$($Itype$Buffer in, boolean throwOnError)
+        throws CharacterCodingException
+    {
+        int n = Math.min((int)(in.remaining() * average$ItypesPerOtype$()),
+                    ArraysSupport.SOFT_MAX_ARRAY_LENGTH);
         $Otype$Buffer out = $Otype$Buffer.allocate(n);
 
         if ((n == 0) && (in.remaining() == 0))
@@ -810,14 +842,19 @@ public abstract class Charset$Coder$ {
             if (cr.isUnderflow())
                 break;
             if (cr.isOverflow()) {
-                n = 2*n + 1;    // Ensure progress; n might be 0!
+                // Ensure progress; n might be 0!
+                n = ArraysSupport.newLength(n, Math.min(n + 1, 1_024), n + 1);
                 $Otype$Buffer o = $Otype$Buffer.allocate(n);
                 out.flip();
                 o.put(out);
                 out = o;
                 continue;
             }
-            cr.throwException();
+            if (throwOnError) {
+                cr.throwException();
+            } else {
+                return null;
+            }
         }
         out.flip();
         return out;
@@ -911,7 +948,8 @@ public abstract class Charset$Coder$ {
         try {
             onMalformedInput(CodingErrorAction.REPORT);
             onUnmappableCharacter(CodingErrorAction.REPORT);
-            encode(cb);
+            ByteBuffer bb = encode(cb, false);
+            return bb != null;
         } catch (CharacterCodingException x) {
             return false;
         } finally {
@@ -919,7 +957,6 @@ public abstract class Charset$Coder$ {
             onUnmappableCharacter(ua);
             reset();
         }
-        return true;
     }
 
     /**

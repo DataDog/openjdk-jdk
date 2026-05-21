@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2019, 2021, Red Hat, Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,12 +25,32 @@
 #ifndef SHARE_GC_SHENANDOAH_SHENANDOAHSTRINGDEDUP_INLINE_HPP
 #define SHARE_GC_SHENANDOAH_SHENANDOAHSTRINGDEDUP_INLINE_HPP
 
-#include "classfile/javaClasses.inline.hpp"
 #include "gc/shenandoah/shenandoahStringDedup.hpp"
 
+#include "classfile/javaClasses.inline.hpp"
+#include "gc/shenandoah/shenandoahHeap.inline.hpp"
+#include "oops/markWord.hpp"
+
+bool ShenandoahStringDedup::is_string_candidate(oop obj) {
+  assert(Thread::current()->is_Worker_thread(),
+        "Only from a GC worker thread");
+  return java_lang_String::is_instance(obj) &&
+         java_lang_String::value(obj) != nullptr;
+}
+
+bool ShenandoahStringDedup::dedup_requested(oop obj) {
+  return java_lang_String::test_and_set_deduplication_requested(obj);
+}
+
 bool ShenandoahStringDedup::is_candidate(oop obj) {
-  return java_lang_String::is_instance_inlined(obj) &&
-         java_lang_String::value(obj) != NULL;
+  if (!is_string_candidate(obj)) {
+    return false;
+  }
+
+  uint age = ShenandoahHeap::get_object_age(obj);
+  return (age <= markWord::max_age) &&
+         StringDedup::is_below_threshold_age(age) &&
+         !dedup_requested(obj);
 }
 
 #endif // SHARE_GC_SHENANDOAH_SHENANDOAHSTRINGDEDUP_INLINE_HPP

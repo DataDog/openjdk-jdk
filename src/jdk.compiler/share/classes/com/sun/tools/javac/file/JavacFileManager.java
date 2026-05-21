@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -54,15 +54,14 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
 import java.util.ServiceLoader;
 import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.zip.ZipException;
 
 import javax.lang.model.SourceVersion;
 import javax.tools.FileObject;
@@ -81,7 +80,9 @@ import com.sun.tools.javac.util.DefinedBy;
 import com.sun.tools.javac.util.DefinedBy.Api;
 import com.sun.tools.javac.util.List;
 import com.sun.tools.javac.util.ListBuffer;
+import com.sun.tools.javac.util.Options;
 
+import static java.nio.charset.StandardCharsets.US_ASCII;
 import static java.nio.file.FileVisitOption.FOLLOW_LINKS;
 
 import static javax.tools.StandardLocation.*;
@@ -109,7 +110,7 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
     private static final Set<JavaFileObject.Kind> SOURCE_OR_CLASS =
         Set.of(JavaFileObject.Kind.SOURCE, JavaFileObject.Kind.CLASS);
 
-    protected boolean symbolFileEnabled;
+    protected boolean symbolFileEnabled = true;
 
     private PathFactory pathFactory = Paths::get;
 
@@ -123,7 +124,7 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
         REVERSE {
             @Override
             public int compare(Path f1, Path f2) {
-                return -f1.getFileName().compareTo(f2.getFileName());
+                return f2.getFileName().compareTo(f1.getFileName());
             }
         }
     }
@@ -155,6 +156,7 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
      * Create a JavacFileManager using a given context, optionally registering
      * it as the JavaFileManager for that context.
      */
+    @SuppressWarnings("this-escape")
     public JavacFileManager(Context context, boolean register, Charset charset) {
         super(charset);
         if (register)
@@ -168,8 +170,12 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
     @Override
     public void setContext(Context context) {
         super.setContext(context);
-
         fsInfo = FSInfo.instance(context);
+    }
+
+    @Override
+    protected void applyOptions(Options options) {
+        super.applyOptions(options);
 
         symbolFileEnabled = !options.isSet("ignore.symbol.file");
 
@@ -190,7 +196,7 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
     }
 
     /**
-     * Set whether or not to use ct.sym as an alternate to rt.jar.
+     * Set whether or not to use ct.sym as an alternate to the current runtime.
      */
     public void setSymbolFileEnabled(boolean b) {
         symbolFileEnabled = b;
@@ -281,13 +287,8 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
     }
 
     private static void printAscii(String format, Object... args) {
-        String message;
-        try {
-            final String ascii = "US-ASCII";
-            message = new String(String.format(null, format, args).getBytes(ascii), ascii);
-        } catch (java.io.UnsupportedEncodingException ex) {
-            throw new AssertionError(ex);
-        }
+        String message = new String(
+                String.format(null, format, args).getBytes(US_ASCII), US_ASCII);
         System.out.println(message);
     }
 
@@ -329,7 +330,7 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
             } else {
                 try {
                     fs = new ArchiveContainer(path);
-                } catch (ProviderNotFoundException | SecurityException ex) {
+                } catch (ProviderNotFoundException ex) {
                     throw new IOException(ex);
                 }
             }
@@ -491,7 +492,7 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
 
             java.util.List<Path> files;
             try (Stream<Path> s = Files.list(d)) {
-                files = (sortFiles == null ? s : s.sorted(sortFiles)).collect(Collectors.toList());
+                files = (sortFiles == null ? s : s.sorted(sortFiles)).toList();
             } catch (IOException ignore) {
                 return;
             }
@@ -558,15 +559,24 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
         private final FileSystem fileSystem;
         private final Map<RelativeDirectory, Path> packages;
 
-        public ArchiveContainer(Path archivePath) throws IOException, ProviderNotFoundException, SecurityException {
+        public ArchiveContainer(Path archivePath) throws IOException, ProviderNotFoundException {
             this.archivePath = archivePath;
             if (multiReleaseValue != null && archivePath.toString().endsWith(".jar")) {
-                Map<String,String> env = Collections.singletonMap("multi-release", multiReleaseValue);
                 FileSystemProvider jarFSProvider = fsInfo.getJarFSProvider();
                 Assert.checkNonNull(jarFSProvider, "should have been caught before!");
-                this.fileSystem = jarFSProvider.newFileSystem(archivePath, env);
+                Map<String, ?> env = fsInfo.readOnlyJarFSEnv(multiReleaseValue);
+                try {
+                    this.fileSystem = jarFSProvider.newFileSystem(archivePath, env);
+                } catch (ZipException ze) {
+                    throw new IOException("ZipException opening \"" + archivePath.getFileName() + "\": " + ze.getMessage(), ze);
+                }
             } else {
-                this.fileSystem = FileSystems.newFileSystem(archivePath, (ClassLoader)null);
+                // Less common case is possible if the file manager was not initialized in JavacTask,
+                // or if non "*.jar" files are on the classpath. If this is not a ZIP/JAR file then it
+                // will ignore ZIP specific parameters in env, and may not end up being read-only.
+                // However, Javac should never attempt to write back to archives either way.
+                Map<String, ?> env = fsInfo.readOnlyJarFSEnv(null);
+                this.fileSystem = FileSystems.newFileSystem(archivePath, env);
             }
             packages = new HashMap<>();
             for (Path root : fileSystem.getRootDirectories()) {
@@ -736,18 +746,19 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
         pathsAndContainersByLocationAndRelativeDirectory.clear();
         nonIndexingContainersByLocation.clear();
         contentCache.clear();
+        resetOutputFilesWritten();
     }
 
     @Override @DefinedBy(Api.COMPILER)
     public ClassLoader getClassLoader(Location location) {
         checkNotModuleOrientedLocation(location);
-        Collection<? extends Path> searchPath = getLocationAsPaths(location);
-        if (searchPath == null)
+        Iterable<? extends File> path = getLocation(location);
+        if (path == null)
             return null;
         ListBuffer<URL> lb = new ListBuffer<>();
-        for (Path p : searchPath) {
+        for (File f: path) {
             try {
-                lb.append(p.toUri().toURL());
+                lb.append(f.toURI().toURL());
             } catch (MalformedURLException e) {
                 throw new AssertionError(e);
             }
@@ -790,8 +801,8 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
             return null;
         }
 
-        if (file instanceof PathFileObject) {
-            return ((PathFileObject) file).inferBinaryName(path);
+        if (file instanceof PathFileObject pathFileObject) {
+            return pathFileObject.inferBinaryName(path);
         } else
             throw new IllegalArgumentException(file.getClass().getName());
     }
@@ -800,8 +811,8 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
     public boolean isSameFile(FileObject a, FileObject b) {
         nullCheck(a);
         nullCheck(b);
-        if (a instanceof PathFileObject && b instanceof PathFileObject)
-            return ((PathFileObject) a).isSameFile((PathFileObject) b);
+        if (a instanceof PathFileObject pathFileObjectA && b instanceof PathFileObject pathFileObjectB)
+            return pathFileObjectA.isSameFile(pathFileObjectB);
         return a.equals(b);
     }
 
@@ -907,13 +918,21 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
             if (getClassOutDir() != null) {
                 dir = getClassOutDir();
             } else {
+                // Sibling is the associated source of the class file (e.g. x/y/Foo.java).
+                // The base name for class output is the class file name (e.g. "Foo.class").
                 String baseName = fileName.basename();
-                if (sibling != null && sibling instanceof PathFileObject) {
-                    return ((PathFileObject) sibling).getSibling(baseName);
+                // Use the sibling to determine the output location where possible, unless
+                // it is in a JAR/ZIP file (we don't attempt to write class files back into
+                // archives).
+                if (sibling instanceof PathFileObject pathFileObject && !pathFileObject.isJarFile()) {
+                    return pathFileObject.getSibling(baseName);
                 } else {
-                    Path p = getPath(baseName);
-                    Path real = fsInfo.getCanonicalFile(p);
-                    return PathFileObject.forSimplePath(this, real, p);
+                    // Without the sibling present, we just create an output path in the
+                    // current working directory (this isn't great, but it is what older
+                    // versions of the JDK did).
+                    Path userPath = getPath(baseName);
+                    Path realPath = fsInfo.getCanonicalFile(userPath);
+                    return PathFileObject.forSimplePath(this, realPath, userPath);
                 }
             }
         } else if (location == SOURCE_OUTPUT) {
@@ -943,8 +962,8 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
         Iterable<? extends File> files)
     {
         ArrayList<PathFileObject> result;
-        if (files instanceof Collection<?>)
-            result = new ArrayList<>(((Collection<?>)files).size());
+        if (files instanceof Collection<?> collection)
+            result = new ArrayList<>(collection.size());
         else
             result = new ArrayList<>();
         for (File f: files) {
@@ -957,17 +976,16 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
     }
 
     @Override @DefinedBy(Api.COMPILER)
-    public Iterable<? extends JavaFileObject> getJavaFileObjectsFromPaths(
-        Collection<? extends Path> paths)
-    {
+    public Iterable<? extends JavaFileObject> getJavaFileObjectsFromPaths(Collection<? extends Path> paths) {
         ArrayList<PathFileObject> result;
-        if (paths instanceof Collection<?>)
-            result = new ArrayList<>(((Collection<?>)paths).size());
-        else
+        if (paths != null) {
+            result = new ArrayList<>(paths.size());
+            for (Path p: paths)
+                result.add(PathFileObject.forSimplePath(this,
+                        fsInfo.getCanonicalFile(p), p));
+        } else {
             result = new ArrayList<>();
-        for (Path p: paths)
-            result.add(PathFileObject.forSimplePath(this,
-                    fsInfo.getCanonicalFile(p), p));
+        }
         return result;
     }
 
@@ -1100,13 +1118,10 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
 
         @Override
         public boolean equals(Object o) {
-          if (o == null || !(o instanceof PathAndContainer)) {
-            return false;
-          }
-          PathAndContainer that = (PathAndContainer) o;
-          return path.equals(that.path)
-              && container.equals(that.container)
-              && index == this.index;
+            return (o instanceof PathAndContainer pathAndContainer)
+                    && path.equals(pathAndContainer.path)
+                    && container.equals(pathAndContainer.container)
+                    && index == pathAndContainer.index;
         }
 
         @Override
@@ -1160,9 +1175,9 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
     @Override @DefinedBy(Api.COMPILER)
     public Location getLocationForModule(Location location, JavaFileObject fo) throws IOException {
         checkModuleOrientedOrOutputLocation(location);
-        if (!(fo instanceof PathFileObject))
+        if (!(fo instanceof PathFileObject pathFileObject))
             return null;
-        Path p = Locations.normalize(((PathFileObject) fo).path);
+        Path p = Locations.normalize(pathFileObject.path);
             // need to find p in location
         return locations.getLocationForModule(location, p);
     }
@@ -1190,8 +1205,8 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
 
     @Override @DefinedBy(Api.COMPILER)
     public Path asPath(FileObject file) {
-        if (file instanceof PathFileObject) {
-            return ((PathFileObject) file).path;
+        if (file instanceof PathFileObject pathFileObject) {
+            return pathFileObject.path;
         } else
             throw new IllegalArgumentException(file.getName());
     }

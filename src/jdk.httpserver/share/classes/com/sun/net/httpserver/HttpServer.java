@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,8 @@ import com.sun.net.httpserver.spi.HttpServerProvider;
 import java.io.IOException;
 import java.net.BindException;
 import java.net.InetSocketAddress;
+import java.util.Arrays;
+import java.util.Objects;
 import java.util.concurrent.Executor;
 
 /**
@@ -42,7 +44,7 @@ import java.util.concurrent.Executor;
  * a root URI path which represents the location of the application or service
  * on this server. The mapping of a handler to a {@code HttpServer} is
  * encapsulated by a {@link HttpContext} object. HttpContexts are created by
- * calling {@link #createContext(String,HttpHandler)}.
+ * calling {@link #createContext(String, HttpHandler)}.
  * Any request for which no handler can be found is rejected with a 404 response.
  * Management of threads can be done external to this object by providing a
  * {@link java.util.concurrent.Executor} object. If none is provided a default
@@ -73,7 +75,7 @@ import java.util.concurrent.Executor;
  *
  * <p>The following table shows some request URIs and which, if any context they would
  * match with:
- * <table class="striped"><caption style="display:none">description</caption>
+ * <table class="striped" style="text-align:left"><caption style="display:none">description</caption>
  *      <thead>
  *          <tr>
  *              <th scope="col"><i>Request URI</i></th>
@@ -115,13 +117,13 @@ public abstract class HttpServer {
      * Creates a {@code HttpServer} instance which is initially not bound to any
      * local address/port. The {@code HttpServer} is acquired from the currently
      * installed {@link HttpServerProvider}. The server must be bound using
-     * {@link #bind(InetSocketAddress,int)} before it can be used.
+     * {@link #bind(InetSocketAddress, int)} before it can be used.
      *
      * @throws IOException if an I/O error occurs
      * @return an instance of {@code HttpServer}
      */
     public static HttpServer create() throws IOException {
-        return create (null, 0);
+        return create(null, 0);
     }
 
     /**
@@ -147,7 +149,59 @@ public abstract class HttpServer {
 
     public static HttpServer create(InetSocketAddress addr, int backlog) throws IOException {
         HttpServerProvider provider = HttpServerProvider.provider();
-        return provider.createHttpServer (addr, backlog);
+        return provider.createHttpServer(addr, backlog);
+    }
+
+    /**
+     * Creates an {@code HttpServer} instance with an initial context.
+     *
+     * <p> The server is created with an <i>initial context</i> that maps the
+     * URI {@code path} to the exchange {@code handler}. The initial context is
+     * created as if by an invocation of
+     * {@link HttpServer#createContext(String) createContext(path)}. The
+     * {@code filters}, if any, are added to the initial context, in the order
+     * they are given. The returned server is not started so can be configured
+     * further if required.
+     *
+     * <p> The server instance will bind to the given
+     * {@link java.net.InetSocketAddress}.
+     *
+     * <p> A maximum backlog can also be specified. This is the maximum number
+     * of queued incoming connections to allow on the listening socket.
+     * Queued TCP connections exceeding this limit may be rejected by
+     * the TCP implementation. The HttpServer is acquired from the currently
+     * installed {@link HttpServerProvider}.
+     *
+     * @param addr    the address to listen on, if {@code null} then
+     *                {@link #bind bind} must be called to set the address
+     * @param backlog the socket backlog. If this value is less than or
+     *                equal to zero, then a system default value is used
+     * @param path    the root URI path of the context, must be absolute
+     * @param handler the HttpHandler for the context
+     * @param filters the Filters for the context, optional
+     * @return the HttpServer
+     * @throws BindException            if the server cannot bind to the address
+     * @throws IOException              if an I/O error occurs
+     * @throws IllegalArgumentException if path is invalid
+     * @throws NullPointerException     if any of: {@code path}, {@code handler},
+     *        {@code filters}, or any element of {@code filters}, are {@code null}
+     * @since 18
+     */
+    public static HttpServer create(InetSocketAddress addr,
+                                    int backlog,
+                                    String path,
+                                    HttpHandler handler,
+                                    Filter... filters) throws IOException {
+        Objects.requireNonNull(path);
+        Objects.requireNonNull(handler);
+        Objects.requireNonNull(filters);
+        Arrays.stream(filters).forEach(Objects::requireNonNull);
+
+        HttpServer server = HttpServer.create(addr, backlog);
+        HttpContext context = server.createContext(path);
+        context.setHandler(handler);
+        Arrays.stream(filters).forEach(f -> context.getFilters().add(f));
+        return server;
     }
 
     /**
@@ -224,10 +278,20 @@ public abstract class HttpServer {
      * <p>The class overview describes how incoming request URIs are
      * <a href="#mapping_description">mapped</a> to HttpContext instances.
      *
-     * @apiNote The path should generally, but is not required to, end with '/'.
-     * If the path does not end with '/', eg such as with {@code "/foo"} then
-     * this would match requests with a path of {@code "/foobar"} or
-     * {@code "/foo/bar"}.
+     * @apiNote
+     * The path should generally, but is not required to, end with {@code /}.
+     * If the path does not end with {@code /}, e.g., such as with {@code /foo},
+     * then some implementations may use <em>string prefix matching</em> where
+     * this context path matches request paths {@code /foo},
+     * {@code /foo/bar}, or {@code /foobar}. Others may use <em>path prefix
+     * matching</em> where {@code /foo} matches request paths {@code /foo} and
+     * {@code /foo/bar}, but not {@code /foobar}.
+     *
+     * @implNote
+     * By default, the JDK built-in implementation uses path prefix matching.
+     * String prefix matching can be enabled using the
+     * {@link jdk.httpserver/##sun.net.httpserver.pathMatcher sun.net.httpserver.pathMatcher}
+     * system property.
      *
      * @param path the root URI path to associate the context with
      * @param handler the handler to invoke for incoming requests
@@ -235,6 +299,8 @@ public abstract class HttpServer {
      * already exists for this path
      * @throws NullPointerException if either path, or handler are {@code null}
      * @return an instance of {@code HttpContext}
+     *
+     * @see jdk.httpserver/##sun.net.httpserver.pathMatcher sun.net.httpserver.pathMatcher
      */
     public abstract HttpContext createContext(String path, HttpHandler handler);
 
@@ -254,16 +320,28 @@ public abstract class HttpServer {
      * <p>The class overview describes how incoming request URIs are
      * <a href="#mapping_description">mapped</a> to {@code HttpContext} instances.
      *
-     * @apiNote The path should generally, but is not required to, end with '/'.
-     * If the path does not end with '/', eg such as with {@code "/foo"} then
-     * this would match requests with a path of {@code "/foobar"} or
-     * {@code "/foo/bar"}.
+     * @apiNote
+     * The path should generally, but is not required to, end with {@code /}.
+     * If the path does not end with {@code /}, e.g., such as with {@code /foo},
+     * then some implementations may use <em>string prefix matching</em> where
+     * this context path matches request paths {@code /foo},
+     * {@code /foo/bar}, or {@code /foobar}. Others may use <em>path prefix
+     * matching</em> where {@code /foo} matches request paths
+     * {@code /foo} and {@code /foo/bar}, but not {@code /foobar}.
+     *
+     * @implNote
+     * By default, the JDK built-in implementation uses path prefix matching.
+     * String prefix matching can be enabled using the
+     * {@link jdk.httpserver/##sun.net.httpserver.pathMatcher sun.net.httpserver.pathMatcher}
+     * system property.
      *
      * @param path the root URI path to associate the context with
      * @throws IllegalArgumentException if path is invalid, or if a context
      * already exists for this path
      * @throws NullPointerException if path is {@code null}
      * @return an instance of {@code HttpContext}
+     *
+     * @see jdk.httpserver/##sun.net.httpserver.pathMatcher sun.net.httpserver.pathMatcher
      */
     public abstract HttpContext createContext(String path);
 

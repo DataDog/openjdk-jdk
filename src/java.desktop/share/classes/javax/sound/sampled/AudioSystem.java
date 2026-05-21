@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -187,8 +187,6 @@ public class AudioSystem {
      * @param  info a {@code Mixer.Info} object representing the desired mixer,
      *         or {@code null} for the system default mixer
      * @return the requested mixer
-     * @throws SecurityException if the requested mixer is unavailable because
-     *         of security restrictions
      * @throws IllegalArgumentException if the info object does not represent a
      *         mixer installed on the system
      * @see #getMixerInfo
@@ -225,11 +223,10 @@ public class AudioSystem {
      */
     public static Line.Info[] getSourceLineInfo(Line.Info info) {
 
-        Vector<Line.Info> vector = new Vector<>();
+        ArrayList<Line.Info> list = new ArrayList<>();
         Line.Info[] currentInfoArray;
 
         Mixer mixer;
-        Line.Info fullInfo = null;
         Mixer.Info[] infoArray = getMixerInfo();
 
         for (int i = 0; i < infoArray.length; i++) {
@@ -238,14 +235,14 @@ public class AudioSystem {
 
             currentInfoArray = mixer.getSourceLineInfo(info);
             for (int j = 0; j < currentInfoArray.length; j++) {
-                vector.addElement(currentInfoArray[j]);
+                list.add(currentInfoArray[j]);
             }
         }
 
-        Line.Info[] returnedArray = new Line.Info[vector.size()];
+        Line.Info[] returnedArray = new Line.Info[list.size()];
 
         for (int i = 0; i < returnedArray.length; i++) {
-            returnedArray[i] = vector.get(i);
+            returnedArray[i] = list.get(i);
         }
 
         return returnedArray;
@@ -264,11 +261,10 @@ public class AudioSystem {
      */
     public static Line.Info[] getTargetLineInfo(Line.Info info) {
 
-        Vector<Line.Info> vector = new Vector<>();
+        ArrayList<Line.Info> list = new ArrayList<>();
         Line.Info[] currentInfoArray;
 
         Mixer mixer;
-        Line.Info fullInfo = null;
         Mixer.Info[] infoArray = getMixerInfo();
 
         for (int i = 0; i < infoArray.length; i++) {
@@ -277,14 +273,14 @@ public class AudioSystem {
 
             currentInfoArray = mixer.getTargetLineInfo(info);
             for (int j = 0; j < currentInfoArray.length; j++) {
-                vector.addElement(currentInfoArray[j]);
+                list.add(currentInfoArray[j]);
             }
         }
 
-        Line.Info[] returnedArray = new Line.Info[vector.size()];
+        Line.Info[] returnedArray = new Line.Info[list.size()];
 
         for (int i = 0; i < returnedArray.length; i++) {
-            returnedArray[i] = vector.get(i);
+            returnedArray[i] = list.get(i);
         }
 
         return returnedArray;
@@ -346,8 +342,6 @@ public class AudioSystem {
      * @return a line of the requested kind
      * @throws LineUnavailableException if a matching line is not available due
      *         to resource restrictions
-     * @throws SecurityException if a matching line is not available due to
-     *         security restrictions
      * @throws IllegalArgumentException if the system does not support at least
      *         one line matching the specified {@code Line.Info} object through
      *         any installed mixer
@@ -445,8 +439,6 @@ public class AudioSystem {
      * @return the desired clip object
      * @throws LineUnavailableException if a clip object is not available due to
      *         resource restrictions
-     * @throws SecurityException if a clip object is not available due to
-     *         security restrictions
      * @throws IllegalArgumentException if the system does not support at least
      *         one clip instance through any installed mixer
      * @see #getClip(Mixer.Info)
@@ -476,8 +468,6 @@ public class AudioSystem {
      * @return a clip object from the specified mixer
      * @throws LineUnavailableException if a clip is not available from this
      *         mixer due to resource restrictions
-     * @throws SecurityException if a clip is not available from this mixer due
-     *         to security restrictions
      * @throws IllegalArgumentException if the system does not support at least
      *         one clip through the specified mixer
      * @see #getClip()
@@ -520,8 +510,6 @@ public class AudioSystem {
      * @return the desired {@code SourceDataLine} object
      * @throws LineUnavailableException if a matching source data line is not
      *         available due to resource restrictions
-     * @throws SecurityException if a matching source data line is not available
-     *         due to security restrictions
      * @throws IllegalArgumentException if the system does not support at least
      *         one source data line supporting the specified audio format
      *         through any installed mixer
@@ -556,8 +544,6 @@ public class AudioSystem {
      * @return the desired {@code SourceDataLine} object
      * @throws LineUnavailableException if a matching source data line is not
      *         available from the specified mixer due to resource restrictions
-     * @throws SecurityException if a matching source data line is not available
-     *         from the specified mixer due to security restrictions
      * @throws IllegalArgumentException if the specified mixer does not support
      *         at least one source data line supporting the specified audio
      *         format
@@ -599,13 +585,10 @@ public class AudioSystem {
      * @return the desired {@code TargetDataLine} object
      * @throws LineUnavailableException if a matching target data line is not
      *         available due to resource restrictions
-     * @throws SecurityException if a matching target data line is not available
-     *         due to security restrictions
      * @throws IllegalArgumentException if the system does not support at least
      *         one target data line supporting the specified audio format
      *         through any installed mixer
      * @see #getTargetDataLine(AudioFormat, Mixer.Info)
-     * @see AudioPermission
      * @since 1.5
      */
     public static TargetDataLine getTargetDataLine(AudioFormat format)
@@ -637,13 +620,10 @@ public class AudioSystem {
      * @return the desired {@code TargetDataLine} object
      * @throws LineUnavailableException if a matching target data line is not
      *         available from the specified mixer due to resource restrictions
-     * @throws SecurityException if a matching target data line is not available
-     *         from the specified mixer due to security restrictions
      * @throws IllegalArgumentException if the specified mixer does not support
      *         at least one target data line supporting the specified audio
      *         format
      * @see #getTargetDataLine(AudioFormat)
-     * @see AudioPermission
      * @since 1.5
      */
     public static TargetDataLine getTargetDataLine(AudioFormat format,
@@ -674,7 +654,7 @@ public class AudioSystem {
         Objects.requireNonNull(sourceEncoding);
 
         List<FormatConversionProvider> codecs = getFormatConversionProviders();
-        Vector<AudioFormat.Encoding> encodings = new Vector<>();
+        ArrayList<AudioFormat.Encoding> encodings = new ArrayList<>();
 
         AudioFormat.Encoding[] encs = null;
 
@@ -684,12 +664,12 @@ public class AudioSystem {
             if( codec.isSourceEncodingSupported( sourceEncoding ) ) {
                 encs = codec.getTargetEncodings();
                 for (int j = 0; j < encs.length; j++) {
-                    encodings.addElement( encs[j] );
+                    encodings.add( encs[j] );
                 }
             }
         }
         if (!encodings.contains(sourceEncoding)) {
-            encodings.addElement(sourceEncoding);
+            encodings.add(sourceEncoding);
         }
 
         return encodings.toArray(new AudioFormat.Encoding[encodings.size()]);

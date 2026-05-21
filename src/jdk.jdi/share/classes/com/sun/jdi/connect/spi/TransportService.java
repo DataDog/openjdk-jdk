@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -64,7 +64,7 @@ import com.sun.jdi.connect.TransportTimeoutException;
  * but may involve techniques such as the <i>positive
  * acknowledgment with retransmission</i> technique used in
  * protocols such as the Transmission Control Protocol (TCP)
- * (see <a href="http://www.ietf.org/rfc/rfc0793.txt"> RFC 793
+ * (see <a href="https://www.ietf.org/rfc/rfc793.txt"> RFC 793
  * </a>).
  *
  * <p> A transport service can be used to initiate a connection
@@ -101,7 +101,7 @@ public abstract class TransportService {
     /**
      * The transport service capabilities.
      */
-    public static abstract class Capabilities {
+    public abstract static class Capabilities {
         /**
          * Constructor for subclasses to call.
          */
@@ -236,7 +236,7 @@ public abstract class TransportService {
      * #stopListening stopListening} to stop the transport
      * service from listening on an address.
      */
-    public static abstract class ListenKey {
+    public abstract static class ListenKey {
         /**
          * Constructor for subclasses to call.
          */

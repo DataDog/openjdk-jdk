@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,13 +26,16 @@
 package java.lang.reflect;
 
 import jdk.internal.access.SharedSecrets;
+import jdk.internal.misc.VM;
 import jdk.internal.reflect.CallerSensitive;
 import jdk.internal.reflect.ConstructorAccessor;
 import jdk.internal.reflect.Reflection;
 import jdk.internal.vm.annotation.ForceInline;
+import jdk.internal.vm.annotation.Stable;
 import sun.reflect.annotation.TypeAnnotation;
 import sun.reflect.annotation.TypeAnnotationParser;
 import sun.reflect.generics.repository.ConstructorRepository;
+import sun.reflect.generics.repository.GenericDeclRepository;
 import sun.reflect.generics.factory.CoreReflectionFactory;
 import sun.reflect.generics.factory.GenericsFactory;
 import sun.reflect.generics.scope.ConstructorScope;
@@ -62,17 +65,15 @@ import java.util.StringJoiner;
  * @since 1.1
  */
 public final class Constructor<T> extends Executable {
-    private Class<T>            clazz;
-    private int                 slot;
-    private Class<?>[]          parameterTypes;
-    private Class<?>[]          exceptionTypes;
-    private int                 modifiers;
+    private final Class<T>            clazz;
+    private final int                 slot;
+    private final Class<?>[]          parameterTypes;
+    private final Class<?>[]          exceptionTypes;
+    private final int                 modifiers;
     // Generics and annotations support
-    private transient String    signature;
-    // generic info repository; lazily initialized
-    private transient ConstructorRepository genericInfo;
-    private byte[]              annotations;
-    private byte[]              parameterAnnotations;
+    private final transient String    signature;
+    private final byte[]              annotations;
+    private final byte[]              parameterAnnotations;
 
     // Generics infrastructure
     // Accessor for factory
@@ -84,24 +85,28 @@ public final class Constructor<T> extends Executable {
     // Accessor for generic info repository
     @Override
     ConstructorRepository getGenericInfo() {
-        // lazily initialize repository if necessary
+        var genericInfo = this.genericInfo;
         if (genericInfo == null) {
-            // create and cache generic info repository
-            genericInfo =
-                ConstructorRepository.make(getSignature(),
-                                           getFactory());
+            var root = this.root;
+            if (root != null) {
+                genericInfo = root.getGenericInfo();
+            } else {
+                genericInfo = ConstructorRepository.make(getSignature(), getFactory());
+            }
+            this.genericInfo = genericInfo;
         }
-        return genericInfo; //return cached repository
+        return genericInfo;
     }
 
-    private volatile ConstructorAccessor constructorAccessor;
-    // For sharing of ConstructorAccessors. This branching structure
-    // is currently only two levels deep (i.e., one root Constructor
-    // and potentially many Constructor objects pointing to it.)
-    //
-    // If this branching structure would ever contain cycles, deadlocks can
-    // occur in annotation code.
-    private Constructor<T>      root;
+    /**
+     * Constructors are mutable due to {@link AccessibleObject#setAccessible(boolean)}.
+     * Thus, we return a new copy of a root each time a constructor is returned.
+     * Some lazily initialized immutable states can be stored on root and shared to the copies.
+     */
+    private Constructor<T> root;
+    private transient volatile ConstructorRepository genericInfo;
+    private @Stable ConstructorAccessor constructorAccessor;
+    // End shared states
 
     @Override
     Constructor<T> getRoot() {
@@ -137,13 +142,6 @@ public final class Constructor<T> extends Executable {
      * "root" field points to this Constructor.
      */
     Constructor<T> copy() {
-        // This routine enables sharing of ConstructorAccessor objects
-        // among Constructor objects which refer to the same underlying
-        // method in the VM. (All of this contortion is only necessary
-        // because of the "accessibility" bit in AccessibleObject,
-        // which implicitly requires that new java.lang.reflect
-        // objects be fabricated for each reflective call on Class
-        // objects.)
         if (this.root != null)
             throw new IllegalArgumentException("Can not copy a non-root Constructor");
 
@@ -156,27 +154,33 @@ public final class Constructor<T> extends Executable {
         res.root = this;
         // Might as well eagerly propagate this if already present
         res.constructorAccessor = constructorAccessor;
+        res.genericInfo = genericInfo;
+        return res;
+    }
+
+    // Creates a new root constructor with a custom accessor for serialization hooks.
+    Constructor<T> newWithAccessor(ConstructorAccessor accessor) {
+        var res = new Constructor<>(clazz, parameterTypes, exceptionTypes, modifiers, slot,
+                signature, annotations, parameterAnnotations);
+        res.constructorAccessor = accessor;
         return res;
     }
 
     /**
      * {@inheritDoc}
      *
-     * <p> A {@code SecurityException} is also thrown if this object is a
+     * <p> A {@code SecurityException} is thrown if this object is a
      * {@code Constructor} object for the class {@code Class} and {@code flag}
      * is true. </p>
      *
      * @param flag {@inheritDoc}
      *
      * @throws InaccessibleObjectException {@inheritDoc}
-     * @throws SecurityException if the request is denied by the security manager
-     *         or this is a constructor for {@code java.lang.Class}
-     *
+     * @throws SecurityException if this is a constructor for {@code java.lang.Class}
      */
     @Override
     @CallerSensitive
     public void setAccessible(boolean flag) {
-        AccessibleObject.checkPermission();
         if (flag) {
             checkCanSetAccessible(Reflection.getCallerClass());
         }
@@ -223,6 +227,7 @@ public final class Constructor<T> extends Executable {
 
     /**
      * {@inheritDoc}
+     * @jls 8.8.3 Constructor Modifiers
      */
     @Override
     public int getModifiers() {
@@ -235,12 +240,12 @@ public final class Constructor<T> extends Executable {
      * @since 1.5
      */
     @Override
-    @SuppressWarnings({"rawtypes", "unchecked"})
+    @SuppressWarnings("unchecked")
     public TypeVariable<Constructor<T>>[] getTypeParameters() {
       if (getSignature() != null) {
         return (TypeVariable<Constructor<T>>[])getGenericInfo().getTypeParameters();
       } else
-          return (TypeVariable<Constructor<T>>[])new TypeVariable[0];
+          return (TypeVariable<Constructor<T>>[])GenericDeclRepository.EMPTY_TYPE_VARS;
     }
 
 
@@ -259,7 +264,7 @@ public final class Constructor<T> extends Executable {
      */
     @Override
     public Class<?>[] getParameterTypes() {
-        return parameterTypes.clone();
+        return parameterTypes.length == 0 ? parameterTypes : parameterTypes.clone();
     }
 
     /**
@@ -285,9 +290,8 @@ public final class Constructor<T> extends Executable {
      */
     @Override
     public Class<?>[] getExceptionTypes() {
-        return exceptionTypes.clone();
+        return exceptionTypes.length == 0 ? exceptionTypes : exceptionTypes.clone();
     }
-
 
     /**
      * {@inheritDoc}
@@ -308,8 +312,7 @@ public final class Constructor<T> extends Executable {
      * same formal parameter types.
      */
     public boolean equals(Object obj) {
-        if (obj != null && obj instanceof Constructor) {
-            Constructor<?> other = (Constructor<?>)obj;
+        if (obj instanceof Constructor<?> other) {
             if (getDeclaringClass() == other.getDeclaringClass()) {
                 return equalParamTypes(parameterTypes, other.parameterTypes);
             }
@@ -333,7 +336,7 @@ public final class Constructor<T> extends Executable {
      * followed by a parenthesized, comma-separated list of the
      * constructor's formal parameter types.  For example:
      * <pre>{@code
-     *    public java.util.Hashtable(int,float)
+     *    public java.util.HashMap(int,float)
      * }</pre>
      *
      * <p>If the constructor is declared to throw exceptions, the
@@ -351,10 +354,13 @@ public final class Constructor<T> extends Executable {
      * @jls 8.9.2 Enum Body Declarations
      */
     public String toString() {
-        return sharedToString(Modifier.constructorModifiers(),
-                              false,
-                              parameterTypes,
+        return sharedToString(parameterTypes,
                               exceptionTypes);
+    }
+
+    @Override
+    void appendModifiers(StringBuilder sb) {
+        Reflection.appendAccessControlModifiers(sb, getModifiers());
     }
 
     @Override
@@ -368,7 +374,7 @@ public final class Constructor<T> extends Executable {
         sb.append(getDeclaringClass().getTypeName());
         sb.append('(');
         StringJoiner sj = new StringJoiner(",");
-        for (Class<?> parameterType : getParameterTypes()) {
+        for (Class<?> parameterType : getSharedParameterTypes()) {
             sj.add(parameterType.getTypeName());
         }
         sb.append(sj);
@@ -414,7 +420,7 @@ public final class Constructor<T> extends Executable {
      */
     @Override
     public String toGenericString() {
-        return sharedToGenericString(Modifier.constructorModifiers(), false);
+        return super.toGenericString();
     }
 
     @Override
@@ -462,7 +468,7 @@ public final class Constructor<T> extends Executable {
      *              after possible unwrapping, a parameter value
      *              cannot be converted to the corresponding formal
      *              parameter type by a method invocation conversion; if
-     *              this constructor pertains to an enum type.
+     *              this constructor pertains to an enum class.
      * @throws    InstantiationException    if the class that declares the
      *              underlying constructor represents an abstract class.
      * @throws    InvocationTargetException if the underlying constructor
@@ -488,10 +494,7 @@ public final class Constructor<T> extends Executable {
         if (checkAccess)
             checkAccess(caller, clazz, clazz, modifiers);
 
-        if ((clazz.getModifiers() & Modifier.ENUM) != 0)
-            throw new IllegalArgumentException("Cannot reflectively create enum objects");
-
-        ConstructorAccessor ca = constructorAccessor;   // read volatile
+        ConstructorAccessor ca = constructorAccessor;   // read @Stable
         if (ca == null) {
             ca = acquireConstructorAccessor();
         }
@@ -503,6 +506,7 @@ public final class Constructor<T> extends Executable {
     /**
      * {@inheritDoc}
      * @since 1.5
+     * @jls 8.4.1 Formal Parameters
      */
     @Override
     public boolean isVarArgs() {
@@ -512,7 +516,11 @@ public final class Constructor<T> extends Executable {
     /**
      * {@inheritDoc}
      * @jls 13.1 The Form of a Binary
+     * @jvms 4.6 Methods
      * @since 1.5
+     * @see <a
+     * href="{@docRoot}/java.base/java/lang/reflect/package-summary.html#LanguageJvmModel">Java
+     * programming language and JVM modeling in core reflection</a>
      */
     @Override
     public boolean isSynthetic() {
@@ -525,16 +533,23 @@ public final class Constructor<T> extends Executable {
     // synchronization will probably make the implementation more
     // scalable.
     private ConstructorAccessor acquireConstructorAccessor() {
+
         // First check to see if one has been created yet, and take it
         // if so.
-        ConstructorAccessor tmp = null;
-        if (root != null) tmp = root.getConstructorAccessor();
+        Constructor<?> root = this.root;
+        ConstructorAccessor tmp = root == null ? null : root.getConstructorAccessor();
         if (tmp != null) {
             constructorAccessor = tmp;
         } else {
             // Otherwise fabricate one and propagate it up to the root
+            // Ensure the declaring class is not an Enum class.
+            if ((clazz.getModifiers() & Modifier.ENUM) != 0)
+                throw new IllegalArgumentException("Cannot reflectively create enum objects");
+
             tmp = reflectionFactory.newConstructorAccessor(this);
-            setConstructorAccessor(tmp);
+            // set the constructor accessor only if it's not using native implementation
+            if (VM.isJavaLangInvokeInited())
+                setConstructorAccessor(tmp);
         }
 
         return tmp;
@@ -551,6 +566,7 @@ public final class Constructor<T> extends Executable {
     void setConstructorAccessor(ConstructorAccessor accessor) {
         constructorAccessor = accessor;
         // Propagate up
+        Constructor<?> root = this.root;
         if (root != null) {
             root.setConstructorAccessor(accessor);
         }
@@ -603,9 +619,14 @@ public final class Constructor<T> extends Executable {
     }
 
     @Override
-    boolean handleParameterNumberMismatch(int resultLength, int numParameters) {
+    boolean handleParameterNumberMismatch(int resultLength, Class<?>[] parameterTypes) {
+        int numParameters = parameterTypes.length;
         Class<?> declaringClass = getDeclaringClass();
-        if (declaringClass.isEnum() ||
+        if (declaringClass.isEnum()) {
+            return resultLength + 2 == numParameters &&
+                    parameterTypes[0] == String.class &&
+                    parameterTypes[1] == int.class;
+        } else if (
             declaringClass.isAnonymousClass() ||
             declaringClass.isLocalClass() )
             return false; // Can't do reliable parameter counting
@@ -662,7 +683,7 @@ public final class Constructor<T> extends Executable {
                     getConstantPool(thisDeclClass),
                 this,
                 thisDeclClass,
-                resolveToOwnerType(enclosingClass),
+                parameterize(enclosingClass),
                 TypeAnnotation.TypeAnnotationTarget.METHOD_RECEIVER);
     }
 }

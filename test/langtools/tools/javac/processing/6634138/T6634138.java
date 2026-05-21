@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,6 @@
 /*
  * @test
  * @bug 6634138
- * @author  Joseph D. Darcy
  * @summary Verify source files output after processing is over are compiled
  * @library /tools/javac/lib
  * @modules java.compiler
@@ -55,22 +54,16 @@ public class T6634138 extends JavacTestingAbstractProcessor {
         if (roundEnvironment.processingOver()) {
             System.out.println("Writing out source files.");
             try {
-                PrintWriter pw = new PrintWriter(filer.createSourceFile("foo.WrittenAfterProcessing").openWriter());
-                try {
+                try (PrintWriter pw = new PrintWriter(filer.createSourceFile("foo.WrittenAfterProcessing").openWriter())) {
                      pw.println("package foo;");
                      pw.println("public class WrittenAfterProcessing {");
                      pw.println("  public WrittenAfterProcessing() {super();}");
                      pw.println("}");
-                 } finally {
-                     pw.close();
                  }
 
-                pw = new PrintWriter(filer.createSourceFile("foo.package-info").openWriter());
-                try {
+                try (PrintWriter pw = new PrintWriter(filer.createSourceFile("foo.package-info").openWriter())) {
                      pw.println("@Deprecated");
                      pw.println("package foo;");
-                 } finally {
-                     pw.close();
                  }
             } catch(IOException io) {
                 throw new RuntimeException(io);

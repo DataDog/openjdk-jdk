@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -33,9 +33,6 @@ AC_DEFUN([FLAGS_SETUP_ARFLAGS],
   # FIXME: figure out if we should select AR flags depending on OS or toolchain.
   if test "x$OPENJDK_TARGET_OS" = xaix; then
     ARFLAGS="-X64"
-  elif test "x$OPENJDK_TARGET_OS" = xwindows; then
-    # lib.exe is used as AR to create static libraries.
-    ARFLAGS="-nologo -NODEFAULTLIB:MSVCRT"
   else
     ARFLAGS=""
   fi
@@ -43,18 +40,46 @@ AC_DEFUN([FLAGS_SETUP_ARFLAGS],
   AC_SUBST(ARFLAGS)
 ])
 
+AC_DEFUN([FLAGS_SETUP_LIBFLAGS],
+[
+  # LIB is used to create static libraries on Windows
+  if test "x$OPENJDK_TARGET_OS" = xwindows; then
+    LIBFLAGS="-nodefaultlib:msvcrt"
+  else
+    LIBFLAGS=""
+  fi
+
+  AC_SUBST(LIBFLAGS)
+])
+
 AC_DEFUN([FLAGS_SETUP_STRIPFLAGS],
 [
   ## Setup strip.
-  # FIXME: should this really be per platform, or should it be per toolchain type?
-  # strip is not provided by clang; so guessing platform makes most sense.
-  # FIXME: we should really only export STRIPFLAGS from here, not POST_STRIP_CMD.
-  if test "x$OPENJDK_TARGET_OS" = xlinux; then
-    STRIPFLAGS="-g"
-  elif test "x$OPENJDK_TARGET_OS" = xmacosx; then
-    STRIPFLAGS="-S"
-  elif test "x$OPENJDK_TARGET_OS" = xaix; then
-    STRIPFLAGS="-X32_64"
+  if test "x$STRIP" != x; then
+    AC_MSG_CHECKING([how to run strip])
+
+    # Easy cheat: Check strip variant by passing --version as an argument.
+    # Different types of strip have varying command line syntaxes for querying their
+    # version string, and all noisily fail if the provided version option is not
+    # recognised.
+    #
+    # The actual version string or failure to execute strip are hidden by redirection
+    # to config.log with 2>&AS_MESSAGE_LOG_FD >&AS_MESSAGE_LOG_FD
+
+    if $STRIP "--version" 2>&AS_MESSAGE_LOG_FD >&AS_MESSAGE_LOG_FD; then
+      # strip that comes from the GNU family uses --version
+      # This variant of strip is usually found accompanying gcc and clang
+      STRIPFLAGS="--strip-debug"
+    elif $STRIP "-V" 2>&AS_MESSAGE_LOG_FD >&AS_MESSAGE_LOG_FD; then
+      # IBM strip that works with AIX binaries only supports -V
+      STRIPFLAGS="-X32_64"
+    else
+      # The only strip variant left is MacOS/Xcode strip, which does not have any
+      # way whatsoever to be identified (lacking even basic help or version options),
+      # so we leave it as the last fallback when all other tests have failed.
+      STRIPFLAGS="-S"
+    fi
+    AC_MSG_RESULT($STRIPFLAGS)
   fi
 
   AC_SUBST(STRIPFLAGS)
@@ -72,12 +97,101 @@ AC_DEFUN([FLAGS_SETUP_RCFLAGS],
   AC_SUBST(RCFLAGS)
 ])
 
+AC_DEFUN([FLAGS_SETUP_NMFLAGS],
+[
+  # On AIX, we need to set NM flag -X64 for processing 64bit object files
+  if test "x$OPENJDK_TARGET_OS" = xaix; then
+    NMFLAGS="-X64"
+  fi
+
+  AC_SUBST(NMFLAGS)
+])
+
+# Check whether the compiler supports the Arm C Language Extensions (ACLE)
+# for SVE. Set SVE_CFLAGS to -march=armv8-a+sve if it does.
+# ACLE and this flag are required to build the aarch64 SVE related functions
+# in libvectormath.
+AC_DEFUN([FLAGS_SETUP_SVE],
+[
+  AARCH64_SVE_AVAILABLE=false
+  # Apple Silicon does not support SVE; use macOS as a proxy for that check.
+  if test "x$OPENJDK_TARGET_CPU" = "xaarch64" && test "x$OPENJDK_TARGET_OS" = "xlinux"; then
+    if test "x$TOOLCHAIN_TYPE" = xgcc || test "x$TOOLCHAIN_TYPE" = xclang; then
+      # check the compiler and binutils support sve or not
+      AC_MSG_CHECKING([if Arm SVE ACLE is supported])
+      AC_LANG_PUSH([C])
+      saved_cflags="$CFLAGS"
+      CFLAGS="$CFLAGS -march=armv8-a+sve $CFLAGS_WARNINGS_ARE_ERRORS ARG_ARGUMENT"
+      AC_COMPILE_IFELSE([AC_LANG_PROGRAM(
+        [
+          #include <arm_sve.h>
+          svfloat64_t a() {}
+        ],
+        [
+          svint32_t r = svdup_n_s32(1)
+        ])],
+        [
+          AARCH64_SVE_AVAILABLE=true
+        ]
+      )
+      CFLAGS="$saved_cflags"
+      AC_LANG_POP([C])
+      AC_MSG_RESULT([$AARCH64_SVE_AVAILABLE])
+    fi
+  fi
+
+  UTIL_ARG_ENABLE(NAME: aarch64-sve, DEFAULT: auto,
+    RESULT: AARCH64_SVE_ENABLED,
+    DESC: [Use SVE when compiling libsleef],
+    AVAILABLE: $AARCH64_SVE_AVAILABLE)
+  SVE_CFLAGS=""
+  if test "x$AARCH64_SVE_ENABLED" = xtrue; then
+    SVE_CFLAGS="-march=armv8-a+sve"
+    # Switching the initialization mode with gcc from 'pattern' to 'zero'
+    # avoids the use of unsupported `__builtin_clear_padding` for variable
+    # length aggregates
+    if test "x$DEBUG_LEVEL" != xrelease && test "x$TOOLCHAIN_TYPE" = xgcc ; then
+      AC_MSG_CHECKING([Switching the initialization mode with gcc from pattern to zero])
+      INIT_ZERO_FLAG="-ftrivial-auto-var-init=zero"
+      FLAGS_COMPILER_CHECK_ARGUMENTS(ARGUMENT: [$INIT_ZERO_FLAG],
+        IF_TRUE: [
+          SVE_CFLAGS="${SVE_CFLAGS} $INIT_ZERO_FLAG"
+        ]
+      )
+    fi
+  fi
+  AC_SUBST(SVE_CFLAGS)
+])
+
 ################################################################################
 # platform independent
 AC_DEFUN([FLAGS_SETUP_ASFLAGS],
 [
+  if test "x$TOOLCHAIN_TYPE" = xgcc || test "x$TOOLCHAIN_TYPE" = xclang; then
+    # Force preprocessor to run, just to make sure
+    BASIC_ASFLAGS="-x assembler-with-cpp"
+  elif test "x$TOOLCHAIN_TYPE" = xmicrosoft; then
+    if test "x$OPENJDK_TARGET_CPU" = xaarch64; then
+      BASIC_ASFLAGS="-nologo"
+    else
+      BASIC_ASFLAGS="-nologo -c"
+    fi
+  fi
+  AC_SUBST(BASIC_ASFLAGS)
+
   if test "x$OPENJDK_TARGET_OS" = xmacosx; then
-    JVM_BASIC_ASFLAGS="-x assembler-with-cpp -mno-omit-leaf-frame-pointer -mstack-alignment=16"
+    JVM_BASIC_ASFLAGS="-mno-omit-leaf-frame-pointer -mstack-alignment=16"
+
+    # Fix linker warning.
+    # Code taken from make/autoconf/flags-cflags.m4 and adapted.
+    JVM_BASIC_ASFLAGS="$JVM_BASIC_ASFLAGS \
+        -DMAC_OS_X_VERSION_MIN_REQUIRED=$MACOSX_VERSION_MIN_NODOTS \
+        -mmacosx-version-min=$MACOSX_VERSION_MIN"
+
+    if test -n "$MACOSX_VERSION_MAX"; then
+        JVM_BASIC_ASFLAGS="$JVM_BASIC_ASFLAGS $OS_CFLAGS \
+            -DMAC_OS_X_VERSION_MAX_ALLOWED=$MACOSX_VERSION_MAX_NODOTS"
+    fi
   fi
 ])
 
@@ -96,6 +210,9 @@ AC_DEFUN([FLAGS_SETUP_ASFLAGS_CPU_DEP],
     $2JVM_ASFLAGS="${$2JVM_ASFLAGS} $ARM_ARCH_TYPE_ASFLAGS $ARM_FLOAT_TYPE_ASFLAGS"
   fi
 
+  if test "x$BRANCH_PROTECTION_ENABLED" = "xtrue"; then
+    $2JVM_ASFLAGS="${$2JVM_ASFLAGS} $BRANCH_PROTECTION_FLAG"
+  fi
+
   AC_SUBST($2JVM_ASFLAGS)
 ])
-

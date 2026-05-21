@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -123,7 +123,10 @@ public class Utils {
         if ((c = primitiveMap.get(className)) != null) {
             return c;
         }
-        return Class.forName(className);
+        if (editableTypes.contains(className)) {
+            return Class.forName(className);
+        }
+        return Object.class; // No need to load class.
     }
 
     /**
@@ -140,7 +143,7 @@ public class Utils {
             return false;
         }
         for (Object o : c) {
-            if (o == null || !e.isAssignableFrom(o.getClass())) {
+            if (o == null || !e.isInstance(o)) {
                 return false;
             }
         }
@@ -216,7 +219,7 @@ public class Utils {
                 className = className.substring(2, className.length() - 1);
             } else {
                 try {
-                    Class<?> c = Class.forName(className);
+                    Class<?> c = Utils.getClass(className);
                     className = c.getComponentType().getName();
                 } catch (ClassNotFoundException e) {
                     // Should not happen
@@ -288,7 +291,7 @@ public class Utils {
         try {
             return c.newInstance(param);
         } catch (InvocationTargetException e) {
-            Throwable t = e.getTargetException();
+            Throwable t = e.getCause();
             if (t instanceof Exception) {
                 throw (Exception) t;
             } else {

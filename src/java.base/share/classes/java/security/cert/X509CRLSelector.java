@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -53,7 +53,7 @@ import sun.security.x509.X500Name;
  * {@link CertStore#getCRLs CertStore.getCRLs} or some similar
  * method.
  * <p>
- * Please refer to <a href="http://tools.ietf.org/html/rfc5280">RFC 5280:
+ * Please refer to <a href="https://tools.ietf.org/html/rfc5280">RFC 5280:
  * Internet X.509 Public Key Infrastructure Certificate and CRL Profile</a>
  * for definitions of the X.509 CRL fields and extensions mentioned below.
  * <p>
@@ -65,6 +65,9 @@ import sun.security.x509.X500Name;
  * provide the necessary locking. Multiple threads each manipulating
  * separate objects need not synchronize.
  *
+ * @spec https://www.rfc-editor.org/info/rfc5280
+ *      RFC 5280: Internet X.509 Public Key Infrastructure Certificate
+ *              and Certificate Revocation List (CRL) Profile
  * @see CRLSelector
  * @see X509CRL
  *
@@ -193,6 +196,10 @@ public class X509CRLSelector implements CRLSelector {
      *
      * @param names a {@code Collection} of names (or {@code null})
      * @throws IOException if a parsing error occurs
+     *
+     * @spec https://www.rfc-editor.org/info/rfc2253
+     *      RFC 2253: Lightweight Directory Access Protocol (v3):
+     *              UTF-8 String Representation of Distinguished Names
      * @see #getIssuerNames
      */
     public void setIssuerNames(Collection<?> names) throws IOException {
@@ -238,6 +245,9 @@ public class X509CRLSelector implements CRLSelector {
      *     <a href="http://www.ietf.org/rfc/rfc2253.txt">RFC 2253</a> form
      * @throws IOException if a parsing error occurs
      *
+     * @spec https://www.rfc-editor.org/info/rfc2253
+     *      RFC 2253: Lightweight Directory Access Protocol (v3):
+     *              UTF-8 String Representation of Distinguished Names
      * @deprecated Use {@link #addIssuer(X500Principal)} or
      * {@link #addIssuerName(byte[])} instead. This method should not be
      * relied on as it can fail to match some CRLs because of a loss of
@@ -314,9 +324,7 @@ public class X509CRLSelector implements CRLSelector {
         throws IOException
     {
         HashSet<Object> namesCopy = new HashSet<>();
-        Iterator<?> i = names.iterator();
-        while (i.hasNext()) {
-            Object nameObject = i.next();
+        for (Object nameObject : names) {
             if (!(nameObject instanceof byte []) &&
                 !(nameObject instanceof String))
                 throw new IOException("name not byte array or String");
@@ -325,7 +333,7 @@ public class X509CRLSelector implements CRLSelector {
             else
                 namesCopy.add(nameObject);
         }
-        return(namesCopy);
+        return namesCopy;
     }
 
     /**
@@ -366,15 +374,14 @@ public class X509CRLSelector implements CRLSelector {
     private static HashSet<X500Principal> parseIssuerNames(Collection<Object> names)
     throws IOException {
         HashSet<X500Principal> x500Principals = new HashSet<>();
-        for (Iterator<Object> t = names.iterator(); t.hasNext(); ) {
-            Object nameObject = t.next();
+        for (Object nameObject : names) {
             if (nameObject instanceof String) {
                 x500Principals.add(new X500Name((String)nameObject).asX500Principal());
             } else {
                 try {
                     x500Principals.add(new X500Principal((byte[])nameObject));
                 } catch (IllegalArgumentException e) {
-                    throw (IOException)new IOException("Invalid name").initCause(e);
+                    throw new IOException("Invalid name", e);
                 }
             }
         }
@@ -496,6 +503,10 @@ public class X509CRLSelector implements CRLSelector {
      * protect against subsequent modifications.
      *
      * @return a {@code Collection} of names (or {@code null})
+     *
+     * @spec https://www.rfc-editor.org/info/rfc2253
+     *      RFC 2253: Lightweight Directory Access Protocol (v3):
+     *              UTF-8 String Representation of Distinguished Names
      * @see #setIssuerNames
      */
     public Collection<Object> getIssuerNames() {
@@ -573,9 +584,8 @@ public class X509CRLSelector implements CRLSelector {
         sb.append("X509CRLSelector: [\n");
         if (issuerNames != null) {
             sb.append("  IssuerNames:\n");
-            Iterator<Object> i = issuerNames.iterator();
-            while (i.hasNext())
-                sb.append("    " + i.next() + "\n");
+            for (Object issuerName : issuerNames)
+                sb.append("    " + issuerName + "\n");
         }
         if (minCRL != null)
             sb.append("  minCRLNumber: " + minCRL + "\n");
@@ -597,10 +607,9 @@ public class X509CRLSelector implements CRLSelector {
      *         {@code false} otherwise
      */
     public boolean match(CRL crl) {
-        if (!(crl instanceof X509CRL)) {
+        if (!(crl instanceof X509CRL xcrl)) {
             return false;
         }
-        X509CRL xcrl = (X509CRL)crl;
 
         /* match on issuer name */
         if (issuerNames != null) {
@@ -628,6 +637,7 @@ public class X509CRLSelector implements CRLSelector {
                 if (debug != null) {
                     debug.println("X509CRLSelector.match: no CRLNumber");
                 }
+                return false;
             }
             BigInteger crlNum;
             try {
@@ -635,7 +645,7 @@ public class X509CRLSelector implements CRLSelector {
                 byte[] encoded = in.getOctetString();
                 CRLNumberExtension crlNumExt =
                     new CRLNumberExtension(Boolean.FALSE, encoded);
-                crlNum = crlNumExt.get(CRLNumberExtension.NUMBER);
+                crlNum = crlNumExt.getCrlNumber();
             } catch (IOException ex) {
                 if (debug != null) {
                     debug.println("X509CRLSelector.match: exception in "

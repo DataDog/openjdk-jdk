@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -55,15 +55,7 @@ public interface Metrics {
      * @return Metrics object or null if not supported on this platform.
      */
     public static Metrics systemMetrics() {
-        try {
-            Class<?> c = Class.forName("jdk.internal.platform.CgroupMetrics");
-            Method m = c.getMethod("getInstance");
-            return (Metrics) m.invoke(null);
-        } catch (ClassNotFoundException e) {
-            return null;
-        } catch (ReflectiveOperationException e) {
-            throw new InternalError(e);
-        }
+        return SystemMetrics.instance();
     }
 
     /**
@@ -79,8 +71,25 @@ public interface Metrics {
      */
     public String getProvider();
 
+    /**
+     * Determines whether or not the underlying system
+     * has useful metrics (a.k.a. is containerized).
+     *
+     * @implNote
+     * Note that Metrics on some systems aren't useful.
+     * For example on a regular Linux system with cgroups
+     * present, with no limits enforced and not running in
+     * a container, Metric aren't useful. This can be used
+     * in order to determine if the system is containerized.
+     *
+     * @return true when the JVM runs in containerized mode.
+     *         false otherwise.
+     *
+     */
+    public boolean isContainerized();
 
-    /*****************************************************************
+
+    /* ***************************************************************
      * CPU Accounting Subsystem
      ****************************************************************/
 
@@ -131,7 +140,7 @@ public interface Metrics {
      */
     public long getCpuSystemUsage();
 
-    /*****************************************************************
+    /* ***************************************************************
      * CPU Scheduling Metrics
      ****************************************************************/
 
@@ -223,7 +232,7 @@ public interface Metrics {
      */
     public long getEffectiveCpuCount();
 
-    /*****************************************************************
+    /* ***************************************************************
      * CPU Sets
      ****************************************************************/
 
@@ -279,7 +288,7 @@ public interface Metrics {
      */
     public int[] getEffectiveCpuSetMems();
 
-    /*****************************************************************
+    /* ***************************************************************
      * Memory Subsystem
      ****************************************************************/
 
@@ -360,7 +369,28 @@ public interface Metrics {
      */
     public long getMemorySoftLimit();
 
-    /*****************************************************************
+    /* ***************************************************************
+     * pids subsystem
+     ****************************************************************/
+
+    /**
+     * Returns the maximum number of tasks that may be created in the Isolation Group.
+     *
+     * @return The maximum number of tasks, -1 if the quota is unlimited or
+     *         -2 if not supported.
+     *
+     */
+    public long getPidsMax();
+
+    /**
+     * Returns the current number of tasks in the Isolation Group.
+     *
+     * @return The current number of tasks or -2 if not supported
+     *
+     */
+    public long getPidsCurrent();
+
+    /* ***************************************************************
      * BlKIO Subsystem
      ****************************************************************/
 

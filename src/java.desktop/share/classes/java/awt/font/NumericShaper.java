@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,10 +27,12 @@ package java.awt.font;
 
 import java.io.IOException;
 import java.io.ObjectOutputStream;
+import java.io.Serial;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.Set;
+
 import jdk.internal.access.SharedSecrets;
 
 /**
@@ -117,21 +119,20 @@ import jdk.internal.access.SharedSecrets;
  * <tbody>
  *   <tr>
  *     <th scope="rowgroup" rowspan="2">Arabic
- *     <td>{@link NumericShaper#ARABIC NumericShaper.ARABIC}
+ *     <th scope="row">{@link NumericShaper#ARABIC NumericShaper.ARABIC}
  *     <br>
  *     {@link NumericShaper#EASTERN_ARABIC NumericShaper.EASTERN_ARABIC}
  *     <td>{@link NumericShaper#EASTERN_ARABIC NumericShaper.EASTERN_ARABIC}
- *   </tr>
  *   <tr>
- *     <td>{@link NumericShaper.Range#ARABIC}
+ *     <th scope="row">{@link NumericShaper.Range#ARABIC}
  *     <br>
  *     {@link NumericShaper.Range#EASTERN_ARABIC}
  *     <td>{@link NumericShaper.Range#EASTERN_ARABIC}
  * </tbody>
  * <tbody>
  *   <tr>
- *     <th scope="row">Tai Tham
- *     <td>{@link NumericShaper.Range#TAI_THAM_HORA}
+ *     <th scope="rowgroup">Tai Tham
+ *     <th scope="row">{@link NumericShaper.Range#TAI_THAM_HORA}
  *     <br>
  *     {@link NumericShaper.Range#TAI_THAM_THAM}
  *     <td>{@link NumericShaper.Range#TAI_THAM_THAM}
@@ -345,6 +346,19 @@ public final class NumericShaper implements java.io.Serializable {
             return index < NUM_KEYS ? Range.values()[index] : null;
         }
 
+        private static int toRangeHash(Set<Range> ranges) {
+            int m = 0;
+            for (Range range : ranges) {
+                int index = range.ordinal();
+                if (index < NUM_KEYS) {
+                    m |= 1 << index;
+                } else {
+                    m |=  (1 << NUM_KEYS) + index;
+                }
+            }
+            return m;
+        }
+
         private static int toRangeMask(Set<Range> ranges) {
             int m = 0;
             for (Range range : ranges) {
@@ -392,16 +406,16 @@ public final class NumericShaper implements java.io.Serializable {
         }
     }
 
-    /** index of context for contextual shaping - values range from 0 to 18 */
+    /** @serial index of context for contextual shaping - values range from 0 to 18 */
     private int key;
 
-    /** flag indicating whether to shape contextually (high bit) and which
+    /** @serial flag indicating whether to shape contextually (high bit) and which
      *  digit ranges to shape (bits 0-18)
      */
     private int mask;
 
     /**
-     * The context {@code Range} for contextual shaping or the {@code
+     * @serial The context {@code Range} for contextual shaping or the {@code
      * Range} for non-contextual shaping. {@code null} for the bit
      * mask-based API.
      *
@@ -426,6 +440,10 @@ public final class NumericShaper implements java.io.Serializable {
      */
     private static final int BSEARCH_THRESHOLD = 3;
 
+    /**
+     * Use serialVersionUID from JDK 1.7 for interoperability.
+     */
+    @Serial
     private static final long serialVersionUID = -8022764705923730308L;
 
     /** Identifies the Latin-1 (European) and extended range, and
@@ -571,7 +589,7 @@ public final class NumericShaper implements java.io.Serializable {
     // and a linear probe is ok.
 
     private static int ctCache = 0;
-    private static int ctCacheLimit = contexts.length - 2;
+    private static final int ctCacheLimit = contexts.length - 2;
 
     // warning, synchronize access to this as it modifies state
     private static int getContextKey(char c) {
@@ -1358,7 +1376,7 @@ public final class NumericShaper implements java.io.Serializable {
 
     // use a binary search with a cache
 
-    private transient volatile int stCache = 0;
+    private transient volatile int stCache;
 
     private boolean isStrongDirectional(char c) {
         int cachedIndex = stCache;
@@ -1423,6 +1441,9 @@ public final class NumericShaper implements java.io.Serializable {
      * EUROPEAN digits are encountered before any strong directional
      * text in the string, the context is presumed to be EUROPEAN, and
      * so the digits will not shape.
+     * Any bit set in the {@code ranges} bitmask which is not a
+     * recognised value is discarded. Similarly if two bits are
+     * specified where one takes precedence, the lesser one is discarded.
      * @param ranges the specified Unicode ranges
      * @return a shaper for the specified ranges
      */
@@ -1441,6 +1462,9 @@ public final class NumericShaper implements java.io.Serializable {
      * is, if EUROPEAN digits are encountered before any strong
      * directional text in the string, the context is presumed to be
      * EUROPEAN, and so the digits will not shape.
+     *
+     * If two ranges are specified where one takes precedence over the
+     * other the lesser range is discarded.
      *
      * @param ranges the specified Unicode ranges
      * @return a contextual shaper for the specified ranges
@@ -1481,6 +1505,9 @@ public final class NumericShaper implements java.io.Serializable {
      * range is one of the provided ranges. The shaper uses {@code
      * defaultContext} as the starting context.
      *
+     * If two ranges are specified where one takes precedence over the
+     * other the lesser range is discarded.
+     *
      * @param ranges the specified Unicode ranges
      * @param defaultContext the starting context, such as
      *                       {@code NumericShaper.Range.EUROPEAN}
@@ -1504,7 +1531,10 @@ public final class NumericShaper implements java.io.Serializable {
      */
     private NumericShaper(int key, int mask) {
         this.key = key;
-        this.mask = mask;
+        this.mask = mask & (CONTEXTUAL_MASK | ALL_RANGES);
+        if (((this.mask & ARABIC) != 0) && ((this.mask & EASTERN_ARABIC) != 0)) {
+            this.mask &= ~ARABIC;
+        }
     }
 
     private NumericShaper(Range defaultContext, Set<Range> ranges) {
@@ -1528,12 +1558,7 @@ public final class NumericShaper implements java.io.Serializable {
         rangeArray = rangeSet.toArray(new Range[rangeSet.size()]);
         if (rangeArray.length > BSEARCH_THRESHOLD) {
             // sort rangeArray for binary search
-            Arrays.sort(rangeArray,
-                        new Comparator<Range>() {
-                            public int compare(Range s1, Range s2) {
-                                return s1.base > s2.base ? 1 : s1.base == s2.base ? 0 : -1;
-                            }
-                        });
+            Arrays.sort(rangeArray, Comparator.comparingInt(s -> s.base));
         }
     }
 
@@ -1795,15 +1820,7 @@ public final class NumericShaper implements java.io.Serializable {
      * @see java.lang.Object#hashCode
      */
     public int hashCode() {
-        int hash = mask;
-        if (rangeSet != null) {
-            // Use the CONTEXTUAL_MASK bit only for the enum-based
-            // NumericShaper. A deserialized NumericShaper might have
-            // bit masks.
-            hash &= CONTEXTUAL_MASK;
-            hash ^= rangeSet.hashCode();
-        }
-        return hash;
+        return (rangeSet != null) ? Range.toRangeHash(rangeSet) : (mask & ~CONTEXTUAL_MASK);
     }
 
     /**
@@ -1962,6 +1979,7 @@ public final class NumericShaper implements java.io.Serializable {
      * @throws IOException if an I/O error occurs while writing to {@code stream}
      * @since 1.7
      */
+    @Serial
     private void writeObject(ObjectOutputStream stream) throws IOException {
         if (shapingRange != null) {
             int index = Range.toRangeIndex(shapingRange);

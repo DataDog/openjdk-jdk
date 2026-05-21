@@ -28,6 +28,7 @@
  *
  * @modules java.base/jdk.internal.misc
  *
+ * @requires vm.flagless
  * @requires os.arch=="aarch64" & vm.debug == true &
  *           vm.flavor == "server" &
  *           vm.gc.Shenandoah
@@ -69,33 +70,6 @@
  *
  * @run driver compiler.c2.aarch64.TestVolatilesShenandoah
  *      TestUnsafeVolatileGAA Shenandoah
- *
- * @run driver compiler.c2.aarch64.TestVolatilesShenandoah
- *      TestVolatileLoad ShenandoahIU
- *
- * @run driver compiler.c2.aarch64.TestVolatilesShenandoah
- *      TestVolatileStore ShenandoahIU
- *
- * @run driver compiler.c2.aarch64.TestVolatilesShenandoah
- *      TestUnsafeVolatileLoad ShenandoahIU
- *
- * @run driver compiler.c2.aarch64.TestVolatilesShenandoah
- *      TestUnsafeVolatileStore ShenandoahIU
- *
- * @run driver compiler.c2.aarch64.TestVolatilesShenandoah
- *      TestUnsafeVolatileCAS ShenandoahIU
- *
- * @run driver compiler.c2.aarch64.TestVolatilesShenandoah
- *      TestUnsafeVolatileWeakCAS ShenandoahIU
- *
- * @run driver compiler.c2.aarch64.TestVolatilesShenandoah
- *      TestUnsafeVolatileCAE ShenandoahIU
- *
- * @run driver compiler.c2.aarch64.TestVolatilesShenandoah
- *      TestUnsafeVolatileGAS ShenandoahIU
- *
- * @run driver compiler.c2.aarch64.TestVolatilesShenandoah
- *      TestUnsafeVolatileGAA ShenandoahIU
  *
  */
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,14 +29,14 @@ import com.sun.javatest.TestResult;
 import com.sun.javatest.regtest.config.RegressionParameters;
 import jdk.test.failurehandler.*;
 
-import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * The jtreg test execution observer, which gathers info about
@@ -45,6 +45,8 @@ import java.util.Map;
 public class GatherDiagnosticInfoObserver implements Harness.Observer {
     public static final String LOG_FILENAME = "environment.log";
     public static final String ENVIRONMENT_OUTPUT = "environment.html";
+    public static final String CORES_OUTPUT = "cores.html";
+
 
     private Path compileJdk;
     private Path testJdk;
@@ -64,18 +66,19 @@ public class GatherDiagnosticInfoObserver implements Harness.Observer {
         workDir.toFile().mkdir();
 
         String name = getClass().getName();
-        PrintWriter log;
+        PrintWriter log1;
         boolean needClose = false;
         try {
-            log = new PrintWriter(new FileWriter(
+            log1 = new PrintWriter(new FileWriter(
                     workDir.resolve(LOG_FILENAME).toFile(), true), true);
             needClose = true;
         } catch (IOException e) {
-            log = new PrintWriter(System.out);
-            log.printf("ERROR: %s cannot open log file %s", name,
+            log1 = new PrintWriter(System.out);
+            log1.printf("ERROR: %s cannot open log file %s", name,
                     LOG_FILENAME);
-            e.printStackTrace(log);
+            e.printStackTrace(log1);
         }
+        final PrintWriter log = log1;
         try {
             log.printf("%s ---%n", name);
             GathererFactory gathererFactory = new GathererFactory(
@@ -83,6 +86,15 @@ public class GatherDiagnosticInfoObserver implements Harness.Observer {
                     testJdk, compileJdk);
             gatherEnvInfo(workDir, name, log,
                     gathererFactory.getEnvironmentInfoGatherer());
+            // generate a cores.html file after parsing the core dump files (if any)
+            List<Path> coreFiles;
+            try (Stream<Path> paths = Files.walk(workDir)) {
+                coreFiles = paths.filter(Files::isRegularFile)
+                        .filter(f -> (f.getFileName().toString().contains("core")
+                                || f.getFileName().toString().contains("mdmp")))
+                        .toList();
+            }
+            gatherCoreInfo(workDir, name, coreFiles, log, gathererFactory.getCoreInfoGatherer());
         } catch (Throwable e) {
             log.printf("ERROR: exception in observer %s:", name);
             e.printStackTrace(log);
@@ -96,11 +108,29 @@ public class GatherDiagnosticInfoObserver implements Harness.Observer {
         }
     }
 
+    private void gatherCoreInfo(Path workDir, String name, List<Path> coreFiles,
+                                PrintWriter log, CoreInfoGatherer gatherer) {
+        if (coreFiles.isEmpty()) {
+            return;
+        }
+        try (HtmlPage html = new HtmlPage(workDir, CORES_OUTPUT, true)) {
+            try (ElapsedTimePrinter timePrinter
+                         = new ElapsedTimePrinter(new Stopwatch(), name, log)) {
+                // gather information from the contents of each core file
+                for (Path coreFile : coreFiles) {
+                    gatherer.gatherCoreInfo(html.getRootSection(), coreFile);
+                }
+            }
+        } catch (Throwable e) {
+            log.printf("ERROR: exception in %s observer while gathering information from"
+                    + " core dump file", name);
+            e.printStackTrace(log);
+        }
+    }
+
     private void gatherEnvInfo(Path workDir, String name, PrintWriter log,
                                EnvironmentInfoGatherer gatherer) {
-        File output = workDir.resolve(ENVIRONMENT_OUTPUT).toFile();
-        try (HtmlPage html = new HtmlPage(new PrintWriter(
-                new FileWriter(output, true), true))) {
+        try (HtmlPage html = new HtmlPage(workDir, ENVIRONMENT_OUTPUT, true)) {
             try (ElapsedTimePrinter timePrinter
                          = new ElapsedTimePrinter(new Stopwatch(), name, log)) {
                 gatherer.gatherEnvironmentInfo(html.getRootSection());

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,9 +31,6 @@ import java.awt.peer.TaskbarPeer;
 import java.awt.event.ActionEvent;
 
 import sun.awt.UNIXToolkit;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
-import sun.security.action.GetPropertyAction;
 
 final class XTaskbarPeer implements TaskbarPeer {
 
@@ -44,18 +41,15 @@ final class XTaskbarPeer implements TaskbarPeer {
     private static boolean isUnity;
 
     static {
-        String de = AccessController.doPrivileged(
-                        (PrivilegedAction<String>) ()
-                                -> System.getenv("XDG_CURRENT_DESKTOP"));
-        isUnity = de != null && de.equals("Unity");
+        String de = System.getenv("XDG_CURRENT_DESKTOP");
+        isUnity = "Unity".equals(de);
     }
 
     private static void initWithLock() {
         XToolkit.awtLock();
         try {
             if (!initExecuted) {
-                String dname = AccessController.doPrivileged(
-                                new GetPropertyAction("java.desktop.appName", ""));
+                String dname = System.getProperty("java.desktop.appName", "");
                 nativeLibraryLoaded = init(dname,
                         UNIXToolkit.getEnabledGtkVersion().ordinal(),
                         UNIXToolkit.isGtkVerbose());
@@ -158,7 +152,7 @@ final class XTaskbarPeer implements TaskbarPeer {
                     mi.getActionCommand());
             try {
                 XToolkit.awtLock();
-                XToolkit.postEvent(XToolkit.targetToAppContext(ae.getSource()), ae);
+                XToolkit.postEvent(ae);
             } finally {
                 XToolkit.awtUnlock();
             }

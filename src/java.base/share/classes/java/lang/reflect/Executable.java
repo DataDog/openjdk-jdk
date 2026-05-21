@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,15 +25,16 @@
 
 package java.lang.reflect;
 
-import java.lang.annotation.*;
+import java.lang.annotation.Annotation;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Set;
 import java.util.Objects;
 import java.util.StringJoiner;
-import java.util.stream.Stream;
 import java.util.stream.Collectors;
 
 import jdk.internal.access.SharedSecrets;
+import jdk.internal.vm.annotation.Stable;
 import sun.reflect.annotation.AnnotationParser;
 import sun.reflect.annotation.AnnotationSupport;
 import sun.reflect.annotation.TypeAnnotationParser;
@@ -45,13 +46,15 @@ import sun.reflect.generics.repository.ConstructorRepository;
  * A shared superclass for the common functionality of {@link Method}
  * and {@link Constructor}.
  *
+ * @sealedGraph
  * @since 1.8
  */
-public abstract class Executable extends AccessibleObject
-    implements Member, GenericDeclaration {
+public abstract sealed class Executable extends AccessibleObject
+    implements Member, GenericDeclaration permits Constructor, Method {
     /*
      * Only grant package-visibility to the constructor.
      */
+    @SuppressWarnings("deprecation")
     Executable() {}
 
     /**
@@ -67,6 +70,10 @@ public abstract class Executable extends AccessibleObject
     abstract ConstructorRepository getGenericInfo();
 
     boolean equalParamTypes(Class<?>[] params1, Class<?>[] params2) {
+        // The parameter arrays are trusted and the same for a root and all leaf
+        // copies. Thus, == on arrays is more useful than == on Executable.
+        if (params1 == params2)
+            return true;
         /* Avoid unnecessary cloning */
         if (params1.length == params2.length) {
             for (int i = 0; i < params1.length; i++) {
@@ -86,31 +93,15 @@ public abstract class Executable extends AccessibleObject
                getDeclaringClass());
     }
 
-    void printModifiersIfNonzero(StringBuilder sb, int mask, boolean isDefault) {
-        int mod = getModifiers() & mask;
+    // Appends source modifiers of this declaration to a display string builder.
+    abstract void appendModifiers(StringBuilder sb);
 
-        if (mod != 0 && !isDefault) {
-            sb.append(Modifier.toString(mod)).append(' ');
-        } else {
-            int access_mod = mod & Modifier.ACCESS_MODIFIERS;
-            if (access_mod != 0)
-                sb.append(Modifier.toString(access_mod)).append(' ');
-            if (isDefault)
-                sb.append("default ");
-            mod = (mod & ~Modifier.ACCESS_MODIFIERS);
-            if (mod != 0)
-                sb.append(Modifier.toString(mod)).append(' ');
-        }
-    }
-
-    String sharedToString(int modifierMask,
-                          boolean isDefault,
-                          Class<?>[] parameterTypes,
+    String sharedToString(Class<?>[] parameterTypes,
                           Class<?>[] exceptionTypes) {
         try {
             StringBuilder sb = new StringBuilder();
 
-            printModifiersIfNonzero(sb, modifierMask, isDefault);
+            appendModifiers(sb);
             specificToStringHeader(sb);
             sb.append(Arrays.stream(parameterTypes)
                       .map(Type::getTypeName)
@@ -144,11 +135,11 @@ public abstract class Executable extends AccessibleObject
         }
     }
 
-    String sharedToGenericString(int modifierMask, boolean isDefault) {
+    String sharedToGenericString() {
         try {
             StringBuilder sb = new StringBuilder();
 
-            printModifiersIfNonzero(sb, modifierMask, isDefault);
+            appendModifiers(sb);
 
             TypeVariable<?>[] typeparms = getTypeParameters();
             if (typeparms.length > 0) {
@@ -201,10 +192,27 @@ public abstract class Executable extends AccessibleObject
     public abstract String getName();
 
     /**
-     * Returns the Java language {@linkplain Modifier modifiers} for
-     * the executable represented by this object.
+     * {@return the Java language {@linkplain Modifier modifiers} for
+     * the executable represented by this object}
+     * @see #accessFlags
      */
     public abstract int getModifiers();
+
+    /**
+     * {@return an unmodifiable set of the {@linkplain AccessFlag
+     * access flags} for the executable represented by this object,
+     * possibly empty}
+     *
+     * @see #getModifiers()
+     * @jvms 4.6 Methods
+     * @since 20
+     */
+    @Override
+    public Set<AccessFlag> accessFlags() {
+        return reflectionFactory.parseAccessFlags(getModifiers(),
+                                                  AccessFlag.Location.METHOD,
+                                                  getDeclaringClass());
+    }
 
     /**
      * Returns an array of {@code TypeVariable} objects that represent the
@@ -236,12 +244,17 @@ public abstract class Executable extends AccessibleObject
      * represented by this object.  Returns an array of length
      * 0 if the underlying executable takes no parameters.
      * Note that the constructors of some inner classes
-     * may have an implicitly declared parameter in addition to
-     * explicitly declared ones.
+     * may have an {@linkplain java.compiler/javax.lang.model.util.Elements.Origin#MANDATED
+     * implicitly declared} parameter in addition to explicitly
+     * declared ones.
+     * Also note that compact constructors of a record class may have
+     * {@linkplain java.compiler/javax.lang.model.util.Elements.Origin#MANDATED
+     * implicitly declared} parameters.
      *
      * @return the parameter types for the executable this object
      * represents
      */
+    @SuppressWarnings("doclint:reference") // cross-module links
     public abstract Class<?>[] getParameterTypes();
 
     /**
@@ -252,22 +265,41 @@ public abstract class Executable extends AccessibleObject
      * @return The number of formal parameters for the executable this
      * object represents
      */
-    public int getParameterCount() {
-        throw new AbstractMethodError();
-    }
+    public abstract int getParameterCount();
 
     /**
-     * Returns an array of {@code Type} objects that represent the formal
-     * parameter types, in declaration order, of the executable represented by
-     * this object. Returns an array of length 0 if the
-     * underlying executable takes no parameters.
-     * Note that the constructors of some inner classes
-     * may have an implicitly declared parameter in addition to
-     * explicitly declared ones.
+     * Returns an array of {@code Type} objects that represent the
+     * formal parameter types, in declaration order, of the executable
+     * represented by this object. An array of length 0 is returned if the
+     * underlying executable takes no parameters.  Note that the
+     * constructors of some inner classes may have an implicitly
+     * declared parameter in addition to explicitly declared ones.
+     * Compact constructors of a record class may also have
+     * {@linkplain java.compiler/javax.lang.model.util.Elements.Origin#MANDATED
+     * implicitly declared} parameters,
+     * but they are a special case and thus considered as if they had
+     * been explicitly declared in the source.
+     * Finally note that as a {@link java.lang.reflect##LanguageJvmModel
+     * modeling artifact}, the number of returned parameters can differ
+     * depending on whether or not generic information is present. If
+     * generic information is present, parameters explicitly
+     * present in the source or parameters of compact constructors
+     * of a record class will be returned.
+     * Note that parameters of compact constructors of a record class are a special case,
+     * as they are not explicitly present in the source, and its type will be returned
+     * regardless of the parameters being
+     * {@linkplain java.compiler/javax.lang.model.util.Elements.Origin#MANDATED
+     * implicitly declared} or not.
+     * If generic information is not present, implicit and synthetic parameters may be
+     * returned as well.
      *
      * <p>If a formal parameter type is a parameterized type,
      * the {@code Type} object returned for it must accurately reflect
-     * the actual type arguments used in the source code.
+     * the actual type arguments used in the source code. This assertion also
+     * applies to the parameters of compact constructors of a record class,
+     * independently of them being
+     * {@linkplain java.compiler/javax.lang.model.util.Elements.Origin#MANDATED
+     * implicitly declared} or not.
      *
      * <p>If a formal parameter type is a type variable or a parameterized
      * type, it is created. Otherwise, it is resolved.
@@ -285,6 +317,7 @@ public abstract class Executable extends AccessibleObject
      *     the underlying executable's parameter types refer to a parameterized
      *     type that cannot be instantiated for any reason
      */
+    @SuppressWarnings("doclint:reference") // cross-module links
     public Type[] getGenericParameterTypes() {
         if (hasGenericInformation())
             return getGenericInfo().getParameterTypes();
@@ -307,26 +340,38 @@ public abstract class Executable extends AccessibleObject
         } else {
             final boolean realParamData = hasRealParameterData();
             final Type[] genericParamTypes = getGenericParameterTypes();
-            final Type[] nonGenericParamTypes = getParameterTypes();
+            final Type[] nonGenericParamTypes = getSharedParameterTypes();
             // If we have real parameter data, then we use the
             // synthetic and mandate flags to our advantage.
             if (realParamData) {
-                final Type[] out = new Type[nonGenericParamTypes.length];
-                final Parameter[] params = getParameters();
-                int fromidx = 0;
-                for (int i = 0; i < out.length; i++) {
-                    final Parameter param = params[i];
-                    if (param.isSynthetic() || param.isImplicit()) {
-                        // If we hit a synthetic or mandated parameter,
-                        // use the non generic parameter info.
-                        out[i] = nonGenericParamTypes[i];
+                if (getDeclaringClass().isRecord() && this instanceof Constructor) {
+                    /* we could be seeing a compact constructor of a record class
+                     * its parameters are mandated but we should be able to retrieve
+                     * its generic information if present
+                     */
+                    if (genericParamTypes.length == nonGenericParamTypes.length) {
+                        return genericParamTypes;
                     } else {
-                        // Otherwise, use the generic parameter info.
-                        out[i] = genericParamTypes[fromidx];
-                        fromidx++;
+                        return nonGenericParamTypes.clone();
                     }
+                } else {
+                    final Type[] out = new Type[nonGenericParamTypes.length];
+                    final Parameter[] params = getParameters();
+                    int fromidx = 0;
+                    for (int i = 0; i < out.length; i++) {
+                        final Parameter param = params[i];
+                        if (param.isSynthetic() || param.isImplicit()) {
+                            // If we hit a synthetic or mandated parameter,
+                            // use the non generic parameter info.
+                            out[i] = nonGenericParamTypes[i];
+                        } else {
+                            // Otherwise, use the generic parameter info.
+                            out[i] = genericParamTypes[fromidx];
+                            fromidx++;
+                        }
+                    }
+                    return out;
                 }
-                return out;
             } else {
                 // Otherwise, use the non-generic parameter data.
                 // Without method parameter reflection data, we have
@@ -334,25 +379,23 @@ public abstract class Executable extends AccessibleObject
                 // synthetic/mandated, thus, no way to match up the
                 // indexes.
                 return genericParamTypes.length == nonGenericParamTypes.length ?
-                    genericParamTypes : nonGenericParamTypes;
+                    genericParamTypes : getParameterTypes();
             }
         }
     }
 
     /**
-     * Returns an array of {@code Parameter} objects that represent
+     * {@return an array of {@code Parameter} objects representing
      * all the parameters to the underlying executable represented by
-     * this object.  Returns an array of length 0 if the executable
+     * this object} An array of length 0 is returned if the executable
      * has no parameters.
      *
      * <p>The parameters of the underlying executable do not necessarily
      * have unique names, or names that are legal identifiers in the
-     * Java programming language (JLS 3.8).
+     * Java programming language (JLS {@jls 3.8}).
      *
      * @throws MalformedParametersException if the class file contains
      * a MethodParameters attribute that is improperly formatted.
-     * @return an array of {@code Parameter} objects representing all
-     * the parameters to the executable this object represents.
      */
     public Parameter[] getParameters() {
         // TODO: This may eventually need to be guarded by security
@@ -361,7 +404,7 @@ public abstract class Executable extends AccessibleObject
         // Need to copy the cached array to prevent users from messing
         // with it.  Since parameters are immutable, we can
         // shallow-copy.
-        return privateGetParameters().clone();
+        return parameterData().parameters.clone();
     }
 
     private Parameter[] synthesizeAllParams() {
@@ -372,7 +415,7 @@ public abstract class Executable extends AccessibleObject
             // modifiers?  Probably not in the general case, since
             // we'd have no way of knowing about them, but there
             // may be specific cases.
-            out[i] = new Parameter("arg" + i, 0, this, i);
+            out[i] = new Parameter(null, 0, this, i);
         return out;
     }
 
@@ -400,46 +443,40 @@ public abstract class Executable extends AccessibleObject
         }
     }
 
-    private Parameter[] privateGetParameters() {
-        // Use tmp to avoid multiple writes to a volatile.
-        Parameter[] tmp = parameters;
-
-        if (tmp == null) {
-
-            // Otherwise, go to the JVM to get them
-            try {
-                tmp = getParameters0();
-            } catch(IllegalArgumentException e) {
-                // Rethrow ClassFormatErrors
-                throw new MalformedParametersException("Invalid constant pool index");
-            }
-
-            // If we get back nothing, then synthesize parameters
-            if (tmp == null) {
-                hasRealParameterData = false;
-                tmp = synthesizeAllParams();
-            } else {
-                hasRealParameterData = true;
-                verifyParameters(tmp);
-            }
-
-            parameters = tmp;
-        }
-
-        return tmp;
-    }
 
     boolean hasRealParameterData() {
-        // If this somehow gets called before parameters gets
-        // initialized, force it into existence.
-        if (parameters == null) {
-            privateGetParameters();
-        }
-        return hasRealParameterData;
+        return parameterData().isReal;
     }
 
-    private transient volatile boolean hasRealParameterData;
-    private transient volatile Parameter[] parameters;
+    private ParameterData parameterData() {
+        ParameterData parameterData = this.parameterData;
+        if (parameterData != null) {
+            return parameterData;
+        }
+
+        Parameter[] tmp;
+        // Go to the JVM to get them
+        try {
+            tmp = getParameters0();
+        } catch (IllegalArgumentException e) {
+            // Rethrow ClassFormatErrors
+            throw new MalformedParametersException("Invalid constant pool index");
+        }
+
+        // If we get back nothing, then synthesize parameters
+        if (tmp == null) {
+            tmp = synthesizeAllParams();
+            parameterData = new ParameterData(tmp, false);
+        } else {
+            verifyParameters(tmp);
+            parameterData = new ParameterData(tmp, true);
+        }
+        return this.parameterData = parameterData;
+    }
+
+    private transient @Stable ParameterData parameterData;
+
+    record ParameterData(@Stable Parameter[] parameters, boolean isReal) {}
 
     private native Parameter[] getParameters0();
     native byte[] getTypeAnnotationBytes0();
@@ -492,19 +529,16 @@ public abstract class Executable extends AccessibleObject
     }
 
     /**
-     * Returns a string describing this {@code Executable}, including
-     * any type parameters.
-     * @return a string describing this {@code Executable}, including
-     * any type parameters
+     * {@return a string describing this {@code Executable}, including
+     * any type parameters}
      */
-    public abstract String toGenericString();
+    public String toGenericString() {
+        return sharedToGenericString();
+    }
 
     /**
-     * Returns {@code true} if this executable was declared to take a
-     * variable number of arguments; returns {@code false} otherwise.
-     *
-     * @return {@code true} if an only if this executable was declared
-     * to take a variable number of arguments.
+     * {@return {@code true} if this executable was declared to take a
+     * variable number of arguments; returns {@code false} otherwise}
      */
     public boolean isVarArgs()  {
         return (getModifiers() & Modifier.VARARGS) != 0;
@@ -518,6 +552,7 @@ public abstract class Executable extends AccessibleObject
      * construct as defined by
      * <cite>The Java Language Specification</cite>.
      * @jls 13.1 The Form of a Binary
+     * @jvms 4.6 Methods
      */
     public boolean isSynthetic() {
         return Modifier.isSynthetic(getModifiers());
@@ -565,17 +600,19 @@ public abstract class Executable extends AccessibleObject
         Annotation[][] result = parseParameterAnnotations(parameterAnnotations);
 
         if (result.length != numParameters &&
-            handleParameterNumberMismatch(result.length, numParameters)) {
-            Annotation[][] tmp = new Annotation[result.length+1][];
-            // Shift annotations down one to account for an implicit leading parameter
-            System.arraycopy(result, 0, tmp, 1, result.length);
-            tmp[0] = new Annotation[0];
+            handleParameterNumberMismatch(result.length, parameterTypes)) {
+            Annotation[][] tmp = new Annotation[numParameters][];
+            // Shift annotations down to account for any implicit leading parameters
+            System.arraycopy(result, 0, tmp, numParameters - result.length, result.length);
+            for (int i = 0; i < numParameters - result.length; i++) {
+                tmp[i] = new Annotation[0];
+            }
             result = tmp;
         }
         return result;
     }
 
-    abstract boolean handleParameterNumberMismatch(int resultLength, int numParameters);
+    abstract boolean handleParameterNumberMismatch(int resultLength, Class<?>[] parameterTypes);
 
     /**
      * {@inheritDoc}
@@ -671,7 +708,7 @@ public abstract class Executable extends AccessibleObject
      * by this {@code Executable} object.
      *
      * The receiver type of a method/constructor is available only if the
-     * method/constructor has a receiver parameter (JLS 8.4.1). If this {@code
+     * method/constructor has a receiver parameter (JLS {@jls 8.4.1}). If this {@code
      * Executable} object <em>represents an instance method or represents a
      * constructor of an inner member class</em>, and the
      * method/constructor <em>either</em> has no receiver parameter or has a
@@ -699,8 +736,29 @@ public abstract class Executable extends AccessibleObject
                         getConstantPool(getDeclaringClass()),
                 this,
                 getDeclaringClass(),
-                resolveToOwnerType(getDeclaringClass()),
+                parameterize(getDeclaringClass()),
                 TypeAnnotation.TypeAnnotationTarget.METHOD_RECEIVER);
+    }
+
+    Type parameterize(Class<?> c) {
+        Class<?> ownerClass = c.getDeclaringClass();
+        TypeVariable<?>[] typeVars = c.getTypeParameters();
+
+        // base case, static nested classes, according to JLS 8.1.3, has no
+        // enclosing instance, therefore its owner is not generified.
+        if (ownerClass == null || Modifier.isStatic(c.getModifiers())) {
+            if (typeVars.length == 0)
+                return c;
+            else
+                return ParameterizedTypeImpl.make(c, typeVars, null);
+        }
+
+        // Resolve owner
+        Type ownerType = parameterize(ownerClass);
+        if (ownerType instanceof Class<?> && typeVars.length == 0) // We have yet to encounter type parameters
+            return c;
+        else
+            return ParameterizedTypeImpl.make(c, typeVars, ownerType);
     }
 
     /**
@@ -713,13 +771,18 @@ public abstract class Executable extends AccessibleObject
      * Returns an array of length 0 if the method/constructor declares no
      * parameters.
      * Note that the constructors of some inner classes
-     * may have an implicitly declared parameter in addition to
-     * explicitly declared ones.
+     * may have an
+     * {@linkplain java.compiler/javax.lang.model.util.Elements.Origin#MANDATED
+     * implicitly declared} parameter in addition to explicitly declared ones.
+     * Also note that compact constructors of a record class may have
+     * {@linkplain java.compiler/javax.lang.model.util.Elements.Origin#MANDATED
+     * implicitly declared} parameters.
      *
      * @return an array of objects representing the types of the
      * formal parameters of the method or constructor represented by this
      * {@code Executable}
      */
+    @SuppressWarnings("doclint:reference") // cross-module links
     public AnnotatedType[] getAnnotatedParameterTypes() {
         return TypeAnnotationParser.buildAnnotatedTypes(getTypeAnnotationBytes0(),
                 SharedSecrets.getJavaLangAccess().
@@ -752,25 +815,5 @@ public abstract class Executable extends AccessibleObject
                 getDeclaringClass(),
                 getGenericExceptionTypes(),
                 TypeAnnotation.TypeAnnotationTarget.THROWS);
-    }
-
-    static Type resolveToOwnerType(Class<?> c) {
-        TypeVariable<?>[] v = c.getTypeParameters();
-        Type o = resolveOwner(c);
-        Type t;
-        if (o != null || v.length > 0) {
-            t = ParameterizedTypeImpl.make(c, v, o);
-        } else {
-            t = c;
-        }
-        return t;
-    }
-
-    private static Type resolveOwner(Class<?> t) {
-        if (Modifier.isStatic(t.getModifiers()) || !(t.isLocalClass() || t.isMemberClass() || t.isAnonymousClass())) {
-            return null;
-        }
-        Class<?> d = t.getDeclaringClass();
-        return ParameterizedTypeImpl.make(d, d.getTypeParameters(), resolveOwner(d));
     }
 }

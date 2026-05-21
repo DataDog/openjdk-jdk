@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,7 +35,7 @@
 import jdk.test.lib.Platform;
 import jdk.test.lib.cds.CDSOptions;
 import jdk.test.lib.cds.CDSTestUtils;
-import jdk.test.lib.process.OutputAnalyzer;
+import jdk.test.lib.helpers.ClassFileInstaller;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.FileAlreadyExistsException;
@@ -60,6 +60,11 @@ public class BootClassPathMismatch {
             // this test is not applicable to dynamic archive since
             // there is no class to be archived in the top archive
             test.testBootClassPathMatchWithAppend();
+
+            // this test is not applicable to dynamic archive since
+            // there is no class path (-cp) specified at dyanmic archive
+            // creation.
+            test.testBootClassPathAppend();
         }
         test.testBootClassPathMatch();
         test.testBootClassPathMismatchTwoJars();
@@ -187,8 +192,7 @@ public class BootClassPathMismatch {
      */
     public void testBootClassPathMatchWithAppend() throws Exception {
       CDSOptions opts = new CDSOptions().setUseVersion(false);
-      OutputAnalyzer out = CDSTestUtils.createArchive(opts);
-      CDSTestUtils.checkDump(out);
+      CDSTestUtils.createArchiveAndCheck(opts);
 
       String appJar = JarBuilder.getOrCreateHelloJar();
       opts.addPrefix("-Xbootclasspath/a:" + appJar, "-showversion").addSuffix("Hello");
@@ -234,6 +238,22 @@ public class BootClassPathMismatch {
         TestCommon.run(
                 "-cp", appJar, "-Xbootclasspath/a:" + jars + "x", "Hello")
             .assertAbnormalExit(mismatchMessage);
+    }
+
+    /* Archive contains Hello class with only hello.jar in bootclasspath at dump time.
+     *
+     * No error - bootclasspath can be appended during runtime if no -cp is specified.
+     */
+    public void testBootClassPathAppend() throws Exception {
+        String appJar = JarBuilder.getOrCreateHelloJar();
+        String jar2 = ClassFileInstaller.writeJar("jar2.jar", "pkg/C2");
+        String jars = appJar + File.pathSeparator + jar2;
+        String appClasses[] = {"Hello", "pkg/C2"};
+        TestCommon.dump(
+            null, appClasses, "-Xbootclasspath/a:" + appJar);
+        TestCommon.run(
+                "-Xbootclasspath/a:" + jars, "Hello")
+            .assertNormalExit();
     }
 
     private static void copyHelloToNewDir() throws Exception {

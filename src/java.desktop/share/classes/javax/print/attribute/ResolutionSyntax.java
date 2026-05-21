@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 
 package javax.print.attribute;
 
+import java.io.Serial;
 import java.io.Serializable;
 
 /**
@@ -84,6 +85,7 @@ public abstract class ResolutionSyntax implements Serializable, Cloneable {
     /**
      * Use serialVersionUID from JDK 1.4 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = 2706743076526672017L;
 
     /**
@@ -264,19 +266,17 @@ public abstract class ResolutionSyntax implements Serializable, Cloneable {
      * @return {@code true} if {@code object} is equivalent to this resolution
      *         attribute, {@code false} otherwise
      */
+    @Override
     public boolean equals(Object object) {
-
-        return(object != null &&
-               object instanceof ResolutionSyntax &&
-               this.crossFeedResolution ==
-               ((ResolutionSyntax) object).crossFeedResolution &&
-               this.feedResolution ==
-               ((ResolutionSyntax) object).feedResolution);
+        return object instanceof ResolutionSyntax other &&
+                this.crossFeedResolution == other.crossFeedResolution &&
+                this.feedResolution == other.feedResolution;
     }
 
     /**
      * Returns a hash code value for this resolution attribute.
      */
+    @Override
     public int hashCode() {
         return(((crossFeedResolution & 0x0000FFFF)) |
                ((feedResolution      & 0x0000FFFF) << 16));
@@ -288,6 +288,7 @@ public abstract class ResolutionSyntax implements Serializable, Cloneable {
      * cross feed direction resolution and <i>F</i> is the feed direction
      * resolution. The values are reported in the internal units of dphi.
      */
+    @Override
     public String toString() {
         StringBuilder result = new StringBuilder();
         result.append(crossFeedResolution);

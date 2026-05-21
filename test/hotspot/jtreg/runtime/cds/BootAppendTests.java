@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,6 +46,7 @@ import jdk.test.lib.cds.CDSOptions;
 import jdk.test.lib.cds.CDSTestUtils;
 import jdk.test.lib.process.ProcessTools;
 import jdk.test.lib.process.OutputAnalyzer;
+import jdk.test.lib.helpers.ClassFileInstaller;
 
 public class BootAppendTests {
     private static final String APP_CLASS = "LoadClass";
@@ -161,7 +162,7 @@ public class BootAppendTests {
                 .addSuffix("-Xlog:class+load=info",
                            APP_CLASS, BOOT_APPEND_DUPLICATE_MODULE_CLASS_NAME);
 
-            String MATCH_PATTERN = ".class.load. javax.annotation.processing.FilerException source:.*bootAppend.jar*";
+            String MATCH_PATTERN = ".class.load.*javax.annotation.processing.FilerException source:.*bootAppend.jar*";
             CDSTestUtils.run(opts)
                 .assertNormalExit(out -> {
                     out.shouldNotMatch(MATCH_PATTERN);
@@ -187,7 +188,7 @@ public class BootAppendTests {
                            APP_CLASS, BOOT_APPEND_MODULE_CLASS_NAME);
             CDSTestUtils.Result res = CDSTestUtils.run(opts);
             String MATCH_PATTERN =
-                ".class.load. javax.sound.sampled.MyClass source:.*bootAppend.jar*";
+                ".class.load.*javax.sound.sampled.MyClass source:.*bootAppend.jar*";
             if (mode.equals("on")) {
                 res.assertSilentlyDisabledCDS(out -> {
                     out.shouldHaveExitValue(0)
@@ -224,7 +225,7 @@ public class BootAppendTests {
 
             CDSTestUtils.Result res = CDSTestUtils.run(opts);
             String MATCH_PATTERN =
-                ".class.load. javax.annotation.processing.FilerException source:.*bootAppend.jar*";
+                ".class.load.*javax.annotation.processing.FilerException source:.*bootAppend.jar*";
             if (mode.equals("on")) {
                 res.assertSilentlyDisabledCDS(out -> {
                     out.shouldHaveExitValue(0)
@@ -257,7 +258,7 @@ public class BootAppendTests {
 
             CDSTestUtils.Result res = CDSTestUtils.run(opts);
             String MATCH_PATTERN =
-                ".class.load. nonjdk.myPackage.MyClass source:.*bootAppend.jar*";
+                ".class.load.*nonjdk.myPackage.MyClass source:.*bootAppend.jar*";
             if (mode.equals("on")) {
                 res.assertSilentlyDisabledCDS(out -> {
                     out.shouldHaveExitValue(0)
@@ -286,7 +287,7 @@ public class BootAppendTests {
 
             CDSTestUtils.Result res = CDSTestUtils.run(opts);
             String MATCH_PATTERN =
-                ".class.load. nonjdk.myPackage.MyClass source:.*bootAppend.jar*";
+                ".class.load.*nonjdk.myPackage.MyClass source:.*bootAppend.jar*";
             if (mode.equals("on")) {
                 res.assertSilentlyDisabledCDS(out -> {
                     out.shouldHaveExitValue(0)

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,17 +44,20 @@ public class ObjectMonitor extends VMObject {
   private static synchronized void initialize(TypeDataBase db) throws WrongTypeException {
     heap = VM.getVM().getObjectHeap();
     Type type  = db.lookupType("ObjectMonitor");
-    sun.jvm.hotspot.types.Field f = type.getField("_header");
-    headerFieldOffset = f.getOffset();
+
+    sun.jvm.hotspot.types.Field f = type.getField("_metadata");
+    metadataFieldOffset = f.getOffset();
     f = type.getField("_object");
     objectFieldOffset = f.getOffset();
     f = type.getField("_owner");
     ownerFieldOffset = f.getOffset();
     f = type.getField("_next_om");
     nextOMFieldOffset = f.getOffset();
-    contentionsField  = type.getJIntField("_contentions");
-    waitersField = type.getJIntField("_waiters");
-    recursionsField = type.getCIntegerField("_recursions");
+    contentionsField  = new CIntField(type.getCIntegerField("_contentions"), 0);
+    waitersField      = new CIntField(type.getCIntegerField("_waiters"), 0);
+    recursionsField   = type.getCIntegerField("_recursions");
+
+    ANONYMOUS_OWNER = db.lookupLongConstant("ObjectMonitor::ANONYMOUS_OWNER").longValue();
   }
 
   public ObjectMonitor(Address addr) {
@@ -62,7 +65,7 @@ public class ObjectMonitor extends VMObject {
   }
 
   public Mark header() {
-    return new Mark(addr.addOffsetTo(headerFieldOffset));
+    return new Mark(addr.addOffsetTo(metadataFieldOffset));
   }
 
   // FIXME
@@ -79,11 +82,15 @@ public class ObjectMonitor extends VMObject {
     return false;
   }
 
+  public boolean isOwnedAnonymous() {
+    return addr.getAddressAt(ownerFieldOffset).asLongValue() == ANONYMOUS_OWNER;
+  }
+
   public Address owner() { return addr.getAddressAt(ownerFieldOffset); }
   // FIXME
   //  void      set_owner(void* owner);
 
-  public int    waiters() { return waitersField.getValue(addr); }
+  public int    waiters() { return (int)waitersField.getValue(this); }
 
   public Address nextOM() { return addr.getAddressAt(nextOMFieldOffset); }
   // FIXME
@@ -100,19 +107,21 @@ public class ObjectMonitor extends VMObject {
   }
 
   public int contentions() {
-      return contentionsField.getValue(addr);
+      return (int)contentionsField.getValue(this);
   }
 
   // The following four either aren't expressed as typed fields in
   // vmStructs.cpp because they aren't strongly typed in the VM, or
   // would confuse the SA's type system.
   private static ObjectHeap    heap;
-  private static long          headerFieldOffset;
+  private static long          metadataFieldOffset;
   private static long          objectFieldOffset;
   private static long          ownerFieldOffset;
   private static long          nextOMFieldOffset;
-  private static JIntField     contentionsField;
-  private static JIntField     waitersField;
+  private static CIntField     contentionsField;
+  private static CIntField     waitersField;
   private static CIntegerField recursionsField;
+  private static long          ANONYMOUS_OWNER;
+
   // FIXME: expose platform-dependent stuff
 }

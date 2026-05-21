@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -87,10 +87,11 @@ public abstract class SSLServerSocketFactory extends ServerSocketFactory {
      * The returned array includes cipher suites from the list of standard
      * cipher suite names in the <a href=
      * "{@docRoot}/../specs/security/standard-names.html#jsse-cipher-suite-names">
-     * JSSE Cipher Suite Names</a> section of the Java Cryptography
-     * Architecture Standard Algorithm Name Documentation, and may also
-     * include other cipher suites that the provider supports.
+     * JSSE Cipher Suite Names</a> section of the Java Security Standard
+     * Algorithm Names Specification, and may also include other cipher
+     * suites that the provider supports.
      *
+     * @spec security/standard-names.html Java Security Standard Algorithm Names
      * @see #getSupportedCipherSuites()
      * @return array of the cipher suites enabled by default
      */
@@ -108,10 +109,11 @@ public abstract class SSLServerSocketFactory extends ServerSocketFactory {
      * The returned array includes cipher suites from the list of standard
      * cipher suite names in the <a href=
      * "{@docRoot}/../specs/security/standard-names.html#jsse-cipher-suite-names">
-     * JSSE Cipher Suite Names</a> section of the Java Cryptography
-     * Architecture Standard Algorithm Name Documentation, and may also
-     * include other cipher suites that the provider supports.
+     * JSSE Cipher Suite Names</a> section of the Java Security Standard
+     * Algorithm Names Specification, and may also include other cipher
+     * suites that the provider supports.
      *
+     * @spec security/standard-names.html Java Security Standard Algorithm Names
      * @return an array of cipher suite names
      * @see #getDefaultCipherSuites()
      */
@@ -173,8 +175,7 @@ class DefaultSSLServerSocketFactory extends SSLServerSocketFactory {
     }
 
     private ServerSocket throwException() throws SocketException {
-        throw (SocketException)
-            new SocketException(reason.toString()).initCause(reason);
+        throw new SocketException(reason.toString(), reason);
     }
 
     @Override

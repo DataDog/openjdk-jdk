@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -56,12 +56,13 @@ public interface ScatteringByteChannel
      *
      * <p> An invocation of this method attempts to read up to <i>r</i> bytes
      * from this channel, where <i>r</i> is the total number of bytes remaining
-     * the specified subsequence of the given buffer array, that is,
+     * in the specified subsequence of the given buffer array, that is,
      *
-     * <blockquote><pre>
-     * dsts[offset].remaining()
-     *     + dsts[offset+1].remaining()
-     *     + ... + dsts[offset+length-1].remaining()</pre></blockquote>
+     * {@snippet lang=java :
+     *     dsts[offset].remaining()
+     *         + dsts[offset+1].remaining()
+     *         + ... + dsts[offset+length-1].remaining()
+     * }
      *
      * at the moment that this method is invoked.
      *
@@ -118,7 +119,7 @@ public interface ScatteringByteChannel
      *          If another thread interrupts the current thread
      *          while the read operation is in progress, thereby
      *          closing the channel and setting the current thread's
-     *          interrupt status
+     *          interrupted status
      *
      * @throws  IOException
      *          If some other I/O error occurs
@@ -132,8 +133,9 @@ public interface ScatteringByteChannel
      * <p> An invocation of this method of the form {@code c.read(dsts)}
      * behaves in exactly the same manner as the invocation
      *
-     * <blockquote><pre>
-     * c.read(dsts, 0, dsts.length);</pre></blockquote>
+     * {@snippet lang=java :
+     *     c.read(dsts, 0, dsts.length);
+     * }
      *
      * @param  dsts
      *         The buffers into which bytes are to be transferred
@@ -158,7 +160,7 @@ public interface ScatteringByteChannel
      *          If another thread interrupts the current thread
      *          while the read operation is in progress, thereby
      *          closing the channel and setting the current thread's
-     *          interrupt status
+     *          interrupted status
      *
      * @throws  IOException
      *          If some other I/O error occurs

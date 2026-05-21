@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 
 package javax.print.attribute.standard;
 
+import java.io.Serial;
 import java.net.URI;
 
 import javax.print.attribute.Attribute;
@@ -57,6 +58,7 @@ public final class PrinterMoreInfoManufacturer extends URISyntax
     /**
      * Use serialVersionUID from JDK 1.4 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = 3323271346485076608L;
 
     /**
@@ -86,6 +88,7 @@ public final class PrinterMoreInfoManufacturer extends URISyntax
      * @return {@code true} if {@code object} is equivalent to this printer more
      *         info manufacturer attribute, {@code false} otherwise
      */
+    @Override
     public boolean equals(Object object) {
         return (super.equals(object) &&
                 object instanceof PrinterMoreInfoManufacturer);
@@ -101,6 +104,7 @@ public final class PrinterMoreInfoManufacturer extends URISyntax
      * @return printing attribute class (category), an instance of class
      *         {@link Class java.lang.Class}
      */
+    @Override
     public final Class<? extends Attribute> getCategory() {
         return PrinterMoreInfoManufacturer.class;
     }
@@ -114,6 +118,7 @@ public final class PrinterMoreInfoManufacturer extends URISyntax
      *
      * @return attribute category name
      */
+    @Override
     public final String getName() {
         return "printer-more-info-manufacturer";
     }

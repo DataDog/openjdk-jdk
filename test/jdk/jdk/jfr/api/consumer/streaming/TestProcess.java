@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2019, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -56,14 +54,19 @@ public final class TestProcess implements AutoCloseable {
     private final Path path;
 
     public TestProcess(String name) throws IOException {
+        this(name, true /* createCore */);
+    }
+
+    public TestProcess(String name, boolean createCore) throws IOException {
         this.path = Paths.get("action-" + System.currentTimeMillis()).toAbsolutePath();
         String[] args = {
                 "--add-exports",
                 "java.base/jdk.internal.misc=ALL-UNNAMED",
                 "-XX:StartFlightRecording:settings=none",
+                "-XX:" + (createCore ? "+" : "-") + "CreateCoredumpOnCrash",
                 TestProcess.class.getName(), path.toString()
             };
-        ProcessBuilder pb = ProcessTools.createJavaProcessBuilder(args);
+        ProcessBuilder pb = ProcessTools.createLimitedTestJavaProcessBuilder(args);
         process = ProcessTools.startProcess(name, pb);
     }
 

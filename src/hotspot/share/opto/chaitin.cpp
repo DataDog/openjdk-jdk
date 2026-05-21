@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "compiler/compileLog.hpp"
 #include "compiler/oopMap.hpp"
 #include "memory/allocation.inline.hpp"
@@ -50,9 +49,11 @@ void LRG::dump() const {
   _mask.dump();
   if( _msize_valid ) {
     if( mask_size() == compute_mask_size() ) tty->print(", #%d ",_mask_size);
-    else tty->print(", #!!!_%d_vs_%d ",_mask_size,_mask.Size());
+    else {
+      tty->print(", #!!!_%d_vs_%d ", _mask_size, _mask.size());
+    }
   } else {
-    tty->print(", #?(%d) ",_mask.Size());
+    tty->print(", #?(%d) ", _mask.size());
   }
 
   tty->print("EffDeg: ");
@@ -61,7 +62,7 @@ void LRG::dump() const {
 
   if( is_multidef() ) {
     tty->print("MultiDef ");
-    if (_defs != NULL) {
+    if (_defs != nullptr) {
       tty->print("(");
       for (int i = 0; i < _defs->length(); i++) {
         tty->print("N%d ", _defs->at(i)->_idx);
@@ -69,7 +70,7 @@ void LRG::dump() const {
       tty->print(") ");
     }
   }
-  else if( _def == 0 ) tty->print("Dead ");
+  else if( _def == nullptr ) tty->print("Dead ");
   else tty->print("Def: N%d ",_def->_idx);
 
   tty->print("Cost:%4.2g Area:%4.2g Score:%4.2g ",_cost,_area, score());
@@ -77,6 +78,7 @@ void LRG::dump() const {
   if( _is_oop ) tty->print("Oop ");
   if( _is_float ) tty->print("Float ");
   if( _is_vector ) tty->print("Vector ");
+  if( _is_predicate ) tty->print("Predicate ");
   if( _is_scalable ) tty->print("Scalable ");
   if( _was_spilled1 ) tty->print("Spilled ");
   if( _was_spilled2 ) tty->print("Spilled2 ");
@@ -199,10 +201,10 @@ PhaseChaitin::PhaseChaitin(uint unique, PhaseCFG &cfg, Matcher &matcher, bool sc
 #ifndef PRODUCT
        print_chaitin_statistics
 #else
-       NULL
+       nullptr
 #endif
        )
-  , _live(0)
+  , _live(nullptr)
   , _lo_degree(0), _lo_stk_degree(0), _hi_degree(0), _simplified(0)
   , _oldphi(unique)
 #ifndef PRODUCT
@@ -210,51 +212,70 @@ PhaseChaitin::PhaseChaitin(uint unique, PhaseCFG &cfg, Matcher &matcher, bool sc
 #endif
   , _lrg_map(Thread::current()->resource_area(), unique)
   , _scheduling_info_generated(scheduling_info_generated)
-  , _sched_int_pressure(0, INTPRESSURE)
-  , _sched_float_pressure(0, FLOATPRESSURE)
-  , _scratch_int_pressure(0, INTPRESSURE)
-  , _scratch_float_pressure(0, FLOATPRESSURE)
+  , _sched_int_pressure(0, Matcher::int_pressure_limit())
+  , _sched_float_pressure(0, Matcher::float_pressure_limit())
+  , _scratch_int_pressure(0, Matcher::int_pressure_limit())
+  , _scratch_float_pressure(0, Matcher::float_pressure_limit())
 {
-  Compile::TracePhase tp("ctorChaitin", &timers[_t_ctorChaitin]);
+  Compile::TracePhase tp(_t_ctorChaitin);
 
   _high_frequency_lrg = MIN2(double(OPTO_LRG_HIGH_FREQ), _cfg.get_outer_loop_frequency());
 
   // Build a list of basic blocks, sorted by frequency
-  _blks = NEW_RESOURCE_ARRAY(Block *, _cfg.number_of_blocks());
   // Experiment with sorting strategies to speed compilation
+  uint nr_blocks = _cfg.number_of_blocks();
   double  cutoff = BLOCK_FREQUENCY(1.0); // Cutoff for high frequency bucket
   Block **buckets[NUMBUCKS];             // Array of buckets
   uint    buckcnt[NUMBUCKS];             // Array of bucket counters
   double  buckval[NUMBUCKS];             // Array of bucket value cutoffs
+
+  // The space which our buckets point into.
+  Block** start = NEW_RESOURCE_ARRAY(Block *, nr_blocks*NUMBUCKS);
+
   for (uint i = 0; i < NUMBUCKS; i++) {
-    buckets[i] = NEW_RESOURCE_ARRAY(Block *, _cfg.number_of_blocks());
+    buckets[i] = &start[i*nr_blocks];
     buckcnt[i] = 0;
     // Bump by three orders of magnitude each time
     cutoff *= 0.001;
     buckval[i] = cutoff;
-    for (uint j = 0; j < _cfg.number_of_blocks(); j++) {
-      buckets[i][j] = NULL;
-    }
   }
+
   // Sort blocks into buckets
-  for (uint i = 0; i < _cfg.number_of_blocks(); i++) {
+  for (uint i = 0; i < nr_blocks; i++) {
     for (uint j = 0; j < NUMBUCKS; j++) {
-      if ((j == NUMBUCKS - 1) || (_cfg.get_block(i)->_freq > buckval[j])) {
+      double bval = buckval[j];
+      Block* blk = _cfg.get_block(i);
+      if (j == NUMBUCKS - 1 || blk->_freq > bval) {
+        uint cnt = buckcnt[j];
         // Assign block to end of list for appropriate bucket
-        buckets[j][buckcnt[j]++] = _cfg.get_block(i);
+        buckets[j][cnt] = blk;
+        buckcnt[j] = cnt+1;
         break; // kick out of inner loop
       }
     }
   }
-  // Dump buckets into final block array
+
+  // Squash the partially filled buckets together into the first one.
+  static_assert(NUMBUCKS >= 2, "must"); // If this isn't true then it'll mess up the squashing.
+  Block** offset = &buckets[0][buckcnt[0]];
+  for (int i = 1; i < NUMBUCKS; i++) {
+    ::memmove(offset, buckets[i], buckcnt[i]*sizeof(Block*));
+    offset += buckcnt[i];
+  }
+  assert((&buckets[0][0] + nr_blocks) == offset, "should be");
+
+  // Free the now unused memory
+  FREE_RESOURCE_ARRAY(buckets[1], (NUMBUCKS-1)*nr_blocks);
+  // Finally, point the _blks to our memory
+  _blks = buckets[0];
+
+#ifdef ASSERT
   uint blkcnt = 0;
   for (uint i = 0; i < NUMBUCKS; i++) {
-    for (uint j = 0; j < buckcnt[i]; j++) {
-      _blks[blkcnt++] = buckets[i][j];
-    }
+    blkcnt += buckcnt[i];
   }
-
-  assert(blkcnt == _cfg.number_of_blocks(), "Block array not totally filled");
+  assert(blkcnt == nr_blocks, "Block array not totally filled");
+#endif
 }
 
 // union 2 sets together.
@@ -301,7 +322,7 @@ int PhaseChaitin::clone_projs(Block* b, uint idx, Node* orig, Node* copy, uint& 
 
 // Renumber the live ranges to compact them.  Makes the IFG smaller.
 void PhaseChaitin::compact() {
-  Compile::TracePhase tp("chaitinCompact", &timers[_t_chaitinCompact]);
+  Compile::TracePhase tp(_t_chaitinCompact);
 
   // Current the _uf_map contains a series of short chains which are headed
   // by a self-cycle.  All the chains run from big numbers to little numbers.
@@ -347,8 +368,8 @@ void PhaseChaitin::Register_Allocate() {
   _alternate = 0;
   _matcher._allocation_started = true;
 
-  ResourceArea split_arena(mtCompiler);     // Arena for Split local resources
-  ResourceArea live_arena(mtCompiler);      // Arena for liveness & IFG info
+  ResourceArea split_arena(mtCompiler, Arena::Tag::tag_regsplit);     // Arena for Split local resources
+  ResourceArea live_arena(mtCompiler, Arena::Tag::tag_reglive);     // Arena for liveness & IFG info
   ResourceMark rm(&live_arena);
 
   // Need live-ness for the IFG; need the IFG for coalescing.  If the
@@ -372,13 +393,13 @@ void PhaseChaitin::Register_Allocate() {
   de_ssa();
 
 #ifdef ASSERT
-  // Veify the graph before RA.
+  // Verify the graph before RA.
   verify(&live_arena);
 #endif
 
   {
-    Compile::TracePhase tp("computeLive", &timers[_t_computeLive]);
-    _live = NULL;                 // Mark live as being not available
+    Compile::TracePhase tp(_t_computeLive);
+    _live = nullptr;              // Mark live as being not available
     rm.reset_to_mark();           // Reclaim working storage
     IndexSet::reset_memory(C, &live_arena);
     ifg.init(_lrg_map.max_lrg_id()); // Empty IFG
@@ -387,6 +408,8 @@ void PhaseChaitin::Register_Allocate() {
     _live = &live;                // Mark LIVE as being available
   }
 
+  C->print_method(PHASE_INITIAL_LIVENESS, 4);
+
   // Base pointers are currently "used" by instructions which define new
   // derived pointers.  This makes base pointers live up to the where the
   // derived pointer is made, but not beyond.  Really, they need to be live
@@ -394,18 +417,23 @@ void PhaseChaitin::Register_Allocate() {
   // at all the GC points, and "stretches" the live range of any base pointer
   // to the GC point.
   if (stretch_base_pointer_live_ranges(&live_arena)) {
-    Compile::TracePhase tp("computeLive (sbplr)", &timers[_t_computeLive]);
+    Compile::TracePhase tp("computeLive (sbplr)", _t_computeLive);
     // Since some live range stretched, I need to recompute live
-    _live = NULL;
+    _live = nullptr;
     rm.reset_to_mark();         // Reclaim working storage
     IndexSet::reset_memory(C, &live_arena);
     ifg.init(_lrg_map.max_lrg_id());
     gather_lrg_masks(false);
     live.compute(_lrg_map.max_lrg_id());
     _live = &live;
+    C->print_method(PHASE_LIVE_RANGE_STRETCHING, 4);
   }
+
   // Create the interference graph using virtual copies
   build_ifg_virtual();  // Include stack slots this time
+  if (C->failing()) {
+    return;
+  }
 
   // The IFG is/was triangular.  I am 'squaring it up' so Union can run
   // faster.  Union requires a 'for all' operation which is slow on the
@@ -419,7 +447,7 @@ void PhaseChaitin::Register_Allocate() {
   // This pass works on virtual copies.  Any virtual copies which are not
   // coalesced get manifested as actual copies
   {
-    Compile::TracePhase tp("chaitinCoalesce1", &timers[_t_chaitinCoalesce1]);
+    Compile::TracePhase tp(_t_chaitinCoalesce1);
 
     PhaseAggressiveCoalesce coalesce(*this);
     coalesce.coalesce_driver();
@@ -434,8 +462,8 @@ void PhaseChaitin::Register_Allocate() {
   // After aggressive coalesce, attempt a first cut at coloring.
   // To color, we need the IFG and for that we need LIVE.
   {
-    Compile::TracePhase tp("computeLive", &timers[_t_computeLive]);
-    _live = NULL;
+    Compile::TracePhase tp(_t_computeLive);
+    _live = nullptr;
     rm.reset_to_mark();           // Reclaim working storage
     IndexSet::reset_memory(C, &live_arena);
     ifg.init(_lrg_map.max_lrg_id());
@@ -444,9 +472,14 @@ void PhaseChaitin::Register_Allocate() {
     _live = &live;
   }
 
+  C->print_method(PHASE_AGGRESSIVE_COALESCING, 4);
+
   // Build physical interference graph
   uint must_spill = 0;
   must_spill = build_ifg_physical(&live_arena);
+  if (C->failing()) {
+    return;
+  }
   // If we have a guaranteed spill, might as well spill now
   if (must_spill) {
     if(!_lrg_map.max_lrg_id()) {
@@ -459,6 +492,9 @@ void PhaseChaitin::Register_Allocate() {
     }
 
     uint new_max_lrg_id = Split(_lrg_map.max_lrg_id(), &split_arena);  // Split spilling LRG everywhere
+    if (C->failing()) {
+      return;
+    }
     _lrg_map.set_max_lrg_id(new_max_lrg_id);
     // Bail out if unique gets too large (ie - unique > MaxNodeLimit - 2*NodeLimitFudgeFactor)
     // or we failed to split
@@ -472,8 +508,8 @@ void PhaseChaitin::Register_Allocate() {
     compact();                  // Compact LRGs; return new lower max lrg
 
     {
-      Compile::TracePhase tp("computeLive", &timers[_t_computeLive]);
-      _live = NULL;
+      Compile::TracePhase tp(_t_computeLive);
+      _live = nullptr;
       rm.reset_to_mark();         // Reclaim working storage
       IndexSet::reset_memory(C, &live_arena);
       ifg.init(_lrg_map.max_lrg_id()); // Build a new interference graph
@@ -481,12 +517,18 @@ void PhaseChaitin::Register_Allocate() {
       live.compute(_lrg_map.max_lrg_id()); // Compute LIVE
       _live = &live;
     }
+
+    C->print_method(PHASE_INITIAL_SPILLING, 4);
+
     build_ifg_physical(&live_arena);
+    if (C->failing()) {
+      return;
+    }
     _ifg->SquareUp();
     _ifg->Compute_Effective_Degree();
     // Only do conservative coalescing if requested
     if (OptoCoalesce) {
-      Compile::TracePhase tp("chaitinCoalesce2", &timers[_t_chaitinCoalesce2]);
+      Compile::TracePhase tp(_t_chaitinCoalesce2);
       // Conservative (and pessimistic) copy coalescing of those spills
       PhaseConservativeCoalesce coalesce(*this);
       // If max live ranges greater than cutoff, don't color the stack.
@@ -494,6 +536,10 @@ void PhaseChaitin::Register_Allocate() {
       coalesce.coalesce_driver();
     }
     _lrg_map.compress_uf_map_for_nodes();
+
+    if (OptoCoalesce) {
+      C->print_method(PHASE_CONSERVATIVE_COALESCING, 4);
+    }
 
 #ifdef ASSERT
     verify(&live_arena, true);
@@ -516,6 +562,9 @@ void PhaseChaitin::Register_Allocate() {
   // Select colors by re-inserting LRGs back into the IFG in reverse order.
   // Return whether or not something spills.
   uint spills = Select( );
+  if (C->failing()) {
+    return;
+  }
 
   // If we spill, split and recycle the entire thing
   while( spills ) {
@@ -531,6 +580,9 @@ void PhaseChaitin::Register_Allocate() {
       return;
     }
     uint new_max_lrg_id = Split(_lrg_map.max_lrg_id(), &split_arena);  // Split spilling LRG everywhere
+    if (C->failing()) {
+      return;
+    }
     _lrg_map.set_max_lrg_id(new_max_lrg_id);
     // Bail out if unique gets too large (ie - unique > MaxNodeLimit - 2*NodeLimitFudgeFactor)
     C->check_node_count(2 * NodeLimitFudgeFactor, "out of nodes after split");
@@ -542,8 +594,8 @@ void PhaseChaitin::Register_Allocate() {
 
     // Nuke the live-ness and interference graph and LiveRanGe info
     {
-      Compile::TracePhase tp("computeLive", &timers[_t_computeLive]);
-      _live = NULL;
+      Compile::TracePhase tp(_t_computeLive);
+      _live = nullptr;
       rm.reset_to_mark();         // Reclaim working storage
       IndexSet::reset_memory(C, &live_arena);
       ifg.init(_lrg_map.max_lrg_id());
@@ -554,19 +606,30 @@ void PhaseChaitin::Register_Allocate() {
       live.compute(_lrg_map.max_lrg_id());
       _live = &live;
     }
+
+    C->print_method(PHASE_ITERATIVE_SPILLING, 4);
+
     must_spill = build_ifg_physical(&live_arena);
+    if (C->failing()) {
+      return;
+    }
     _ifg->SquareUp();
     _ifg->Compute_Effective_Degree();
 
     // Only do conservative coalescing if requested
     if (OptoCoalesce) {
-      Compile::TracePhase tp("chaitinCoalesce3", &timers[_t_chaitinCoalesce3]);
+      Compile::TracePhase tp(_t_chaitinCoalesce3);
       // Conservative (and pessimistic) copy coalescing
       PhaseConservativeCoalesce coalesce(*this);
       // Check for few live ranges determines how aggressive coalesce is.
       coalesce.coalesce_driver();
     }
     _lrg_map.compress_uf_map_for_nodes();
+
+    if (OptoCoalesce) {
+      C->print_method(PHASE_CONSERVATIVE_COALESCING, 4);
+    }
+
 #ifdef ASSERT
     verify(&live_arena, true);
 #endif
@@ -579,7 +642,12 @@ void PhaseChaitin::Register_Allocate() {
     // Select colors by re-inserting LRGs back into the IFG in reverse order.
     // Return whether or not something spills.
     spills = Select();
+    if (C->failing()) {
+      return;
+    }
   }
+
+  C->print_method(PHASE_AFTER_ITERATIVE_SPILLING, 4);
 
   // Count number of Simplify-Select trips per coloring success.
   _allocator_attempts += _trip_cnt + 1;
@@ -588,11 +656,15 @@ void PhaseChaitin::Register_Allocate() {
   // Peephole remove copies
   post_allocate_copy_removal();
 
+  C->print_method(PHASE_POST_ALLOCATION_COPY_REMOVAL, 4);
+
   // Merge multidefs if multiple defs representing the same value are used in a single block.
   merge_multidefs();
 
+  C->print_method(PHASE_MERGE_MULTI_DEFS, 4);
+
 #ifdef ASSERT
-  // Veify the graph after RA.
+  // Verify the graph after RA.
   verify(&live_arena);
 #endif
 
@@ -619,9 +691,11 @@ void PhaseChaitin::Register_Allocate() {
   // Convert CISC spills
   fixup_spills();
 
+  C->print_method(PHASE_FIX_UP_SPILLS, 4);
+
   // Log regalloc results
   CompileLog* log = Compile::current()->log();
-  if (log != NULL) {
+  if (log != nullptr) {
     log->elem("regalloc attempts='%d' success='%d'", _trip_cnt, !C->failing());
   }
 
@@ -638,7 +712,8 @@ void PhaseChaitin::Register_Allocate() {
       LRG &lrg = lrgs(_lrg_map.live_range_id(i));
       if (!lrg.alive()) {
         set_bad(i);
-      } else if (lrg.num_regs() == 1) {
+      } else if ((lrg.num_regs() == 1 && !lrg.is_scalable()) ||
+                 (lrg.is_scalable() && lrg.scalable_reg_slots() == 1)) {
         set1(i, lrg.reg());
       } else {                  // Must be a register-set
         if (!lrg._fat_proj) {   // Must be aligned adjacent register set
@@ -653,18 +728,22 @@ void PhaseChaitin::Register_Allocate() {
             // num_regs, which reflects the physical length of scalable registers.
             num_regs = lrg.scalable_reg_slots();
           }
-          OptoReg::Name lo = OptoReg::add(hi, (1-num_regs)); // Find lo
-          // We have to use pair [lo,lo+1] even for wide vectors because
-          // the rest of code generation works only with pairs. It is safe
-          // since for registers encoding only 'lo' is used.
-          // Second reg from pair is used in ScheduleAndBundle on SPARC where
-          // vector max size is 8 which corresponds to registers pair.
-          // It is also used in BuildOopMaps but oop operations are not
-          // vectorized.
-          set2(i, lo);
+          if (num_regs == 1) {
+            set1(i, hi);
+          } else {
+            OptoReg::Name lo = OptoReg::add(hi, (1 - num_regs)); // Find lo
+            // We have to use pair [lo,lo+1] even for wide vectors/vmasks because
+            // the rest of code generation works only with pairs. It is safe
+            // since for registers encoding only 'lo' is used.
+            // Second reg from pair is used in ScheduleAndBundle with vector max
+            // size 8 which corresponds to registers pair.
+            // It is also used in BuildOopMaps but oop operations are not
+            // vectorized.
+            set2(i, lo);
+          }
         } else {                // Misaligned; extract 2 bits
           OptoReg::Name hi = lrg.reg(); // Get hi register
-          lrg.Remove(hi);       // Yank from mask
+          lrg.remove(hi);               // Yank from mask
           int lo = lrg.mask().find_first_elem(); // Find lo
           set_pair(i, hi, lo);
         }
@@ -676,9 +755,9 @@ void PhaseChaitin::Register_Allocate() {
   }
 
   // Done!
-  _live = NULL;
-  _ifg = NULL;
-  C->set_indexSet_arena(NULL);  // ResourceArea is at end of scope
+  _live = nullptr;
+  _ifg = nullptr;
+  C->set_indexSet_arena(nullptr);  // ResourceArea is at end of scope
 }
 
 void PhaseChaitin::de_ssa() {
@@ -696,7 +775,7 @@ void PhaseChaitin::de_ssa() {
       Node *n = block->get_node(j);
       // Pre-color to the zero live range, or pick virtual register
       const RegMask &rm = n->out_RegMask();
-      _lrg_map.map(n->_idx, rm.is_NotEmpty() ? lr_counter++ : 0);
+      _lrg_map.map(n->_idx, !rm.is_empty() ? lr_counter++ : 0);
     }
   }
 
@@ -717,7 +796,7 @@ void PhaseChaitin::mark_ssa() {
       Node *n = block->get_node(j);
       // Pre-color to the zero live range, or pick virtual register
       const RegMask &rm = n->out_RegMask();
-      _lrg_map.map(n->_idx, rm.is_NotEmpty() ? n->_idx : 0);
+      _lrg_map.map(n->_idx, !rm.is_empty() ? n->_idx : 0);
       max_idx = (n->_idx > max_idx) ? n->_idx : max_idx;
     }
   }
@@ -785,10 +864,10 @@ void PhaseChaitin::gather_lrg_masks( bool after_aggressive ) {
           copy_src._has_copy = 1;
         }
 
-        if (trace_spilling() && lrg._def != NULL) {
+        if (trace_spilling() && lrg._def != nullptr) {
           // collect defs for MultiDef printing
-          if (lrg._defs == NULL) {
-            lrg._defs = new (_ifg->_arena) GrowableArray<Node*>(_ifg->_arena, 2, 0, NULL);
+          if (lrg._defs == nullptr) {
+            lrg._defs = new (_ifg->_arena) GrowableArray<Node*>(_ifg->_arena, 2, 0, nullptr);
             lrg._defs->append(lrg._def);
           }
           lrg._defs->append(n);
@@ -796,13 +875,13 @@ void PhaseChaitin::gather_lrg_masks( bool after_aggressive ) {
 #endif
 
         // Check for a single def LRG; these can spill nicely
-        // via rematerialization.  Flag as NULL for no def found
+        // via rematerialization.  Flag as null for no def found
         // yet, or 'n' for single def or -1 for many defs.
         lrg._def = lrg._def ? NodeSentinel : n;
 
         // Limit result register mask to acceptable registers
         const RegMask &rm = n->out_RegMask();
-        lrg.AND( rm );
+        lrg.and_with(rm);
 
         uint ireg = n->ideal_reg();
         assert( !n->bottom_type()->isa_oop_ptr() || ireg == Op_RegP,
@@ -813,7 +892,7 @@ void PhaseChaitin::gather_lrg_masks( bool after_aggressive ) {
         // processes as vector in RA.
         if (RegMask::is_vector(ireg)) {
           lrg._is_vector = 1;
-          if (ireg == Op_VecA) {
+          if (Matcher::implements_scalable_vector && ireg == Op_VecA) {
             assert(Matcher::supports_scalable_vector(), "scalable vector should be supported");
             lrg._is_scalable = 1;
             // For scalable vector, when it is allocated in physical register,
@@ -824,7 +903,22 @@ void PhaseChaitin::gather_lrg_masks( bool after_aggressive ) {
             lrg.set_scalable_reg_slots(Matcher::scalable_vector_reg_size(T_FLOAT));
           }
         }
-        assert(n_type->isa_vect() == NULL || lrg._is_vector || ireg == Op_RegD || ireg == Op_RegL,
+
+        if (ireg == Op_RegVectMask) {
+          assert(Matcher::has_predicated_vectors(), "predicated vector should be supported");
+          lrg._is_predicate = 1;
+          if (Matcher::supports_scalable_vector()) {
+            lrg._is_scalable = 1;
+            // For scalable predicate, when it is allocated in physical register,
+            // num_regs is RegMask::SlotsPerRegVectMask for reg mask,
+            // which may not be the actual physical register size.
+            // If it is allocated in stack, we need to get the actual
+            // physical length of scalable predicate register.
+            lrg.set_scalable_reg_slots(Matcher::scalable_predicate_reg_slots());
+          }
+        }
+        assert(n_type->isa_vect() == nullptr || lrg._is_vector ||
+               ireg == Op_RegD || ireg == Op_RegL || ireg == Op_RegVectMask,
                "vector must be in vector registers");
 
         // Check for bound register masks
@@ -843,7 +937,7 @@ void PhaseChaitin::gather_lrg_masks( bool after_aggressive ) {
         switch (ireg) {
         case MachProjNode::fat_proj:
           // Fat projections have size equal to number of registers killed
-          lrg.set_num_regs(rm.Size());
+          lrg.set_num_regs(rm.size());
           lrg.set_reg_pressure(lrg.num_regs());
           lrg._fat_proj = 1;
           lrg._is_bound = 1;
@@ -881,8 +975,6 @@ void PhaseChaitin::gather_lrg_masks( bool after_aggressive ) {
           // ------------------- reg_pressure --------------------
           // Each entry is reg_pressure_per_value,number_of_regs
           //         RegL  RegI  RegFlags   RegF RegD    INTPRESSURE  FLOATPRESSURE
-          // IA32     2     1     1          1    1          6           6
-          // IA64     1     1     1          1    1         50          41
           // SPARC    2     2     2          2    2         48 (24)     52 (26)
           // SPARCV9  2     2     2          2    2         48 (24)     52 (26)
           // AMD64    1     1     1          1    1         14          15
@@ -898,12 +990,6 @@ void PhaseChaitin::gather_lrg_masks( bool after_aggressive ) {
           // Define platform specific register pressure
 #if defined(ARM32)
           lrg.set_reg_pressure(2);
-#elif defined(IA32)
-          if( ireg == Op_RegL ) {
-            lrg.set_reg_pressure(2);
-          } else {
-            lrg.set_reg_pressure(1);
-          }
 #else
           lrg.set_reg_pressure(1);  // normally one value per register
 #endif
@@ -916,6 +1002,12 @@ void PhaseChaitin::gather_lrg_masks( bool after_aggressive ) {
             lrg._fat_proj = 1;
             lrg._is_bound = 1;
           }
+          break;
+        case Op_RegVectMask:
+          assert(Matcher::has_predicated_vectors(), "sanity");
+          assert(RegMask::num_registers(Op_RegVectMask) == RegMask::SlotsPerRegVectMask, "sanity");
+          lrg.set_num_regs(RegMask::SlotsPerRegVectMask);
+          lrg.set_reg_pressure(1);
           break;
         case Op_RegF:
         case Op_RegI:
@@ -984,8 +1076,8 @@ void PhaseChaitin::gather_lrg_masks( bool after_aggressive ) {
 
       // Prepare register mask for each input
       for( uint k = input_edge_start; k < cnt; k++ ) {
-        uint vreg = _lrg_map.live_range_id(n->in(k));
-        if (!vreg) {
+        uint vreg_in = _lrg_map.live_range_id(n->in(k));
+        if (!vreg_in) {
           continue;
         }
 
@@ -1007,7 +1099,7 @@ void PhaseChaitin::gather_lrg_masks( bool after_aggressive ) {
           if (k >= cur_node->num_opnds()) continue;
         }
 
-        LRG &lrg = lrgs(vreg);
+        LRG &lrg_in = lrgs(vreg_in);
         // // Testing for floating point code shape
         // Node *test = n->in(k);
         // if( test->is_Mach() ) {
@@ -1022,25 +1114,25 @@ void PhaseChaitin::gather_lrg_masks( bool after_aggressive ) {
         // Do not limit registers from uncommon uses before
         // AggressiveCoalesce.  This effectively pre-virtual-splits
         // around uncommon uses of common defs.
-        const RegMask &rm = n->in_RegMask(k);
+        const RegMask &rm_in = n->in_RegMask(k);
         if (!after_aggressive && _cfg.get_block_for_node(n->in(k))->_freq > 1000 * block->_freq) {
           // Since we are BEFORE aggressive coalesce, leave the register
           // mask untrimmed by the call.  This encourages more coalescing.
           // Later, AFTER aggressive, this live range will have to spill
           // but the spiller handles slow-path calls very nicely.
         } else {
-          lrg.AND( rm );
+          lrg_in.and_with(rm_in);
         }
 
         // Check for bound register masks
-        const RegMask &lrgmask = lrg.mask();
+        const RegMask &lrgmask_in = lrg_in.mask();
         uint kreg = n->in(k)->ideal_reg();
         bool is_vect = RegMask::is_vector(kreg);
-        assert(n->in(k)->bottom_type()->isa_vect() == NULL ||
-               is_vect || kreg == Op_RegD || kreg == Op_RegL,
+        assert(n->in(k)->bottom_type()->isa_vect() == nullptr || is_vect ||
+               kreg == Op_RegD || kreg == Op_RegL || kreg == Op_RegVectMask,
                "vector must be in vector registers");
-        if (lrgmask.is_bound(kreg))
-          lrg._is_bound = 1;
+        if (lrgmask_in.is_bound(kreg))
+          lrg_in._is_bound = 1;
 
         // If this use of a double forces a mis-aligned double,
         // flag as '_fat_proj' - really flag as allowing misalignment
@@ -1049,30 +1141,30 @@ void PhaseChaitin::gather_lrg_masks( bool after_aggressive ) {
         // FOUR registers!
 #ifdef ASSERT
         if (is_vect && !_scheduling_info_generated) {
-          if (lrg.num_regs() != 0) {
-            assert(lrgmask.is_aligned_sets(lrg.num_regs()), "vector should be aligned");
-            assert(!lrg._fat_proj, "sanity");
-            assert(RegMask::num_registers(kreg) == lrg.num_regs(), "sanity");
+          if (lrg_in.num_regs() != 0) {
+            assert(lrgmask_in.is_aligned_sets(lrg_in.num_regs()), "vector should be aligned");
+            assert(!lrg_in._fat_proj, "sanity");
+            assert(RegMask::num_registers(kreg) == lrg_in.num_regs(), "sanity");
           } else {
             assert(n->is_Phi(), "not all inputs processed only if Phi");
           }
         }
 #endif
-        if (!is_vect && lrg.num_regs() == 2 && !lrg._fat_proj && rm.is_misaligned_pair()) {
-          lrg._fat_proj = 1;
-          lrg._is_bound = 1;
+        if (!is_vect && lrg_in.num_regs() == 2 && !lrg_in._fat_proj && rm_in.is_misaligned_pair()) {
+          lrg_in._fat_proj = 1;
+          lrg_in._is_bound = 1;
         }
         // if the LRG is an unaligned pair, we will have to spill
         // so clear the LRG's register mask if it is not already spilled
         if (!is_vect && !n->is_SpillCopy() &&
-            (lrg._def == NULL || lrg.is_multidef() || !lrg._def->is_SpillCopy()) &&
-            lrgmask.is_misaligned_pair()) {
-          lrg.Clear();
+            (lrg_in._def == nullptr || lrg_in.is_multidef() || !lrg_in._def->is_SpillCopy()) &&
+            lrgmask_in.is_misaligned_pair()) {
+          lrg_in.clear();
         }
 
         // Check for maximum frequency value
-        if (lrg._maxfreq < block->_freq) {
-          lrg._maxfreq = block->_freq;
+        if (lrg_in._maxfreq < block->_freq) {
+          lrg_in._maxfreq = block->_freq;
         }
 
       } // End for all allocated inputs
@@ -1131,7 +1223,7 @@ void PhaseChaitin::set_was_low() {
 
 // Compute cost/area ratio, in case we spill.  Build the lo-degree list.
 void PhaseChaitin::cache_lrg_info( ) {
-  Compile::TracePhase tp("chaitinCacheLRG", &timers[_t_chaitinCacheLRG]);
+  Compile::TracePhase tp(_t_chaitinCacheLRG);
 
   for (uint i = 1; i < _lrg_map.max_lrg_id(); i++) {
     LRG &lrg = lrgs(i);
@@ -1165,7 +1257,7 @@ void PhaseChaitin::cache_lrg_info( ) {
 
 // Simplify the IFG by removing LRGs of low degree.
 void PhaseChaitin::Simplify( ) {
-  Compile::TracePhase tp("chaitinSimplify", &timers[_t_chaitinSimplify]);
+  Compile::TracePhase tp(_t_chaitinSimplify);
 
   while( 1 ) {                  // Repeat till simplified it all
     // May want to explore simplifying lo_degree before _lo_stk_degree.
@@ -1245,7 +1337,7 @@ void PhaseChaitin::Simplify( ) {
     bool bound = lrgs(lo_score)._is_bound;
 
     // Find cheapest guy
-    debug_only( int lo_no_simplify=0; );
+    DEBUG_ONLY( int lo_no_simplify=0; );
     for (uint i = _hi_degree; i; i = lrgs(i)._next) {
       assert(!_ifg->_yanked->test(i), "");
       // It's just vaguely possible to move hi-degree to lo-degree without
@@ -1257,7 +1349,7 @@ void PhaseChaitin::Simplify( ) {
         lo_score = i;
         break;
       }
-      debug_only( if( lrgs(i)._was_lo ) lo_no_simplify=i; );
+      DEBUG_ONLY( if( lrgs(i)._was_lo ) lo_no_simplify=i; );
       double iscore = lrgs(i).score();
       double iarea = lrgs(i)._area;
       double icost = lrgs(i)._cost;
@@ -1307,9 +1399,8 @@ void PhaseChaitin::Simplify( ) {
 }
 
 // Is 'reg' register legal for 'lrg'?
-static bool is_legal_reg(LRG &lrg, OptoReg::Name reg, int chunk) {
-  if (reg >= chunk && reg < (chunk + RegMask::CHUNK_SIZE) &&
-      lrg.mask().Member(OptoReg::add(reg,-chunk))) {
+static bool is_legal_reg(LRG& lrg, OptoReg::Name reg) {
+  if (lrg.mask().can_represent(reg) && lrg.mask().member(reg)) {
     // RA uses OptoReg which represent the highest element of a registers set.
     // For example, vectorX (128bit) on x86 uses [XMM,XMMb,XMMc,XMMd] set
     // in which XMMd is used by RA to represent such vectors. A double value
@@ -1332,13 +1423,15 @@ static bool is_legal_reg(LRG &lrg, OptoReg::Name reg, int chunk) {
   return false;
 }
 
-static OptoReg::Name find_first_set(LRG &lrg, RegMask mask, int chunk) {
+static OptoReg::Name find_first_set(LRG& lrg, RegMask& mask) {
   int num_regs = lrg.num_regs();
   OptoReg::Name assigned = mask.find_first_set(lrg, num_regs);
 
   if (lrg.is_scalable()) {
     // a physical register is found
-    if (chunk == 0 && OptoReg::is_reg(assigned)) {
+    if (OptoReg::is_reg(assigned)) {
+      assert(!lrg.mask().is_offset(),
+             "offset register masks can only contain stack slots");
       return assigned;
     }
 
@@ -1354,26 +1447,91 @@ static OptoReg::Name find_first_set(LRG &lrg, RegMask mask, int chunk) {
       // does not work for scalable size. We have to find adjacent scalable_reg_slots() bits
       // instead of SlotsPerVecA bits.
       assigned = mask.find_first_set(lrg, num_regs); // find highest valid reg
-      while (OptoReg::is_valid(assigned) && RegMask::can_represent(assigned)) {
+      while (OptoReg::is_valid(assigned)) {
+        assert(mask.can_represent(assigned), "sanity");
         // Verify the found reg has scalable_reg_slots() bits set.
         if (mask.is_valid_reg(assigned, num_regs)) {
           return assigned;
         } else {
           // Remove more for each iteration
-          mask.Remove(assigned - num_regs + 1); // Unmask the lowest reg
+          mask.remove(assigned - num_regs + 1);      // Unmask the lowest reg
           mask.clear_to_sets(RegMask::SlotsPerVecA); // Align by SlotsPerVecA bits
           assigned = mask.find_first_set(lrg, num_regs);
         }
       }
       return OptoReg::Bad; // will cause chunk change, and retry next chunk
+    } else if (lrg._is_predicate) {
+      assert(num_regs == RegMask::SlotsPerRegVectMask, "scalable predicate register");
+      num_regs = lrg.scalable_reg_slots();
+      mask.clear_to_sets(num_regs);
+      return mask.find_first_set(lrg, num_regs);
     }
   }
 
   return assigned;
 }
 
+OptoReg::Name PhaseChaitin::select_bias_lrg_color(LRG& lrg) {
+  uint bias_lrg1_idx = _lrg_map.find(lrg._copy_bias);
+  uint bias_lrg2_idx = _lrg_map.find(lrg._copy_bias2);
+
+  // If bias_lrg1 has a color
+  if (bias_lrg1_idx != 0 && !_ifg->_yanked->test(bias_lrg1_idx)) {
+    OptoReg::Name reg = lrgs(bias_lrg1_idx).reg();
+    //  and it is legal for lrg
+    if (is_legal_reg(lrg, reg)) {
+      return reg;
+    }
+  }
+
+  // If bias_lrg2 has a color
+  if (bias_lrg2_idx != 0 && !_ifg->_yanked->test(bias_lrg2_idx)) {
+    OptoReg::Name reg = lrgs(bias_lrg2_idx).reg();
+    //  and it is legal for lrg
+    if (is_legal_reg(lrg, reg)) {
+      return reg;
+    }
+  }
+
+  uint bias_lrg_idx = 0;
+  if (bias_lrg1_idx != 0 && bias_lrg2_idx != 0) {
+    // Since none of the bias live ranges are part of the IFG yet, constrain the
+    // definition mask with the bias live range with the least degrees of
+    // freedom. This will increase the chances of register sharing once the bias
+    // live range becomes part of the IFG.
+    lrgs(bias_lrg1_idx).compute_set_mask_size();
+    lrgs(bias_lrg2_idx).compute_set_mask_size();
+    bias_lrg_idx = lrgs(bias_lrg1_idx).degrees_of_freedom() >
+                           lrgs(bias_lrg2_idx).degrees_of_freedom()
+                       ? bias_lrg2_idx
+                       : bias_lrg1_idx;
+  } else if (bias_lrg1_idx != 0) {
+    bias_lrg_idx = bias_lrg1_idx;
+  } else if (bias_lrg2_idx != 0) {
+    bias_lrg_idx = bias_lrg2_idx;
+  }
+
+  // Register masks with offset excludes all mask bits before the offset.
+  // Such masks are mainly used for allocation from stack slots. Constrain the
+  // register mask of definition live range using bias mask only if
+  // both masks have zero offset.
+  if (bias_lrg_idx != 0 && !lrg.mask().is_offset() &&
+      !lrgs(bias_lrg_idx).mask().is_offset()) {
+    // Choose a color which is legal for bias_lrg
+    ResourceMark rm(C->regmask_arena());
+    RegMask tempmask(lrg.mask(), C->regmask_arena());
+    tempmask.and_with(lrgs(bias_lrg_idx).mask());
+    tempmask.clear_to_sets(lrg.num_regs());
+    OptoReg::Name reg = find_first_set(lrg, tempmask);
+    if (OptoReg::is_valid(reg)) {
+      return reg;
+    }
+  }
+  return OptoReg::Bad;
+}
+
 // Choose a color using the biasing heuristic
-OptoReg::Name PhaseChaitin::bias_color( LRG &lrg, int chunk ) {
+OptoReg::Name PhaseChaitin::bias_color(LRG& lrg) {
 
   // Check for "at_risk" LRG's
   uint risk_lrg = _lrg_map.find(lrg._risk_bias);
@@ -1387,61 +1545,52 @@ OptoReg::Name PhaseChaitin::bias_color( LRG &lrg, int chunk ) {
     while ((datum = elements.next()) != 0) {
       OptoReg::Name reg = lrgs(datum).reg();
       // If this LRG's register is legal for us, choose it
-      if (is_legal_reg(lrg, reg, chunk))
+      if (is_legal_reg(lrg, reg)) {
         return reg;
+      }
     }
   }
 
-  uint copy_lrg = _lrg_map.find(lrg._copy_bias);
-  if (copy_lrg != 0) {
-    // If he has a color,
-    if(!_ifg->_yanked->test(copy_lrg)) {
-      OptoReg::Name reg = lrgs(copy_lrg).reg();
-      //  And it is legal for you,
-      if (is_legal_reg(lrg, reg, chunk))
-        return reg;
-    } else if( chunk == 0 ) {
-      // Choose a color which is legal for him
-      RegMask tempmask = lrg.mask();
-      tempmask.AND(lrgs(copy_lrg).mask());
-      tempmask.clear_to_sets(lrg.num_regs());
-      OptoReg::Name reg = find_first_set(lrg, tempmask, chunk);
-      if (OptoReg::is_valid(reg))
-        return reg;
-    }
+  // Try biasing the color with non-interfering bias live range[s].
+  OptoReg::Name reg = select_bias_lrg_color(lrg);
+  if (OptoReg::is_valid(reg)) {
+    return reg;
   }
 
   // If no bias info exists, just go with the register selection ordering
-  if (lrg._is_vector || lrg.num_regs() == 2) {
+  if (lrg._is_vector || lrg.num_regs() == 2 || lrg.is_scalable()) {
     // Find an aligned set
-    return OptoReg::add(find_first_set(lrg, lrg.mask(), chunk), chunk);
+    ResourceMark rm(C->regmask_arena());
+    RegMask tempmask(lrg.mask(), C->regmask_arena());
+    return find_first_set(lrg, tempmask);
   }
 
   // CNC - Fun hack.  Alternate 1st and 2nd selection.  Enables post-allocate
   // copy removal to remove many more copies, by preventing a just-assigned
   // register from being repeatedly assigned.
-  OptoReg::Name reg = lrg.mask().find_first_elem();
+  reg = lrg.mask().find_first_elem();
   if( (++_alternate & 1) && OptoReg::is_valid(reg) ) {
     // This 'Remove; find; Insert' idiom is an expensive way to find the
     // SECOND element in the mask.
-    lrg.Remove(reg);
+    lrg.remove(reg);
     OptoReg::Name reg2 = lrg.mask().find_first_elem();
-    lrg.Insert(reg);
-    if( OptoReg::is_reg(reg2))
+    lrg.insert(reg);
+    if (OptoReg::is_reg(reg2)) {
       reg = reg2;
+    }
   }
-  return OptoReg::add( reg, chunk );
+  return reg;
 }
 
 // Choose a color in the current chunk
-OptoReg::Name PhaseChaitin::choose_color( LRG &lrg, int chunk ) {
-  assert( C->in_preserve_stack_slots() == 0 || chunk != 0 || lrg._is_bound || lrg.mask().is_bound1() || !lrg.mask().Member(OptoReg::Name(_matcher._old_SP-1)), "must not allocate stack0 (inside preserve area)");
-  assert(C->out_preserve_stack_slots() == 0 || chunk != 0 || lrg._is_bound || lrg.mask().is_bound1() || !lrg.mask().Member(OptoReg::Name(_matcher._old_SP+0)), "must not allocate stack0 (inside preserve area)");
+OptoReg::Name PhaseChaitin::choose_color(LRG& lrg) {
+  assert(C->in_preserve_stack_slots() == 0 || lrg.mask().is_offset() || lrg._is_bound || lrg.mask().is_bound1() || !lrg.mask().member(OptoReg::Name(_matcher._old_SP - 1)), "must not allocate stack0 (inside preserve area)");
+  assert(C->out_preserve_stack_slots() == 0 || lrg.mask().is_offset() || lrg._is_bound || lrg.mask().is_bound1() || !lrg.mask().member(OptoReg::Name(_matcher._old_SP + 0)), "must not allocate stack0 (inside preserve area)");
 
   if( lrg.num_regs() == 1 ||    // Common Case
       !lrg._fat_proj )          // Aligned+adjacent pairs ok
     // Use a heuristic to "bias" the color choice
-    return bias_color(lrg, chunk);
+    return bias_color(lrg);
 
   assert(!lrg._is_vector, "should be not vector here" );
   assert( lrg.num_regs() >= 2, "dead live ranges do not color" );
@@ -1449,7 +1598,7 @@ OptoReg::Name PhaseChaitin::choose_color( LRG &lrg, int chunk ) {
   // Fat-proj case or misaligned double argument.
   assert(lrg.compute_mask_size() == lrg.num_regs() ||
          lrg.num_regs() == 2,"fat projs exactly color" );
-  assert( !chunk, "always color in 1st chunk" );
+  assert(!lrg.mask().is_offset(), "always color in 1st chunk");
   // Return the highest element in the set.
   return lrg.mask().find_last_elem();
 }
@@ -1459,7 +1608,7 @@ OptoReg::Name PhaseChaitin::choose_color( LRG &lrg, int chunk ) {
 // everything going back is guaranteed a color.  Select that color.  If some
 // hi-degree LRG cannot get a color then we record that we must spill.
 uint PhaseChaitin::Select( ) {
-  Compile::TracePhase tp("chaitinSelect", &timers[_t_chaitinSelect]);
+  Compile::TracePhase tp(_t_chaitinSelect);
 
   uint spill_reg = LRG::SPILL_REG;
   _max_reg = OptoReg::Name(0);  // Past max register used
@@ -1481,50 +1630,52 @@ uint PhaseChaitin::Select( ) {
     // Re-insert into the IFG
     _ifg->re_insert(lidx);
     if( !lrg->alive() ) continue;
-    // capture allstackedness flag before mask is hacked
-    const int is_allstack = lrg->mask().is_AllStack();
+    // capture infinitestackedness flag before mask is hacked
+    const int is_infinite_stack = lrg->mask().is_infinite_stack();
 
     // Yeah, yeah, yeah, I know, I know.  I can refactor this
     // to avoid the GOTO, although the refactored code will not
     // be much clearer.  We arrive here IFF we have a stack-based
     // live range that cannot color in the current chunk, and it
     // has to move into the next free stack chunk.
-    int chunk = 0;              // Current chunk is first chunk
     retry_next_chunk:
 
     // Remove neighbor colors
     IndexSet *s = _ifg->neighbors(lidx);
-    debug_only(RegMask orig_mask = lrg->mask();)
+#ifndef PRODUCT
+    ResourceMark rm(C->regmask_arena());
+    RegMask orig_mask(lrg->mask(), C->regmask_arena());
+#endif
 
     if (!s->is_empty()) {
       IndexSetIterator elements(s);
       uint neighbor;
       while ((neighbor = elements.next()) != 0) {
-        // Note that neighbor might be a spill_reg.  In this case, exclusion
-        // of its color will be a no-op, since the spill_reg chunk is in outer
-        // space.  Also, if neighbor is in a different chunk, this exclusion
-        // will be a no-op.  (Later on, if lrg runs out of possible colors in
-        // its chunk, a new chunk of color may be tried, in which case
-        // examination of neighbors is started again, at retry_next_chunk.)
         LRG &nlrg = lrgs(neighbor);
         OptoReg::Name nreg = nlrg.reg();
-        // Only subtract masks in the same chunk
-        if (nreg >= chunk && nreg < chunk + RegMask::CHUNK_SIZE) {
+        // The neighbor might be a spill_reg. In this case, exclusion of its
+        // color will be a no-op, since the spill_reg is in outer space. In
+        // this case, do not exclude the corresponding mask. Later on, if lrg
+        // runs out of possible colors in its chunk, a new chunk of color may
+        // be tried, in which case examination of neighbors is started again,
+        // at retry_next_chunk.
+        if (nreg < LRG::SPILL_REG) {
 #ifndef PRODUCT
-          uint size = lrg->mask().Size();
-          RegMask rm = lrg->mask();
+          uint size = lrg->mask().size();
+          ResourceMark rm(C->regmask_arena());
+          RegMask trace_mask(lrg->mask(), C->regmask_arena());
 #endif
-          lrg->SUBTRACT(nlrg.mask());
+          lrg->subtract_inner(nlrg.mask());
 #ifndef PRODUCT
-          if (trace_spilling() && lrg->mask().Size() != size) {
+          if (trace_spilling() && lrg->mask().size() != size) {
             ttyLocker ttyl;
             tty->print("L%d ", lidx);
-            rm.dump();
+            trace_mask.dump();
             tty->print(" intersected L%d ", neighbor);
             nlrg.mask().dump();
             tty->print(" removed ");
-            rm.SUBTRACT(lrg->mask());
-            rm.dump();
+            trace_mask.subtract(lrg->mask());
+            trace_mask.dump();
             tty->print(" leaving ");
             lrg->mask().dump();
             tty->cr();
@@ -1533,7 +1684,28 @@ uint PhaseChaitin::Select( ) {
         }
       }
     }
-    //assert(is_allstack == lrg->mask().is_AllStack(), "nbrs must not change AllStackedness");
+
+    Node* def = lrg->_def;
+    if (lrg->is_singledef() && !lrg->_is_bound && def->is_Mach()) {
+      MachNode* mdef = def->as_Mach();
+      if (Matcher::is_register_biasing_candidate(mdef, 1)) {
+        Node* in1 = mdef->in(mdef->operand_index(1));
+        if (in1 != nullptr && lrg->_copy_bias == 0) {
+          lrg->_copy_bias = _lrg_map.find(in1);
+        }
+      }
+
+      // For commutative operations, def allocation can also be
+      // biased towards LRG of second input's def.
+      if (Matcher::is_register_biasing_candidate(mdef, 2)) {
+        Node* in2 = mdef->in(mdef->operand_index(2));
+        if (in2 != nullptr && lrg->_copy_bias2 == 0) {
+          lrg->_copy_bias2 = _lrg_map.find(in2);
+        }
+      }
+    }
+
+    //assert(is_infinite_stack == lrg->mask().is_infinite_stack(), "nbrs must not change InfiniteStackedness");
     // Aligned pairs need aligned masks
     assert(!lrg->_is_vector || !lrg->_fat_proj, "sanity");
     if (lrg->num_regs() > 1 && !lrg->_fat_proj) {
@@ -1541,32 +1713,42 @@ uint PhaseChaitin::Select( ) {
     }
 
     // Check if a color is available and if so pick the color
-    OptoReg::Name reg = choose_color( *lrg, chunk );
+    OptoReg::Name reg = choose_color(*lrg);
 
     //---------------
-    // If we fail to color and the AllStack flag is set, trigger
-    // a chunk-rollover event
-    if(!OptoReg::is_valid(OptoReg::add(reg,-chunk)) && is_allstack) {
+    // If we fail to color and the infinite flag is set, we must trigger
+    // a chunk-rollover event and continue searching for a color in the next set
+    // of slots (which are all necessarily stack slots, as registers are only in
+    // the initial chunk)
+    if (!OptoReg::is_valid(reg) && is_infinite_stack) {
       // Bump register mask up to next stack chunk
-      chunk += RegMask::CHUNK_SIZE;
-      lrg->Set_All();
+      bool success = lrg->rollover();
+      if (!success) {
+        // We should never get here in practice. Bail out in product,
+        // assert in debug.
+        assert(false, "the next available stack slots should be within the "
+                      "OptoRegPair range");
+        C->record_method_not_compilable(
+            "chunk-rollover outside of OptoRegPair range");
+        return -1;
+      }
       goto retry_next_chunk;
     }
 
     //---------------
     // Did we get a color?
-    else if( OptoReg::is_valid(reg)) {
+    else if (OptoReg::is_valid(reg)) {
 #ifndef PRODUCT
-      RegMask avail_rm = lrg->mask();
+      ResourceMark rm(C->regmask_arena());
+      RegMask avail_rm(lrg->mask(), C->regmask_arena());
 #endif
 
       // Record selected register
       lrg->set_reg(reg);
 
-      if( reg >= _max_reg )     // Compute max register limit
-        _max_reg = OptoReg::add(reg,1);
-      // Fold reg back into normal space
-      reg = OptoReg::add(reg,-chunk);
+      if (reg >= _max_reg) { // Compute max register limit
+        _max_reg = OptoReg::add(reg, 1);
+      }
 
       // If the live range is not bound, then we actually had some choices
       // to make.  In this case, the mask has more bits in it than the colors
@@ -1579,15 +1761,15 @@ uint PhaseChaitin::Select( ) {
         } else {
           assert(!lrg->_is_vector || n_regs <= RegMask::SlotsPerVecZ, "sanity");
         }
-        lrg->Clear();           // Clear the mask
-        lrg->Insert(reg);       // Set regmask to match selected reg
+        lrg->clear();     // Clear the mask
+        lrg->insert(reg); // Set regmask to match selected reg
         // For vectors and pairs, also insert the low bit of the pair
         // We always choose the high bit, then mask the low bits by register size
         if (lrg->is_scalable() && OptoReg::is_stack(lrg->reg())) { // stack
           n_regs = lrg->scalable_reg_slots();
         }
         for (int i = 1; i < n_regs; i++) {
-          lrg->Insert(OptoReg::add(reg,-i));
+          lrg->insert(OptoReg::add(reg, -i));
         }
         lrg->set_mask_size(n_regs);
       } else {                  // Else fatproj
@@ -1612,7 +1794,7 @@ uint PhaseChaitin::Select( ) {
       assert( lrg->alive(), "" );
       assert( !lrg->_fat_proj || lrg->is_multidef() ||
               lrg->_def->outcnt() > 0, "fat_proj cannot spill");
-      assert( !orig_mask.is_AllStack(), "All Stack does not spill" );
+      assert( !orig_mask.is_infinite_stack(), "infinite stack does not spill" );
 
       // Assign the special spillreg register
       lrg->set_reg(OptoReg::Name(spill_reg++));
@@ -1623,8 +1805,8 @@ uint PhaseChaitin::Select( ) {
         ttyLocker ttyl;
         tty->print("L%d spilling with neighbors: ", lidx);
         s->dump();
-        debug_only(tty->print(" original mask: "));
-        debug_only(orig_mask.dump());
+        DEBUG_ONLY(tty->print(" original mask: "));
+        DEBUG_ONLY(orig_mask.dump());
         dump_lrg(lidx);
       }
 #endif
@@ -1647,7 +1829,7 @@ void PhaseChaitin::fixup_spills() {
   // This function does only cisc spill work.
   if( !UseCISCSpill ) return;
 
-  Compile::TracePhase tp("fixupSpills", &timers[_t_fixupSpills]);
+  Compile::TracePhase tp(_t_fixupSpills);
 
   // Grab the Frame Pointer
   Node *fp = _cfg.get_root_block()->head()->in(1)->in(TypeFunc::FramePtr);
@@ -1695,6 +1877,19 @@ void PhaseChaitin::fixup_spills() {
           if( cisc->oper_input_base() > 1 && mach->oper_input_base() <= 1 ) {
             assert( cisc->oper_input_base() == 2, "Only adding one edge");
             cisc->ins_req(1,src);         // Requires a memory edge
+          } else {
+            // There is no space reserved for a memory edge before the inputs for
+            // instructions which have "stackSlotX" parameter instead of "memory".
+            // For example, "MoveF2I_stack_reg". We always need a memory edge from
+            // src to cisc, else we might schedule cisc before src, loading from a
+            // spill location before storing the spill. On some platforms, we land
+            // in this else case because mach->oper_input_base() > 1, i.e. we have
+            // multiple inputs. In some rare cases there are even multiple memory
+            // operands, before and after spilling.
+            // (e.g. spilling "addFPR24_reg_mem" to "addFPR24_mem_cisc")
+            // In either case, there is no space in the inputs for the memory edge
+            // so we add an additional precedence / memory edge.
+            cisc->add_prec(src);
           }
           block->map_node(cisc, j);          // Insert into basic block
           n->subsume_by(cisc, C); // Correct graph
@@ -1725,29 +1920,39 @@ void PhaseChaitin::fixup_spills() {
 // Helper to stretch above; recursively discover the base Node for a
 // given derived Node.  Easy for AddP-related machine nodes, but needs
 // to be recursive for derived Phis.
-Node *PhaseChaitin::find_base_for_derived( Node **derived_base_map, Node *derived, uint &maxlrg ) {
+Node* PhaseChaitin::find_base_for_derived(Node** derived_base_map, Node* derived, uint& maxlrg) {
   // See if already computed; if so return it
-  if( derived_base_map[derived->_idx] )
+  if (derived_base_map[derived->_idx]) {
     return derived_base_map[derived->_idx];
+  }
+
+#ifdef ASSERT
+  if (derived->is_Mach() && derived->as_Mach()->ideal_Opcode() == Op_VerifyVectorAlignment) {
+    // Bypass the verification node
+    Node* base = find_base_for_derived(derived_base_map, derived->in(1), maxlrg);
+    derived_base_map[derived->_idx] = base;
+    return base;
+  }
+#endif
 
   // See if this happens to be a base.
   // NOTE: we use TypePtr instead of TypeOopPtr because we can have
-  // pointers derived from NULL!  These are always along paths that
+  // pointers derived from null!  These are always along paths that
   // can't happen at run-time but the optimizer cannot deduce it so
   // we have to handle it gracefully.
   assert(!derived->bottom_type()->isa_narrowoop() ||
           derived->bottom_type()->make_ptr()->is_ptr()->_offset == 0, "sanity");
   const TypePtr *tj = derived->bottom_type()->isa_ptr();
   // If its an OOP with a non-zero offset, then it is derived.
-  if( tj == NULL || tj->_offset == 0 ) {
+  if( tj == nullptr || tj->_offset == 0 ) {
     derived_base_map[derived->_idx] = derived;
     return derived;
   }
-  // Derived is NULL+offset?  Base is NULL!
+  // Derived is null+offset?  Base is null!
   if( derived->is_Con() ) {
     Node *base = _matcher.mach_null();
-    assert(base != NULL, "sanity");
-    if (base->in(0) == NULL) {
+    assert(base != nullptr, "sanity");
+    if (base->in(0) == nullptr) {
       // Initialize it once and make it shared:
       // set control to _root and place it into Start block
       // (where top() node is placed).
@@ -1772,7 +1977,7 @@ Node *PhaseChaitin::find_base_for_derived( Node **derived_base_map, Node *derive
     if (_lrg_map.live_range_id(base) == 0) {
       new_lrg(base, maxlrg++);
     }
-    assert(base->in(0) == _cfg.get_root_node() && _cfg.get_block_for_node(base) == _cfg.get_block_for_node(C->top()), "base NULL should be shared");
+    assert(base->in(0) == _cfg.get_root_node() && _cfg.get_block_for_node(base) == _cfg.get_block_for_node(C->top()), "base null should be shared");
     derived_base_map[derived->_idx] = base;
     return base;
   }
@@ -1821,7 +2026,7 @@ Node *PhaseChaitin::find_base_for_derived( Node **derived_base_map, Node *derive
     uint j;
     for( j = 1; j < base->req(); j++ )
       if( phi->in(j) != base->in(j) &&
-          !(phi->in(j)->is_Con() && base->in(j)->is_Con()) ) // allow different NULLs
+          !(phi->in(j)->is_Con() && base->in(j)->is_Con()) ) // allow different nulls
         break;
     if( j == base->req() ) {    // All inputs match?
       base = phi;               // Then use existing 'phi' and drop 'base'
@@ -2138,42 +2343,42 @@ void PhaseChaitin::dump_simplified() const {
   tty->cr();
 }
 
-static char *print_reg(OptoReg::Name reg, const PhaseChaitin* pc, char* buf) {
+static char *print_reg(OptoReg::Name reg, const PhaseChaitin* pc, char* buf, size_t buf_size) {
   if ((int)reg < 0)
-    sprintf(buf, "<OptoReg::%d>", (int)reg);
+    os::snprintf_checked(buf, buf_size, "<OptoReg::%d>", (int)reg);
   else if (OptoReg::is_reg(reg))
     strcpy(buf, Matcher::regName[reg]);
   else
-    sprintf(buf,"%s + #%d",OptoReg::regname(OptoReg::c_frame_pointer),
+    os::snprintf_checked(buf, buf_size, "%s + #%d",OptoReg::regname(OptoReg::c_frame_pointer),
             pc->reg2offset(reg));
   return buf+strlen(buf);
 }
 
 // Dump a register name into a buffer.  Be intelligent if we get called
 // before allocation is complete.
-char *PhaseChaitin::dump_register(const Node* n, char* buf) const {
+char *PhaseChaitin::dump_register(const Node* n, char* buf, size_t buf_size) const {
   if( _node_regs ) {
     // Post allocation, use direct mappings, no LRG info available
-    print_reg( get_reg_first(n), this, buf );
+    print_reg( get_reg_first(n), this, buf, buf_size);
   } else {
     uint lidx = _lrg_map.find_const(n); // Grab LRG number
     if( !_ifg ) {
-      sprintf(buf,"L%d",lidx);  // No register binding yet
+      os::snprintf_checked(buf, buf_size, "L%d",lidx);  // No register binding yet
     } else if( !lidx ) {        // Special, not allocated value
       strcpy(buf,"Special");
     } else {
       if (lrgs(lidx)._is_vector) {
         if (lrgs(lidx).mask().is_bound_set(lrgs(lidx).num_regs()))
-          print_reg( lrgs(lidx).reg(), this, buf ); // a bound machine register
+          print_reg( lrgs(lidx).reg(), this, buf, buf_size); // a bound machine register
         else
-          sprintf(buf,"L%d",lidx); // No register binding yet
+          os::snprintf_checked(buf, buf_size, "L%d",lidx); // No register binding yet
       } else if( (lrgs(lidx).num_regs() == 1)
                  ? lrgs(lidx).mask().is_bound1()
                  : lrgs(lidx).mask().is_bound_pair() ) {
         // Hah!  We have a bound machine register
-        print_reg( lrgs(lidx).reg(), this, buf );
+        print_reg( lrgs(lidx).reg(), this, buf, buf_size);
       } else {
-        sprintf(buf,"L%d",lidx); // No register binding yet
+        os::snprintf_checked(buf, buf_size, "L%d",lidx); // No register binding yet
       }
     }
   }
@@ -2268,7 +2473,7 @@ void PhaseChaitin::dump_frame() const {
         tty->print_cr("saved fp register");
       else if (return_addr == OptoReg::add(reg, 2*VMRegImpl::slots_per_word) &&
                VerifyStackAtCalls)
-        tty->print_cr("0xBADB100D   +VerifyStackAtCalls");
+        tty->print_cr("<Majik cookie>   +VerifyStackAtCalls");
       else
         tty->print_cr("in_preserve");
     } else if ((int)OptoReg::reg2stack(reg) < fixed_slots) {
@@ -2383,7 +2588,7 @@ void PhaseChaitin::verify_base_ptrs(ResourceArea* a) const {
       if (n->is_MachSafePoint()) {
         MachSafePointNode* sfpt = n->as_MachSafePoint();
         JVMState* jvms = sfpt->jvms();
-        if (jvms != NULL) {
+        if (jvms != nullptr) {
           // Now scan for a live derived pointer
           if (jvms->oopoff() < sfpt->req()) {
             // Check each derived/base pair
@@ -2406,12 +2611,12 @@ void PhaseChaitin::verify_base_ptrs(ResourceArea* a) const {
                     worklist.push(check->in(m));
                   }
                 } else if (check->is_Con()) {
-                  if (is_derived) {
-                    // Derived is NULL+offset
-                    assert(!is_derived || check->bottom_type()->is_ptr()->ptr() == TypePtr::Null, "Bad derived pointer");
+                  if (is_derived && check->bottom_type()->is_ptr()->_offset != 0) {
+                    // Derived is null+non-zero offset, base must be null.
+                    assert(check->bottom_type()->is_ptr()->ptr() == TypePtr::Null, "Bad derived pointer");
                   } else {
                     assert(check->bottom_type()->is_ptr()->_offset == 0, "Bad base pointer");
-                    // Base either ConP(NULL) or loadConP
+                    // Base either ConP(nullptr) or loadConP
                     if (check->is_Mach()) {
                       assert(check->as_Mach()->ideal_Opcode() == Op_ConP, "Bad base pointer");
                     } else {
@@ -2428,7 +2633,7 @@ void PhaseChaitin::verify_base_ptrs(ResourceArea* a) const {
 #ifdef _LP64
                       (UseCompressedOops && check->as_Mach()->ideal_Opcode() == Op_CastPP) ||
                       (UseCompressedOops && check->as_Mach()->ideal_Opcode() == Op_DecodeN) ||
-                      (UseCompressedClassPointers && check->as_Mach()->ideal_Opcode() == Op_DecodeNKlass) ||
+                      (check->as_Mach()->ideal_Opcode() == Op_DecodeNKlass) ||
 #endif // _LP64
                       check->as_Mach()->ideal_Opcode() == Op_LoadP ||
                       check->as_Mach()->ideal_Opcode() == Op_LoadKlass))) {
@@ -2456,6 +2661,9 @@ void PhaseChaitin::verify_base_ptrs(ResourceArea* a) const {
 void PhaseChaitin::verify(ResourceArea* a, bool verify_ifg) const {
   if (VerifyRegisterAllocator) {
     _cfg.verify();
+    if (C->failing()) {
+      return;
+    }
     verify_base_ptrs(a);
     if (verify_ifg) {
       _ifg->verify(this);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,7 +33,6 @@ import javax.imageio.plugins.jpeg.JPEGHuffmanTable;
 import java.io.IOException;
 import java.util.List;
 import java.util.ArrayList;
-import java.util.Iterator;
 
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
@@ -91,17 +90,17 @@ class DHTMarkerSegment extends MarkerSegment {
         }
     }
 
+    @Override
     protected Object clone() {
         DHTMarkerSegment newGuy = (DHTMarkerSegment) super.clone();
         newGuy.tables = new ArrayList<>(tables.size());
-        Iterator<Htable> iter = tables.iterator();
-        while (iter.hasNext()) {
-            Htable table = iter.next();
+        for (Htable table : tables) {
             newGuy.tables.add((Htable) table.clone());
         }
         return newGuy;
     }
 
+    @Override
     IIOMetadataNode getNativeNode() {
         IIOMetadataNode node = new IIOMetadataNode("dht");
         for (int i= 0; i<tables.size(); i++) {
@@ -115,14 +114,15 @@ class DHTMarkerSegment extends MarkerSegment {
      * Writes the data for this segment to the stream in
      * valid JPEG format.
      */
+    @Override
     void write(ImageOutputStream ios) throws IOException {
         // We don't write DHT segments; the IJG library does.
     }
 
+    @Override
     void print() {
         printTag("DHT");
-        System.out.println("Num tables: "
-                           + Integer.toString(tables.size()));
+        System.out.println("Num tables: " + tables.size());
         for (int i= 0; i<tables.size(); i++) {
             Htable table = tables.get(i);
             table.print();
@@ -142,7 +142,7 @@ class DHTMarkerSegment extends MarkerSegment {
     /**
      * A Huffman table within a DHT marker segment.
      */
-    class Htable implements Cloneable {
+    static class Htable implements Cloneable {
         int tableClass;  // 0 == DC, 1 == AC
         int tableID; // 0 - 4
         private static final int NUM_LENGTHS = 16;
@@ -205,6 +205,7 @@ class DHTMarkerSegment extends MarkerSegment {
 
         }
 
+        @Override
         protected Object clone() {
             Htable newGuy = null;
             try {
@@ -234,7 +235,7 @@ class DHTMarkerSegment extends MarkerSegment {
             System.out.println("Huffman Table");
             System.out.println("table class: "
                                + ((tableClass == 0) ? "DC":"AC"));
-            System.out.println("table id: " + Integer.toString(tableID));
+            System.out.println("table id: " + tableID);
 
             (new JPEGHuffmanTable(numCodes, values)).toString();
             /*

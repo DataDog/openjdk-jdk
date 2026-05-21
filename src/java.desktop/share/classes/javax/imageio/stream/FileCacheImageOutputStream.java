@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,10 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.file.Files;
+import javax.imageio.stream.FileCacheImageInputStream.StreamDisposerRecord;
 import com.sun.imageio.stream.StreamCloser;
+import sun.java2d.Disposer;
+import sun.java2d.DisposerRecord;
 
 /**
  * An implementation of {@code ImageOutputStream} that writes its
@@ -46,6 +49,9 @@ public class FileCacheImageOutputStream extends ImageOutputStreamImpl {
 
     private RandomAccessFile cache;
 
+    private final Object disposerReferent = new Object();
+
+    private final StreamDisposerRecord disposerRecord;
     // Pos after last (rightmost) byte written
     private long maxStreamPos = 0L;
 
@@ -69,11 +75,11 @@ public class FileCacheImageOutputStream extends ImageOutputStreamImpl {
      * cache file should be created, or {@code null} to use the
      * system directory.
      *
-     * @exception IllegalArgumentException if {@code stream}
+     * @throws IllegalArgumentException if {@code stream}
      * is {@code null}.
-     * @exception IllegalArgumentException if {@code cacheDir} is
+     * @throws IllegalArgumentException if {@code cacheDir} is
      * non-{@code null} but is not a directory.
-     * @exception IOException if a cache file cannot be created.
+     * @throws IOException if a cache file cannot be created.
      */
     public FileCacheImageOutputStream(OutputStream stream, File cacheDir)
         throws IOException {
@@ -91,6 +97,13 @@ public class FileCacheImageOutputStream extends ImageOutputStreamImpl {
                                   .toFile();
         this.cache = new RandomAccessFile(cacheFile, "rw");
 
+        // If this instance becomes unreachable the disposer will clean up resources
+        // used for caching. This can't flush any un-flushed cache.
+        this.disposerRecord = new StreamDisposerRecord(cacheFile, cache);
+        Disposer.addRecord(this.disposerReferent, this.disposerRecord);
+        // If the VM is exiting and this instance is still reachable,
+        // StreamCloser will call close() to flush the cache and clean up resources.
+        // However closing the java.io.OutputStream is the application's responsibility.
         this.closeAction = StreamCloser.createCloseAction(this);
         StreamCloser.addToQueue(closeAction);
     }
@@ -159,9 +172,9 @@ public class FileCacheImageOutputStream extends ImageOutputStreamImpl {
      * performed.  The file length will not be increased until a write
      * is performed.
      *
-     * @exception IndexOutOfBoundsException if {@code pos} is smaller
+     * @throws IndexOutOfBoundsException if {@code pos} is smaller
      * than the flushed position.
-     * @exception IOException if any other I/O error occurs.
+     * @throws IOException if any other I/O error occurs.
      */
     public void seek(long pos) throws IOException {
         checkClosed();
@@ -223,7 +236,7 @@ public class FileCacheImageOutputStream extends ImageOutputStreamImpl {
      * is closed and removed.  The destination {@code OutputStream}
      * is not closed.
      *
-     * @exception IOException if an error occurs.
+     * @throws IOException if an error occurs.
      */
     public void close() throws IOException {
         maxStreamPos = cache.length();
@@ -231,15 +244,19 @@ public class FileCacheImageOutputStream extends ImageOutputStreamImpl {
         seek(maxStreamPos);
         flushBefore(maxStreamPos);
         super.close();
-        cache.close();
+        disposerRecord.dispose();
         cache = null;
-        cacheFile.delete();
         cacheFile = null;
         stream.flush();
         stream = null;
         StreamCloser.removeFromQueue(closeAction);
     }
 
+    /**
+     * {@inheritDoc ImageOutputStream}
+     * @param pos {@inheritDoc ImageOutputStream}
+     * @throws IOException {@inheritDoc ImageOutputStream}
+     */
     public void flushBefore(long pos) throws IOException {
         long oFlushedPos = flushedPos;
         super.flushBefore(pos); // this will call checkClosed() for us

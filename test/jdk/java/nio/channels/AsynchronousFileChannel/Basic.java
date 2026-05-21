@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,23 +22,45 @@
  */
 
 /* @test
- * @bug 4607272 6822643 6830721 6842687
+ * @bug 4607272 5041655 6822643 6830721 6842687
  * @summary Unit test for AsynchronousFileChannel
  * @key randomness
+ * @run main/othervm Basic
  */
 
-import java.nio.file.*;
-import java.nio.channels.*;
-import java.nio.ByteBuffer;
 import java.io.File;
 import java.io.IOException;
-import java.util.*;
-import java.util.concurrent.*;
+import java.lang.foreign.Arena;
+import java.nio.ByteBuffer;
+import java.nio.channels.AsynchronousCloseException;
+import java.nio.channels.AsynchronousFileChannel;
+import java.nio.channels.ClosedChannelException;
+import java.nio.channels.CompletionHandler;
+import java.nio.channels.FileLock;
+import java.nio.channels.NonWritableChannelException;
+import java.nio.channels.OverlappingFileLockException;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import static java.nio.file.StandardOpenOption.*;
 
 public class Basic {
 
+    // Must be indeterministic
     private static final Random rand = new Random();
 
     public static void main(String[] args) throws IOException {
@@ -176,7 +198,12 @@ public class Basic {
             // test 1 - acquire lock and check that tryLock throws
             // OverlappingFileLockException
             try {
-                fl = ch.lock().get();
+                long pos = rand.nextInt(Integer.MAX_VALUE);
+                fl = ch.lock(pos, 0, false).get();
+                long expectedSize = Long.MAX_VALUE - pos;
+                if(fl.size() != expectedSize)
+                    throw new RuntimeException("Lock size " + fl.size() +
+                        " != " + expectedSize + " for position " + pos);
             } catch (ExecutionException x) {
                 throw new RuntimeException(x);
             } catch (InterruptedException x) {
@@ -192,7 +219,12 @@ public class Basic {
             fl.release();
 
             // test 2 - acquire try and check that lock throws OverlappingFileLockException
-            fl = ch.tryLock();
+            long pos = rand.nextInt(Integer.MAX_VALUE);
+            fl = ch.tryLock(pos, 0, false);
+            long expectedSize = Long.MAX_VALUE - pos;
+            if(fl.size() != expectedSize)
+                throw new RuntimeException("Lock size " + fl.size() + " != " +
+                    expectedSize + " for position " + pos);
             if (fl == null)
                 throw new RuntimeException("Unable to acquire lock");
             try {
@@ -534,15 +566,23 @@ public class Basic {
     static ByteBuffer genBuffer() {
         int size = 1024 + rand.nextInt(16000);
         byte[] buf = new byte[size];
-        boolean useDirect = rand.nextBoolean();
-        if (useDirect) {
-            ByteBuffer bb = ByteBuffer.allocateDirect(buf.length);
-            bb.put(buf);
-            bb.flip();
-            return bb;
-        } else {
-            return ByteBuffer.wrap(buf);
-        }
+        rand.nextBytes(buf);
+        return switch (rand.nextInt(5)) {
+            case 0 -> ByteBuffer.allocateDirect(buf.length)
+                    .put(buf)
+                    .flip();
+            case 1 -> ByteBuffer.wrap(buf);
+            case 2 -> Arena.global().allocate(buf.length).asByteBuffer()
+                    .put(buf)
+                    .flip();
+            case 3 -> Arena.ofAuto().allocate(buf.length).asByteBuffer()
+                    .put(buf)
+                    .flip();
+            case 4 -> Arena.ofShared().allocate(buf.length).asByteBuffer()
+                    .put(buf)
+                    .flip();
+            default -> throw new InternalError("Should not reach here");
+        };
     }
 
     // writes all remaining bytes in the buffer to the given channel at the
@@ -574,7 +614,7 @@ public class Basic {
 
     static void readAll(final AsynchronousFileChannel ch,
                         final ByteBuffer dst,
-                       long position)
+                        long position)
     {
         final CountDownLatch latch = new CountDownLatch(1);
 

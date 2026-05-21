@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,55 +23,38 @@
 
 package common;
 
-import static jaxp.library.JAXPTestUtilities.runWithAllPerm;
-
 import javax.xml.parsers.SAXParserFactory;
 import javax.xml.transform.TransformerFactory;
-import javax.xml.transform.TransformerFactoryConfigurationError;
-
 import org.testng.Assert;
-import org.testng.annotations.Listeners;
 import org.testng.annotations.Test;
 
 /*
  * @test
  * @bug 6350682
  * @library /javax/xml/jaxp/libs /javax/xml/jaxp/unittest
- * @run testng/othervm -DrunSecMngr=true common.Bug6350682
  * @run testng/othervm common.Bug6350682
  * @summary Test SAXParserFactory and TransformerFactory can newInstance when setContextClassLoader(null).
  */
-@Listeners({jaxp.library.BasePolicy.class})
 public class Bug6350682 {
 
     @Test
     public void testSAXParserFactory() {
-        try {
-            runWithAllPerm(() -> Thread.currentThread().setContextClassLoader(null));
-            if (Bug6350682.class.getClassLoader() == null)
-                System.out.println("this class loader is NULL");
-            else
-                System.out.println("this class loader is NOT NULL");
-            SAXParserFactory factory = SAXParserFactory.newInstance();
-            Assert.assertTrue(factory != null, "Failed to get an instance of a SAXParserFactory");
-        } catch (Exception e) {
-            e.printStackTrace();
-            Assert.fail("Exception occured: " + e.getMessage());
+        // This test run in othervm so change in environment need not to be recovered at the end of test.
+        Thread.currentThread().setContextClassLoader(null);
+        if (Bug6350682.class.getClassLoader() == null) {
+            System.out.println("this class loader is NULL");
+        } else {
+            System.out.println("this class loader is NOT NULL");
         }
+        SAXParserFactory factory = SAXParserFactory.newInstance();
+        Assert.assertNotNull(factory, "Failed to get an instance of a SAXParserFactory");
     }
 
     @Test
     public void testTransformerFactory() {
-        try {
-            runWithAllPerm(() -> Thread.currentThread().setContextClassLoader(null));
-            TransformerFactory factory = TransformerFactory.newInstance();
-            Assert.assertTrue(factory != null, "Failed to get an instance of a TransformerFactory");
-        } catch (Exception e) {
-            e.printStackTrace();
-            Assert.fail("Exception occured: " + e.getMessage());
-        } catch (TransformerFactoryConfigurationError error) {
-            error.printStackTrace();
-            Assert.fail(error.toString());
-        }
+        // This test run in othervm so change in environment need not to be recovered at the end of test.
+        Thread.currentThread().setContextClassLoader(null);
+        TransformerFactory factory = TransformerFactory.newInstance();
+        Assert.assertNotNull(factory, "Failed to get an instance of a TransformerFactory");
     }
 }

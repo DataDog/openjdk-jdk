@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,12 +30,10 @@ import java.rmi.Remote;
 import java.rmi.dgc.VMID;
 import java.rmi.server.ExportException;
 import java.rmi.server.ObjID;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.HashMap;
 import java.util.Map;
 import sun.rmi.runtime.Log;
-import sun.rmi.runtime.NewThreadAction;
+import sun.rmi.runtime.RuntimeUtil;
 
 /**
  * Object table shared by all implementors of the Transport interface.
@@ -48,9 +46,8 @@ import sun.rmi.runtime.NewThreadAction;
 public final class ObjectTable {
 
     /** maximum interval between complete garbage collections of local heap */
-    private final static long gcInterval =              // default 1 hour
-        AccessController.doPrivileged((PrivilegedAction<Long>) () ->
-            Long.getLong("sun.rmi.dgc.server.gcInterval", 3600000));
+    private static final long gcInterval =              // default 1 hour
+        Long.getLong("sun.rmi.dgc.server.gcInterval", 3600000);
 
     /**
      * lock guarding objTable and implTable.
@@ -274,8 +271,7 @@ public final class ObjectTable {
             keepAliveCount++;
 
             if (reaper == null) {
-                reaper = AccessController.doPrivileged(
-                    new NewThreadAction(new Reaper(), "Reaper", false));
+                reaper = RuntimeUtil.newSystemThread(new Reaper(), "Reaper", false);
                 reaper.start();
             }
 
@@ -311,12 +307,7 @@ public final class ObjectTable {
 
             if (keepAliveCount == 0) {
                 if (!(reaper != null)) { throw new AssertionError(); }
-                AccessController.doPrivileged(new PrivilegedAction<Void>() {
-                    public Void run() {
-                        reaper.interrupt();
-                        return null;
-                    }
-                });
+                reaper.interrupt();
                 reaper = null;
 
                 /*

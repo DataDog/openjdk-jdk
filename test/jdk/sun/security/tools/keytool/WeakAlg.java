@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
 
 /*
  * @test
- * @bug 8171319 8177569 8182879 8172404
+ * @bug 8171319 8177569 8182879 8172404 8353749
  * @summary keytool should print out warnings when reading or generating
   *         cert/cert req using weak algorithms
  * @library /test/lib
@@ -156,15 +156,15 @@ public class WeakAlg {
         // (w/ different formats)
         checkWeakGenKeyPair("x", "-keyalg RSA -sigalg SHA1withRSA", "SHA1withRSA");
         checkWeakGenKeyPair("y", "-keyalg RSA -keysize 1024", "1024-bit RSA key");
-        checkWeakGenKeyPair("z", "-keyalg RSA", null);
+        checkWeakGenKeyPair("z", "-keyalg RSA", "nowarn");
 
         kt("-list")
                 .shouldContain("Warning:")
-                .shouldMatch("<x>.*SHA1withRSA.*will be disabled")
+                .shouldMatch("<x>.*SHA1withRSA.*considered a security risk")
                 .shouldMatch("<y>.*1024-bit RSA key.*will be disabled");
         kt("-list -v")
                 .shouldContain("Warning:")
-                .shouldMatch("<x>.*SHA1withRSA.*will be disabled")
+                .shouldMatch("<x>.*SHA1withRSA.*considered a security risk")
                 .shouldContain("SHA1withRSA (weak)")
                 .shouldMatch("<y>.*1024-bit RSA key.*will be disabled")
                 .shouldContain("1024-bit RSA key (weak)");
@@ -173,21 +173,21 @@ public class WeakAlg {
         // or -list or -exportcert
 
         // -certreq, -printcertreq, -gencert
-        checkWeakCertReq("x", "", null);
+        checkWeakCertReq("x", "", "nowarn");
         gencert("z-x", "")
                 .shouldNotContain("Warning"); // new sigalg is not weak
         gencert("z-x", "-sigalg SHA1withRSA")
                 .shouldContain("Warning:")
-                .shouldMatch("The generated certificate.*SHA1withRSA.*will be disabled");
+                .shouldMatch("The generated certificate.*SHA1withRSA.*considered a security risk");
 
         checkWeakCertReq("x", "-sigalg SHA1withRSA", "SHA1withRSA");
         gencert("z-x", "")
                 .shouldContain("Warning:")
-                .shouldMatch("The certificate request.*SHA1withRSA.*will be disabled");
+                .shouldMatch("The certificate request.*SHA1withRSA.*considered a security risk");
         gencert("z-x", "-sigalg SHA1withRSA")
                 .shouldContain("Warning:")
-                .shouldMatch("The certificate request.*SHA1withRSA.*will be disabled")
-                .shouldMatch("The generated certificate.*SHA1withRSA.*will be disabled");
+                .shouldMatch("The certificate request.*SHA1withRSA.*considered a security risk")
+                .shouldMatch("The generated certificate.*SHA1withRSA.*considered a security risk");
 
         checkWeakCertReq("y", "", "1024-bit RSA key");
         gencert("z-y", "")
@@ -195,10 +195,10 @@ public class WeakAlg {
                 .shouldMatch("The certificate request.*1024-bit RSA key.*will be disabled")
                 .shouldMatch("The generated certificate.*1024-bit RSA key.*will be disabled");
 
-        checkWeakCertReq("z", "", null);
+        checkWeakCertReq("z", "", "nowarn");
         gencert("x-z", "")
                 .shouldContain("Warning:")
-                .shouldMatch("The issuer.*SHA1withRSA.*will be disabled");
+                .shouldMatch("The issuer.*SHA1withRSA.*considered a security risk");
 
         // but the new cert is not weak
         kt("-printcert -file x-z.cert")
@@ -210,10 +210,10 @@ public class WeakAlg {
                 .shouldMatch("The issuer.*1024-bit RSA key.*will be disabled");
 
         // -gencrl, -printcrl
-        checkWeakGenCRL("x", "", null);
+        checkWeakGenCRL("x", "", "nowarn");
         checkWeakGenCRL("x", "-sigalg SHA1withRSA", "SHA1withRSA");
         checkWeakGenCRL("y", "", "1024-bit RSA key");
-        checkWeakGenCRL("z", "", null);
+        checkWeakGenCRL("z", "", "nowarn");
 
         kt("-delete -alias y");
         kt("-printcrl -file y.crl")
@@ -226,7 +226,8 @@ public class WeakAlg {
 
         // No warning for cacerts, all certs
         kt0("-cacerts -list -storepass changeit")
-                .shouldNotContain("proprietary format");
+                .shouldNotContain("outdated cryptographic algorithms")
+                .shouldNotContain("keytool -importkeystore -srckeystore");
 
         rm("ks");
         rm("ks2");
@@ -242,7 +243,10 @@ public class WeakAlg {
 
         // warn if migrating to JKS
         importkeystore("ks", "ks2", "-deststoretype jks")
-                .shouldContain("JKS keystore uses a proprietary format");
+                .shouldContain("JKS uses outdated cryptographic algorithms" +
+                        " and will be removed")
+                .shouldMatch("keytool -importkeystore -srckeystore." +
+                        "*-destkeystore.*-deststoretype pkcs12");
 
         rm("ks");
         rm("ks2");
@@ -252,17 +256,35 @@ public class WeakAlg {
         kt("-importcert -alias b -file a.crt -storetype jks -noprompt")
                 .shouldNotContain("Warning:");
         kt("-genkeypair -keyalg DSA -alias a -dname CN=A")
-                .shouldContain("JKS keystore uses a proprietary format");
+                .shouldContain("JKS uses outdated cryptographic algorithms" +
+                        " and will be removed")
+                .shouldMatch("keytool -importkeystore -srckeystore." +
+                        "*-destkeystore.*-deststoretype pkcs12");
         kt("-list")
-                .shouldContain("JKS keystore uses a proprietary format");
+                .shouldContain("JKS uses outdated cryptographic algorithms" +
+                        " and will be removed")
+                .shouldMatch("keytool -importkeystore -srckeystore." +
+                        "*-destkeystore.*-deststoretype pkcs12");
         kt("-list -storetype pkcs12") // warn if JKS used as PKCS12
-                .shouldContain("JKS keystore uses a proprietary format");
+                .shouldContain("JKS uses outdated cryptographic algorithms" +
+                        " and will be removed")
+                .shouldMatch("keytool -importkeystore -srckeystore." +
+                        "*-destkeystore.*-deststoretype pkcs12");
         kt("-exportcert -alias a -file a.crt")
-                .shouldContain("JKS keystore uses a proprietary format");
+                .shouldContain("JKS uses outdated cryptographic algorithms" +
+                        " and will be removed")
+                .shouldMatch("keytool -importkeystore -srckeystore." +
+                        "*-destkeystore.*-deststoretype pkcs12");
         kt("-printcert -file a.crt") // warning since -keystore option is supported
-                .shouldContain("JKS keystore uses a proprietary format");
+                .shouldContain("JKS uses outdated cryptographic algorithms" +
+                        " and will be removed")
+                .shouldMatch("keytool -importkeystore -srckeystore." +
+                        "*-destkeystore.*-deststoretype pkcs12");
         kt("-certreq -alias a -file a.req")
-                .shouldContain("JKS keystore uses a proprietary format");
+                .shouldContain("JKS uses outdated cryptographic algorithms" +
+                        " and will be removed")
+                .shouldMatch("keytool -importkeystore -srckeystore." +
+                        "*-destkeystore.*-deststoretype pkcs12");
         kt("-printcertreq -file a.req") // no warning if keystore not touched
                 .shouldNotContain("Warning:");
 
@@ -276,21 +298,42 @@ public class WeakAlg {
         rm("ks");
 
         kt("-genkeypair -keyalg DSA -alias a -dname CN=A -storetype jceks")
-                .shouldContain("JCEKS keystore uses a proprietary format");
+                .shouldContain("JCEKS uses outdated cryptographic algorithms" +
+                        " and will be removed")
+                .shouldMatch("keytool -importkeystore -srckeystore." +
+                        "*-destkeystore.*-deststoretype pkcs12");
         kt("-list")
-                .shouldContain("JCEKS keystore uses a proprietary format");
+                .shouldContain("JCEKS uses outdated cryptographic algorithms" +
+                        " and will be removed")
+                .shouldMatch("keytool -importkeystore -srckeystore." +
+                        "*-destkeystore.*-deststoretype pkcs12");
         kt("-importcert -alias b -file a.crt -noprompt")
-                .shouldContain("JCEKS keystore uses a proprietary format");
+                .shouldContain("JCEKS uses outdated cryptographic algorithms" +
+                        " and will be removed")
+                .shouldMatch("keytool -importkeystore -srckeystore." +
+                        "*-destkeystore.*-deststoretype pkcs12");
         kt("-exportcert -alias a -file a.crt")
-                .shouldContain("JCEKS keystore uses a proprietary format");
+                .shouldContain("JCEKS uses outdated cryptographic algorithms" +
+                        " and will be removed")
+                .shouldMatch("keytool -importkeystore -srckeystore." +
+                        "*-destkeystore.*-deststoretype pkcs12");
         kt("-printcert -file a.crt") // warning since -keystore option is supported
-                .shouldContain("JCEKS keystore uses a proprietary format");
+                .shouldContain("JCEKS uses outdated cryptographic algorithms" +
+                        " and will be removed")
+                .shouldMatch("keytool -importkeystore -srckeystore." +
+                        "*-destkeystore.*-deststoretype pkcs12");
         kt("-certreq -alias a -file a.req")
-                .shouldContain("JCEKS keystore uses a proprietary format");
+                .shouldContain("JCEKS uses outdated cryptographic algorithms" +
+                        " and will be removed")
+                .shouldMatch("keytool -importkeystore -srckeystore." +
+                        "*-destkeystore.*-deststoretype pkcs12");
         kt("-printcertreq -file a.req")
                 .shouldNotContain("Warning:");
         kt("-genseckey -alias c -keyalg AES -keysize 128")
-                .shouldContain("JCEKS keystore uses a proprietary format");
+                .shouldContain("JCEKS uses outdated cryptographic algorithms" +
+                        " and will be removed")
+                .shouldMatch("keytool -importkeystore -srckeystore." +
+                        "*-destkeystore.*-deststoretype pkcs12");
     }
 
     static void checkImportKeyStore() throws Exception {
@@ -336,7 +379,10 @@ public class WeakAlg {
         // Migration
         importkeystore("ks", "ks", "-deststoretype jks")
                 .shouldContain("Warning:")
-                .shouldContain("JKS keystore uses a proprietary format")
+                .shouldContain("JKS uses outdated cryptographic algorithms" +
+                        " and will be removed")
+                .shouldMatch("keytool -importkeystore -srckeystore." +
+                        "*-destkeystore.*-deststoretype pkcs12")
                 .shouldMatch("Migrated.*JKS.*PKCS12.*ks.old5");
 
         Asserts.assertEQ(
@@ -346,7 +392,9 @@ public class WeakAlg {
 
         importkeystore("ks", "ks", "-srcstoretype PKCS12")
                 .shouldContain("Warning:")
-                .shouldNotContain("proprietary format")
+                .shouldNotContain("outdated cryptographic algorithms")
+                .shouldNotMatch("keytool -importkeystore -srckeystore." +
+                        "*-destkeystore.*-deststoretype pkcs12")
                 .shouldMatch("Migrated.*PKCS12.*JKS.*ks.old6");
 
         Asserts.assertEQ(
@@ -702,7 +750,7 @@ public class WeakAlg {
             oa.shouldNotContain("Warning");
         } else {
             oa.shouldContain("Warning")
-                    .shouldMatch("The certificate.*" + bad + ".*is disabled");
+                    .shouldMatch("uses.*" + bad + ".*is disabled");
         }
 
         // With cert content
@@ -722,7 +770,7 @@ public class WeakAlg {
         } else {
             oa.shouldContain("Warning")
                     .shouldContain(bad + " (disabled)")
-                    .shouldMatch("The certificate.*" + bad + ".*is disabled");
+                    .shouldMatch("uses.*" + bad + ".*is disabled");
         }
     }
 
@@ -730,63 +778,114 @@ public class WeakAlg {
             String alias, String options, String bad) {
 
         OutputAnalyzer oa = genkeypair(alias, options);
-        if (bad == null) {
-            oa.shouldNotContain("Warning");
-        } else {
-            oa.shouldContain("Warning")
-                    .shouldMatch("The generated certificate.*" + bad + ".*will be disabled");
+        switch (bad) {
+            case "nowarn":
+                oa.shouldNotContain("Warning");
+                break;
+            case "SHA1withRSA":
+                oa.shouldContain("Warning")
+                        .shouldMatch("The generated certificate.*" + bad + ".*considered a security risk");
+                break;
+            case "1024-bit RSA key":
+                oa.shouldContain("Warning")
+                        .shouldMatch("The generated certificate.*" + bad + ".*will be disabled");
+                break;
         }
 
         oa = kt("-exportcert -alias " + alias + " -file " + alias + ".cert");
-        if (bad == null) {
-            oa.shouldNotContain("Warning");
-        } else {
-            oa.shouldContain("Warning")
-                    .shouldMatch("The certificate.*" + bad + ".*will be disabled");
+        switch (bad) {
+            case "nowarn":
+                oa.shouldNotContain("Warning");
+                break;
+            case "SHA1withRSA":
+                oa.shouldContain("Warning")
+                        .shouldMatch("The certificate.*" + bad + ".*considered a security risk");
+                break;
+            case "1024-bit RSA key":
+                oa.shouldContain("Warning")
+                        .shouldMatch("The certificate.*" + bad + ".*will be disabled");
+                break;
         }
 
         oa = kt("-exportcert -rfc -alias " + alias + " -file " + alias + ".cert");
-        if (bad == null) {
-            oa.shouldNotContain("Warning");
-        } else {
-            oa.shouldContain("Warning")
-                    .shouldMatch("The certificate.*" + bad + ".*will be disabled");
+        switch (bad) {
+            case "nowarn":
+                oa.shouldNotContain("Warning");
+                break;
+            case "SHA1withRSA":
+                oa.shouldContain("Warning")
+                        .shouldMatch("The certificate.*" + bad + ".*considered a security risk");
+                break;
+            case "1024-bit RSA key":
+                oa.shouldContain("Warning")
+                        .shouldMatch("The certificate.*" + bad + ".*will be disabled");
+                break;
         }
 
         oa = kt("-printcert -rfc -file " + alias + ".cert");
-        if (bad == null) {
-            oa.shouldNotContain("Warning");
-        } else {
-            oa.shouldContain("Warning")
-                    .shouldMatch("The certificate.*" + bad + ".*will be disabled");
+        switch (bad) {
+            case "nowarn":
+                oa.shouldNotContain("Warning");
+                break;
+            case "SHA1withRSA":
+                oa.shouldContain("Warning")
+                        .shouldMatch("The certificate.*" + bad + ".*considered a security risk");
+                break;
+            case "1024-bit RSA key":
+                oa.shouldContain("Warning")
+                        .shouldMatch("The certificate.*" + bad + ".*will be disabled");
+                break;
         }
 
         oa = kt("-list -alias " + alias);
-        if (bad == null) {
-            oa.shouldNotContain("Warning");
-        } else {
-            oa.shouldContain("Warning")
-                    .shouldMatch("The certificate.*" + bad + ".*will be disabled");
+        switch (bad) {
+            case "nowarn":
+                oa.shouldNotContain("Warning");
+                break;
+            case "SHA1withRSA":
+                oa.shouldContain("Warning")
+                        .shouldMatch("uses.*" + bad + ".*considered a security risk");
+                break;
+            case "1024-bit RSA key":
+                oa.shouldContain("Warning")
+                        .shouldMatch("uses.*" + bad + ".*will be disabled");
+                break;
         }
 
         // With cert content
 
         oa = kt("-printcert -file " + alias + ".cert");
-        if (bad == null) {
-            oa.shouldNotContain("Warning");
-        } else {
-            oa.shouldContain("Warning")
-                    .shouldContain(bad + " (weak)")
-                    .shouldMatch("The certificate.*" + bad + ".*will be disabled");
+        switch (bad) {
+            case "nowarn":
+                oa.shouldNotContain("Warning");
+                break;
+            case "SHA1withRSA":
+                oa.shouldContain("Warning")
+                        .shouldContain(bad + " (weak)")
+                        .shouldMatch("The certificate.*" + bad + ".*considered a security risk");
+                break;
+            case "1024-bit RSA key":
+                oa.shouldContain("Warning")
+                        .shouldContain(bad + " (weak)")
+                        .shouldMatch("The certificate.*" + bad + ".*will be disabled");
+                break;
         }
 
         oa = kt("-list -v -alias " + alias);
-        if (bad == null) {
-            oa.shouldNotContain("Warning");
-        } else {
-            oa.shouldContain("Warning")
-                    .shouldContain(bad + " (weak)")
-                    .shouldMatch("The certificate.*" + bad + ".*will be disabled");
+        switch (bad) {
+            case "nowarn":
+                oa.shouldNotContain("Warning");
+                break;
+            case "SHA1withRSA":
+                oa.shouldContain("Warning")
+                        .shouldContain(bad + " (weak)")
+                        .shouldMatch("uses.*" + bad + ".*considered a security risk");
+                break;
+            case "1024-bit RSA key":
+                oa.shouldContain("Warning")
+                        .shouldContain(bad + " (weak)")
+                        .shouldMatch("uses.*" + bad + ".*will be disabled");
+                break;
         }
     }
 
@@ -795,23 +894,39 @@ public class WeakAlg {
 
         OutputAnalyzer oa = kt("-gencrl -alias " + alias
                 + " -id 1 -file " + alias + ".crl " + options);
-        if (bad == null) {
-            oa.shouldNotContain("Warning");
-        } else {
-            oa.shouldContain("Warning")
-                    .shouldMatch("The generated CRL.*" + bad + ".*will be disabled");
+        switch (bad) {
+            case "nowarn":
+                oa.shouldNotContain("Warning");
+                break;
+            case "SHA1withRSA":
+                oa.shouldContain("Warning")
+                        .shouldMatch("The generated CRL.*" + bad + ".*considered a security risk");
+                break;
+            case "1024-bit RSA key":
+                oa.shouldContain("Warning")
+                        .shouldMatch("The generated CRL.*" + bad + ".*will be disabled");
+                break;
         }
 
         oa = kt("-printcrl -file " + alias + ".crl");
-        if (bad == null) {
-            oa.shouldNotContain("Warning")
-                    .shouldContain("Verified by " + alias + " in keystore")
-                    .shouldNotContain("(weak");
-        } else {
-            oa.shouldContain("Warning:")
-                    .shouldMatch("The CRL.*" + bad + ".*will be disabled")
-                    .shouldContain("Verified by " + alias + " in keystore")
-                    .shouldContain(bad + " (weak)");
+        switch (bad) {
+            case "nowarn":
+                oa.shouldNotContain("Warning")
+                        .shouldContain("Verified by " + alias + " in keystore")
+                        .shouldNotContain("(weak");
+                break;
+            case "SHA1withRSA":
+                oa.shouldContain("Warning")
+                        .shouldMatch("The CRL.*" + bad + ".*considered a security risk")
+                        .shouldContain("Verified by " + alias + " in keystore")
+                        .shouldContain(bad + " (weak)");
+                break;
+            case "1024-bit RSA key":
+                oa.shouldContain("Warning")
+                        .shouldMatch("The CRL.*" + bad + ".*will be disabled")
+                        .shouldContain("Verified by " + alias + " in keystore")
+                        .shouldContain(bad + " (weak)");
+                break;
         }
     }
 
@@ -819,21 +934,36 @@ public class WeakAlg {
             String alias, String options, String bad) {
 
         OutputAnalyzer oa = certreq(alias, options);
-        if (bad == null) {
-            oa.shouldNotContain("Warning");
-        } else {
-            oa.shouldContain("Warning")
-                    .shouldMatch("The generated certificate request.*" + bad + ".*will be disabled");
+        switch (bad) {
+            case "nowarn":
+                oa.shouldNotContain("Warning");
+                break;
+            case "SHA1withRSA":
+                oa.shouldContain("Warning")
+                        .shouldMatch("The generated certificate request.*" + bad + ".*considered a security risk");
+                break;
+            case "1024-bit RSA key":
+                oa.shouldContain("Warning")
+                        .shouldMatch("The generated certificate request.*" + bad + ".*will be disabled");
+                break;
         }
 
         oa = kt("-printcertreq -file " + alias + ".req");
-        if (bad == null) {
-            oa.shouldNotContain("Warning")
-                    .shouldNotContain("(weak)");
-        } else {
-            oa.shouldContain("Warning")
-                    .shouldMatch("The certificate request.*" + bad + ".*will be disabled")
-                    .shouldContain(bad + " (weak)");
+        switch (bad) {
+            case "nowarn":
+                oa.shouldNotContain("Warning")
+                        .shouldNotContain("(weak)");
+                break;
+            case "SHA1withRSA":
+                oa.shouldContain("Warning")
+                        .shouldMatch("The certificate request.*" + bad + ".*considered a security risk")
+                        .shouldContain(bad + " (weak)");
+                break;
+            case "1024-bit RSA key":
+                oa.shouldContain("Warning")
+                        .shouldMatch("The certificate request.*" + bad + ".*will be disabled")
+                        .shouldContain(bad + " (weak)");
+                break;
         }
     }
 

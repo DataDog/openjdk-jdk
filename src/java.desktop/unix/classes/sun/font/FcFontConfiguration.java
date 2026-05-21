@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,24 +32,25 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Properties;
 import java.util.Scanner;
+
 import sun.awt.FcFontManager;
 import sun.awt.FontConfiguration;
 import sun.awt.FontDescriptor;
 import sun.awt.SunToolkit;
-import sun.font.CompositeFontDescriptor;
-import sun.font.FontConfigManager.FontConfigInfo;
 import sun.font.FontConfigManager.FcCompFont;
 import sun.font.FontConfigManager.FontConfigFont;
+import sun.font.FontConfigManager.FontConfigInfo;
 import sun.util.logging.PlatformLogger;
 
-public class FcFontConfiguration extends FontConfiguration {
+import static java.nio.charset.StandardCharsets.ISO_8859_1;
+
+public final class FcFontConfiguration extends FontConfiguration {
 
     /** Version of the cache file format understood by this code.
      * Its part of the file name so that we can rev this at
@@ -157,7 +158,7 @@ public class FcFontConfiguration extends FontConfiguration {
 
     @Override
     protected Charset getDefaultFontCharset(String fontName) {
-        return Charset.forName("ISO8859_1");
+        return ISO_8859_1;
     }
 
     @Override
@@ -178,7 +179,7 @@ public class FcFontConfiguration extends FontConfiguration {
         String[] componentFaceNames = cfi[idx].getComponentFaceNames();
         FontDescriptor[] ret = new FontDescriptor[componentFaceNames.length];
         for (int i = 0; i < componentFaceNames.length; i++) {
-            ret[i] = new FontDescriptor(componentFaceNames[i], StandardCharsets.ISO_8859_1.newEncoder(), new int[0]);
+            ret[i] = new FontDescriptor(componentFaceNames[i], ISO_8859_1.newEncoder(), new int[0]);
         }
 
         return ret;
@@ -294,6 +295,16 @@ public class FcFontConfiguration extends FontConfiguration {
         return null;
     }
 
+    private String extractInfo(String s) {
+        if (s == null) {
+            return null;
+        }
+        if (s.startsWith("\"")) s = s.substring(1);
+        if (s.endsWith("\"")) s = s.substring(0, s.length()-1);
+        s = s.replace(' ', '_');
+        return s;
+    }
+
     /**
      * Sets the OS name and version from environment information.
      */
@@ -306,28 +317,14 @@ public class FcFontConfiguration extends FontConfiguration {
             return;
         }
         try {
-            File f;
-            if ((f = new File("/etc/lsb-release")).canRead()) {
-                    /* Ubuntu and (perhaps others) use only lsb-release.
-                     * Syntax and encoding is compatible with java properties.
-                     * For Ubuntu the ID is "Ubuntu".
-                     */
-                    Properties props = new Properties();
-                    props.load(new FileInputStream(f));
-                    osName = props.getProperty("DISTRIB_ID");
-                    osVersion =  props.getProperty("DISTRIB_RELEASE");
-            } else if ((f = new File("/etc/redhat-release")).canRead()) {
-                osName = "RedHat";
-                osVersion = getVersionString(f);
-            } else if ((f = new File("/etc/SuSE-release")).canRead()) {
-                osName = "SuSE";
-                osVersion = getVersionString(f);
-            } else if ((f = new File("/etc/turbolinux-release")).canRead()) {
-                osName = "Turbo";
-                osVersion = getVersionString(f);
-            } else if ((f = new File("/etc/fedora-release")).canRead()) {
-                osName = "Fedora";
-                osVersion = getVersionString(f);
+            File f = new File("/etc/os-release");
+            if (f.canRead()) {
+                Properties props = new Properties();
+                try (FileInputStream fis = new FileInputStream(f)) {
+                    props.load(fis);
+                }
+                osName = extractInfo(props.getProperty("ID"));
+                osVersion = extractInfo(props.getProperty("VERSION_ID"));
             }
         } catch (Exception e) {
             if (FontUtilities.debugFonts()) {
@@ -338,11 +335,6 @@ public class FcFontConfiguration extends FontConfiguration {
 
     private File getFcInfoFile() {
         if (fcInfoFileName == null) {
-            // NB need security permissions to get true IP address, and
-            // we should have those as the whole initialisation is in a
-            // doPrivileged block. But in this case no exception is thrown,
-            // and it returns the loop back address, and so we end up with
-            // "localhost"
             String hostname;
             try {
                 hostname = InetAddress.getLocalHost().getHostName();
@@ -400,10 +392,9 @@ public class FcFontConfiguration extends FontConfiguration {
             File dir = fcInfoFile.getParentFile();
             dir.mkdirs();
             File tempFile = Files.createTempFile(dir.toPath(), "fcinfo", null).toFile();
-            FileOutputStream fos = new FileOutputStream(tempFile);
-            props.store(fos,
-                      "JDK Font Configuration Generated File: *Do Not Edit*");
-            fos.close();
+            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+                props.store(fos, "JDK Font Configuration Generated File: *Do Not Edit*");
+            }
             boolean renamed = tempFile.renameTo(fcInfoFile);
             if (!renamed && FontUtilities.debugFonts()) {
                 System.out.println("rename failed");

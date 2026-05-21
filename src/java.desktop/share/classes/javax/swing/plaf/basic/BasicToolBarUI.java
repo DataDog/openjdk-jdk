@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -548,16 +548,17 @@ public class BasicToolBarUI extends ToolBarUI implements SwingConstants
      * @param toolbar an instance of {@code JToolBar}
      * @return an instance of {@code JFrame}
      * @see #createFloatingWindow
+     * @deprecated It is recommended that {@link BasicToolBarUI#createFloatingWindow(JToolBar)}
+     *             be used instead
      */
+    @Deprecated(since = "17", forRemoval = true)
     protected JFrame createFloatingFrame(JToolBar toolbar) {
         Window window = SwingUtilities.getWindowAncestor(toolbar);
-        @SuppressWarnings("serial") // anonymous class
         JFrame frame = new JFrame(toolbar.getName(),
                                   (window != null) ? window.getGraphicsConfiguration() : null) {
             // Override createRootPane() to automatically resize
             // the frame when contents change
             protected JRootPane createRootPane() {
-                @SuppressWarnings("serial") // anonymous class
                 JRootPane rootPane = new JRootPane() {
                     private boolean packing = false;
 
@@ -603,7 +604,6 @@ public class BasicToolBarUI extends ToolBarUI implements SwingConstants
             // Override createRootPane() to automatically resize
             // the frame when contents change
             protected JRootPane createRootPane() {
-                @SuppressWarnings("serial") // anonymous class
                 JRootPane rootPane = new JRootPane() {
                     private boolean packing = false;
 
@@ -651,8 +651,8 @@ public class BasicToolBarUI extends ToolBarUI implements SwingConstants
             Container p;
             for(p = toolBar.getParent() ; p != null && !(p instanceof Window) ;
                 p = p.getParent());
-            if(p != null && p instanceof Window)
-                frame = (Window) p;
+            if (p instanceof Window window)
+                frame = window;
         }
         if(floatingToolBar == null) {
             floatingToolBar = createFloatingWindow(toolBar);
@@ -980,7 +980,7 @@ public class BasicToolBarUI extends ToolBarUI implements SwingConstants
     {
         toolBar.setOrientation( orientation );
 
-        if (dragWindow !=null)
+        if (dragWindow != null)
             dragWindow.setOrientation(orientation);
     }
 
@@ -1428,15 +1428,6 @@ public class BasicToolBarUI extends ToolBarUI implements SwingConstants
                 if (floatingToolBar instanceof Window) ((Window)floatingToolBar).setVisible(false);
                 floatingToolBar.getContentPane().remove(toolBar);
                 String constraint = constraintBeforeFloating;
-                if (toolBar.getOrientation() == JToolBar.HORIZONTAL) {
-                    if (constraint == "West" || constraint == "East") {
-                        constraint = "North";
-                    }
-                } else {
-                    if (constraint == "North" || constraint == "South") {
-                        constraint = "West";
-                    }
-                }
                 if (dockingSource == null)
                     dockingSource = toolBar.getParent();
                 if (propertyListener != null)
@@ -1625,7 +1616,7 @@ public class BasicToolBarUI extends ToolBarUI implements SwingConstants
                 this.orientation = o;
                 Dimension size = getSize();
                 setSize(new Dimension(size.height, size.width));
-                if (offset!=null) {
+                if (offset != null) {
                     if( BasicGraphicsUtils.isLeftToRight(toolBar) ) {
                         setOffset(new Point(offset.y, offset.x));
                     } else if( o == JToolBar.HORIZONTAL ) {

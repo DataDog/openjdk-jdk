@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,11 +21,11 @@
  * questions.
  */
 
+
 /*
  * @test
  * @bug 6376083 6376084 6458819 7025784 7025786 7025789
  * @summary Test that warnings about source versions are output as expected.
- * @author  Joseph D. Darcy
  * @modules java.compiler
  *          jdk.compiler
  * @compile TestSourceVersionWarnings.java
@@ -45,7 +45,7 @@ import javax.lang.model.SourceVersion;
 import static javax.lang.model.SourceVersion.*;
 import javax.lang.model.element.*;
 import javax.lang.model.util.*;
-import static javax.tools.Diagnostic.Kind.*;
+
 
 /**
  * This processor returns the supported source level as indicated by
@@ -61,8 +61,7 @@ public class TestSourceVersionWarnings extends AbstractProcessor {
     public SourceVersion getSupportedSourceVersion() {
         String sourceVersion = processingEnv.getOptions().get("SourceVersion");
         if (sourceVersion == null) {
-            processingEnv.getMessager().printMessage(WARNING,
-                                                     "No SourceVersion option given");
+            processingEnv.getMessager().printWarning("No SourceVersion option given");
             return SourceVersion.RELEASE_8;
         } else {
             return SourceVersion.valueOf(sourceVersion);

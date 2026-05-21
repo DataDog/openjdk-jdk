@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2013, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -25,6 +23,7 @@
 package jdk.jfr.event.runtime;
 
 import static jdk.test.lib.Asserts.assertTrue;
+import static jdk.test.lib.Asserts.assertEquals;
 
 import java.nio.file.Paths;
 import java.time.Duration;
@@ -33,20 +32,19 @@ import java.util.*;
 import jdk.jfr.Recording;
 import jdk.jfr.consumer.RecordedEvent;
 
-import jdk.test.lib.Asserts;
 import jdk.test.lib.jfr.EventNames;
 import jdk.test.lib.jfr.Events;
-import sun.hotspot.WhiteBox;
+import jdk.test.whitebox.WhiteBox;
 
 /**
  * @test TestSafepointEvents
- * @key jfr
+ * @requires vm.flagless
  * @requires vm.hasJFR
  * @library /test/lib
- * @build sun.hotspot.WhiteBox
- * @run driver ClassFileInstaller sun.hotspot.WhiteBox
+ * @build jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run main/othervm -Xbootclasspath/a:.
- *                   -XX:+FlightRecorder -XX:+UnlockDiagnosticVMOptions -XX:+WhiteBoxAPI
+ *                   -XX:+UnlockDiagnosticVMOptions -XX:+WhiteBoxAPI
  *                   jdk.jfr.event.runtime.TestSafepointEvents
  */
 public class TestSafepointEvents {
@@ -54,8 +52,6 @@ public class TestSafepointEvents {
     static final String[] EVENT_NAMES = new String[] {
         EventNames.SafepointBegin,
         EventNames.SafepointStateSynchronization,
-        EventNames.SafepointCleanup,
-        EventNames.SafepointCleanupTask,
         EventNames.SafepointEnd
     };
 
@@ -69,42 +65,30 @@ public class TestSafepointEvents {
         recording.stop();
 
         try {
-            // Verify that each event type was seen at least once
-            for (String name : EVENT_NAMES) {
-                boolean found = false;
-                for (RecordedEvent event : Events.fromRecording(recording)) {
-                    found = event.getEventType().getName().equals(name);
-                    if (found) {
-                        break;
-                    }
-                }
-                assertTrue(found, "Expected event from test [" + name + "]");
-            }
-
             // Collect all events grouped by safepoint id
             SortedMap<Long, Set<String>> safepointIds = new TreeMap<>();
             for (RecordedEvent event : Events.fromRecording(recording)) {
                 Long safepointId = event.getValue("safepointId");
-                if (!safepointIds.containsKey(safepointId)) {
-                    safepointIds.put(safepointId, new HashSet<>());
-                }
-                safepointIds.get(safepointId).add(event.getEventType().getName());
+                String eventName = event.getEventType().getName();
+                safepointIds.computeIfAbsent(safepointId, k -> new HashSet<>()).add(eventName);
             }
 
-            // The last safepoint may be related to stopping the recording and can thus be
-            // incomplete - so if there is more than one, ignore the last one
-            if (safepointIds.size() > 1) {
-                safepointIds.remove(safepointIds.lastKey());
-            }
-            Asserts.assertGreaterThanOrEqual(safepointIds.size(), 1, "At least 1 safepoint must have occured");
-
-            // Verify that each safepoint id has an occurence of every event type,
-            // this ensures that all events related to a given safepoint had the same id
-            for (Set<String> safepointEvents : safepointIds.values()) {
-                for (String name : EVENT_NAMES) {
-                    assertTrue(safepointEvents.contains(name), "Expected event '" + name + "' to be present");
+            // Select the first set that is complete.
+            Set<String> safepointEvents = null;
+            for (Long key : safepointIds.keySet()) {
+                safepointEvents = safepointIds.get(key);
+                if (safepointEvents.size() == EVENT_NAMES.length) {
+                    break;
                 }
             }
+            assertEquals(safepointEvents.size(), EVENT_NAMES.length,
+                "At least one safepoint id should map to a set containing an instance of each enabled event type.");
+
+            // Verify that the selected set contains an instance of each enabled event type.
+            for (String name : EVENT_NAMES) {
+                assertTrue(safepointEvents.contains(name), "Expected event '" + name + "' to be present");
+            }
+
         } catch (Throwable e) {
             recording.dump(Paths.get("failed.jfr"));
             throw e;

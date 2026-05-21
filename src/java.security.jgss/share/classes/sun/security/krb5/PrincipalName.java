@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,7 +34,7 @@ package sun.security.krb5;
 import sun.security.krb5.internal.*;
 import sun.security.util.*;
 import java.net.*;
-import java.util.Vector;
+import java.util.ArrayList;
 import java.util.Locale;
 import java.io.IOException;
 import java.math.BigInteger;
@@ -99,7 +99,6 @@ public class PrincipalName implements Cloneable {
      * TGS Name
      */
     public static final String TGS_DEFAULT_SRV_NAME = "krbtgt";
-    public static final int TGS_DEFAULT_NT = KRB_NT_SRV_INST;
 
     public static final char NAME_COMPONENT_SEPARATOR = '/';
     public static final char NAME_REALM_SEPARATOR = '@';
@@ -107,7 +106,12 @@ public class PrincipalName implements Cloneable {
 
     public static final String NAME_COMPONENT_SEPARATOR_STR = "/";
     public static final String NAME_REALM_SEPARATOR_STR = "@";
-    public static final String REALM_COMPONENT_SEPARATOR_STR = ".";
+
+    private static final boolean NAME_CASE_SENSITIVE_IN_MATCH
+            = "true".equalsIgnoreCase(
+                    SecurityProperties.getOverridableProperty(
+                            "jdk.security.krb5.name.case.sensitive"));
+
 
     // Instance fields.
 
@@ -129,12 +133,6 @@ public class PrincipalName implements Cloneable {
     private final Realm nameRealm;      // not null
 
 
-    /**
-     * When constructing a PrincipalName, whether the realm is included in
-     * the input, or deduced from default realm or domain-realm mapping.
-     */
-    private final boolean realmDeduced;
-
     // cached default salt, not used in clone
     private transient String salt = null;
 
@@ -155,7 +153,6 @@ public class PrincipalName implements Cloneable {
         this.nameType = nameType;
         this.nameStrings = nameStrings.clone();
         this.nameRealm = nameRealm;
-        this.realmDeduced = false;
     }
 
     // Warning: called by NativeCreds.c
@@ -209,12 +206,9 @@ public class PrincipalName implements Cloneable {
         if (this == o) {
             return true;
         }
-        if (o instanceof PrincipalName) {
-            PrincipalName other = (PrincipalName)o;
-            return nameRealm.equals(other.nameRealm) &&
-                    Arrays.equals(nameStrings, other.nameStrings);
-        }
-        return false;
+        return o instanceof PrincipalName other
+                && nameRealm.equals(other.nameRealm)
+                && Arrays.equals(nameStrings, other.nameStrings);
     }
 
     /**
@@ -248,7 +242,6 @@ public class PrincipalName implements Cloneable {
         if (realm == null) {
             throw new IllegalArgumentException("Null realm not allowed");
         }
-        realmDeduced = false;
         nameRealm = realm;
         DerValue der;
         if (encoding == null) {
@@ -270,15 +263,14 @@ public class PrincipalName implements Cloneable {
             if (subDer.getTag() != DerValue.tag_SequenceOf) {
                 throw new Asn1Exception(Krb5.ASN1_BAD_ID);
             }
-            Vector<String> v = new Vector<>();
+            ArrayList<String> v = new ArrayList<>();
             DerValue subSubDer;
             while(subDer.getData().available() > 0) {
                 subSubDer = subDer.getData().getDerValue();
                 String namePart = new KerberosString(subSubDer).toString();
-                v.addElement(namePart);
+                v.add(namePart);
             }
-            nameStrings = new String[v.size()];
-            v.copyInto(nameStrings);
+            nameStrings = v.toArray(new String[0]);
             validateNameStrings(nameStrings);
         } else  {
             throw new Asn1Exception(Krb5.ASN1_BAD_ID);
@@ -326,7 +318,7 @@ public class PrincipalName implements Cloneable {
     // Code repetition, realm parsed again by class Realm
     private static String[] parseName(String name) {
 
-        Vector<String> tempStrings = new Vector<>();
+        ArrayList<String> tempStrings = new ArrayList<>();
         String temp = name;
         int i = 0;
         int componentStart = 0;
@@ -346,7 +338,7 @@ public class PrincipalName implements Cloneable {
                 else {
                     if (componentStart <= i) {
                         component = temp.substring(componentStart, i);
-                        tempStrings.addElement(component);
+                        tempStrings.add(component);
                     }
                     componentStart = i + 1;
                 }
@@ -363,7 +355,7 @@ public class PrincipalName implements Cloneable {
                     } else {
                         if (componentStart < i) {
                             component = temp.substring(componentStart, i);
-                            tempStrings.addElement(component);
+                            tempStrings.add(component);
                         }
                         componentStart = i + 1;
                         break;
@@ -375,11 +367,10 @@ public class PrincipalName implements Cloneable {
 
         if (i == temp.length()) {
             component = temp.substring(componentStart, i);
-            tempStrings.addElement(component);
+            tempStrings.add(component);
         }
 
-        String[] result = new String[tempStrings.size()];
-        tempStrings.copyInto(result);
+        String[] result = tempStrings.toArray(new String[0]);
         return result;
     }
 
@@ -403,9 +394,6 @@ public class PrincipalName implements Cloneable {
         if (realm == null) {
             realm = Realm.parseRealmAtSeparator(name);
         }
-
-        // No realm info from parameter and string, must deduce later
-        realmDeduced = realm == null;
 
         switch (type) {
         case KRB_NT_SRV_HST:
@@ -436,8 +424,8 @@ public class PrincipalName implements Cloneable {
                                 hostName.toLowerCase(Locale.ENGLISH) + ".")) {
                             hostName = canonicalized;
                         }
-                    } catch (UnknownHostException | SecurityException e) {
-                        // not canonicalized or no permission to do so, use old
+                    } catch (UnknownHostException e) {
+                        // not canonicalized, use old
                     }
                     if (hostName.endsWith(".")) {
                         hostName = hostName.substring(0, hostName.length() - 1);
@@ -515,6 +503,7 @@ public class PrincipalName implements Cloneable {
         return temp.toString();
     }
 
+    @Override
     public int hashCode() {
         return toString().hashCode();
     }
@@ -534,7 +523,6 @@ public class PrincipalName implements Cloneable {
     public byte[][] toByteArray() {
         byte[][] result = new byte[nameStrings.length][];
         for (int i = 0; i < nameStrings.length; i++) {
-            result[i] = new byte[nameStrings[i].length()];
             result[i] = nameStrings[i].getBytes();
         }
         return result;
@@ -612,33 +600,47 @@ public class PrincipalName implements Cloneable {
 
 
     /**
-     * Checks if two <code>PrincipalName</code> objects have identical values in their corresponding data fields.
+     * Checks if two <code>PrincipalName</code> objects have identical values
+     * in their corresponding data fields.
+     * <p>
+     * If {@systemProperty jdk.security.krb5.name.case.sensitive} is set to true,
+     * the name comparison is case-sensitive. Otherwise, it's case-insensitive.
+     * <p>
+     * It is used in {@link sun.security.krb5.internal.ccache.FileCredentialsCache}
+     * and {@link sun.security.krb5.internal.ktab.KeyTab} to retrieve ccache
+     * or keytab entry for a principal.
      *
      * @param pname the other <code>PrincipalName</code> object.
      * @return true if two have identical values, otherwise, return false.
      */
-    // It is used in <code>sun.security.krb5.internal.ccache</code> package.
     public boolean match(PrincipalName pname) {
-        boolean matched = true;
-        //name type is just a hint, no two names can be the same ignoring name type.
-        // if (this.nameType != pname.nameType) {
-        //      matched = false;
-        // }
-        if ((this.nameRealm != null) && (pname.nameRealm != null)) {
+        // No need to check name type. It's just a hint, no two names can be
+        // the same ignoring name type.
+        if (NAME_CASE_SENSITIVE_IN_MATCH) {
+            if (!(this.nameRealm.toString().equals(pname.nameRealm.toString()))) {
+                return false;
+            }
+        } else {
             if (!(this.nameRealm.toString().equalsIgnoreCase(pname.nameRealm.toString()))) {
-                matched = false;
+                return false;
             }
         }
         if (this.nameStrings.length != pname.nameStrings.length) {
-            matched = false;
+            return false;
         } else {
             for (int i = 0; i < this.nameStrings.length; i++) {
-                if (!(this.nameStrings[i].equalsIgnoreCase(pname.nameStrings[i]))) {
-                    matched = false;
+                if (NAME_CASE_SENSITIVE_IN_MATCH) {
+                    if (!(this.nameStrings[i].equals(pname.nameStrings[i]))) {
+                        return false;
+                    }
+                } else {
+                    if (!(this.nameStrings[i].equalsIgnoreCase(pname.nameStrings[i]))) {
+                        return false;
+                    }
                 }
             }
         }
-        return matched;
+        return true;
     }
 
     /**
@@ -710,9 +712,5 @@ public class PrincipalName implements Cloneable {
         } catch (KrbException e) {
         }
         return result;
-    }
-
-    public boolean isRealmDeduced() {
-        return realmDeduced;
     }
 }

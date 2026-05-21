@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 1997, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation. Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -828,10 +826,8 @@ public class JTextComponentOperator extends JComponentOperator
     public Hashtable<String, Object> getDump() {
         Hashtable<String, Object> result = super.getDump();
         result.put(TEXT_DPROP, ((JTextComponent) getSource()).getText());
-        if (((JTextComponent) getSource()).getSelectedText() != null
-                && !((JTextComponent) getSource()).getSelectedText().equals("")) {
-            result.put(SELECTED_TEXT_DPROP, ((JTextComponent) getSource()).getSelectedText());
-        }
+        String selected = ((JTextComponent) getSource()).getSelectedText();
+        result.put(SELECTED_TEXT_DPROP, (selected != null) ? selected : "");
         result.put(IS_EDITABLE_DPROP, ((JTextComponent) getSource()).isEditable() ? "true" : "false");
         return result;
     }

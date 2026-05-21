@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -48,14 +48,11 @@ import java.rmi.server.ServerNotActiveException;
 import java.rmi.server.ServerRef;
 import java.rmi.server.Skeleton;
 import java.rmi.server.SkeletonNotFoundException;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.WeakHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import sun.rmi.runtime.Log;
 import sun.rmi.transport.LiveRef;
 import sun.rmi.transport.StreamRemoteCall;
@@ -80,8 +77,7 @@ public class UnicastServerRef extends UnicastRef
     implements ServerRef, Dispatcher
 {
     /** value of server call log property */
-    public static final boolean logCalls = AccessController.doPrivileged(
-        (PrivilegedAction<Boolean>) () -> Boolean.getBoolean("java.rmi.server.logCalls"));
+    public static final boolean logCalls = Boolean.getBoolean("java.rmi.server.logCalls");
 
     /** server call log */
     public static final Log callLog =
@@ -92,8 +88,7 @@ public class UnicastServerRef extends UnicastRef
 
     /** flag to enable writing exceptions to System.err */
     private static final boolean wantExceptionLog =
-        AccessController.doPrivileged((PrivilegedAction<Boolean>) () ->
-            Boolean.getBoolean("sun.rmi.server.exceptionTrace"));
+            Boolean.getBoolean("sun.rmi.server.exceptionTrace");
 
     private boolean forceStubUse = false;
 
@@ -102,8 +97,7 @@ public class UnicastServerRef extends UnicastRef
      * exceptions thrown by remote invocations to this VM
      */
     private static final boolean suppressStackTraces =
-        AccessController.doPrivileged((PrivilegedAction<Boolean>) () ->
-            Boolean.getBoolean("sun.rmi.server.suppressStackTraces"));
+            Boolean.getBoolean("sun.rmi.server.suppressStackTraces");
 
     /**
      * skeleton to dispatch remote calls through, for 1.1 stub protocol
@@ -412,15 +406,8 @@ public class UnicastServerRef extends UnicastRef
      */
     protected void unmarshalCustomCallData(ObjectInput in)
             throws IOException, ClassNotFoundException {
-        if (filter != null &&
-                in instanceof ObjectInputStream) {
-            // Set the filter on the stream
-            ObjectInputStream ois = (ObjectInputStream) in;
-
-            AccessController.doPrivileged((PrivilegedAction<Void>)() -> {
-                ois.setObjectInputFilter(filter);
-                return null;
-            });
+        if (filter != null && in instanceof ObjectInputStream ois) {
+            ois.setObjectInputFilter(filter);
         }
     }
 
@@ -581,20 +568,13 @@ public class UnicastServerRef extends UnicastRef
                 for (Class<?> intf : cl.getInterfaces()) {
                     if (Remote.class.isAssignableFrom(intf)) {
                         for (Method method : intf.getMethods()) {
-                            final Method m = method;
                             /*
                              * Set this Method object to override language
                              * access checks so that the dispatcher can invoke
                              * methods from non-public remote interfaces.
                              */
-                            AccessController.doPrivileged(
-                                new PrivilegedAction<Void>() {
-                                public Void run() {
-                                    m.setAccessible(true);
-                                    return null;
-                                }
-                            });
-                            map.put(Util.computeMethodHash(m), m);
+                            method.setAccessible(true);
+                            map.put(Util.computeMethodHash(method), method);
                         }
                     }
                 }

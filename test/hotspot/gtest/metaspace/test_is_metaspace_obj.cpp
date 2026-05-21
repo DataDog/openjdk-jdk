@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2026, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2020 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -23,7 +23,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "memory/allocation.inline.hpp"
 #include "memory/classLoaderMetaspace.hpp"
 #include "memory/metaspace.hpp"
@@ -42,14 +41,14 @@ class MetaspaceIsMetaspaceObjTest {
 
 public:
 
-  MetaspaceIsMetaspaceObjTest() : _lock(NULL), _ms(NULL) {}
+  MetaspaceIsMetaspaceObjTest() : _lock(nullptr), _ms(nullptr) {}
   ~MetaspaceIsMetaspaceObjTest() {
     delete _ms;
     delete _lock;
   }
 
   void do_test(Metaspace::MetadataType mdType) {
-    _lock = new Mutex(Monitor::native, "gtest-IsMetaspaceObjTest-lock", false, Monitor::_safepoint_check_never);
+    _lock = new Mutex(Monitor::nosafepoint, "gtest-IsMetaspaceObjTest_lock");
     {
       MutexLocker ml(_lock, Mutex::_no_safepoint_check_flag);
       _ms = new ClassLoaderMetaspace(_lock, Metaspace::StandardMetaspaceType);
@@ -66,8 +65,8 @@ public:
 
     // Test VirtualSpaceList::contains
     const VirtualSpaceList* const vslist =
-        (mdType == Metaspace::ClassType && Metaspace::using_class_space()) ?
-         VirtualSpaceList::vslist_class() : VirtualSpaceList::vslist_nonclass();
+       (mdType == Metaspace::ClassType && INCLUDE_CLASS_SPACE) ?
+        VirtualSpaceList::vslist_class() : VirtualSpaceList::vslist_nonclass();
 
     ASSERT_TRUE(vslist->contains((MetaWord*)p));
 
@@ -75,7 +74,7 @@ public:
     ASSERT_TRUE(vslist->contains((MetaWord*)((address)p) + 1));
 
     // Now for some bogus values
-    ASSERT_FALSE(MetaspaceObj::is_valid((MetaspaceObj*)NULL));
+    ASSERT_FALSE(MetaspaceObj::is_valid((MetaspaceObj*)nullptr));
 
     // Should exercise various paths in MetaspaceObj::is_valid()
     ASSERT_FALSE(MetaspaceObj::is_valid((MetaspaceObj*)1024));
@@ -93,9 +92,9 @@ public:
     ASSERT_TRUE(Metaspace::contains_non_shared(p));
 
     delete _ms;
-    _ms = NULL;
+    _ms = nullptr;
     delete _lock;
-    _lock = NULL;
+    _lock = nullptr;
   }
 
 };

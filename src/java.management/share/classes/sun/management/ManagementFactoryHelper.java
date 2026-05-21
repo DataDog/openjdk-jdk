@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,9 +36,6 @@ import javax.management.MBeanRegistrationException;
 import javax.management.NotCompliantMBeanException;
 import javax.management.ObjectName;
 import javax.management.RuntimeOperationsException;
-import java.security.AccessController;
-import java.security.PrivilegedActionException;
-import java.security.PrivilegedExceptionAction;
 
 import jdk.internal.misc.VM;
 import jdk.internal.misc.VM.BufferPool;
@@ -47,7 +44,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 import java.lang.reflect.UndeclaredThrowableException;
-import java.security.PrivilegedAction;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -183,25 +179,21 @@ public class ManagementFactoryHelper {
     //
     static final class LoggingMXBeanAccess {
 
-        final static String LOG_MANAGER_CLASS_NAME = "java.util.logging.LogManager";
-        final static String LOGGING_MXBEAN_CLASS_NAME = "java.util.logging.LoggingMXBean";
-        final static Class<?> LOG_MANAGER_CLASS = loadLoggingClass(LOG_MANAGER_CLASS_NAME);
+        static final String LOG_MANAGER_CLASS_NAME = "java.util.logging.LogManager";
+        static final String LOGGING_MXBEAN_CLASS_NAME = "java.util.logging.LoggingMXBean";
+        static final Class<?> LOG_MANAGER_CLASS = loadLoggingClass(LOG_MANAGER_CLASS_NAME);
 
         static boolean isAvailable() {
             return LOG_MANAGER_CLASS != null;
         }
 
         private static Class<?> loadLoggingClass(String className) {
-            return AccessController.doPrivileged(new PrivilegedAction<>() {
-                @Override
-                public Class<?> run() {
-                    Optional<Module> logging = ModuleLayer.boot().findModule("java.logging");
-                    if (logging.isPresent()) {
-                        return Class.forName(logging.get(), className);
-                    }
-                    return null;
-                }
-            });
+            Optional<Module> logging = ModuleLayer.boot().findModule("java.logging");
+            if (logging.isPresent()) {
+                return Class.forName(logging.get(), className);
+            } else {
+                return null;
+            }
         }
 
         private Map<String, Method> initMethodMap(Object impl) {
@@ -355,7 +347,7 @@ public class ManagementFactoryHelper {
         return bufferPools;
     }
 
-    private final static String BUFFER_POOL_MXBEAN_NAME = "java.nio:type=BufferPool";
+    private static final String BUFFER_POOL_MXBEAN_NAME = "java.nio:type=BufferPool";
 
     /**
      * Creates management interface for the given buffer pool.
@@ -460,43 +452,30 @@ public class ManagementFactoryHelper {
      * otherwise, just return.
      */
     private static void addMBean(MBeanServer mbs, Object mbean, String mbeanName) {
-        try {
-            final ObjectName objName = Util.newObjectName(mbeanName);
+        final ObjectName objName = Util.newObjectName(mbeanName);
 
-            // inner class requires these fields to be final
-            final MBeanServer mbs0 = mbs;
-            final Object mbean0 = mbean;
-            AccessController.doPrivileged(new PrivilegedExceptionAction<Void>() {
-                public Void run() throws MBeanRegistrationException,
-                                         NotCompliantMBeanException {
-                    try {
-                        mbs0.registerMBean(mbean0, objName);
-                        return null;
-                    } catch (InstanceAlreadyExistsException e) {
-                        // if an instance with the object name exists in
-                        // the MBeanServer ignore the exception
-                    }
-                    return null;
-                }
-            });
-        } catch (PrivilegedActionException e) {
-            throw Util.newException(e.getException());
+        try {
+            mbs.registerMBean(mbean, objName);
+        } catch (InstanceAlreadyExistsException iaee) {
+            // if an instance with the object name exists in the MBeanServer, ignore the exception
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
-    private final static String HOTSPOT_CLASS_LOADING_MBEAN_NAME =
+    private static final String HOTSPOT_CLASS_LOADING_MBEAN_NAME =
         "sun.management:type=HotspotClassLoading";
 
-    private final static String HOTSPOT_COMPILATION_MBEAN_NAME =
+    private static final String HOTSPOT_COMPILATION_MBEAN_NAME =
         "sun.management:type=HotspotCompilation";
 
-    private final static String HOTSPOT_MEMORY_MBEAN_NAME =
+    private static final String HOTSPOT_MEMORY_MBEAN_NAME =
         "sun.management:type=HotspotMemory";
 
     private static final String HOTSPOT_RUNTIME_MBEAN_NAME =
         "sun.management:type=HotspotRuntime";
 
-    private final static String HOTSPOT_THREAD_MBEAN_NAME =
+    private static final String HOTSPOT_THREAD_MBEAN_NAME =
         "sun.management:type=HotspotThreading";
 
     static void registerInternalMBeans(MBeanServer mbs) {
@@ -520,24 +499,14 @@ public class ManagementFactoryHelper {
     }
 
     private static void unregisterMBean(MBeanServer mbs, String mbeanName) {
-        try {
-            final ObjectName objName = Util.newObjectName(mbeanName);
+        final ObjectName objName = Util.newObjectName(mbeanName);
 
-            // inner class requires these fields to be final
-            final MBeanServer mbs0 = mbs;
-            AccessController.doPrivileged(new PrivilegedExceptionAction<Void>() {
-                public Void run() throws MBeanRegistrationException,
-                                           RuntimeOperationsException  {
-                    try {
-                        mbs0.unregisterMBean(objName);
-                    } catch (InstanceNotFoundException e) {
-                        // ignore exception if not found
-                    }
-                    return null;
-                }
-            });
-        } catch (PrivilegedActionException e) {
-            throw Util.newException(e.getException());
+        try {
+            mbs.unregisterMBean(objName);
+        } catch (InstanceNotFoundException infe) {
+            // ignore exception if not found
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 

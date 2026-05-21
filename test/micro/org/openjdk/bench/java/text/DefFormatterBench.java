@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,18 +22,22 @@
  */
 package org.openjdk.bench.java.text;
 
+import java.math.BigDecimal;
 import java.text.NumberFormat;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.DoubleStream;
 
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Level;
 import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OperationsPerInvocation;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
-import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
@@ -43,20 +47,56 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
-@Warmup(iterations = 5, time = 5, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 5, time = 10, timeUnit = TimeUnit.SECONDS)
-@Fork(1)
+@Warmup(iterations = 5, time = 1)
+@Measurement(iterations = 5, time = 1)
+@Fork(3)
 @State(Scope.Benchmark)
 public class DefFormatterBench {
 
-    @Param({"1.23", "1.49", "1.80", "1.7", "0.0", "-1.49", "-1.50", "9999.9123", "1.494", "1.495", "1.03", "25.996", "-25.996"})
-    public double value;
+    public static final int VALUES_SIZE = 13;
+    public double[] values;
+    public BigDecimal[] bdLargeValues;
+    public BigDecimal[] bdSmallValues;
 
-    private DefNumerFormat dnf = new DefNumerFormat();
+    @Setup(Level.Invocation)
+    public void setup() {
+        values = new double[] {
+            1.23, 1.49, 1.80, 1.7, 0.0, -1.49, -1.50, 9999.9123, 1.494, 1.495, 1.03, 25.996, -25.996
+        };
+
+        bdLargeValues = DoubleStream.of(values)
+                .mapToObj(BigDecimal::new)
+                .toArray(BigDecimal[]::new);
+
+        bdSmallValues = DoubleStream.of(values)
+                .mapToObj(BigDecimal::valueOf)
+                .toArray(BigDecimal[]::new);
+    }
+
+    private DefNumberFormat dnf = new DefNumberFormat();
 
     @Benchmark
+    @OperationsPerInvocation(VALUES_SIZE)
     public void testDefNumberFormatter(final Blackhole blackhole) {
-        blackhole.consume(this.dnf.format(this.value));
+        for (double value : values) {
+            blackhole.consume(this.dnf.format(value));
+        }
+    }
+
+    @Benchmark
+    @OperationsPerInvocation(VALUES_SIZE)
+    public void testSmallBigDecDefNumberFormatter(final Blackhole blackhole) {
+        for (BigDecimal value : bdSmallValues) {
+            blackhole.consume(this.dnf.format(value));
+        }
+    }
+
+    @Benchmark
+    @OperationsPerInvocation(VALUES_SIZE)
+    public void testLargeBigDecDefNumberFormatter(final Blackhole blackhole) {
+        for (BigDecimal value : bdLargeValues) {
+            blackhole.consume(this.dnf.format(value));
+        }
     }
 
     public static void main(String... args) throws Exception {
@@ -64,11 +104,11 @@ public class DefFormatterBench {
         new Runner(opts).run();
     }
 
-    private static class DefNumerFormat {
+    private static class DefNumberFormat {
 
         private final NumberFormat n;
 
-        public DefNumerFormat() {
+        public DefNumberFormat() {
             this.n = NumberFormat.getInstance(Locale.ENGLISH);
             this.n.setMaximumFractionDigits(2);
             this.n.setMinimumFractionDigits(2);
@@ -77,6 +117,10 @@ public class DefFormatterBench {
 
         public String format(final double d) {
             return this.n.format(d);
+        }
+
+        public String format(final BigDecimal bd) {
+            return this.n.format(bd);
         }
     }
 }

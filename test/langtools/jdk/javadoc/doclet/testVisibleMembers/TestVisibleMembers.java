@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@
  * @test
  * @bug 8025091 8198890
  * @summary Verify the presence visible members in the case of
- *          member hiding and overridding.
+ *          member hiding and overriding.
  * @library /tools/lib ../../lib
  * @modules jdk.javadoc/jdk.javadoc.internal.tool
  * @build javadoc.tester.* toolbox.ToolBox builder.ClassBuilder
@@ -49,8 +49,8 @@ public class TestVisibleMembers extends JavadocTester {
 
     final ToolBox tb;
     public static void main(String... args) throws Exception {
-        TestVisibleMembers tester = new TestVisibleMembers();
-        tester.runTests(m -> new Object[] { Paths.get(m.getName()) });
+        var tester = new TestVisibleMembers();
+        tester.runTests();
     }
 
     TestVisibleMembers() {
@@ -135,7 +135,7 @@ public class TestVisibleMembers extends JavadocTester {
                 "@param lvalue an lvalue", "@return something");
 
         new ClassBuilder(tb, "p.B")
-                .setModifiers( "public", "interface")
+                .setModifiers("public", "interface")
                 .setExtends("A")
                 .addMembers(mbWith1, mbWith2)
                 .write(srcDir);
@@ -309,7 +309,7 @@ public class TestVisibleMembers extends JavadocTester {
 
         checkOrder("p/C.html",
                 "METHOD DETAIL",
-                "public", "void", "method", "See Also:", "sub()", "I.sub1()",
+                "public", "void", "method", "See Also:", "sub()", "sub1()",
                 "public", "void", "m", "Method in C. See", "I.length()"
                 );
 
@@ -325,9 +325,8 @@ public class TestVisibleMembers extends JavadocTester {
                 "METHOD DETAIL",
                 "Method sub in p.IImpl",
                 "Specified by:", "I.html",
+                "Specified by:", "II.html",
                 "END OF CLASS DATA");
-
-        checkUnique("p/IImpl.html", "Specified by:");
     }
 
     // see j.u.Spliterator
@@ -359,7 +358,7 @@ public class TestVisibleMembers extends JavadocTester {
                         MethodBuilder.parse("public I sub() {return null;}"),
                         MethodBuilder.parse("public I sub1() {return null;}")
                                 .setComments(Kind.INHERIT_DOC),
-                        MethodBuilder.parse(" public void method() {}")
+                        MethodBuilder.parse("public void method() {}")
                                 .setComments("A method ", "@see #sub", "@see #sub1"),
                         MethodBuilder.parse("public int length(){return 1;}")
                                 .setComments(Kind.NO_API_COMMENT)
@@ -381,7 +380,7 @@ public class TestVisibleMembers extends JavadocTester {
                 ).write(srcDir);
 
         new ClassBuilder(tb, "p.QLong<P, Q, R>")
-                .setModifiers("public interface")
+                .setModifiers("public", "interface")
                 .addMembers(
                         MethodBuilder.parse("default void forEach(Q action) {}")
                 ).write(srcDir);
@@ -664,7 +663,7 @@ public class TestVisibleMembers extends JavadocTester {
                 ).write(srcDir);
 
         new ClassBuilder(tb, "p.I3")
-                .setExtends("I1, I2")
+                .addImplements("I1", "I2")
                 .setModifiers("public", "interface")
                 .addMembers(
                         FieldBuilder.parse("public static int field = 3;"),
@@ -678,8 +677,8 @@ public class TestVisibleMembers extends JavadocTester {
                 .write(srcDir);
 
         new ClassBuilder(tb, "p.C2")
-                .setExtends("C1")
                 .setModifiers("public", "abstract", "class")
+                .setExtends("C1")
                 .addMembers(
                         FieldBuilder.parse("public int field;"),
                         MethodBuilder.parse("public void method(){}"),

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -69,6 +69,8 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.io.InvalidObjectException;
 import java.io.ObjectInputStream;
+import java.io.ObjectStreamField;
+import java.io.Serial;
 import java.io.Serializable;
 import java.time.chrono.Chronology;
 import java.time.chrono.IsoChronology;
@@ -85,6 +87,8 @@ import java.time.temporal.TemporalQuery;
 import java.time.temporal.UnsupportedTemporalTypeException;
 import java.time.temporal.ValueRange;
 import java.util.Objects;
+
+import jdk.internal.util.DecimalDigits;
 
 /**
  * A month-day in the ISO-8601 calendar system, such as {@code --12-03}.
@@ -133,6 +137,20 @@ public final class MonthDay
      */
     @java.io.Serial
     private static final long serialVersionUID = -939150713474957432L;
+
+    /**
+     * For backward compatibility of the serialized {@code MonthDay.class} object,
+     * explicitly declare the types of the serialized fields as defined in Java SE 8.
+     * Instances of {@code MonthDay} are serialized using the dedicated
+     * serialized form by {@code writeReplace}.
+     * @serialField month int The month-of-year.
+     * @serialField day int The day-of-month.
+     */
+    @Serial
+    private static final ObjectStreamField[] serialPersistentFields = {
+            new ObjectStreamField("month", int.class),
+            new ObjectStreamField("day", int.class)
+    };
     /**
      * Parser.
      */
@@ -144,13 +162,13 @@ public final class MonthDay
         .toFormatter();
 
     /**
-     * The month-of-year, not null.
+     * @serial The month-of-year.
      */
-    private final int month;
+    private final transient byte month;
     /**
-     * The day-of-month.
+     * @serial The day-of-month.
      */
-    private final int day;
+    private final transient byte day;
 
     //-----------------------------------------------------------------------
     /**
@@ -319,8 +337,8 @@ public final class MonthDay
      * @param dayOfMonth  the day-of-month to represent, validated from 1 to 29-31
      */
     private MonthDay(int month, int dayOfMonth) {
-        this.month = month;
-        this.day = dayOfMonth;
+        this.month = (byte) month;
+        this.day = (byte) dayOfMonth;
     }
 
     //-----------------------------------------------------------------------
@@ -444,13 +462,13 @@ public final class MonthDay
      */
     @Override
     public long getLong(TemporalField field) {
-        if (field instanceof ChronoField) {
-            switch ((ChronoField) field) {
+        if (field instanceof ChronoField chronoField) {
+            return switch (chronoField) {
                 // alignedDOW and alignedWOM not supported because they cannot be set in with()
-                case DAY_OF_MONTH: return day;
-                case MONTH_OF_YEAR: return month;
-            }
-            throw new UnsupportedTemporalTypeException("Unsupported field: " + field);
+                case DAY_OF_MONTH -> day;
+                case MONTH_OF_YEAR -> month;
+                default -> throw new UnsupportedTemporalTypeException("Unsupported field: " + field);
+            };
         }
         return field.getFrom(this);
     }
@@ -675,7 +693,10 @@ public final class MonthDay
      * It is "consistent with equals", as defined by {@link Comparable}.
      *
      * @param other  the other month-day to compare to, not null
-     * @return the comparator value, negative if less, positive if greater
+     * @return the comparator value, that is less than zero if this is before {@code other},
+     *          zero if they are equal, greater than zero if this is after {@code other}
+     * @see #isBefore
+     * @see #isAfter
      */
     @Override
     public int compareTo(MonthDay other) {
@@ -720,11 +741,9 @@ public final class MonthDay
         if (this == obj) {
             return true;
         }
-        if (obj instanceof MonthDay) {
-            MonthDay other = (MonthDay) obj;
-            return month == other.month && day == other.day;
-        }
-        return false;
+        return (obj instanceof MonthDay other)
+                && month == other.month
+                && day == other.day;
     }
 
     /**
@@ -747,10 +766,12 @@ public final class MonthDay
      */
     @Override
     public String toString() {
-        return new StringBuilder(10).append("--")
-            .append(month < 10 ? "0" : "").append(month)
-            .append(day < 10 ? "-0" : "-").append(day)
-            .toString();
+        StringBuilder buf = new StringBuilder(10);
+        buf.append("--");
+        DecimalDigits.appendPair(buf, month);
+        buf.append('-');
+        DecimalDigits.appendPair(buf, day);
+        return buf.toString();
     }
 
     //-----------------------------------------------------------------------

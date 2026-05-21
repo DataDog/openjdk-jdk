@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,15 +23,15 @@
 
 /*
  * @test
- * @bug 8000983 8008577 8247781
+ * @bug 8000983 8008577 8247781 8262108 8174269
  * @summary Unit test for narrow names support. This test is locale data-dependent
  *          and assumes that both COMPAT and CLDR have the same narrow names if not
  *          explicitly specified.
  * @modules jdk.localedata
- * @comment Locale providers: COMPAT,SPI
- * @run main/othervm -Djava.locale.providers=COMPAT,SPI NarrowNamesTest COMPAT,SPI
+ * @comment Locale providers: CLDR,SPI
+ * @run main/othervm -Djava.locale.providers=CLDR,SPI NarrowNamesTest CLDR,SPI
  * @comment Locale providers: CLDR
- * @run main/othervm -Djava.locale.providers=CLDR NarrowNamesTest CLDR
+ * @run main NarrowNamesTest CLDR
  */
 
 import java.time.LocalDateTime;
@@ -44,8 +44,8 @@ import static java.util.GregorianCalendar.*;
 
 public class NarrowNamesTest {
     private static final Locale US = Locale.US;
-    private static final Locale JAJPJP = new Locale("ja", "JP", "JP");
-    private static final Locale THTH = new Locale("th", "TH");
+    private static final Locale JAJPJP = Locale.of("ja", "JP", "JP");
+    private static final Locale THTH = Locale.of("th", "TH");
 
     private static final String RESET_INDEX = "RESET_INDEX";
 
@@ -94,28 +94,10 @@ public class NarrowNamesTest {
                 "Sat"        // abb Saturday
                 );
         testMap(US, DAY_OF_WEEK, NARROW_FORMAT); // expect null
-        if (providers.startsWith("CLDR")) {
-            testMap(US, AM_PM, ALL_STYLES,
-                    "AM",
-                    "PM",
-                    "midnight",
-                    "noon",
-                    "in the morning",
-                    "",
-                    "in the afternoon",
-                    "",
-                    "in the evening",
-                    "",
-                    "at night",
-                    "",
-                    RESET_INDEX,
-                    "a", "p", "mi", "n", "", "", "", "", "", "", "", "");
-        } else {
-            testMap(US, AM_PM, ALL_STYLES,
-                    "AM", "PM",
-                    RESET_INDEX,
-                    "a", "p");
-        }
+        testMap(US, AM_PM, ALL_STYLES,
+                "AM", "PM",
+                RESET_INDEX,
+                "a", "p");
         testMap(JAJPJP, DAY_OF_WEEK, NARROW_STANDALONE,
                 "", // 1-based indexing for DAY_OF_WEEK
                 "\u65e5",

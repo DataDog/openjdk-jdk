@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,41 +25,23 @@
 
 package java.rmi;
 
-import java.security.*;
-
 /**
- * {@code RMISecurityManager} implements a policy identical to the policy
- * implemented by {@link SecurityManager}. RMI applications
- * should use the {@code SecurityManager} class or another appropriate
- * {@code SecurityManager} implementation instead of this class. RMI's class
- * loader will download classes from remote locations only if a security
- * manager has been set.
- *
- * @implNote
- * <p>Applets typically run in a container that already has a security
- * manager, so there is generally no need for applets to set a security
- * manager. If you have a standalone application, you might need to set a
- * {@code SecurityManager} in order to enable class downloading. This can be
- * done by adding the following to your code. (It needs to be executed before
- * RMI can download code from remote hosts, so it most likely needs to appear
- * in the {@code main} method of your application.)
- *
- * <pre>{@code
- *    if (System.getSecurityManager() == null) {
- *        System.setSecurityManager(new SecurityManager());
- *    }
- * }</pre>
+ * RMISecurityManager was originally specified to allow an application implement
+ * a security policy identical to the policy implemented by {@link SecurityManager}.
+ * This feature no longer exists.
  *
  * @author  Roger Riggs
  * @author  Peter Jones
  * @since 1.1
- * @deprecated Use {@link SecurityManager} instead.
+ * @deprecated There is no replacement for the Security Manager.
  */
-@Deprecated
+@SuppressWarnings("removal")
+@Deprecated(since="1.8", forRemoval = true)
 public class RMISecurityManager extends SecurityManager {
 
     /**
      * Constructs a new {@code RMISecurityManager}.
+     *
      * @since 1.1
      */
     public RMISecurityManager() {

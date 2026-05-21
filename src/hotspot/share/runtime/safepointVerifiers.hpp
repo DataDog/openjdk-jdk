@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,7 @@
 #define SHARE_RUNTIME_SAFEPOINTVERIFIERS_HPP
 
 #include "memory/allocation.hpp"
-#include "runtime/thread.hpp"
+#include "runtime/javaThread.hpp"
 
 // A NoSafepointVerifier object will throw an assertion failure if
 // the current thread passes a possible safepoint while this object is
@@ -38,8 +38,9 @@ class NoSafepointVerifier : public StackObj {
 
  private:
   Thread *_thread;
+  bool _active;
  public:
-  NoSafepointVerifier()  NOT_DEBUG_RETURN;
+  explicit NoSafepointVerifier(bool active = true)  NOT_DEBUG_RETURN;
   ~NoSafepointVerifier() NOT_DEBUG_RETURN;
 };
 

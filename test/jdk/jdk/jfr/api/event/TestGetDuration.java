@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -39,7 +37,7 @@ import jdk.test.lib.jfr.SimpleEvent;
 /**
  * @test
  * @summary Test for RecordedEvent.getDuration()
- * @key jfr
+ * @requires vm.flagless
  * @requires vm.hasJFR
  * @library /test/lib
  * @run main/othervm jdk.jfr.api.event.TestGetDuration
@@ -89,7 +87,7 @@ public class TestGetDuration {
         Events.hasEvents(testEvents);
         for (RecordedEvent re : testEvents) {
             int id = re.getValue("id");
-            Asserts.assertEquals(re.getDuration(), Duration.between(re.getStartTime(), re.getEndTime()));
+            Asserts.assertEquals(re.getDuration(), re.getStartTime().until(re.getEndTime()));
             switch (id) {
                 case DURATIONAL_EVENT_ID:
                     Asserts.assertTrue(!re.getDuration().isNegative() && !re.getDuration().isZero());
@@ -113,7 +111,7 @@ public class TestGetDuration {
         List<RecordedEvent> recordedEvents = Events.fromRecording(r);
         Events.hasEvents(recordedEvents);
         for (RecordedEvent re : recordedEvents) {
-            Asserts.assertEquals(re.getDuration(), Duration.between(re.getStartTime(), re.getEndTime()));
+            Asserts.assertEquals(re.getDuration(), re.getStartTime().until(re.getEndTime()));
             switch (re.getEventType().getName()) {
                 case EventNames.JVMInformation:
                     Asserts.assertTrue(re.getDuration().isZero());

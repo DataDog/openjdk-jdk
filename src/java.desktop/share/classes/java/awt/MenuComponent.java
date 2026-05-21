@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,8 +29,7 @@ import java.awt.event.ActionEvent;
 import java.awt.peer.MenuComponentPeer;
 import java.io.IOException;
 import java.io.ObjectInputStream;
-import java.security.AccessControlContext;
-import java.security.AccessController;
+import java.io.Serial;
 
 import javax.accessibility.Accessible;
 import javax.accessibility.AccessibleComponent;
@@ -41,7 +40,6 @@ import javax.accessibility.AccessibleState;
 import javax.accessibility.AccessibleStateSet;
 
 import sun.awt.AWTAccessor;
-import sun.awt.AppContext;
 import sun.awt.ComponentFactory;
 
 /**
@@ -58,22 +56,8 @@ import sun.awt.ComponentFactory;
  */
 public abstract class MenuComponent implements java.io.Serializable {
 
-    static {
-        /* ensure that the necessary native libraries are loaded */
-        Toolkit.loadLibraries();
-        if (!GraphicsEnvironment.isHeadless()) {
-            initIDs();
-        }
-    }
-
     transient volatile MenuComponentPeer peer;
     transient volatile MenuContainer parent;
-
-    /**
-     * The {@code AppContext} of the {@code MenuComponent}.
-     * This is set in the constructor and never changes.
-     */
-    private transient volatile AppContext appContext;
 
     /**
      * The menu component's font. This value can be
@@ -111,45 +95,20 @@ public abstract class MenuComponent implements java.io.Serializable {
     volatile boolean newEventsOnly;
 
     /*
-     * The menu's AccessControlContext.
-     */
-    private transient volatile AccessControlContext acc =
-            AccessController.getContext();
-
-    /*
-     * Returns the acc this menu component was constructed with.
-     */
-    final AccessControlContext getAccessControlContext() {
-        if (acc == null) {
-            throw new SecurityException(
-                    "MenuComponent is missing AccessControlContext");
-        }
-        return acc;
-    }
-
-    /*
      * Internal constants for serialization.
      */
     static final String actionListenerK = Component.actionListenerK;
     static final String itemListenerK = Component.itemListenerK;
 
-    /*
-     * JDK 1.1 serialVersionUID
+    /**
+     * Use serialVersionUID from JDK 1.1 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = -4536902356223894379L;
 
     static {
         AWTAccessor.setMenuComponentAccessor(
             new AWTAccessor.MenuComponentAccessor() {
-                @Override
-                public AppContext getAppContext(MenuComponent menuComp) {
-                    return menuComp.appContext;
-                }
-                @Override
-                public void setAppContext(MenuComponent menuComp,
-                                          AppContext appContext) {
-                    menuComp.appContext = appContext;
-                }
                 @Override
                 @SuppressWarnings("unchecked")
                 public <T extends MenuComponentPeer> T getPeer(MenuComponent menuComp) {
@@ -172,14 +131,13 @@ public abstract class MenuComponent implements java.io.Serializable {
 
     /**
      * Creates a {@code MenuComponent}.
-     * @exception HeadlessException if
+     * @throws HeadlessException if
      *    {@code GraphicsEnvironment.isHeadless}
      *    returns {@code true}
      * @see java.awt.GraphicsEnvironment#isHeadless
      */
     public MenuComponent() throws HeadlessException {
         GraphicsEnvironment.checkHeadless();
-        appContext = AppContext.getAppContext();
     }
 
     /**
@@ -369,8 +327,7 @@ public abstract class MenuComponent implements java.io.Serializable {
         Toolkit.getDefaultToolkit().notifyAWTEventListeners(e);
 
         if (newEventsOnly ||
-            (parent != null && parent instanceof MenuComponent &&
-             ((MenuComponent)parent).newEventsOnly)) {
+            (parent instanceof MenuComponent mc && mc.newEventsOnly)) {
             if (eventEnabled(e)) {
                 processEvent(e);
             } else if (e instanceof ActionEvent && parent != null) {
@@ -444,32 +401,23 @@ public abstract class MenuComponent implements java.io.Serializable {
      * @throws IOException if an I/O error occurs
      * @throws HeadlessException if {@code GraphicsEnvironment.isHeadless()}
      *         returns {@code true}
-     * @serial
+     *
      * @see java.awt.GraphicsEnvironment#isHeadless
      */
+    @Serial
     private void readObject(ObjectInputStream s)
         throws ClassNotFoundException, IOException, HeadlessException
     {
         GraphicsEnvironment.checkHeadless();
 
-        acc = AccessController.getContext();
-
         s.defaultReadObject();
-
-        appContext = AppContext.getAppContext();
     }
-
-    /**
-     * Initialize JNI field and method IDs.
-     */
-    private static native void initIDs();
-
 
     /*
      * --- Accessibility Support ---
      */
     /**
-     * MenuComponent will contain all of the methods in interface Accessible,
+     * @serial MenuComponent will contain all of the methods in interface Accessible,
      * though it won't actually implement the interface - that will be up
      * to the individual objects which extend MenuComponent.
      */
@@ -507,9 +455,10 @@ public abstract class MenuComponent implements java.io.Serializable {
         implements java.io.Serializable, AccessibleComponent,
                    AccessibleSelection
     {
-        /*
-         * JDK 1.3 serialVersionUID
+        /**
+         * Use serialVersionUID from JDK 1.3 for interoperability.
          */
+        @Serial
         private static final long serialVersionUID = -4269533416223798698L;
 
         /**
@@ -736,7 +685,7 @@ public abstract class MenuComponent implements java.io.Serializable {
         /**
          * Gets the {@code Font} of this object.
          *
-         * @return the {@code Font},if supported, for the object;
+         * @return the {@code Font}, if supported, for the object;
          *     otherwise, {@code null}
          */
         public Font getFont() {

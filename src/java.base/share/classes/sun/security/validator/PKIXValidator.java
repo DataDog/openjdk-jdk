@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,13 +25,10 @@
 
 package sun.security.validator;
 
-import java.util.*;
-
 import java.security.*;
 import java.security.cert.*;
-
+import java.util.*;
 import javax.security.auth.x500.X500Principal;
-import sun.security.action.GetBooleanAction;
 import sun.security.provider.certpath.AlgorithmChecker;
 import sun.security.provider.certpath.PKIXExtendedParameters;
 import sun.security.util.SecurityProperties;
@@ -56,10 +53,10 @@ public final class PKIXValidator extends Validator {
     /**
      * Flag indicating whether to enable revocation check for the PKIX trust
      * manager. Typically, this will only work if the PKIX implementation
-     * supports CRL distribution points as we do not manually setup CertStores.
+     * supports CRL distribution points as we do not manually set up CertStores.
      */
-    private static final boolean checkTLSRevocation = GetBooleanAction
-            .privilegedGetProperty("com.sun.net.ssl.checkRevocation");
+    private static final boolean checkTLSRevocation =
+            Boolean.getBoolean("com.sun.net.ssl.checkRevocation");
 
     /**
      * System or security property that if set (or set to "true"), allows trust
@@ -69,7 +66,7 @@ public final class PKIXValidator extends Validator {
     private static final boolean ALLOW_NON_CA_ANCHOR = allowNonCaAnchor();
     private static boolean allowNonCaAnchor() {
         String prop = SecurityProperties
-                .privilegedGetOverridable("jdk.security.allowNonCaAnchor");
+                .getOverridableProperty("jdk.security.allowNonCaAnchor");
         return prop != null && (prop.isEmpty() || prop.equalsIgnoreCase("true"));
     }
 
@@ -81,13 +78,11 @@ public final class PKIXValidator extends Validator {
     private final Map<X500Principal, List<PublicKey>> trustedSubjects;
     private final CertificateFactory factory;
 
-    private final boolean plugin;
-
     PKIXValidator(String variant, Collection<X509Certificate> trustedCerts) {
         super(TYPE_PKIX, variant);
         this.trustedCerts = (trustedCerts instanceof Set) ?
-                            (Set<X509Certificate>)trustedCerts :
-                            new HashSet<X509Certificate>(trustedCerts);
+                (Set<X509Certificate>)trustedCerts :
+                new HashSet<>(trustedCerts);
 
         Set<TrustAnchor> trustAnchors = new HashSet<>();
         for (X509Certificate cert : trustedCerts) {
@@ -104,14 +99,13 @@ public final class PKIXValidator extends Validator {
         }
 
         setDefaultParameters(variant);
-        plugin = variant.equals(VAR_PLUGIN_CODE_SIGNING);
 
         trustedSubjects = setTrustedSubjects();
     }
 
     PKIXValidator(String variant, PKIXBuilderParameters params) {
         super(TYPE_PKIX, variant);
-        trustedCerts = new HashSet<X509Certificate>();
+        trustedCerts = new HashSet<>();
         for (TrustAnchor anchor : params.getTrustAnchors()) {
             X509Certificate cert = anchor.getTrustedCert();
             if (cert != null) {
@@ -125,8 +119,6 @@ public final class PKIXValidator extends Validator {
         } catch (CertificateException e) {
             throw new RuntimeException("Internal error", e);
         }
-
-        plugin = variant.equals(VAR_PLUGIN_CODE_SIGNING);
 
         trustedSubjects = setTrustedSubjects();
     }
@@ -147,7 +139,7 @@ public final class PKIXValidator extends Validator {
             if (subjectMap.containsKey(dn)) {
                 keys = subjectMap.get(dn);
             } else {
-                keys = new ArrayList<PublicKey>();
+                keys = new ArrayList<>();
                 subjectMap.put(dn, keys);
             }
             keys.add(cert.getPublicKey());
@@ -224,7 +216,7 @@ public final class PKIXValidator extends Validator {
         // add new algorithm constraints checker
         if (constraints != null) {
             pkixParameters.addCertPathChecker(
-                    new AlgorithmChecker(constraints, null, variant));
+                    new AlgorithmChecker(constraints, variant));
         }
 
         // attach it to the PKIXBuilderParameters.
@@ -269,57 +261,12 @@ public final class PKIXValidator extends Validator {
         // apparently issued by trust anchor?
         X509Certificate last = chain[chain.length - 1];
         X500Principal issuer = last.getIssuerX500Principal();
-        X500Principal subject = last.getSubjectX500Principal();
-        if (trustedSubjects.containsKey(issuer) &&
-                isSignatureValid(trustedSubjects.get(issuer), last)) {
+        if (trustedSubjects.containsKey(issuer)) {
             return doValidate(chain, pkixParameters);
         }
 
-        // don't fallback to builder if called from plugin/webstart
-        if (plugin) {
-            // Validate chain even if no trust anchor is found. This
-            // allows plugin/webstart to make sure the chain is
-            // otherwise valid
-            if (chain.length > 1) {
-                X509Certificate[] newChain =
-                    new X509Certificate[chain.length-1];
-                System.arraycopy(chain, 0, newChain, 0, newChain.length);
-
-                // temporarily set last cert as sole trust anchor
-                try {
-                    pkixParameters.setTrustAnchors
-                        (Collections.singleton(new TrustAnchor
-                            (chain[chain.length-1], null)));
-                } catch (InvalidAlgorithmParameterException iape) {
-                    // should never occur, but ...
-                    throw new CertificateException(iape);
-                }
-                doValidate(newChain, pkixParameters);
-            }
-            // if the rest of the chain is valid, throw exception
-            // indicating no trust anchor was found
-            throw new ValidatorException
-                (ValidatorException.T_NO_TRUST_ANCHOR);
-        }
         // otherwise, fall back to builder
-
         return doBuild(chain, otherCerts, pkixParameters);
-    }
-
-    private boolean isSignatureValid(List<PublicKey> keys,
-            X509Certificate sub) {
-        if (plugin) {
-            for (PublicKey key: keys) {
-                try {
-                    sub.verify(key);
-                    return true;
-                } catch (Exception ex) {
-                    continue;
-                }
-            }
-            return false;
-        }
-        return true; // only check if PLUGIN is set
     }
 
     private static X509Certificate[] toArray(CertPath path, TrustAnchor anchor)
@@ -419,7 +366,7 @@ public final class PKIXValidator extends Validator {
 
             // setup CertStores
             Collection<X509Certificate> certs =
-                                        new ArrayList<X509Certificate>();
+                    new ArrayList<>();
             certs.addAll(Arrays.asList(chain));
             if (otherCerts != null) {
                 certs.addAll(otherCerts);

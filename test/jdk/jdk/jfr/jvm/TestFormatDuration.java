@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2019, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -24,7 +22,7 @@
  */
 package jdk.jfr.jvm;
 
-import jdk.jfr.internal.Utils;
+import jdk.jfr.internal.util.ValueFormatter;
 import jdk.test.lib.Asserts;
 
 import java.time.Duration;
@@ -32,10 +30,10 @@ import java.util.Locale;
 
 /**
  * @test
- * @key jfr
+ * @requires vm.flagless
  * @requires vm.hasJFR
  * @library /test/lib
- * @modules jdk.jfr/jdk.jfr.internal
+ * @modules jdk.jfr/jdk.jfr.internal.util
  * @run main/othervm jdk.jfr.jvm.TestFormatDuration
  */
 public class TestFormatDuration {
@@ -135,9 +133,9 @@ public class TestFormatDuration {
     private static void assertDuration(String value, String expected) throws Exception {
         long nanos = parse(value);
         System.out.println(value + " == " + expected + " ? (" + nanos + " ns) ");
-        Asserts.assertEquals(Utils.formatDuration(Duration.ofNanos(nanos)), expected);
+        Asserts.assertEquals(ValueFormatter.formatDuration(Duration.ofNanos(nanos)), expected);
         if (nanos != 0) {
-            Asserts.assertEquals(Utils.formatDuration(Duration.ofNanos(-nanos)), "-" + expected);
+            Asserts.assertEquals(ValueFormatter.formatDuration(Duration.ofNanos(-nanos)), "-" + expected);
         }
     }
 

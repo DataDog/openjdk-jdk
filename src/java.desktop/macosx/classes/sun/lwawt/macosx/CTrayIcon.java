@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -54,8 +54,8 @@ import sun.awt.SunToolkit;
 import static sun.awt.AWTAccessor.MenuComponentAccessor;
 import static sun.awt.AWTAccessor.getMenuComponentAccessor;
 
-public class CTrayIcon extends CFRetainedResource implements TrayIconPeer {
-    private TrayIcon target;
+public final class CTrayIcon extends CFRetainedResource implements TrayIconPeer {
+    private final TrayIcon target;
     private PopupMenu popup;
 
     // In order to construct MouseEvent object, we need to specify a
@@ -68,6 +68,8 @@ public class CTrayIcon extends CFRetainedResource implements TrayIconPeer {
     // on MOUSE_RELEASE. Click events are only generated if there were no drag
     // events between MOUSE_PRESSED and MOUSE_RELEASED for particular button
     private static int mouseClickButtons = 0;
+
+    private static final boolean useTemplateImages = Boolean.getBoolean("apple.awt.enableTemplateImages");
 
     CTrayIcon(TrayIcon target) {
         super(0, true);
@@ -138,6 +140,7 @@ public class CTrayIcon extends CFRetainedResource implements TrayIconPeer {
      * kind of window in Lion, NSPopover, so perhaps it could be used it
      * to implement better looking notifications.
      */
+    @Override
     public void displayMessage(final String caption, final String text,
                                final String messageType) {
         // obtain icon to show along the message
@@ -166,7 +169,6 @@ public class CTrayIcon extends CFRetainedResource implements TrayIconPeer {
         }
 
         LWCToolkit.targetDisposedPeer(target, this);
-        target = null;
 
         super.dispose();
     }
@@ -211,18 +213,18 @@ public class CTrayIcon extends CFRetainedResource implements TrayIconPeer {
         if (cimage != null) {
             cimage.execute(imagePtr -> {
                 execute(ptr -> {
-                    setNativeImage(ptr, imagePtr, imageAutoSize);
+                    setNativeImage(ptr, imagePtr, imageAutoSize, useTemplateImages);
                 });
             });
         }
     }
 
-    private native void setNativeImage(final long model, final long nsimage, final boolean autosize);
+    private native void setNativeImage(final long model, final long nsimage, final boolean autosize, final boolean template);
 
     private void postEvent(final AWTEvent event) {
         SunToolkit.executeOnEventHandlerThread(target, new Runnable() {
             public void run() {
-                SunToolkit.postEvent(SunToolkit.targetToAppContext(target), event);
+                SunToolkit.postEvent(event);
             }
         });
     }
@@ -247,7 +249,7 @@ public class CTrayIcon extends CFRetainedResource implements TrayIconPeer {
 
         int jmodifiers = NSEvent.nsToJavaModifiers(
                 nsEvent.getModifierFlags());
-        boolean isPopupTrigger = NSEvent.isPopupTrigger(jmodifiers);
+        boolean isPopupTrigger = NSEvent.isPopupTrigger(jmodifiers, jeventType);
 
         int eventButtonMask = (jbuttonNumber > 0)?
                 MouseEvent.getMaskForButton(jbuttonNumber) : 0;
@@ -305,7 +307,7 @@ public class CTrayIcon extends CFRetainedResource implements TrayIconPeer {
      *
      * @param icon        icon to scale
      * @param scaleFactor scale factor to use
-     * @return scaled icon as BuffedredImage
+     * @return scaled icon as BufferedImage
      */
     private static BufferedImage scaleIcon(Icon icon, double scaleFactor) {
         if (icon == null) {
@@ -356,10 +358,10 @@ public class CTrayIcon extends CFRetainedResource implements TrayIconPeer {
         }
     }
 
-    class IconObserver implements ImageObserver {
+    final class IconObserver implements ImageObserver {
         @Override
         public boolean imageUpdate(Image image, int flags, int x, int y, int width, int height) {
-            if (target == null || image != target.getImage()) //if the image has been changed
+            if (image != target.getImage()) //if the image has been changed
             {
                 return false;
             }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -335,6 +335,11 @@ Java_com_sun_java_swing_plaf_gtk_GTKEngine_nativeFinishPainting(
 {
     jint transparency;
     gint *buffer = (gint*) (*env)->GetPrimitiveArrayCritical(env, dest, 0);
+    if (buffer == 0) {
+        (*env)->ExceptionClear(env);
+        JNU_ThrowOutOfMemoryError(env, "Could not get image buffer");
+        return -1;
+    }
     gtk->gdk_threads_enter();
     transparency = gtk->copy_image(buffer, width, height);
     gtk->gdk_threads_leave();
@@ -382,4 +387,18 @@ Java_com_sun_java_swing_plaf_gtk_GTKEngine_nativeSetRangeValue(
     gtk->gdk_threads_enter();
     gtk->set_range_value(widget_type, value, min, max, visible);
     gtk->gdk_threads_leave();
+}
+
+/*
+ * Class:     com_sun_java_swing_plaf_gtk_GTKLookAndFeel
+ * Method:    applyThemeIfNeeded
+ * Signature: ()Z
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_sun_java_swing_plaf_gtk_GTKLookAndFeel_applyThemeIfNeeded(JNIEnv *env, jobject this) {
+    gtk->gdk_threads_enter();
+    const gboolean result = gtk->apply_theme_if_needed();
+    gtk->gdk_threads_leave();
+
+    return result ? JNI_TRUE : JNI_FALSE;
 }

@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -46,7 +44,7 @@ import jdk.test.lib.process.OutputAnalyzer;
 /**
  * @test
  * @summary The test verifies JFR.dump command
- * @key jfr
+ * @requires vm.flagless
  * @requires vm.hasJFR
  * @library /test/lib /test/jdk
  * @run main/othervm jdk.jfr.jcmd.TestJcmdDumpLimited
@@ -112,9 +110,7 @@ public class TestJcmdDumpLimited {
             recs.add(new TestRecording(i, 100));
         }
         int last = 0;
-        List<TestRecording> reversed = new ArrayList<>(recs);
-        Collections.reverse(reversed);
-        for (TestRecording r : reversed) {
+        for (TestRecording r : recs.reversed()) {
             r.total = r.size + last;
             last += r.size;
         }

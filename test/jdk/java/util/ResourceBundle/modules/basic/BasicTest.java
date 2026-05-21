@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
 
 /*
  * @test
- * @bug 8044767 8139067 8210408
+ * @bug 8044767 8139067 8210408 8263202
  * @summary Basic tests for ResourceBundle with modules:
  *          1) Named module "test" contains resource bundles for root and en,
  *          and separate named modules "eubundles" and "asiabundles" contain
@@ -43,7 +43,7 @@
  *        jdk.test.lib.compiler.CompilerUtils
  *        jdk.test.lib.process.ProcessTools
  *        ModuleTestUtil
- * @run testng BasicTest
+ * @run junit/timeout=200 BasicTest
  */
 
 import java.nio.file.Path;
@@ -54,13 +54,15 @@ import jdk.test.lib.JDKToolLauncher;
 import jdk.test.lib.Utils;
 import jdk.test.lib.compiler.CompilerUtils;
 import jdk.test.lib.process.ProcessTools;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 
 import static jdk.test.lib.Asserts.assertEquals;
-import static org.testng.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
-@Test
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class BasicTest {
     private static final String SRC_DIR_APPBASIC = "srcAppbasic";
     private static final String SRC_DIR_APPBASIC2 = "srcAppbasic2";
@@ -82,7 +84,7 @@ public class BasicTest {
     private static final List<String> LOCALE_LIST = List.of("de", "fr", "ja",
             "zh-tw", "en", "de");
     private static final List<String> LOCALE_LIST_BASIC = List.of("de", "fr",
-            "ja", "ja-jp", "zh-tw", "en", "de", "ja-jp");
+            "ja", "ja-jp", "zh-tw", "en", "de", "ja-jp", "in", "yi");
 
     private static final List<String> MODULE_LIST = List.of("asiabundles",
             "eubundles", "test");
@@ -92,7 +94,6 @@ public class BasicTest {
 
     private static final String MAIN = "test/jdk.test.Main";
 
-    @DataProvider(name = "basicTestData")
     Object[][] basicTestData() {
         return new Object[][] {
                 // Named module "test" contains resource bundles for root and en,
@@ -122,7 +123,8 @@ public class BasicTest {
         };
     }
 
-    @Test(dataProvider = "basicTestData")
+    @ParameterizedTest
+    @MethodSource("basicTestData")
     public void runBasicTest(String src, String mod, List<String> moduleList,
             List<String> localeList, String resFormat) throws Throwable {
         Path srcPath = Paths.get(Utils.TEST_SRC, src);

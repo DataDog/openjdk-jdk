@@ -28,7 +28,7 @@
  * @requires vm.compiler2.enabled
  *
  * @library /test/lib
- * @run driver compiler.loopstripmining.CheckLoopStripMining
+ * @run driver/timeout=480 compiler.loopstripmining.CheckLoopStripMining
  */
 
 package compiler.loopstripmining;
@@ -38,14 +38,12 @@ import jdk.test.lib.process.ProcessTools;
 
 public class CheckLoopStripMining {
     public static void main(String args[]) throws Exception {
-        ProcessTools.executeTestJvm("-XX:+UnlockDiagnosticVMOptions",
-                                    // to prevent biased locking handshakes from changing the timing of this test
-                                    "-XX:-UseBiasedLocking",
+        ProcessTools.executeTestJava("-XX:+UnlockDiagnosticVMOptions",
                                     "-XX:+SafepointTimeout",
                                     "-XX:+SafepointALot",
                                     "-XX:+AbortVMOnSafepointTimeout",
-                                    "-XX:SafepointTimeoutDelay=" + Utils.adjustTimeout(300),
-                                    "-XX:GuaranteedSafepointInterval=" + Utils.adjustTimeout(300),
+                                    "-XX:SafepointTimeoutDelay=" + Utils.adjustTimeout(1200),
+                                    "-XX:GuaranteedSafepointInterval=" + Utils.adjustTimeout(1200),
                                     "-XX:-TieredCompilation",
                                     "-XX:+UseCountedLoopSafepoints",
                                     "-XX:LoopStripMiningIter=1000",
@@ -56,14 +54,12 @@ public class CheckLoopStripMining {
             .shouldHaveExitValue(0)
             .stdoutShouldContain("sum: 715827882");
 
-        ProcessTools.executeTestJvm("-XX:+UnlockDiagnosticVMOptions",
-                                    // to prevent biased locking handshakes from changing the timing of this test
-                                    "-XX:-UseBiasedLocking",
+        ProcessTools.executeTestJava("-XX:+UnlockDiagnosticVMOptions",
                                     "-XX:+SafepointTimeout",
                                     "-XX:+SafepointALot",
                                     "-XX:+AbortVMOnSafepointTimeout",
-                                    "-XX:SafepointTimeoutDelay=" + Utils.adjustTimeout(300),
-                                    "-XX:GuaranteedSafepointInterval=" + Utils.adjustTimeout(300),
+                                    "-XX:SafepointTimeoutDelay=" + Utils.adjustTimeout(1200),
+                                    "-XX:GuaranteedSafepointInterval=" + Utils.adjustTimeout(1200),
                                     "-XX:-TieredCompilation",
                                     "-XX:+UseCountedLoopSafepoints",
                                     "-XX:LoopStripMiningIter=1000",

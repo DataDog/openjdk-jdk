@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,22 +24,29 @@
 /*
  * @test
  * @bug 4496290 4985072 7006178 7068595 8016328 8050031 8048351 8081854 8071982 8162363 8175200 8186332
- *      8182765 8196202 8202626
+ *      8182765 8196202 8202626 8261976 8323698 8345770
  * @summary A simple test to ensure class-use files are correct.
- * @library ../../lib
+ * @library /tools/lib ../../lib
  * @modules jdk.javadoc/jdk.javadoc.internal.tool
  * @build javadoc.tester.*
  * @run main TestUseOption
  */
 
 import javadoc.tester.JavadocTester;
+import toolbox.ToolBox;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 public class TestUseOption extends JavadocTester {
 
     public static void main(String... args) throws Exception {
-        TestUseOption tester = new TestUseOption();
+        var tester = new TestUseOption();
         tester.runTests();
     }
+
+    private final ToolBox tb = new ToolBox();
 
     @Test
     public void test1() {
@@ -83,7 +90,7 @@ public class TestUseOption extends JavadocTester {
         );
         checkOutput("pkg1/class-use/UsedClass.html", true,
           """
-              <a href="../C1.html#methodInC1ReturningType()">methodInC1ReturningType</a>"""
+              <a href="../C1.html#methodInC1ReturningType()" class="member-name-link">methodInC1ReturningType</a>"""
         );
         checkOutput("pkg1/class-use/UsedInterface.html", true,
           """
@@ -100,7 +107,10 @@ public class TestUseOption extends JavadocTester {
         );
         checkOutput("pkg1/class-use/UsedInterface.html", true,
            """
-               <a href="../AnAbstract.html" title="class in pkg1">AnAbstract</a>"""
+               <a href="../AnAbstract.html" class="type-name-link" title="class in pkg1">AnAbstract</a>""",
+           """
+               Link to interface method: <a href="../UsedInterface.html#doNothing()"><code>Use\
+               dInterface.doNothing()</code></a>."""
         );
         checkOutput("pkg1/class-use/UsedInterface.html", true,
             "../C10.html#withReturningTypeParameters()"
@@ -114,15 +124,15 @@ public class TestUseOption extends JavadocTester {
         );
         checkOutput("pkg1/class-use/UsedInterface.html", true,
             """
-                <a href="../C10.html#addAll(pkg1.UsedInterface...)">addAll</a>"""
+                <a href="../C10.html#addAll(pkg1.UsedInterface...)" class="member-name-link">addAll</a>"""
         );
         checkOutput("pkg1/class-use/UsedInterface.html", true,
             """
-                <a href="../C10.html#create(pkg1.UsedInterfaceA,pkg1.UsedInterface,java.lang.String)">"""
+                <a href="../C10.html#create(pkg1.UsedInterfaceA,pkg1.UsedInterface,java.lang.String)" class="member-name-link">"""
         );
         checkOutput("pkg1/class-use/UsedInterface.html", true,
             """
-                <a href="../C10.html#withTypeParametersOfType(java.lang.Class)">withTypeParametersOfType</a>"""
+                <a href="../C10.html#withTypeParametersOfType(java.lang.Class)" class="member-name-link">withTypeParametersOfType</a>"""
         );
         checkOutput("pkg1/class-use/UsedInterface.html", true,
             """
@@ -130,8 +140,8 @@ public class TestUseOption extends JavadocTester {
                 nterface</a> in <a href="../package-summary.html">pkg1""",
             """
                 <div class="col-first even-row-color"><code>interface&nbsp;</code></div>
-                <div class="col-second even-row-color"><code><span class="member-name-link"><a href="\
-                ../SubInterface.html" title="interface in pkg1">SubInterface</a>&lt;T&gt;</span>\
+                <div class="col-second even-row-color"><code><a href="\
+                ../SubInterface.html" class="type-name-link" title="interface in pkg1">SubInterface</a>&lt;T&gt;\
                 </code></div>"""
         );
         checkOutput("pkg1/class-use/UsedThrowable.html", true,
@@ -141,8 +151,8 @@ public class TestUseOption extends JavadocTester {
             """
                 <div class="col-first even-row-color"><code>void</code></div>
                 <div class="col-second even-row-color"><span class="type-name-label">C1.</span><code>\
-                <span class="member-name-link"><a href="../C1.html#methodInC1ThrowsThrowable()">\
-                methodInC1ThrowsThrowable</a></span>()</code></div>"""
+                <a href="../C1.html#methodInC1ThrowsThrowable()" class="member-name-link">\
+                methodInC1ThrowsThrowable</a>()</code></div>"""
         );
     }
 
@@ -156,20 +166,20 @@ public class TestUseOption extends JavadocTester {
 
         checkOutput("class-use/UsedInC.html", true,
                 """
-                    Uses of <a href="../UsedInC.html" title="class in &lt;Unnamed&gt;">UsedInC</a> i\
-                    n <a href="../package-summary.html">&lt;Unnamed&gt;</a>"""
+                    Uses of <a href="../UsedInC.html" title="class in Unnamed Package">UsedInC</a> i\
+                    n <a href="../package-summary.html">Unnamed Package</a>"""
         );
         checkOutput("class-use/UsedInC.html", true,
                 """
                     <li>
-                    <section class="detail" id="unnamed.package">
+                    <section class="detail" id="unnamed-package">
                     """
         );
         checkOutput("package-use.html", true,
                 """
-                    <div class="col-first even-row-color"><a href="class-use/UsedInC.html#unnamed.package">UsedInC</a></div>""",
+                    <div class="col-first even-row-color"><a href="class-use/UsedInC.html#unnamed-package">UsedInC</a></div>""",
                 """
-                    <div class="col-first even-row-color"><a href="#unnamed.package">&lt;Unnamed&gt;</a></div>
+                    <div class="col-first even-row-color"><a href="#unnamed-package">Unnamed Package</a></div>
                     <div class="col-last even-row-color">&nbsp;</div>"""
         );
     }
@@ -183,12 +193,91 @@ public class TestUseOption extends JavadocTester {
         checkExit(Exit.OK);
         checkUnique("unique/class-use/UseMe.html",
                 """
-                    <a href="../C1.html#umethod1(unique.UseMe,unique.UseMe%5B%5D)">""",
+                    <a href="../C1.html#umethod1(unique.UseMe,unique.UseMe%5B%5D)" class="member-name-link">""",
                 """
-                    <a href="../C1.html#umethod2(unique.UseMe,unique.UseMe)">""",
+                    <a href="../C1.html#umethod2(unique.UseMe,unique.UseMe)" class="member-name-link">""",
                 """
-                    <a href="../C1.html#umethod3(unique.UseMe,unique.UseMe)">""",
+                    <a href="../C1.html#umethod3(unique.UseMe,unique.UseMe)" class="member-name-link">""",
                 """
-                    <a href="../C1.html#%3Cinit%3E(unique.UseMe,unique.UseMe)">""");
+                    <a href="../C1.html#%3Cinit%3E(unique.UseMe,unique.UseMe)" class="member-name-link">""");
+    }
+
+    @Test
+    public void testSuperclassAndInterfaceTypeArgument(Path base) throws IOException {
+        Path src = base.resolve("src");
+
+        Files.createDirectories(src);
+        tb.writeJavaFiles(src,
+                """
+                    public class One {}
+                    """,
+                """
+                    import java.util.*;
+                    public class Two extends ArrayList<One> implements Comparator<One> {
+                    }
+                    """,
+                """
+                    import java.util.*;
+                    public interface Three extends Comparator<One> {
+                    }
+                    """);
+
+        javadoc(
+                "-use",
+                "-d", base.resolve("out").toString(),
+                src.resolve("One.java").toString(),
+                src.resolve("Two.java").toString(),
+                src.resolve("Three.java").toString()
+        );
+        checkExit(Exit.OK);
+
+        checkOrder("class-use/One.html",
+                """
+                    <div class="caption"><span>Subclasses with type arguments of \
+                    type <a href="../One.html" title="class in Unnamed Package">One</a> \
+                    in <a href="../package-summary.html">Unnamed Package</a></span></div>
+                    """,
+                """
+                    <div class="summary-table three-column-summary">
+                    <div class="table-header col-first">Modifier and Type</div>
+                    <div class="table-header col-second">Class</div>
+                    <div class="table-header col-last">Description</div>
+                    <div class="col-first even-row-color"><code>class&nbsp;</code></div>
+                    <div class="col-second even-row-color"><code><a href="../Two.html" class="type-name-link" \
+                    title="class in Unnamed Package">Two</a></code></div>
+                    <div class="col-last even-row-color">&nbsp;</div>
+                    </div>
+                    """,
+                """
+                    <div class="caption"><span>Subinterfaces with type arguments of \
+                    type <a href="../One.html" title="class in Unnamed Package">One</a> \
+                    in <a href="../package-summary.html">Unnamed Package</a></span></div>
+                    """,
+                """
+                    <div class="summary-table three-column-summary">
+                    <div class="table-header col-first">Modifier and Type</div>
+                    <div class="table-header col-second">Interface</div>
+                    <div class="table-header col-last">Description</div>
+                    <div class="col-first even-row-color"><code>interface&nbsp;</code></div>
+                    <div class="col-second even-row-color"><code><a href="../Three.html" class="type-name-link" title="interface in Unnamed Package">Three</a></code></div>
+                    <div class="col-last even-row-color">&nbsp;</div>
+                    </div>
+                    """,
+                """
+                    <div class="caption"><span>Classes in <a href="../package-summary.html">\
+                    Unnamed Package</a> that implement interfaces with type arguments of type \
+                    <a href="../One.html" title="class in Unnamed Package">One</a></span></div>
+                    """,
+                """
+                    <div class="summary-table three-column-summary">
+                    <div class="table-header col-first">Modifier and Type</div>
+                    <div class="table-header col-second">Class</div>
+                    <div class="table-header col-last">Description</div>
+                    <div class="col-first even-row-color"><code>class&nbsp;</code></div>
+                    <div class="col-second even-row-color"><code><a href="../Two.html" class="type-name-link" \
+                    title="class in Unnamed Package">Two</a></code></div>
+                    <div class="col-last even-row-color">&nbsp;</div>
+                    </div>
+                    """);
     }
 }

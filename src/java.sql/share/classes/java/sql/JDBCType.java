@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -200,18 +200,32 @@ public enum JDBCType implements SQLType {
     /**
      * Identifies the generic SQL type {@code TIMESTAMP_WITH_TIMEZONE}.
      */
-    TIMESTAMP_WITH_TIMEZONE(Types.TIMESTAMP_WITH_TIMEZONE);
+    TIMESTAMP_WITH_TIMEZONE(Types.TIMESTAMP_WITH_TIMEZONE),
+
+    /* JDBC 4.5 Types */
+
+    /**
+     * Identifies the generic SQL type {@code DECFLOAT}.
+     * @since 26
+     */
+    DECFLOAT(Types.DECFLOAT),
+
+    /**
+     * Identifies the generic SQL type {@code JSON}.
+     * @since 26
+     */
+    JSON(Types.JSON);
 
     /**
      * The Integer value for the JDBCType.  It maps to a value in
      * {@code Types.java}
      */
-    private Integer type;
+    private final Integer type;
 
     /**
-     * Constructor to specify the data type value from {@code Types) for
+     * Constructor to specify the data type value from {@code Types} for
      * this data type.
-     * @param type The value from {@code Types) for this data type
+     * @param type The value from {@code Types} for this data type
      */
     JDBCType(final Integer type) {
         this.type = type;
@@ -251,8 +265,8 @@ public enum JDBCType implements SQLType {
      * @see Types
      */
     public static JDBCType valueOf(int type) {
-        for( JDBCType sqlType : JDBCType.class.getEnumConstants()) {
-            if(type == sqlType.type)
+        for (JDBCType sqlType : JDBCType.values()) {
+            if (type == sqlType.type)
                 return sqlType;
         }
         throw new IllegalArgumentException("Type:" + type + " is not a valid "

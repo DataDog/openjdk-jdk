@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
  */
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
@@ -36,7 +36,6 @@ import com.sun.org.apache.xerces.internal.util.FeatureState;
 import com.sun.org.apache.xerces.internal.util.PropertyState;
 import com.sun.org.apache.xerces.internal.util.Status;
 import com.sun.org.apache.xerces.internal.util.SymbolTable;
-import com.sun.org.apache.xerces.internal.utils.XMLSecurityPropertyManager;
 import com.sun.org.apache.xerces.internal.xni.XMLLocator;
 import com.sun.org.apache.xerces.internal.xni.XNIException;
 import com.sun.org.apache.xerces.internal.xni.grammars.XMLGrammarPool;
@@ -49,6 +48,8 @@ import com.sun.org.apache.xerces.internal.xni.parser.XMLInputSource;
 import com.sun.org.apache.xerces.internal.xni.parser.XMLPullParserConfiguration;
 import javax.xml.XMLConstants;
 import javax.xml.catalog.CatalogFeatures;
+import jdk.xml.internal.JdkConstants;
+import jdk.xml.internal.JdkXmlConfig;
 import jdk.xml.internal.JdkXmlUtils;
 
 /**
@@ -62,6 +63,7 @@ import jdk.xml.internal.JdkXmlUtils;
  * include the replacement text of internal entities, and supply default attribute values".
  *
  * @author Elena Litani, IBM
+ * @LastModified: Apr 2025
  */
 public class NonValidatingConfiguration
     extends BasicParserConfiguration
@@ -162,7 +164,7 @@ public class NonValidatingConfiguration
 
       /** Property identifier: Security property manager. */
       protected static final String XML_SECURITY_PROPERTY_MANAGER =
-              Constants.XML_SECURITY_PROPERTY_MANAGER;
+              JdkConstants.XML_SECURITY_PROPERTY_MANAGER;
 
      /** Property identifier: Security manager. */
      private static final String SECURITY_MANAGER = Constants.SECURITY_MANAGER;
@@ -295,7 +297,7 @@ public class NonValidatingConfiguration
             //NOTIFY_CHAR_REFS,         // from XMLDocumentFragmentScannerImpl
             //WARN_ON_DUPLICATE_ENTITYDEF   // from XMLEntityManager
             XMLConstants.USE_CATALOG,
-            JdkXmlUtils.OVERRIDE_PARSER
+            JdkConstants.OVERRIDE_PARSER
         };
         addRecognizedFeatures(recognizedFeatures);
 
@@ -311,7 +313,7 @@ public class NonValidatingConfiguration
         //setFeature(NOTIFY_CHAR_REFS, false);      // from XMLDocumentFragmentScannerImpl
         //setFeature(WARN_ON_DUPLICATE_ENTITYDEF, false);   // from XMLEntityManager
         fFeatures.put(XMLConstants.USE_CATALOG, JdkXmlUtils.USE_CATALOG_DEFAULT);
-        fFeatures.put(JdkXmlUtils.OVERRIDE_PARSER, JdkXmlUtils.OVERRIDE_PARSER_DEFAULT);
+        fFeatures.put(JdkConstants.OVERRIDE_PARSER, JdkConstants.OVERRIDE_PARSER_DEFAULT);
 
         // add default recognized properties
         final String[] recognizedProperties = {
@@ -331,7 +333,7 @@ public class NonValidatingConfiguration
             JdkXmlUtils.CATALOG_FILES,
             JdkXmlUtils.CATALOG_PREFER,
             JdkXmlUtils.CATALOG_RESOLVE,
-            JdkXmlUtils.CDATA_CHUNK_SIZE
+            JdkConstants.CDATA_CHUNK_SIZE
         };
         addRecognizedProperties(recognizedProperties);
 
@@ -388,14 +390,15 @@ public class NonValidatingConfiguration
             // REVISIT: What is the right thing to do? -Ac
         }
 
-        setProperty(XML_SECURITY_PROPERTY_MANAGER, new XMLSecurityPropertyManager());
+        setProperty(XML_SECURITY_PROPERTY_MANAGER,
+                JdkXmlConfig.getInstance(false).getXMLSecurityPropertyManager(false));
 
         // Initialize Catalog features
         for( CatalogFeatures.Feature f : CatalogFeatures.Feature.values()) {
             setProperty(f.getPropertyName(), null);
         }
 
-        setProperty(JdkXmlUtils.CDATA_CHUNK_SIZE, JdkXmlUtils.CDATA_CHUNK_SIZE_DEFAULT);
+        setProperty(JdkConstants.CDATA_CHUNK_SIZE, JdkConstants.CDATA_CHUNK_SIZE_DEFAULT);
     } // <init>(SymbolTable,XMLGrammarPool)
 
     //

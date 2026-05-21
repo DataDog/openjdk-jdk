@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 
 package javax.print.attribute;
 
+import java.io.Serial;
 import java.io.Serializable;
 
 /**
@@ -45,6 +46,7 @@ public abstract class IntegerSyntax implements Serializable, Cloneable {
     /**
      * Use serialVersionUID from JDK 1.4 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = 3644574816328081943L;
 
     /**
@@ -105,16 +107,17 @@ public abstract class IntegerSyntax implements Serializable, Cloneable {
      * @return {@code true} if {@code object} is equivalent to this integer
      *         attribute, {@code false} otherwise
      */
+    @Override
     public boolean equals(Object object) {
-
-        return (object != null && object instanceof IntegerSyntax &&
-                value == ((IntegerSyntax) object).value);
+        return object instanceof IntegerSyntax other &&
+                value == other.value;
     }
 
     /**
      * Returns a hash code value for this integer attribute. The hash code is
      * just this integer attribute's integer value.
      */
+    @Override
     public int hashCode() {
         return value;
     }
@@ -124,6 +127,7 @@ public abstract class IntegerSyntax implements Serializable, Cloneable {
      * string value is just this integer attribute's integer value converted to
      * a string.
      */
+    @Override
     public String toString() {
         return "" + value;
     }

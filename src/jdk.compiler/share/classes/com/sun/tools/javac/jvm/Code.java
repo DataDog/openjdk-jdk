@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,8 +34,12 @@ import com.sun.tools.javac.util.JCDiagnostic.DiagnosticPosition;
 import java.util.function.ToIntBiFunction;
 import java.util.function.ToIntFunction;
 
+import static com.sun.tools.javac.code.TypeTag.ARRAY;
 import static com.sun.tools.javac.code.TypeTag.BOT;
+import static com.sun.tools.javac.code.TypeTag.DOUBLE;
 import static com.sun.tools.javac.code.TypeTag.INT;
+import static com.sun.tools.javac.code.TypeTag.LONG;
+import static com.sun.tools.javac.code.TypeTag.TYPEVAR;
 import static com.sun.tools.javac.jvm.ByteCodes.*;
 import static com.sun.tools.javac.jvm.ClassFile.CONSTANT_Class;
 import static com.sun.tools.javac.jvm.ClassFile.CONSTANT_Double;
@@ -401,10 +405,12 @@ public class Code {
     */
     public void emitLdc(LoadableConstant constant) {
         int od = poolWriter.putConstant(constant);
-        if (od <= 255) {
+        Type constantType = types.constantType(constant);
+        if (constantType.hasTag(LONG) || constantType.hasTag(DOUBLE)) {
+            emitop2(ldc2w, od, constant);
+        } else if (od <= 255) {
             emitop1(ldc1, od, constant);
-        }
-        else {
+        } else {
             emitop2(ldc2, od, constant);
         }
     }
@@ -621,7 +627,7 @@ public class Code {
             markDead();
             break;
         case athrow:
-            state.pop(1);
+            state.pop(state.stacksize);
             markDead();
             break;
         case lstore_0:
@@ -1062,15 +1068,13 @@ public class Code {
             Type t = types.erasure((Type)data);
             state.push(t);
             break; }
+        case ldc2:
         case ldc2w:
             state.push(types.constantType((LoadableConstant)data));
             break;
         case instanceof_:
             state.pop(1);
             state.push(syms.intType);
-            break;
-        case ldc2:
-            state.push(types.constantType((LoadableConstant)data));
             break;
         case jsr:
             break;
@@ -1217,7 +1221,7 @@ public class Code {
         return !alive || state.stacksize == letExprStackPos;
     }
 
-/**************************************************************************
+/* ************************************************************************
  * Stack map generation
  *************************************************************************/
 
@@ -1392,7 +1396,7 @@ public class Code {
     }
 
 
-/**************************************************************************
+/* ************************************************************************
  * Operations having to do with jumps
  *************************************************************************/
 
@@ -1805,11 +1809,7 @@ public class Code {
             for (int i=0; i<stacksize; ) {
                 Type t = stack[i];
                 Type tother = other.stack[i];
-                Type result =
-                    t==tother ? t :
-                    types.isSubtype(t, tother) ? tother :
-                    types.isSubtype(tother, t) ? t :
-                    error();
+                Type result = commonSuperClass(t, tother);
                 int w = width(result);
                 stack[i] = result;
                 if (w == 2) Assert.checkNull(stack[i+1]);
@@ -1818,8 +1818,54 @@ public class Code {
             return this;
         }
 
-        Type error() {
-            throw new AssertionError("inconsistent stack types at join point");
+        private Type commonSuperClass(Type t1, Type t2) {
+            if (t1 == t2) {
+                return t1;
+            } else if (types.isSubtype(t1, t2)) {
+                return t2;
+            } else if (types.isSubtype(t2, t1)) {
+                return t1;
+            } else {
+                /* the most semantically correct approach here would be to invoke Types::lub
+                 * and then erase the result.
+                 * But this approach can be too slow for some complex cases, see JDK-8369654.
+                 * This is why the method below leverages the fact that the result
+                 * will be erased to produce a correct supertype using a simpler approach compared
+                 * to a full blown lub.
+                 */
+                Type es = erasedSuper(t1, t2);
+                if (es == null || es.hasTag(BOT)) {
+                    throw Assert.error("Cannot find a common super class of: " +
+                                       t1 + " and " + t2);
+                }
+                return es;
+            }
+        }
+
+        private Type erasedSuper(Type t1, Type t2) {
+            if (t1.hasTag(ARRAY) && t2.hasTag(ARRAY)) {
+                Type elem1 = types.elemtype(t1);
+                Type elem2 = types.elemtype(t2);
+                if (elem1.isPrimitive() || elem2.isPrimitive()) {
+                    return (elem1.tsym == elem2.tsym) ? t1 : syms.serializableType;
+                } else { // both are arrays of references
+                    return new ArrayType(erasedSuper(elem1, elem2), syms.arrayClass);
+                }
+            } else {
+                t1 = types.skipTypeVars(t1, false);
+                t2 = types.skipTypeVars(t2, false);
+                List<Type> result = types.closureMin(
+                        types.intersect(
+                            t1.hasTag(ARRAY) ?
+                                    List.of(syms.serializableType, syms.cloneableType, syms.objectType) :
+                                    types.erasedSupertypes(t1),
+                            t2.hasTag(ARRAY) ?
+                                    List.of(syms.serializableType, syms.cloneableType, syms.objectType) :
+                                    types.erasedSupertypes(t2)
+                        )
+                );
+                return result.head;
+            }
         }
 
         void dump() {
@@ -2015,7 +2061,7 @@ public class Code {
             if (localVar != null) {
                 for (LocalVar.Range range: localVar.aliveRanges) {
                     if (range.closed() && range.start_pc + range.length >= oldCP) {
-                        range.length += delta;
+                        range.length += (char)delta;
                     }
                 }
             }
@@ -2189,6 +2235,8 @@ public class Code {
                 ((var.sym.owner.flags() & Flags.LAMBDA_METHOD) == 0 ||
                  (var.sym.flags() & Flags.PARAMETER) == 0);
         if (ignoredSyntheticVar) return;
+        //don't include unnamed variables:
+        if (var.sym.name == var.sym.name.table.names.empty) return ;
         if (varBuffer == null)
             varBuffer = new LocalVar[20];
         else
@@ -2234,7 +2282,7 @@ public class Code {
         for (int i = nextreg; i < prevNextReg; i++) endScope(i);
     }
 
-/**************************************************************************
+/* ************************************************************************
  * static tables
  *************************************************************************/
 
@@ -2243,7 +2291,7 @@ public class Code {
     }
 
     private static class Mneumonics {
-        private final static String[] mnem = new String[ByteCodeCount];
+        private static final String[] mnem = new String[ByteCodeCount];
         static {
             mnem[nop] = "nop";
             mnem[aconst_null] = "aconst_null";

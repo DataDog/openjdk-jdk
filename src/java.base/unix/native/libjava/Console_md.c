@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,40 +30,20 @@
 
 #include <stdlib.h>
 #include <unistd.h>
-#include <termios.h>
 
-JNIEXPORT jboolean JNICALL
-Java_java_io_Console_istty(JNIEnv *env, jclass cls)
+JNIEXPORT jint JNICALL
+Java_java_io_Console_ttyStatus(JNIEnv *env, jclass cls)
 {
-    return isatty(fileno(stdin)) && isatty(fileno(stdout));
-}
+    jint ret = 0;
 
-JNIEXPORT jstring JNICALL
-Java_java_io_Console_encoding(JNIEnv *env, jclass cls)
-{
-    return NULL;
-}
-
-JNIEXPORT jboolean JNICALL
-Java_java_io_Console_echo(JNIEnv *env,
-                          jclass cls,
-                          jboolean on)
-{
-    struct termios tio;
-    jboolean old;
-    int tty = fileno(stdin);
-    if (tcgetattr(tty, &tio) == -1) {
-        JNU_ThrowIOExceptionWithLastError(env, "tcgetattr failed");
-        return !on;
+    if (isatty(fileno(stdin))) {
+        ret |= java_io_Console_TTY_STDIN_MASK;
     }
-    old = (tio.c_lflag & ECHO) != 0;
-    if (on) {
-        tio.c_lflag |= ECHO;
-    } else {
-        tio.c_lflag &= ~ECHO;
+    if (isatty(fileno(stdout))) {
+        ret |= java_io_Console_TTY_STDOUT_MASK;
     }
-    if (tcsetattr(tty, TCSANOW, &tio) == -1) {
-        JNU_ThrowIOExceptionWithLastError(env, "tcsetattr failed");
+    if (isatty(fileno(stderr))) {
+        ret |= java_io_Console_TTY_STDERR_MASK;
     }
-    return old;
+    return ret;
 }

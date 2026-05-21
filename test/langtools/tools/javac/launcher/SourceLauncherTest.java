@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,19 +23,24 @@
 
 /*
  * @test
- * @bug 8192920 8204588 8246774
+ * @bug 8192920 8204588 8246774 8248843 8268869 8235876 8328339 8335896 8344706
+ *      8362237 8376534
  * @summary Test source launcher
  * @library /tools/lib
  * @modules jdk.compiler/com.sun.tools.javac.api
  *          jdk.compiler/com.sun.tools.javac.launcher
  *          jdk.compiler/com.sun.tools.javac.main
+ *          java.base/jdk.internal.module
  * @build toolbox.JavaTask toolbox.JavacTask toolbox.TestRunner toolbox.ToolBox
  * @run main SourceLauncherTest
  */
 
+import java.lang.classfile.*;
+import java.lang.classfile.attribute.ModuleResolutionAttribute;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -48,16 +53,17 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
-import com.sun.tools.javac.launcher.Main;
+import com.sun.tools.javac.launcher.SourceLauncher;
+import com.sun.tools.javac.launcher.Fault;
 
 import toolbox.JavaTask;
 import toolbox.JavacTask;
 import toolbox.Task;
 import toolbox.TestRunner;
-import toolbox.TestRunner;
 import toolbox.ToolBox;
+
+import static jdk.internal.module.ClassFileConstants.WARN_INCUBATING;
 
 public class SourceLauncherTest extends TestRunner {
     public static void main(String... args) throws Exception {
@@ -71,7 +77,7 @@ public class SourceLauncherTest extends TestRunner {
         System.err.println("version: " + thisVersion);
     }
 
-    private final ToolBox tb;
+    final ToolBox tb;
     private static final String thisVersion = System.getProperty("java.specification.version");
 
     /*
@@ -100,6 +106,27 @@ public class SourceLauncherTest extends TestRunner {
             "        System.out.println(\"Hello World! \" + Arrays.toString(args));\n" +
             "    }\n" +
             "}");
+        testSuccess(base.resolve("hello").resolve("World.java"), "Hello World! [1, 2, 3]\n");
+    }
+
+    @Test
+    public void testHelloWorldInPackageWithStaticImport(Path base) throws IOException {
+        tb.writeJavaFiles(base,
+                """
+                package hello;
+                import static hello.Helper.*;
+                import java.util.Arrays;
+                class World {
+                    public static void main(String... args) {
+                        m(args);
+                    }
+                }
+                class Helper {
+                    static void m(String... args) {
+                        System.out.println("Hello World! " + Arrays.toString(args));
+                    }
+                }
+                """);
         testSuccess(base.resolve("hello").resolve("World.java"), "Hello World! [1, 2, 3]\n");
     }
 
@@ -213,50 +240,6 @@ public class SourceLauncherTest extends TestRunner {
     }
 
     @Test
-    public void testPermissions(Path base) throws IOException {
-        // does not work on exploded image, because the default policy file assumes jrt:; skip the test
-        if (Files.exists(Path.of(System.getProperty("java.home")).resolve("modules"))) {
-            out.println("JDK using exploded modules; test skipped");
-            return;
-        }
-
-        Path policyFile = base.resolve("test.policy");
-        Path sourceFile = base.resolve("TestPermissions.java");
-
-        tb.writeFile(policyFile,
-            "grant codeBase \"jrt:/jdk.compiler\" {\n" +
-            "    permission java.security.AllPermission;\n" +
-            "};\n" +
-            "grant codeBase \"" + sourceFile.toUri().toURL() + "\" {\n" +
-            "    permission java.util.PropertyPermission \"user.dir\", \"read\";\n" +
-            "};\n");
-
-        tb.writeJavaFiles(base,
-            "import java.net.URL;\n" +
-            "class TestPermissions {\n" +
-            "    public static void main(String... args) {\n" +
-            "        System.out.println(\"user.dir=\" + System.getProperty(\"user.dir\"));\n" +
-            "        try {\n" +
-            "            System.setProperty(\"user.dir\", \"\");\n" +
-            "            System.out.println(\"no exception\");\n" +
-            "            System.exit(1);\n" +
-            "        } catch (SecurityException e) {\n" +
-            "            System.out.println(\"exception: \" + e);\n" +
-            "        }\n" +
-            "    }\n" +
-            "}");
-
-        String log = new JavaTask(tb)
-                .vmOptions("-Djava.security.manager", "-Djava.security.policy=" + policyFile)
-                .className(sourceFile.toString())
-                .run(Task.Expect.SUCCESS)
-                .getOutput(Task.OutputKind.STDOUT);
-        checkEqual("stdout", log.trim(),
-                "user.dir=" + System.getProperty("user.dir") + "\n" +
-                "exception: java.security.AccessControlException: " +
-                    "access denied (\"java.util.PropertyPermission\" \"user.dir\" \"write\")");
-    }
-
     public void testSystemProperty(Path base) throws IOException {
         tb.writeJavaFiles(base,
             "class ShowProperty {\n" +
@@ -273,11 +256,72 @@ public class SourceLauncherTest extends TestRunner {
         checkEqual("stdout", log.trim(), file.toAbsolutePath().toString());
     }
 
+    @Test
+    public void testThreadContextClassLoader(Path base) throws IOException {
+        tb.writeJavaFiles(base, //language=java
+                """
+                class ThreadContextClassLoader {
+                    public static void main(String... args) {
+                        var expected = ThreadContextClassLoader.class.getClassLoader();
+                        var actual = Thread.currentThread().getContextClassLoader();
+                        System.out.println(expected == actual);
+                    }
+                }
+                """);
+
+        Path file = base.resolve("ThreadContextClassLoader.java");
+        String log = new JavaTask(tb)
+                .className(file.toString())
+                .run(Task.Expect.SUCCESS)
+                .getOutput(Task.OutputKind.STDOUT);
+        checkEqual("stdout", log.trim(), "true");
+    }
+
     void testSuccess(Path file, String expect) throws IOException {
         Result r = run(file, Collections.emptyList(), List.of("1", "2", "3"));
         checkEqual("stdout", r.stdOut, expect);
         checkEmpty("stderr", r.stdErr);
         checkNull("exception", r.exception);
+    }
+
+
+    @Test
+    public void testMainNoParams(Path base) throws IOException {
+        tb.writeJavaFiles(base,
+            "package hello;\n" +
+            "import java.util.Arrays;\n" +
+            "class World {\n" +
+            "    public static void main(String... args) {\n" +
+            "        System.out.println(\"Hello World! \" + Arrays.toString(args));\n" +
+            "    }\n" +
+            "}");
+        testSuccess(base.resolve("hello").resolve("World.java"), "Hello World! [1, 2, 3]\n");
+    }
+
+    @Test
+    public void testMainNotPublic(Path base) throws IOException {
+        tb.writeJavaFiles(base,
+            "package hello;\n" +
+            "import java.util.Arrays;\n" +
+            "class World {\n" +
+            "    static void main(String... args) {\n" +
+            "        System.out.println(\"Hello World! \" + Arrays.toString(args));\n" +
+            "    }\n" +
+            "}");
+        testSuccess(base.resolve("hello").resolve("World.java"), "Hello World! [1, 2, 3]\n");
+    }
+
+    @Test
+    public void testMainNotStatic(Path base) throws IOException {
+        tb.writeJavaFiles(base,
+            "package hello;\n" +
+            "import java.util.Arrays;\n" +
+            "class World {\n" +
+            "    public void main(String... args) {\n" +
+            "        System.out.println(\"Hello World! \" + Arrays.toString(args));\n" +
+            "    }\n" +
+            "}");
+        testSuccess(base.resolve("hello").resolve("World.java"), "Hello World! [1, 2, 3]\n");
     }
 
     /*
@@ -299,7 +343,7 @@ public class SourceLauncherTest extends TestRunner {
             file + ":1: error: illegal character: '#'\n" +
             "#!/usr/bin/java --source " + thisVersion + "\n" +
             "^\n" +
-            file + ":1: error: class, interface, enum, or record expected\n" +
+            file + ":1: error: class, interface, annotation type, enum, record, method or field expected\n" +
             "#!/usr/bin/java --source " + thisVersion + "\n" +
             "  ^\n" +
             "2 errors\n",
@@ -308,10 +352,18 @@ public class SourceLauncherTest extends TestRunner {
 
     @Test
     public void testNoClass(Path base) throws IOException {
-        Files.createDirectories(base);
-        Path file = base.resolve("NoClass.java");
+        var path = Files.createDirectories(base.resolve("p"));
+        Path file = path.resolve("NoClass.java");
         Files.write(file, List.of("package p;"));
         testError(file, "", "error: no class declared in source file");
+    }
+
+    @Test
+    public void testMismatchOfPathAndPackage(Path base) throws IOException {
+        Files.createDirectories(base);
+        Path file = base.resolve("MismatchOfPathAndPackage.java");
+        Files.write(file, List.of("package p; class MismatchOfPathAndPackage {}"));
+        testError(file, "", "error: end of path to source file does not match its package name p: " + file);
     }
 
     @Test
@@ -505,7 +557,7 @@ public class SourceLauncherTest extends TestRunner {
             file + ":1: error: illegal character: '#'\n" +
             "#/usr/bin/java --source " + thisVersion + "\n" +
             "^\n" +
-            file + ":1: error: class, interface, enum, or record expected\n" +
+            file + ":1: error: class, interface, annotation type, enum, record, method or field expected\n" +
             "#/usr/bin/java --source " + thisVersion + "\n" +
             "  ^\n" +
             "2 errors\n",
@@ -541,41 +593,24 @@ public class SourceLauncherTest extends TestRunner {
         List<String> log = new JavaTask(tb)
                 .vmOptions("--enable-preview")
                 .className(base.resolve("HelloWorld.java").toString())
-                .run(Task.Expect.FAIL)
-                .getOutputLines(Task.OutputKind.STDERR);
-        log = log.stream().filter(s->!s.matches("^Picked up .*JAVA.*OPTIONS:.*")).collect(Collectors.toList());
-        checkEqual("stderr", log, List.of("error: --enable-preview must be used with --source"));
+                .run(Task.Expect.SUCCESS)
+                .getOutputLines(Task.OutputKind.STDOUT);
+        checkEqual("stdout", log, List.of("Hello World! []"));
     }
 
     @Test
     public void testNoMain(Path base) throws IOException {
         tb.writeJavaFiles(base, "class NoMain { }");
         testError(base.resolve("NoMain.java"), "",
-                "error: can't find main(String[]) method in class: NoMain");
+                "error: can't find main(String[]) or main() method in class: NoMain");
     }
 
     @Test
     public void testMainBadParams(Path base) throws IOException {
         tb.writeJavaFiles(base,
-                "class BadParams { public static void main() { } }");
+                "class BadParams { public static void main(int n) { } }");
         testError(base.resolve("BadParams.java"), "",
-                "error: can't find main(String[]) method in class: BadParams");
-    }
-
-    @Test
-    public void testMainNotPublic(Path base) throws IOException {
-        tb.writeJavaFiles(base,
-                "class NotPublic { static void main(String... args) { } }");
-        testError(base.resolve("NotPublic.java"), "",
-                "error: 'main' method is not declared 'public static'");
-    }
-
-    @Test
-    public void testMainNotStatic(Path base) throws IOException {
-        tb.writeJavaFiles(base,
-                "class NotStatic { public void main(String... args) { } }");
-        testError(base.resolve("NotStatic.java"), "",
-                "error: 'main' method is not declared 'public static'");
+                "error: can't find main(String[]) or main() method in class: BadParams");
     }
 
     @Test
@@ -583,7 +618,7 @@ public class SourceLauncherTest extends TestRunner {
         tb.writeJavaFiles(base,
                 "class NotVoid { public static int main(String... args) { return 0; } }");
         testError(base.resolve("NotVoid.java"), "",
-                "error: 'main' method is not declared with a return type of 'void'");
+                "error: can't find main(String[]) or main() method in class: NotVoid");
     }
 
     @Test
@@ -596,6 +631,53 @@ public class SourceLauncherTest extends TestRunner {
                 "^\n" +
                 "1 error\n",
                 "error: compilation failed");
+    }
+
+    @Test
+    public void testNoRecompileWithSuggestions(Path base) throws IOException {
+        tb.writeJavaFiles(base,
+            "class NoRecompile {\n" +
+            "    void use(String s) {}\n" +
+            "    void test() {\n" +
+            "        use(1);\n" +
+            "    }\n" +
+            "    <T> void test(T t, Object o) {\n" +
+            "        T t1 = (T) o;\n" +
+            "    }\n" +
+            "    static class Generic<T> {\n" +
+            "        T t;\n" +
+            "        void raw(Generic raw) {\n" +
+            "            raw.t = \"\";\n" +
+            "        }\n" +
+            "    }\n" +
+            "    void deprecation() {\n" +
+            "        Thread.currentThread().stop();\n" +
+            "    }\n" +
+            "    void preview(Object o) {\n" +
+            "      if (o instanceof String s) {\n" +
+            "          System.out.println(s);\n" +
+            "      }\n" +
+            "    }\n" +
+            "}");
+        Result r = run(base.resolve("NoRecompile.java"), Collections.emptyList(), Collections.emptyList());
+        if (r.stdErr.contains("recompile with")) {
+            error("Unexpected recompile suggestions in error output: " + r.stdErr);
+        }
+    }
+
+    @Test
+    public void testNoOptionsWarnings(Path base) throws IOException {
+        tb.writeJavaFiles(base, "public class Main { public static void main(String... args) {}}");
+        String log = new JavaTask(tb)
+                .vmOptions("--source", "21")
+                .includeStandardOptions(false) // Do not inherit --enable-preview
+                .className(base.resolve("Main.java").toString())
+                .run(Task.Expect.SUCCESS)
+                .getOutput(Task.OutputKind.STDERR);
+
+        if (log.contains("warning: [options]")) {
+            error("Unexpected options warning in error output: " + log);
+        }
     }
 
     void testError(Path file, String expectStdErr, String expectFault) throws IOException {
@@ -634,6 +716,232 @@ public class SourceLauncherTest extends TestRunner {
                 "at Thrower.main(Thrower.java:4)");
     }
 
+    /*
+     * Tests in which main throws a traceless exception.
+     */
+    @Test
+    public void testTracelessTargetException(Path base) throws IOException {
+        tb.writeJavaFiles(base, """
+            class TestLauncherException extends RuntimeException {
+                TestLauncherException() {
+                    super("No trace", null, true, false); // No writable trace
+                }
+
+                public static void main(String... args) {
+                    throw new TestLauncherException();
+                }
+            }
+            """);
+        Path file = base.resolve("TestLauncherException.java");
+        SourceLauncherTest.Result r = run(file, List.of(), List.of("3"));
+        checkEmpty("stdout", r.stdOut());
+        checkEmpty("stderr", r.stdErr());
+        checkTrace("exception", r.exception(), "TestLauncherException: No trace");
+    }
+
+    @Test
+    public void testNoDuplicateIncubatorWarning(Path base) throws Exception {
+        Path module = base.resolve("lib");
+        Path moduleSrc = module.resolve("src");
+        Path moduleClasses = module.resolve("classes");
+        Files.createDirectories(moduleClasses);
+        tb.cleanDirectory(moduleClasses);
+        tb.writeJavaFiles(moduleSrc, "module test {}");
+        new JavacTask(tb)
+                .outdir(moduleClasses)
+                .files(tb.findJavaFiles(moduleSrc))
+                .run()
+                .writeAll();
+        markModuleAsIncubator(moduleClasses.resolve("module-info.class"));
+        tb.writeJavaFiles(base, "public class Main { public static void main(String... args) {}}");
+        String log = new JavaTask(tb)
+                .vmOptions("--module-path", moduleClasses.toString(),
+                           "--add-modules", "test")
+                .className(base.resolve("Main.java").toString())
+                .run(Task.Expect.SUCCESS)
+                .writeAll()
+                .getOutput(Task.OutputKind.STDERR);
+
+        int numberOfWarnings = log.split("WARNING").length - 1;
+
+        if (log.contains("warning:") || numberOfWarnings != 1) {
+            error("Unexpected warning in error output: " + log);
+        }
+
+        List<String> compileLog = new JavacTask(tb)
+                .options("--module-path", moduleClasses.toString(),
+                         "--add-modules", "test",
+                         "-XDrawDiagnostics",
+                         "-XDsourceLauncher",
+                         "-XDshould-stop.at=FLOW")
+                .files(base.resolve("Main.java").toString())
+                .run(Task.Expect.SUCCESS)
+                .writeAll()
+                .getOutputLines(Task.OutputKind.DIRECT);
+
+        List<String> expectedOutput = List.of(
+                "- compiler.warn.incubating.modules: test",
+                "1 warning"
+        );
+
+        if (!expectedOutput.equals(compileLog)) {
+            error("Unexpected options : " + compileLog);
+        }
+    }
+        //where:
+        private static void markModuleAsIncubator(Path moduleInfoFile) throws Exception {
+            ClassModel cf = ClassFile.of().parse(moduleInfoFile);
+            ModuleResolutionAttribute newAttr = ModuleResolutionAttribute.of(WARN_INCUBATING);
+            byte[] newBytes = ClassFile.of().transformClass(cf,
+                    ClassTransform.endHandler(classBuilder -> classBuilder.with(newAttr)));
+            try (OutputStream out = Files.newOutputStream(moduleInfoFile)) {
+                out.write(newBytes);
+            }
+        }
+
+    @Test
+    public void testPrivateConstructor(Path base) throws IOException {
+        tb.writeJavaFiles(base,
+                """
+                class PrivateConstructor {
+                    private PrivateConstructor() {}
+                    void main() {}
+                }
+                """);
+        testError(base.resolve("PrivateConstructor.java"), "",
+                """
+                error: no non-private zero argument constructor found in class PrivateConstructor
+                remove private from existing constructor or define as:
+                   public PrivateConstructor()""");
+    }
+
+    @Test
+    public void testAbstractClassInstanceMain(Path base) throws IOException {
+        tb.writeJavaFiles(base,
+                          """
+                          public abstract class AbstractMain {
+                              void main(String[] args) {}
+                          }
+                          """);
+        testError(base.resolve("AbstractMain.java"), "",
+                "error: abstract class: AbstractMain can not be instantiated");
+    }
+
+    @Test
+    public void testWrongMainPrivate(Path base) throws IOException {
+        tb.writeJavaFiles(base,
+                          """
+                          public class WrongMainPrivate {
+                              private static void main(String[] args) {}
+                              void main() {
+                                  System.out.println("correct");
+                              }
+                          }
+                          """);
+        testSuccess(base.resolve("WrongMainPrivate.java"),
+                    "correct\n");
+    }
+
+    @Test
+    public void testWrongMainPrivateInstance(Path base) throws IOException {
+        tb.writeJavaFiles(base,
+                          """
+                          public class WrongMainPrivate {
+                              private void main(String[] args) {}
+                              void main() {
+                                  System.out.println("correct");
+                              }
+                          }
+                          """);
+        testSuccess(base.resolve("WrongMainPrivate.java"),
+                    "correct\n");
+    }
+
+    @Test
+    public void testWrongMainReturnType(Path base) throws IOException {
+        tb.writeJavaFiles(base,
+                          """
+                          public class WrongMainReturnType {
+                              public static int main(String[] args) {
+                                  return -1;
+                              }
+                              void main() {
+                                  System.out.println("correct");
+                              }
+                          }
+                          """);
+        testSuccess(base.resolve("WrongMainReturnType.java"),
+                    "correct\n");
+    }
+
+    @Test
+    public void testWrongMainReturnTypeInstance(Path base) throws IOException {
+        tb.writeJavaFiles(base,
+                          """
+                          public class WrongMainReturnType {
+                              public int main(String[] args) {
+                                  return -1;
+                              }
+                              void main() {
+                                  System.out.println("correct");
+                              }
+                          }
+                          """);
+        testSuccess(base.resolve("WrongMainReturnType.java"),
+                    "correct\n");
+    }
+
+    @Test
+    public void testInheritedMain(Path base) throws IOException {
+        tb.writeJavaFiles(base,
+            """
+            class Sub extends Super {}
+            """,
+            """
+            class Super {
+                void main() {
+                    System.out.println(getClass().getName());
+                }
+            }
+            """);
+        testSuccess(base.resolve("Sub.java"),
+                    "Sub\n");
+    }
+
+    @Test
+    public void testInheritedMainFromAbstract(Path base) throws IOException {
+        tb.writeJavaFiles(base,
+            """
+            class Sub extends Super {}
+            """,
+            """
+            abstract class Super {
+                void main() {
+                    System.out.println(getClass().getName());
+                }
+            }
+            """);
+        testSuccess(base.resolve("Sub.java"),
+                    "Sub\n");
+    }
+
+    @Test
+    public void testInheritedMainFromInterface(Path base) throws IOException {
+        tb.writeJavaFiles(base,
+            """
+            public class Sub implements Super {}
+            """,
+            """
+            public interface Super {
+                default void main() {
+                    System.out.println(getClass().getName());
+                }
+            }
+            """);
+        testSuccess(base.resolve("Sub.java"),
+                    "Sub\n");
+    }
+
     Result run(Path file, List<String> runtimeArgs, List<String> appArgs) {
         List<String> args = new ArrayList<>();
         args.add(file.toString());
@@ -645,7 +953,7 @@ public class SourceLauncherTest extends TestRunner {
             System.setOut(out);
             StringWriter sw = new StringWriter();
             try (PrintWriter err = new PrintWriter(sw, true)) {
-                Main m = new Main(err);
+                SourceLauncher m = new SourceLauncher(err);
                 m.run(toArray(runtimeArgs), toArray(args));
                 return new Result(baos.toString(), sw.toString(), null);
             } catch (Throwable t) {
@@ -691,16 +999,21 @@ public class SourceLauncherTest extends TestRunner {
     }
 
     void checkFault(String name, Throwable found, String expect) {
-        expect = expect.replace("\n", tb.lineSeparator);
         out.println(name + ": " + found);
         if (found == null) {
-            error("No exception thrown; expected Main.Fault");
+            error("No exception thrown; expected Fault");
         } else {
-            if (!(found instanceof Main.Fault)) {
-                error("Unexpected exception; expected Main.Fault");
+            if (!(found instanceof Fault)) {
+                error("Unexpected exception; expected Fault");
             }
-            if (!(found.getMessage().equals(expect))) {
-                error("Unexpected detail message; expected: " + expect);
+            String actual = found.getMessage();
+            List<String> actualLines = actual.lines().toList();
+            List<String> expectLines = expect.lines().toList();
+            if (!(actualLines.equals(expectLines))) {
+                error("Unexpected detail message; expected: \n"
+                      + expect.indent(2)
+                      + "\nactual:\n"
+                      + actual.indent(2));
             }
         }
     }
@@ -729,15 +1042,5 @@ public class SourceLauncherTest extends TestRunner {
         return list.toArray(new String[list.size()]);
     }
 
-    class Result {
-        private final String stdOut;
-        private final String stdErr;
-        private final Throwable exception;
-
-        Result(String stdOut, String stdErr, Throwable exception) {
-            this.stdOut = stdOut;
-            this.stdErr = stdErr;
-            this.exception = exception;
-        }
-    }
+    record Result(String stdOut, String stdErr, Throwable exception) {}
 }

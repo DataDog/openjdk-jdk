@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,12 +21,24 @@
  * questions.
  */
 
+import java.net.InetAddress;
 import java.security.Provider;
 import java.security.Security;
 
 public class TestJSSE {
 
-    private static final String LOCAL_IP = "127.0.0.1";
+    /*
+     * Enables the JSSE system debugging system property:
+     *
+     *     -Djavax.net.debug=ssl,record
+     *
+     * This gives a lot of low-level information about operations underway,
+     * including specific handshake messages, and might be best examined
+     * after gaining some familiarity with this application.
+     */
+    private static final boolean debug = false;
+
+    private static final String LOCAL_IP = InetAddress.getLoopbackAddress().getHostAddress();
 
     public static void main(String... args) throws Exception {
         // reset the security property to make sure that the algorithms
@@ -34,7 +46,9 @@ public class TestJSSE {
         Security.setProperty("jdk.tls.disabledAlgorithms", "");
 
         // enable debug output
-        System.setProperty("javax.net.debug", "ssl,record");
+        if (debug) {
+            System.setProperty("javax.net.debug", "ssl,record");
+        }
 
         String srvProtocol = System.getProperty("SERVER_PROTOCOL");
         String clnProtocol = System.getProperty("CLIENT_PROTOCOL");

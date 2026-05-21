@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,11 +31,15 @@
 
 package sun.security.krb5;
 
+import java.io.Serial;
+import java.util.Objects;
+
 import sun.security.krb5.internal.Krb5;
 import sun.security.krb5.internal.KRBError;
 
 public class KrbException extends Exception {
 
+    @Serial
     private static final long serialVersionUID = -4993302876451928596L;
 
     private int returnCode;
@@ -133,12 +137,7 @@ public class KrbException extends Exception {
     }
 
     @Override public int hashCode() {
-        int result = 17;
-        result = 37 * result + returnCode;
-        if (error != null) {
-            result = 37 * result + error.hashCode();
-        }
-        return result;
+        return Objects.hash(returnCode, error);
     }
 
     @Override public boolean equals(Object obj) {
@@ -146,15 +145,8 @@ public class KrbException extends Exception {
             return true;
         }
 
-        if (!(obj instanceof KrbException)) {
-            return false;
-        }
-
-        KrbException other = (KrbException)obj;
-        if (returnCode != other.returnCode) {
-            return false;
-        }
-        return (error == null)?(other.error == null):
-            (error.equals(other.error));
+        return obj instanceof KrbException other
+                && returnCode == other.returnCode
+                && Objects.equals(error, other.error);
     }
 }

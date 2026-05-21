@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018, Red Hat, Inc. All rights reserved.
+ * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +23,7 @@
  *
  */
 
-/* @test TestPinnedGarbage
+/* @test id=passive
  * @summary Test that garbage in the pinned region does not crash VM
  * @key randomness
  * @requires vm.gc.Shenandoah
@@ -39,7 +40,7 @@
  *      TestPinnedGarbage
  */
 
-/* @test TestPinnedGarbage
+/* @test id=aggressive
  * @summary Test that garbage in the pinned region does not crash VM
  * @key randomness
  * @requires vm.gc.Shenandoah
@@ -48,10 +49,32 @@
  * @run main/othervm/native -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions -Xmx128m
  *      -XX:+UseShenandoahGC -XX:ShenandoahGCHeuristics=aggressive
  *      TestPinnedGarbage
- *
+ */
+
+/* @test id=verify
+ * @summary Test that garbage in the pinned region does not crash VM
+ * @key randomness
+ * @requires vm.gc.Shenandoah
+ * @library /test/lib
  * @run main/othervm/native -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions -Xmx128m
  *      -XX:+UseShenandoahGC
  *      -XX:+ShenandoahVerify
+ *      TestPinnedGarbage
+ */
+
+/* @test id=generational
+ * @summary Test that garbage in the pinned region does not crash VM
+ * @key randomness
+ * @requires vm.gc.Shenandoah
+ * @library /test/lib
+ *
+ * @run main/othervm/native -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions -Xmx128m
+ *      -XX:+UseShenandoahGC -XX:ShenandoahGCMode=generational
+ *      -XX:+ShenandoahVerify
+ *      TestPinnedGarbage
+ *
+ * @run main/othervm/native -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions -Xmx128m
+ *      -XX:+UseShenandoahGC -XX:ShenandoahGCMode=generational
  *      TestPinnedGarbage
  */
 

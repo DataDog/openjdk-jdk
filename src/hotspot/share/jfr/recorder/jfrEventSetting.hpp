@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,9 @@
 #ifndef SHARE_JFR_RECORDER_JFREVENTSETTING_HPP
 #define SHARE_JFR_RECORDER_JFREVENTSETTING_HPP
 
-#include "jni.h"
 #include "jfr/utilities/jfrAllocation.hpp"
 #include "jfrfiles/jfrEventControl.hpp"
+#include "jni.h"
 
 //
 // Native event settings as an associative array using the event id as key.
@@ -36,6 +36,7 @@ class JfrEventSetting : AllStatic {
  private:
   static JfrNativeSettings _jvm_event_settings;
   static jfrNativeEventSetting& setting(JfrEventId event_id);
+  static bool _internal_types;
 
  public:
   static void set_enabled(jlong event_id, bool enabled);
@@ -44,10 +45,13 @@ class JfrEventSetting : AllStatic {
   static bool has_stacktrace(JfrEventId event_id);
   static bool set_threshold(jlong event_id, jlong threshold_ticks);
   static jlong threshold(JfrEventId event_id);
-  static bool set_cutoff(jlong event_id, jlong cutoff_ticks);
+  static void set_miscellaneous(jlong event_id, jlong cutoff_ticks);
   static jlong cutoff(JfrEventId event_id);
+  static jlong level(JfrEventId event_id);
   static bool is_large(JfrEventId event_id);
   static void set_large(JfrEventId event_id);
+  static void unhide_internal_types();
+  static bool is_internal_types_visible();
 
   DEBUG_ONLY(static bool bounds_check_event(jlong id);)
 };

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,7 +36,7 @@ import javadoc.tester.JavadocTester;
 public class TestHtmlTableStyles extends JavadocTester {
 
     public static void main(String... args) throws Exception {
-        TestHtmlTableStyles tester = new TestHtmlTableStyles();
+        var tester = new TestHtmlTableStyles();
         tester.runTests();
     }
 
@@ -50,7 +50,7 @@ public class TestHtmlTableStyles extends JavadocTester {
         checkOutput(Output.OUT, true,
                 "attribute not supported in HTML5: summary",
                 """
-                    attribute border for table only accepts "" or "1", use CSS instead: BORDER""",
+                    attribute "border" for table only accepts "" or "1": border""",
                 "attribute not supported in HTML5: cellpadding",
                 "attribute not supported in HTML5: cellspacing",
                 "attribute not supported in HTML5: align");
@@ -65,11 +65,11 @@ public class TestHtmlTableStyles extends JavadocTester {
                     <div class="caption"><span>Constructors</span></div>
                     <div class="summary-table two-column-summary">""",
                 """
-                    <div class="summary-table three-column-summary" aria-labelledby="method-summary-table-tab0">""");
+                    <div class="summary-table three-column-summary">""");
 
         checkOutput("pkg1/package-summary.html", true,
                 """
-                    <div class="caption"><span>Class Summary</span></div>
+                    <div class="caption"><span>Classes</span></div>
                     <div class="summary-table two-column-summary">""");
 
         checkOutput("pkg1/class-use/TestTable.html", true,
@@ -85,7 +85,7 @@ public class TestHtmlTableStyles extends JavadocTester {
         checkOutput("deprecated-list.html", true,
             """
                     <div id="method">
-                    <div class="caption"><span>Methods</span></div>
+                    <div class="caption"><span>Deprecated Methods</span></div>
                     <div class="summary-table two-column-summary">""");
 
         checkOutput("constant-values.html", true,

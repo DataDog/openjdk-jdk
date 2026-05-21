@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,7 @@
  *
  */
 
-#include "precompiled.hpp"
-#include "classfile/systemDictionary.hpp"
+#include "classfile/vmClasses.hpp"
 #include "classfile/vmSymbols.hpp"
 #include "memory/resourceArea.hpp"
 #include "memory/universe.hpp"
@@ -39,7 +38,6 @@
 #include "services/management.hpp"
 
 volatile bool LowMemoryDetector::_enabled_for_collected_pools = false;
-volatile jint LowMemoryDetector::_disabled_count = 0;
 
 bool LowMemoryDetector::has_pending_requests() {
   assert(Notification_lock->owned_by_self(), "Must own Notification_lock");
@@ -48,12 +46,12 @@ bool LowMemoryDetector::has_pending_requests() {
   for (int i = 0; i < num_memory_pools; i++) {
     MemoryPool* pool = MemoryService::get_memory_pool(i);
     SensorInfo* sensor = pool->usage_sensor();
-    if (sensor != NULL) {
+    if (sensor != nullptr) {
       has_requests = has_requests || sensor->has_pending_requests();
     }
 
     SensorInfo* gc_sensor = pool->gc_usage_sensor();
-    if (gc_sensor != NULL) {
+    if (gc_sensor != nullptr) {
       has_requests = has_requests || gc_sensor->has_pending_requests();
     }
   }
@@ -70,10 +68,10 @@ void LowMemoryDetector::process_sensor_changes(TRAPS) {
     MemoryPool* pool = MemoryService::get_memory_pool(i);
     SensorInfo* sensor = pool->usage_sensor();
     SensorInfo* gc_sensor = pool->gc_usage_sensor();
-    if (sensor != NULL && sensor->has_pending_requests()) {
+    if (sensor != nullptr && sensor->has_pending_requests()) {
       sensor->process_pending_requests(CHECK);
     }
-    if (gc_sensor != NULL && gc_sensor->has_pending_requests()) {
+    if (gc_sensor != nullptr && gc_sensor->has_pending_requests()) {
       gc_sensor->process_pending_requests(CHECK);
     }
   }
@@ -89,7 +87,7 @@ void LowMemoryDetector::detect_low_memory() {
   for (int i = 0; i < num_memory_pools; i++) {
     MemoryPool* pool = MemoryService::get_memory_pool(i);
     SensorInfo* sensor = pool->usage_sensor();
-    if (sensor != NULL &&
+    if (sensor != nullptr &&
         pool->usage_threshold()->is_high_threshold_supported() &&
         pool->usage_threshold()->high_threshold() != 0) {
       MemoryUsage usage = pool->get_memory_usage();
@@ -108,7 +106,7 @@ void LowMemoryDetector::detect_low_memory() {
 // and also VMThread.
 void LowMemoryDetector::detect_low_memory(MemoryPool* pool) {
   SensorInfo* sensor = pool->usage_sensor();
-  if (sensor == NULL ||
+  if (sensor == nullptr ||
       !pool->usage_threshold()->is_high_threshold_supported() ||
       pool->usage_threshold()->high_threshold() == 0) {
     return;
@@ -130,7 +128,7 @@ void LowMemoryDetector::detect_low_memory(MemoryPool* pool) {
 // Only called by VMThread at GC time
 void LowMemoryDetector::detect_after_gc_memory(MemoryPool* pool) {
   SensorInfo* sensor = pool->gc_usage_sensor();
-  if (sensor == NULL ||
+  if (sensor == nullptr ||
       !pool->gc_usage_threshold()->is_high_threshold_supported() ||
       pool->gc_usage_threshold()->high_threshold() == 0) {
     return;
@@ -171,7 +169,7 @@ SensorInfo::SensorInfo() {
 }
 
 void SensorInfo::set_sensor(instanceOop sensor) {
-  assert(_sensor_obj.peek() == NULL, "Should be set only once");
+  assert(_sensor_obj.peek() == nullptr, "Should be set only once");
   _sensor_obj = OopHandle(Universe::vm_global(), sensor);
 }
 
@@ -297,7 +295,7 @@ void SensorInfo::process_pending_requests(TRAPS) {
 void SensorInfo::trigger(int count, TRAPS) {
   assert(count <= _pending_trigger_count, "just checking");
   Handle sensor_h(THREAD, _sensor_obj.resolve());
-  if (sensor_h() != NULL) {
+  if (sensor_h() != nullptr) {
     InstanceKlass* sensorKlass = Management::sun_management_Sensor_klass(CHECK);
     Symbol* trigger_method_signature;
 
@@ -311,7 +309,7 @@ void SensorInfo::trigger(int count, TRAPS) {
     // Sensor::trigger(int) instead.  The pending request will be processed
     // but no notification will be sent.
     if (HAS_PENDING_EXCEPTION) {
-       assert((PENDING_EXCEPTION->is_a(SystemDictionary::OutOfMemoryError_klass())), "we expect only an OOME here");
+       assert((PENDING_EXCEPTION->is_a(vmClasses::OutOfMemoryError_klass())), "we expect only an OOME here");
        CLEAR_PENDING_EXCEPTION;
        trigger_method_signature = vmSymbols::int_void_signature();
     } else {
@@ -330,7 +328,7 @@ void SensorInfo::trigger(int count, TRAPS) {
        // We just clear the OOM pending exception that we might have encountered
        // in Java's tiggerAction(), and continue with updating the counters since
        // the Java counters have been updated too.
-       assert((PENDING_EXCEPTION->is_a(SystemDictionary::OutOfMemoryError_klass())), "we expect only an OOME here");
+       assert((PENDING_EXCEPTION->is_a(vmClasses::OutOfMemoryError_klass())), "we expect only an OOME here");
        CLEAR_PENDING_EXCEPTION;
      }
   }
@@ -361,7 +359,7 @@ void SensorInfo::clear(int count, TRAPS) {
   }
 
   Handle sensor(THREAD, _sensor_obj.resolve());
-  if (sensor() != NULL) {
+  if (sensor() != nullptr) {
     InstanceKlass* sensorKlass = Management::sun_management_Sensor_klass(CHECK);
     JavaValue result(T_VOID);
     JavaCallArguments args(sensor);
@@ -380,7 +378,7 @@ void SensorInfo::clear(int count, TRAPS) {
 
 #ifndef PRODUCT
 void SensorInfo::print() {
-  tty->print_cr("%s count = " SIZE_FORMAT " pending_triggers = %d pending_clears = %d",
+  tty->print_cr("%s count = %zu pending_triggers = %d pending_clears = %d",
                 (_sensor_on ? "on" : "off"),
                 _sensor_count, _pending_trigger_count, _pending_clear_count);
 }

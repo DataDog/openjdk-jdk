@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,19 +25,15 @@
 
 package com.sun.imageio.plugins.bmp;
 
-import java.io.UnsupportedEncodingException;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import javax.imageio.ImageTypeSpecifier;
 import javax.imageio.metadata.IIOMetadata;
-import javax.imageio.metadata.IIOMetadataNode;
-import javax.imageio.metadata.IIOMetadataFormat;
 import javax.imageio.metadata.IIOMetadataFormatImpl;
-import org.w3c.dom.Node;
-import com.sun.imageio.plugins.common.I18N;
+import javax.imageio.metadata.IIOMetadataNode;
 
+import com.sun.imageio.plugins.common.I18N;
 import com.sun.imageio.plugins.common.ImageUtil;
+import org.w3c.dom.Node;
+
+import static java.nio.charset.StandardCharsets.ISO_8859_1;
 
 public class BMPMetadata extends IIOMetadata implements BMPConstants {
     public static final String nativeMetadataFormatName =
@@ -98,10 +94,12 @@ public class BMPMetadata extends IIOMetadata implements BMPConstants {
               null, null);
     }
 
+    @Override
     public boolean isReadOnly() {
         return true;
     }
 
+    @Override
     public Node getAsTree(String formatName) {
         if (formatName.equals(nativeMetadataFormatName)) {
             return getNativeTree();
@@ -114,11 +112,7 @@ public class BMPMetadata extends IIOMetadata implements BMPConstants {
     }
 
     private String toISO8859(byte[] data) {
-        try {
-            return new String(data, "ISO-8859-1");
-        } catch (UnsupportedEncodingException e) {
-            return "";
-        }
+        return new String(data, ISO_8859_1);
     }
 
     private Node getNativeTree() {
@@ -185,6 +179,7 @@ public class BMPMetadata extends IIOMetadata implements BMPConstants {
     }
 
     // Standard tree node methods
+    @Override
     protected IIOMetadataNode getStandardChromaNode() {
 
         if ((palette != null) && (paletteSize > 0)) {
@@ -210,6 +205,7 @@ public class BMPMetadata extends IIOMetadata implements BMPConstants {
         return null;
     }
 
+    @Override
     protected IIOMetadataNode getStandardCompressionNode() {
         IIOMetadataNode node = new IIOMetadataNode("Compression");
 
@@ -220,6 +216,7 @@ public class BMPMetadata extends IIOMetadata implements BMPConstants {
         return node;
     }
 
+    @Override
     protected IIOMetadataNode getStandardDataNode() {
         IIOMetadataNode node = new IIOMetadataNode("Data");
 
@@ -238,6 +235,7 @@ public class BMPMetadata extends IIOMetadata implements BMPConstants {
         return node;
     }
 
+    @Override
     protected IIOMetadataNode getStandardDimensionNode() {
         if (yPixelsPerMeter > 0.0F && xPixelsPerMeter > 0.0F) {
             IIOMetadataNode node = new IIOMetadataNode("Dimension");
@@ -259,14 +257,17 @@ public class BMPMetadata extends IIOMetadata implements BMPConstants {
         return null;
     }
 
+    @Override
     public void setFromTree(String formatName, Node root) {
         throw new IllegalStateException(I18N.getString("BMPMetadata1"));
     }
 
+    @Override
     public void mergeTree(String formatName, Node root) {
         throw new IllegalStateException(I18N.getString("BMPMetadata1"));
     }
 
+    @Override
     public void reset() {
         throw new IllegalStateException(I18N.getString("BMPMetadata1"));
     }

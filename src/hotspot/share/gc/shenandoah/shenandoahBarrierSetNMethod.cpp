@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2019, 2022, Red Hat, Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 
 #include "gc/shenandoah/shenandoahBarrierSetNMethod.hpp"
 #include "gc/shenandoah/shenandoahClosures.inline.hpp"
@@ -33,17 +32,26 @@
 #include "gc/shenandoah/shenandoahThreadLocalData.hpp"
 #include "memory/iterator.hpp"
 #include "memory/resourceArea.hpp"
+#include "runtime/threadWXSetters.inline.hpp"
 
 bool ShenandoahBarrierSetNMethod::nmethod_entry_barrier(nmethod* nm) {
-  ShenandoahReentrantLock* lock = ShenandoahNMethod::lock_for_nmethod(nm);
-  assert(lock != NULL, "Must be");
-  ShenandoahReentrantLocker locker(lock);
-
   if (!is_armed(nm)) {
     // Some other thread got here first and healed the oops
-    // and disarmed the nmethod.
+    // and disarmed the nmethod. No need to continue.
     return true;
   }
+
+  ShenandoahNMethodLock* lock = ShenandoahNMethod::lock_for_nmethod(nm);
+  assert(lock != nullptr, "Must be");
+  ShenandoahNMethodLocker locker(lock);
+
+  if (!is_armed(nm)) {
+    // Some other thread managed to complete while we were
+    // waiting for lock. No need to continue.
+    return true;
+  }
+
+  MACOS_AARCH64_ONLY(ThreadWXEnable wx(WXWrite, Thread::current());)
 
   if (nm->is_unloading()) {
     // We don't need to take the lock when unlinking nmethods from
@@ -57,20 +65,13 @@ bool ShenandoahBarrierSetNMethod::nmethod_entry_barrier(nmethod* nm) {
     return false;
   }
 
-  // Heal oops and disarm
+  // Heal oops
   ShenandoahNMethod::heal_nmethod(nm);
+
+  // CodeCache unloading support
+  nm->mark_as_maybe_on_stack();
+
+  // Disarm
   ShenandoahNMethod::disarm_nmethod(nm);
   return true;
-}
-
-int ShenandoahBarrierSetNMethod::disarmed_value() const {
-  return ShenandoahCodeRoots::disarmed_value();
-}
-
-ByteSize ShenandoahBarrierSetNMethod::thread_disarmed_offset() const {
-  return ShenandoahThreadLocalData::disarmed_value_offset();
-}
-
-int* ShenandoahBarrierSetNMethod::disarmed_value_address() const {
-  return ShenandoahCodeRoots::disarmed_value_address();
 }

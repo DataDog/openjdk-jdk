@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,15 +34,13 @@
 
 class ClassLoaderDataGraph : public AllStatic {
   friend class ClassLoaderData;
-  friend class ClassLoaderDataGraphMetaspaceIterator;
-  friend class ClassLoaderDataGraphKlassIteratorAtomic;
-  friend class ClassLoaderDataGraphKlassIteratorStatic;
-  friend class ClassLoaderDataGraphIterator;
+  friend class ClassLoaderDataGraphIteratorAtomic;
   friend class VMStructs;
  private:
-  // All CLDs (except the null CLD) can be reached by walking _head->_next->...
+  class ClassLoaderDataGraphIterator;
+
+  // All CLDs (except unlinked CLDs) can be reached by walking _head->_next->...
   static ClassLoaderData* volatile _head;
-  static ClassLoaderData* _unloading;
 
   // Set if there's anything to purge in the deallocate lists or previous versions
   // during a safepoint after class unloading in a full GC.
@@ -65,26 +63,30 @@ class ClassLoaderDataGraph : public AllStatic {
   static void purge(bool at_safepoint);
   static void clear_claimed_marks();
   static void clear_claimed_marks(int claim);
-  // Iteration through CLDG inside a safepoint; GC support
+  static void verify_claimed_marks_cleared(int claim);
+  // Iteration through CLDG; GC support
   static void cld_do(CLDClosure* cl);
-  static void cld_unloading_do(CLDClosure* cl);
   static void roots_cld_do(CLDClosure* strong, CLDClosure* weak);
   static void always_strong_cld_do(CLDClosure* cl);
   // Iteration through CLDG not by GC.
+  // All the do suffixed functions do not keep the CLD alive. Any CLD OopHandles
+  // (modules, mirrors, resolved refs) resolved must be treated as no keepalive.
+  // And requires that its CLD's holder is kept alive if they escape the
+  // caller's safepoint or ClassLoaderDataGraph_lock critical section.
+  // The do_keepalive suffixed functions will keep all CLDs alive.
   static void loaded_cld_do(CLDClosure* cl);
   // klass do
   // Walking classes through the ClassLoaderDataGraph include array classes.  It also includes
   // classes that are allocated but not loaded, classes that have errors, and scratch classes
   // for redefinition.  These classes are removed during the next class unloading.
-  // Walking the ClassLoaderDataGraph also includes hidden and unsafe anonymous classes.
+  // Walking the ClassLoaderDataGraph also includes hidden classes.
   static void classes_do(KlassClosure* klass_closure);
   static void classes_do(void f(Klass* const));
   static void methods_do(void f(Method*));
+  static void modules_do_keepalive(void f(ModuleEntry*));
   static void modules_do(void f(ModuleEntry*));
-  static void modules_unloading_do(void f(ModuleEntry*));
   static void packages_do(void f(PackageEntry*));
-  static void packages_unloading_do(void f(PackageEntry*));
-  static void loaded_classes_do(KlassClosure* klass_closure);
+  static void loaded_classes_do_keepalive(KlassClosure* klass_closure);
   static void classes_unloading_do(void f(Klass* const));
   static bool do_unloading();
 
@@ -96,23 +98,9 @@ class ClassLoaderDataGraph : public AllStatic {
   // Called from VMOperation
   static void walk_metadata_and_clean_metaspaces();
 
-  // dictionary do
-  // Iterate over all klasses in dictionary, but
-  // just the classes from defining class loaders.
-  static void dictionary_classes_do(void f(InstanceKlass*));
-  // Added for initialize_itable_for_klass to handle exceptions.
-  static void dictionary_classes_do(void f(InstanceKlass*, TRAPS), TRAPS);
-
-  // VM_CounterDecay iteration support
-  static InstanceKlass* try_get_next_class();
-  static void adjust_saved_class(ClassLoaderData* cld);
-  static void adjust_saved_class(Klass* klass);
-
   static void verify_dictionary();
   static void print_dictionary(outputStream* st);
   static void print_table_statistics(outputStream* st);
-
-  static int resize_dictionaries();
 
   static bool has_metaspace_oom()           { return _metaspace_oom; }
   static void set_metaspace_oom(bool value) { _metaspace_oom = value; }
@@ -152,14 +140,14 @@ public:
   }
 };
 
-// An iterator that distributes Klasses to parallel worker threads.
-class ClassLoaderDataGraphKlassIteratorAtomic : public StackObj {
- Klass* volatile _next_klass;
- public:
-  ClassLoaderDataGraphKlassIteratorAtomic();
-  Klass* next_klass();
- private:
-  static Klass* next_klass_in_cldg(Klass* klass);
+// An iterator that distributes Klasses to parallel worker threads based on CLDs.
+class ClassLoaderDataGraphIteratorAtomic : public StackObj {
+  ClassLoaderData* volatile _cld;
+
+public:
+  ClassLoaderDataGraphIteratorAtomic();
+
+  ClassLoaderData* next();
 };
 
 #endif // SHARE_CLASSFILE_CLASSLOADERDATAGRAPH_HPP

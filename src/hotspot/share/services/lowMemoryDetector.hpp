@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,9 @@
 #ifndef SHARE_SERVICES_LOWMEMORYDETECTOR_HPP
 #define SHARE_SERVICES_LOWMEMORYDETECTOR_HPP
 
-#include "memory/allocation.hpp"
+#include "memory/allStatic.hpp"
 #include "oops/oopHandle.hpp"
-#include "runtime/atomic.hpp"
+#include "runtime/atomicAccess.hpp"
 #include "services/memoryPool.hpp"
 #include "services/memoryService.hpp"
 #include "services/memoryUsage.hpp"
@@ -61,8 +61,7 @@
 //
 // May need to deal with hysteresis effect.
 //
-// Memory detection code runs in the Notification thread or
-// ServiceThread depending on UseNotificationThread flag.
+// Memory detection code runs in the Notification thread.
 
 class OopClosure;
 class MemoryPool;
@@ -211,19 +210,13 @@ public:
 };
 
 class LowMemoryDetector : public AllStatic {
-  friend class LowMemoryDetectorDisabler;
   friend class ServiceThread;
   friend class NotificationThread;
 private:
   // true if any collected heap has low memory detection enabled
   static volatile bool _enabled_for_collected_pools;
-  // > 0 if temporary disabed
-  static volatile jint _disabled_count;
 
   static bool has_pending_requests();
-  static bool temporary_disabled() { return _disabled_count > 0; }
-  static void disable() { Atomic::inc(&_disabled_count); }
-  static void enable() { Atomic::dec(&_disabled_count); }
   static void process_sensor_changes(TRAPS);
 
 public:
@@ -235,7 +228,7 @@ public:
     // low memory detection is enabled for collected memory pools
     // iff one of the collected memory pool has a sensor and the
     // threshold set non-zero
-    if (pool->usage_sensor() == NULL) {
+    if (pool->usage_sensor() == nullptr) {
       return false;
     } else {
       ThresholdSupport* threshold_support = pool->usage_threshold();
@@ -244,19 +237,13 @@ public:
     }
   }
 
-  // indicates if low memory detection is enabled for any collected
-  // memory pools
-  static inline bool is_enabled_for_collected_pools() {
-    return !temporary_disabled() && _enabled_for_collected_pools;
-  }
-
   // recompute enabled flag
   static void recompute_enabled_for_collected_pools();
 
   // low memory detection for collected memory pools.
   static inline void detect_low_memory_for_collected_pools() {
     // no-op if low memory detection not enabled
-    if (!is_enabled_for_collected_pools()) {
+    if (!_enabled_for_collected_pools) {
       return;
     }
     int num_memory_pools = MemoryService::num_memory_pools();
@@ -273,19 +260,6 @@ public:
         }
       }
     }
-  }
-};
-
-class LowMemoryDetectorDisabler: public StackObj {
-public:
-  LowMemoryDetectorDisabler()
-  {
-    LowMemoryDetector::disable();
-  }
-  ~LowMemoryDetectorDisabler()
-  {
-    assert(LowMemoryDetector::temporary_disabled(), "should be disabled!");
-    LowMemoryDetector::enable();
   }
 };
 

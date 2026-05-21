@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -59,13 +59,12 @@
  */
 package test.java.time;
 
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertSame;
-import static org.testng.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.util.Set;
 
 /**
  * Base test class.
@@ -83,11 +82,15 @@ public abstract class AbstractTest {
     }
 
     protected static void assertImmutable(Class<?> cls) {
+        assertImmutable(cls, Set.of());
+    }
+
+    protected static void assertImmutable(Class<?> cls, Set<String> ignoreFields) {
         assertTrue(Modifier.isPublic(cls.getModifiers()));
         assertTrue(Modifier.isFinal(cls.getModifiers()));
         Field[] fields = cls.getDeclaredFields();
         for (Field field : fields) {
-            if (field.getName().contains("$") == false) {
+            if (!field.getName().contains("$") && !ignoreFields.contains(field.getName())) {
                 if (Modifier.isStatic(field.getModifiers())) {
                     assertTrue(Modifier.isFinal(field.getModifiers()), "Field:" + field.getName());
                 } else {

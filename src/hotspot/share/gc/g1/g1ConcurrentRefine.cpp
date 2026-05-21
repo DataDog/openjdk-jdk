@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,287 +22,466 @@
  *
  */
 
-#include "precompiled.hpp"
+#include "gc/g1/g1Analytics.hpp"
 #include "gc/g1/g1BarrierSet.hpp"
+#include "gc/g1/g1CardTableClaimTable.inline.hpp"
+#include "gc/g1/g1CollectedHeap.inline.hpp"
+#include "gc/g1/g1CollectionSet.hpp"
 #include "gc/g1/g1ConcurrentRefine.hpp"
+#include "gc/g1/g1ConcurrentRefineStats.inline.hpp"
+#include "gc/g1/g1ConcurrentRefineSweepTask.hpp"
 #include "gc/g1/g1ConcurrentRefineThread.hpp"
-#include "gc/g1/g1DirtyCardQueue.hpp"
+#include "gc/g1/g1HeapRegion.inline.hpp"
+#include "gc/g1/g1HeapRegionRemSet.inline.hpp"
+#include "gc/g1/g1Policy.hpp"
+#include "gc/shared/gc_globals.hpp"
+#include "gc/shared/gcTraceTime.inline.hpp"
+#include "gc/shared/workerThread.hpp"
 #include "logging/log.hpp"
 #include "memory/allocation.inline.hpp"
 #include "memory/iterator.hpp"
-#include "runtime/globals_extension.hpp"
 #include "runtime/java.hpp"
-#include "runtime/thread.hpp"
+#include "runtime/mutexLocker.hpp"
 #include "utilities/debug.hpp"
-#include "utilities/formatBuffer.hpp"
 #include "utilities/globalDefinitions.hpp"
-#include "utilities/pair.hpp"
+#include "utilities/ticks.hpp"
+
 #include <math.h>
 
-G1ConcurrentRefineThread* G1ConcurrentRefineThreadControl::create_refinement_thread(uint worker_id, bool initializing) {
-  G1ConcurrentRefineThread* result = NULL;
-  if (initializing || !InjectGCWorkerCreationFailure) {
-    result = new G1ConcurrentRefineThread(_cr, worker_id);
-  }
-  if (result == NULL || result->osthread() == NULL) {
-    log_warning(gc)("Failed to create refinement thread %u, no more %s",
-                    worker_id,
-                    result == NULL ? "memory" : "OS threads");
+G1ConcurrentRefineThread* G1ConcurrentRefineThreadControl::create_refinement_thread() {
+  G1ConcurrentRefineThread* result = nullptr;
+  result = G1ConcurrentRefineThread::create(_cr);
+  if (result == nullptr || result->osthread() == nullptr) {
+    log_warning(gc)("Failed to create refinement control thread, no more %s",
+                    result == nullptr ? "memory" : "OS threads");
+    if (result != nullptr) {
+      delete result;
+      result = nullptr;
+    }
   }
   return result;
 }
 
-G1ConcurrentRefineThreadControl::G1ConcurrentRefineThreadControl() :
-  _cr(NULL),
-  _threads(NULL),
-  _num_max_threads(0)
-{
-}
+G1ConcurrentRefineThreadControl::G1ConcurrentRefineThreadControl(uint max_num_threads) :
+  _cr(nullptr),
+  _control_thread(nullptr),
+  _workers(nullptr),
+  _max_num_threads(max_num_threads)
+{}
 
 G1ConcurrentRefineThreadControl::~G1ConcurrentRefineThreadControl() {
-  for (uint i = 0; i < _num_max_threads; i++) {
-    G1ConcurrentRefineThread* t = _threads[i];
-    if (t != NULL) {
-      delete t;
-    }
-  }
-  FREE_C_HEAP_ARRAY(G1ConcurrentRefineThread*, _threads);
+  delete _control_thread;
+  delete _workers;
 }
 
-jint G1ConcurrentRefineThreadControl::initialize(G1ConcurrentRefine* cr, uint num_max_threads) {
-  assert(cr != NULL, "G1ConcurrentRefine must not be NULL");
+jint G1ConcurrentRefineThreadControl::initialize(G1ConcurrentRefine* cr) {
+  assert(cr != nullptr, "G1ConcurrentRefine must not be null");
   _cr = cr;
-  _num_max_threads = num_max_threads;
 
-  _threads = NEW_C_HEAP_ARRAY(G1ConcurrentRefineThread*, num_max_threads, mtGC);
-
-  for (uint i = 0; i < num_max_threads; i++) {
-    if (UseDynamicNumberOfGCThreads && i != 0 /* Always start first thread. */) {
-      _threads[i] = NULL;
-    } else {
-      _threads[i] = create_refinement_thread(i, true);
-      if (_threads[i] == NULL) {
-        vm_shutdown_during_initialization("Could not allocate refinement threads.");
-        return JNI_ENOMEM;
-      }
+  if (is_refinement_enabled()) {
+    _control_thread = create_refinement_thread();
+    if (_control_thread == nullptr) {
+      vm_shutdown_during_initialization("Could not allocate refinement control thread");
+      return JNI_ENOMEM;
     }
+    _workers = new WorkerThreads("G1 Refinement Workers", max_num_threads());
+    _workers->initialize_workers();
   }
-
-  if (num_max_threads > 0) {
-    G1BarrierSet::dirty_card_queue_set().set_primary_refinement_thread(_threads[0]);
-  }
-
   return JNI_OK;
 }
 
-void G1ConcurrentRefineThreadControl::maybe_activate_next(uint cur_worker_id) {
-  assert(cur_worker_id < _num_max_threads,
-         "Activating another thread from %u not allowed since there can be at most %u",
-         cur_worker_id, _num_max_threads);
-  if (cur_worker_id == (_num_max_threads - 1)) {
-    // Already the last thread, there is no more thread to activate.
-    return;
-  }
+#ifdef ASSERT
+void G1ConcurrentRefineThreadControl::assert_current_thread_is_control_refinement_thread() const {
+  assert(Thread::current() == _control_thread, "Not refinement control thread");
+}
+#endif // ASSERT
 
-  uint worker_id = cur_worker_id + 1;
-  G1ConcurrentRefineThread* thread_to_activate = _threads[worker_id];
-  if (thread_to_activate == NULL) {
-    // Still need to create the thread...
-    _threads[worker_id] = create_refinement_thread(worker_id, false);
-    thread_to_activate = _threads[worker_id];
-  }
-  if (thread_to_activate != NULL) {
-    thread_to_activate->activate();
+void G1ConcurrentRefineThreadControl::activate() {
+  _control_thread->activate();
+}
+
+void G1ConcurrentRefineThreadControl::run_task(WorkerTask* task, uint num_workers) {
+  WithActiveWorkers w(_workers, num_workers);
+  _workers->run_task(task);
+}
+
+void G1ConcurrentRefineThreadControl::control_thread_do(ThreadClosure* tc) {
+  if (is_refinement_enabled()) {
+    tc->do_thread(_control_thread);
   }
 }
 
 void G1ConcurrentRefineThreadControl::worker_threads_do(ThreadClosure* tc) {
-  for (uint i = 0; i < _num_max_threads; i++) {
-    if (_threads[i] != NULL) {
-      tc->do_thread(_threads[i]);
-    }
+  if (is_refinement_enabled()) {
+    _workers->threads_do(tc);
   }
 }
 
 void G1ConcurrentRefineThreadControl::stop() {
-  for (uint i = 0; i < _num_max_threads; i++) {
-    if (_threads[i] != NULL) {
-      _threads[i]->stop();
+  if (is_refinement_enabled()) {
+    _control_thread->stop();
+  }
+}
+
+G1ConcurrentRefineSweepState::G1ConcurrentRefineSweepState(uint max_reserved_regions) :
+  _state(State::Idle),
+  _sweep_table(new G1CardTableClaimTable(G1CollectedHeap::get_chunks_per_region_for_merge())),
+  _stats()
+{
+  _sweep_table->initialize(max_reserved_regions);
+}
+
+G1ConcurrentRefineSweepState::~G1ConcurrentRefineSweepState() {
+  delete _sweep_table;
+}
+
+void G1ConcurrentRefineSweepState::enter_state(State state, Ticks timestamp) {
+  assert(state > State::Idle, "precondition");
+  assert(state != State::Last, "preconditon");
+  assert(_state == State(static_cast<uint>(state) - 1),
+         "must come from previous state but is %s", state_name(_state));
+
+  _state_start[static_cast<uint>(state)] = timestamp;
+  _state = state;
+}
+
+Tickspan G1ConcurrentRefineSweepState::time_since_start(Ticks completion_time) const {
+  assert(_state >= State::SwapGlobalCT, "precondition");
+  return completion_time - _state_start[static_cast<uint>(State::SwapGlobalCT)];
+}
+
+Tickspan G1ConcurrentRefineSweepState::time_until_state(State state) const {
+  assert(_state >= State::SwapGlobalCT, "precondition");
+  assert(state >= State::SwapGlobalCT, "precondition");
+  assert(state <= _state, "precondition");
+  return _state_start[static_cast<uint>(state)] - _state_start[static_cast<uint>(State::SwapGlobalCT)];
+}
+
+void G1ConcurrentRefineSweepState::reset_stats() {
+  stats()->reset();
+}
+
+void G1ConcurrentRefineSweepState::add_yield_during_sweep_duration(jlong duration) {
+  stats()->inc_yield_during_sweep_duration(duration);
+}
+
+bool G1ConcurrentRefineSweepState::swap_global_card_table() {
+  enter_state(State::SwapGlobalCT, Ticks::now());
+  _stats.reset();
+
+  GCTraceTime(Info, gc, refine) tm("Concurrent Refine Global Card Table Swap");
+
+  {
+    // We can't have any new threads being in the process of created while we
+    // swap the card table because we read the current card table state during
+    // initialization.
+    // A safepoint may occur during that time, so leave the STS temporarily.
+    SuspendibleThreadSetLeaver sts_leave;
+
+    MutexLocker mu(Threads_lock);
+    // A GC that advanced the epoch might have happened, which already switched
+    // the global card table. Do nothing.
+    if (is_in_progress()) {
+      G1BarrierSet::g1_barrier_set()->swap_global_card_table();
+    }
+  }
+
+  return is_in_progress();
+}
+
+bool G1ConcurrentRefineSweepState::swap_java_threads_ct() {
+  enter_state(State::SwapJavaThreadsCT, Ticks::now());
+
+  GCTraceTime(Info, gc, refine) tm("Concurrent Refine Java Thread CT swap");
+
+  {
+    // Need to leave the STS to avoid potential deadlock in the handshake.
+    SuspendibleThreadSetLeaver sts;
+
+    class G1SwapThreadCardTableClosure : public HandshakeClosure {
+    public:
+      G1SwapThreadCardTableClosure() : HandshakeClosure("G1 Java Thread CT swap") { }
+
+      virtual void do_thread(Thread* thread) {
+        G1BarrierSet* bs = G1BarrierSet::g1_barrier_set();
+        bs->update_card_table_base(thread);
+      }
+    } cl;
+    Handshake::execute(&cl);
+  }
+
+  return is_in_progress();
+}
+
+bool G1ConcurrentRefineSweepState::swap_gc_threads_ct() {
+  enter_state(State::SynchronizeGCThreads, Ticks::now());
+
+  GCTraceTime(Info, gc, refine) tm("Concurrent Refine GC Thread CT swap");
+
+  {
+    class RendezvousGCThreads: public VM_Operation {
+    public:
+      VMOp_Type type() const { return VMOp_G1RendezvousGCThreads; }
+
+      virtual bool evaluate_at_safepoint() const {
+        // We only care about synchronizing the GC threads.
+        // Leave the Java threads running.
+        return false;
+      }
+
+      virtual bool skip_thread_oop_barriers() const {
+        fatal("Concurrent VMOps should not call this");
+        return true;
+      }
+
+      void doit() {
+        // Light weight "handshake" of the GC threads for memory synchronization;
+        // both changes to the Java heap need to be synchronized as well as the
+        // previous global card table reference change, so that no GC thread
+        // accesses the wrong card table.
+        // For example in the rebuild remset process the marking threads write
+        // marks into the card table, and that card table reference must be the
+        // correct one.
+        SuspendibleThreadSet::synchronize();
+        SuspendibleThreadSet::desynchronize();
+      };
+    } op;
+
+    SuspendibleThreadSetLeaver sts_leave;
+    VMThread::execute(&op);
+  }
+
+  return is_in_progress();
+}
+
+void G1ConcurrentRefineSweepState::snapshot_heap() {
+  enter_state(State::SnapshotHeap, Ticks::now());
+
+  GCTraceTime(Info, gc, refine) tm("Concurrent Refine Snapshot Heap");
+
+  snapshot_heap_inner();
+}
+
+bool G1ConcurrentRefineSweepState::sweep_refinement_table(jlong& total_yield_duration) {
+  enter_state(State::SweepRT, Ticks::now());
+
+  while (true) {
+    {
+      GCTraceTime(Info, gc, refine) tm("Concurrent Refine Table Step");
+
+      G1ConcurrentRefine* cr = G1CollectedHeap::heap()->concurrent_refine();
+
+      G1ConcurrentRefineSweepTask task(_sweep_table, &_stats, cr->num_threads_wanted());
+      cr->run_with_refinement_workers(&task);
+
+      assert(is_in_progress(), "inv");
+      if (task.sweep_completed()) {
+        return true;
+      }
+    }
+
+    assert(SuspendibleThreadSet::should_yield(), "must be");
+    // Interrupted by safepoint request.
+    {
+      jlong yield_start = os::elapsed_counter();
+      SuspendibleThreadSet::yield();
+
+      if (!is_in_progress()) {
+        return false;
+      } else {
+        jlong yield_during_sweep_duration = os::elapsed_counter() - yield_start;
+        log_trace(gc, refine)("Yielded from card table sweeping for %.2fms, no GC inbetween, continue",
+                              TimeHelper::counter_to_millis(yield_during_sweep_duration));
+        total_yield_duration += yield_during_sweep_duration;
+      }
     }
   }
 }
 
-// Arbitrary but large limits, to simplify some of the zone calculations.
-// The general idea is to allow expressions like
-//   MIN2(x OP y, max_XXX_zone)
-// without needing to check for overflow in "x OP y", because the
-// ranges for x and y have been restricted.
-STATIC_ASSERT(sizeof(LP64_ONLY(jint) NOT_LP64(jshort)) <= (sizeof(size_t)/2));
-const size_t max_yellow_zone = LP64_ONLY(max_jint) NOT_LP64(max_jshort);
-const size_t max_green_zone = max_yellow_zone / 2;
-const size_t max_red_zone = INT_MAX; // For dcqs.set_max_cards.
-STATIC_ASSERT(max_yellow_zone <= max_red_zone);
+static void print_refinement_stats(const Tickspan& total_duration,
+                                   const Tickspan& pre_sweep_duration,
+                                   const G1ConcurrentRefineStats* stats) {
+  assert(total_duration >= Tickspan(), "must be non-negative");
+  assert(pre_sweep_duration >= Tickspan(), "must be non-negative");
+  assert(pre_sweep_duration <= total_duration, "must be bounded by total duration");
 
-// Range check assertions for green zone values.
-#define assert_zone_constraints_g(green)                        \
-  do {                                                          \
-    size_t azc_g_green = (green);                               \
-    assert(azc_g_green <= max_green_zone,                       \
-           "green exceeds max: " SIZE_FORMAT, azc_g_green);     \
-  } while (0)
+  log_debug(gc, refine)("Refinement took %.2fms (pre-sweep %.2fms card refine %.2fms) "
+                        "(scanned %zu clean %zu (%.2f%%) not_clean %zu (%.2f%%) not_parsable %zu "
+                        "refers_to_cset %zu (%.2f%%) still_refers_to_cset %zu (%.2f%%) no_cross_region %zu pending %zu)",
+                        total_duration.seconds() * 1000.0,
+                        pre_sweep_duration.seconds() * 1000.0,
+                        TimeHelper::counter_to_millis(stats->refine_duration()),
+                        stats->cards_scanned(),
+                        stats->cards_clean(),
+                        percent_of(stats->cards_clean(), stats->cards_scanned()),
+                        stats->cards_not_clean(),
+                        percent_of(stats->cards_not_clean(), stats->cards_scanned()),
+                        stats->cards_not_parsable(),
+                        stats->cards_refer_to_cset(),
+                        percent_of(stats->cards_refer_to_cset(), stats->cards_not_clean()),
+                        stats->cards_already_refer_to_cset(),
+                        percent_of(stats->cards_already_refer_to_cset(), stats->cards_not_clean()),
+                        stats->cards_no_cross_region(),
+                        stats->cards_pending()
+                       );
+}
 
-// Range check assertions for green and yellow zone values.
-#define assert_zone_constraints_gy(green, yellow)                       \
-  do {                                                                  \
-    size_t azc_gy_green = (green);                                      \
-    size_t azc_gy_yellow = (yellow);                                    \
-    assert_zone_constraints_g(azc_gy_green);                            \
-    assert(azc_gy_yellow <= max_yellow_zone,                            \
-           "yellow exceeds max: " SIZE_FORMAT, azc_gy_yellow);          \
-    assert(azc_gy_green <= azc_gy_yellow,                               \
-           "green (" SIZE_FORMAT ") exceeds yellow (" SIZE_FORMAT ")",  \
-           azc_gy_green, azc_gy_yellow);                                \
-  } while (0)
-
-// Range check assertions for green, yellow, and red zone values.
-#define assert_zone_constraints_gyr(green, yellow, red)                 \
-  do {                                                                  \
-    size_t azc_gyr_green = (green);                                     \
-    size_t azc_gyr_yellow = (yellow);                                   \
-    size_t azc_gyr_red = (red);                                         \
-    assert_zone_constraints_gy(azc_gyr_green, azc_gyr_yellow);          \
-    assert(azc_gyr_red <= max_red_zone,                                 \
-           "red exceeds max: " SIZE_FORMAT, azc_gyr_red);               \
-    assert(azc_gyr_yellow <= azc_gyr_red,                               \
-           "yellow (" SIZE_FORMAT ") exceeds red (" SIZE_FORMAT ")",    \
-           azc_gyr_yellow, azc_gyr_red);                                \
-  } while (0)
-
-// Logging tag sequence for refinement control updates.
-#define CTRL_TAGS gc, ergo, refine
-
-// For logging zone values, ensuring consistency of level and tags.
-#define LOG_ZONES(...) log_debug( CTRL_TAGS )(__VA_ARGS__)
-
-// Convert configuration values in units of buffers to number of cards.
-static size_t configuration_buffers_to_cards(size_t value, const char* value_name) {
-  if (value == 0) return 0;
-  size_t res = value * G1UpdateBufferSize;
-
-  if (res / value != G1UpdateBufferSize) { // Check overflow
-    vm_exit_during_initialization(err_msg("configuration_buffers_to_cards: "
-      "(%s = " SIZE_FORMAT ") * (G1UpdateBufferSize = " SIZE_FORMAT ") overflow!", value_name, value, G1UpdateBufferSize));
+void G1ConcurrentRefineSweepState::handle_ongoing_refinement_at_safepoint() {
+  assert_at_safepoint();
+  if (!is_in_progress()) {
+    return;
   }
-  return res;
-}
 
-// Package for pair of refinement thread activation and deactivation
-// thresholds.  The activation and deactivation levels are resp. the first
-// and second values of the pair.
-typedef Pair<size_t, size_t> Thresholds;
-inline size_t activation_level(const Thresholds& t) { return t.first; }
-inline size_t deactivation_level(const Thresholds& t) { return t.second; }
+  const Ticks completion_time = Ticks::now();
 
-static Thresholds calc_thresholds(size_t green_zone,
-                                  size_t yellow_zone,
-                                  uint worker_id) {
-  double yellow_size = yellow_zone - green_zone;
-  double step = yellow_size / G1ConcurrentRefine::max_num_threads();
-  if (worker_id == 0) {
-    // Potentially activate worker 0 more aggressively, to keep
-    // available buffers near green_zone value.  When yellow_size is
-    // large we don't want to allow a full step to accumulate before
-    // doing any processing, as that might lead to significantly more
-    // than green_zone buffers to be processed during pause.  So limit
-    // to an extra half buffer per pause-time processing thread.
-    step = MIN2(step, configuration_buffers_to_cards(ParallelGCThreads, "ParallelGCThreads") / 2.0);
+  const Tickspan total_duration = time_since_start(completion_time);
+  const Tickspan pre_sweep_duration = time_until_state(MIN2(_state, State::SweepRT));
+
+  print_refinement_stats(total_duration, pre_sweep_duration, &_stats);
+
+  const bool is_in_sweep_rt = _state == State::SweepRT;
+
+  if (!is_in_sweep_rt) {
+    // Refinement has been interrupted without having a snapshot. There may
+    // be a mix of already swapped and not-swapped card tables assigned to threads,
+    // so they might have already dirtied the swapped card tables.
+    // Conservatively scan all (non-free, non-committed) region's card tables,
+    // creating the snapshot right now.
+    log_debug(gc, refine)("Create work from scratch");
+    snapshot_heap_inner();
+  } else {
+    log_debug(gc, refine)("Continue existing work");
   }
-  size_t activate_offset = static_cast<size_t>(ceil(step * (worker_id + 1)));
-  size_t deactivate_offset = static_cast<size_t>(floor(step * worker_id));
-  return Thresholds(green_zone + activate_offset,
-                    green_zone + deactivate_offset);
+
+  _state = State::Idle;
 }
 
-G1ConcurrentRefine::G1ConcurrentRefine(size_t green_zone,
-                                       size_t yellow_zone,
-                                       size_t red_zone,
-                                       size_t min_yellow_zone_size) :
-  _thread_control(),
-  _green_zone(green_zone),
-  _yellow_zone(yellow_zone),
-  _red_zone(red_zone),
-  _min_yellow_zone_size(min_yellow_zone_size)
-{
-  assert_zone_constraints_gyr(green_zone, yellow_zone, red_zone);
+void G1ConcurrentRefineSweepState::cancel_refinement() {
+  _state = State::Idle;
 }
+
+void G1ConcurrentRefineSweepState::complete_refinement(jlong total_yield_during_sweep_duration,
+                                                       jlong epoch_yield_duration,
+                                                       jlong next_epoch_start) {
+  enter_state(State::CompleteRefineWork, Ticks::now());
+
+  GCTraceTime(Info, gc, refine) tm("Concurrent Refine Complete Work");
+
+  add_yield_during_sweep_duration(total_yield_during_sweep_duration);
+
+  const Ticks completion_time = Ticks::now();
+
+  const Tickspan total_duration = time_since_start(completion_time);
+  const Tickspan pre_sweep_duration = time_until_state(State::SweepRT);
+
+  print_refinement_stats(total_duration, pre_sweep_duration, &_stats);
+
+  G1CollectedHeap* g1h = G1CollectedHeap::heap();
+  G1Policy* policy = g1h->policy();
+  policy->record_refinement_stats(stats());
+
+  {
+    MutexLocker x(G1ReviseYoungLength_lock, Mutex::_no_safepoint_check_flag);
+    policy->record_dirtying_stats(TimeHelper::counter_to_millis(g1h->last_refinement_epoch_start()),
+                                  TimeHelper::counter_to_millis(next_epoch_start),
+                                  _stats.cards_pending(),
+                                  TimeHelper::counter_to_millis(epoch_yield_duration),
+                                  0 /* pending_cards_from_gc */,
+                                  _stats.cards_to_cset());
+    g1h->set_last_refinement_epoch_start(next_epoch_start, epoch_yield_duration);
+  }
+  _stats.reset();
+
+  _state = State::Idle;
+}
+
+void G1ConcurrentRefineSweepState::snapshot_heap_inner() {
+  // G1CollectedHeap::heap_region_iterate() below will only visit currently committed
+  // regions. Initialize all entries in the state table here and later in this method
+  // selectively enable regions that we are interested. This way regions committed
+  // later will be automatically excluded from iteration.
+  // Their refinement table must be completely empty anyway.
+  _sweep_table->reset_all_to_claimed();
+
+  class SnapshotRegionsClosure : public G1HeapRegionClosure {
+    G1CardTableClaimTable* _sweep_table;
+
+  public:
+    SnapshotRegionsClosure(G1CardTableClaimTable* sweep_table) : G1HeapRegionClosure(), _sweep_table(sweep_table) { }
+
+    bool do_heap_region(G1HeapRegion* r) override {
+      if (!r->is_free()) {
+        // Need to scan all parts of non-free regions, so reset the claim.
+        // No need for synchronization: we are only interested in regions
+        // that were allocated before the handshake; the handshake makes such
+        // regions' metadata visible to all threads, and we do not care about
+        // humongous regions that were allocated afterwards.
+        _sweep_table->reset_to_unclaimed(r->hrm_index());
+      }
+      return false;
+    }
+  } cl(_sweep_table);
+  G1CollectedHeap::heap()->heap_region_iterate(&cl);
+}
+
+bool G1ConcurrentRefineSweepState::are_java_threads_synched() const {
+  return _state > State::SwapJavaThreadsCT || !is_in_progress();
+}
+
+uint64_t G1ConcurrentRefine::adjust_threads_period_ms() const {
+  // Instead of a fixed value, this could be a command line option.  But then
+  // we might also want to allow configuration of adjust_threads_wait_ms().
+
+  // Use a prime number close to 50ms, different to other components that derive
+  // their wait time from the try_get_available_bytes_estimate() call to minimize
+  // interference.
+  return 53;
+}
+
+static size_t minimum_pending_cards_target() {
+  return ParallelGCThreads * G1PerThreadPendingCardThreshold;
+}
+
+G1ConcurrentRefine::G1ConcurrentRefine(G1CollectedHeap* g1h) :
+  _policy(g1h->policy()),
+  _num_threads_wanted(0),
+  _pending_cards_target(PendingCardsTargetUninitialized),
+  _last_adjust(),
+  _needs_adjust(false),
+  _heap_was_locked(false),
+  _threads_needed(g1h->policy(), adjust_threads_period_ms()),
+  _thread_control(G1ConcRefinementThreads),
+  _sweep_state(g1h->max_num_regions())
+{ }
 
 jint G1ConcurrentRefine::initialize() {
-  return _thread_control.initialize(this, max_num_threads());
+  return _thread_control.initialize(this);
 }
 
-static size_t calc_min_yellow_zone_size() {
-  size_t step = configuration_buffers_to_cards(G1ConcRefinementThresholdStep, "G1ConcRefinementThresholdStep");
-  uint n_workers = G1ConcurrentRefine::max_num_threads();
-  if ((max_yellow_zone / step) < n_workers) {
-    return max_yellow_zone;
-  } else {
-    return step * n_workers;
+G1ConcurrentRefineSweepState& G1ConcurrentRefine::sweep_state_for_merge() {
+  sweep_state().handle_ongoing_refinement_at_safepoint();
+  assert(!sweep_state().is_in_progress(), "postcondition");
+  return sweep_state();
+}
+
+void G1ConcurrentRefine::run_with_refinement_workers(WorkerTask* task) {
+  _thread_control.run_task(task, num_threads_wanted());
+}
+
+void G1ConcurrentRefine::notify_region_reclaimed(G1HeapRegion* r) {
+  assert_at_safepoint();
+  if (_sweep_state.is_in_progress()) {
+    _sweep_state.sweep_table()->claim_all_cards(r->hrm_index());
   }
 }
 
-static size_t calc_init_green_zone() {
-  size_t green = G1ConcRefinementGreenZone;
-  const char* name = "G1ConcRefinementGreenZone";
-  if (FLAG_IS_DEFAULT(G1ConcRefinementGreenZone)) {
-    green = ParallelGCThreads;
-    name = "ParallelGCThreads";
-  }
-  green = configuration_buffers_to_cards(green, name);
-  return MIN2(green, max_green_zone);
-}
-
-static size_t calc_init_yellow_zone(size_t green, size_t min_size) {
-  size_t config = configuration_buffers_to_cards(G1ConcRefinementYellowZone, "G1ConcRefinementYellowZone");
-  size_t size = 0;
-  if (FLAG_IS_DEFAULT(G1ConcRefinementYellowZone)) {
-    size = green * 2;
-  } else if (green < config) {
-    size = config - green;
-  }
-  size = MAX2(size, min_size);
-  size = MIN2(size, max_yellow_zone);
-  return MIN2(green + size, max_yellow_zone);
-}
-
-static size_t calc_init_red_zone(size_t green, size_t yellow) {
-  size_t size = yellow - green;
-  if (!FLAG_IS_DEFAULT(G1ConcRefinementRedZone)) {
-    size_t config = configuration_buffers_to_cards(G1ConcRefinementRedZone, "G1ConcRefinementRedZone");
-    if (yellow < config) {
-      size = MAX2(size, config - yellow);
-    }
-  }
-  return MIN2(yellow + size, max_red_zone);
-}
-
-G1ConcurrentRefine* G1ConcurrentRefine::create(jint* ecode) {
-  size_t min_yellow_zone_size = calc_min_yellow_zone_size();
-  size_t green_zone = calc_init_green_zone();
-  size_t yellow_zone = calc_init_yellow_zone(green_zone, min_yellow_zone_size);
-  size_t red_zone = calc_init_red_zone(green_zone, yellow_zone);
-
-  LOG_ZONES("Initial Refinement Zones: "
-            "green: " SIZE_FORMAT ", "
-            "yellow: " SIZE_FORMAT ", "
-            "red: " SIZE_FORMAT ", "
-            "min yellow size: " SIZE_FORMAT,
-            green_zone, yellow_zone, red_zone, min_yellow_zone_size);
-
-  G1ConcurrentRefine* cr = new G1ConcurrentRefine(green_zone,
-                                                  yellow_zone,
-                                                  red_zone,
-                                                  min_yellow_zone_size);
+G1ConcurrentRefine* G1ConcurrentRefine::create(G1CollectedHeap* g1h, jint* ecode) {
+  G1ConcurrentRefine* cr = new G1ConcurrentRefine(g1h);
   *ecode = cr->initialize();
+  if (*ecode != 0) {
+    delete cr;
+    cr = nullptr;
+  }
   return cr;
 }
 
@@ -314,148 +493,147 @@ G1ConcurrentRefine::~G1ConcurrentRefine() {
 }
 
 void G1ConcurrentRefine::threads_do(ThreadClosure *tc) {
+  worker_threads_do(tc);
+  control_thread_do(tc);
+}
+
+void G1ConcurrentRefine::worker_threads_do(ThreadClosure *tc) {
   _thread_control.worker_threads_do(tc);
 }
 
-uint G1ConcurrentRefine::max_num_threads() {
-  return G1ConcRefinementThreads;
+void G1ConcurrentRefine::control_thread_do(ThreadClosure *tc) {
+  _thread_control.control_thread_do(tc);
 }
 
-static size_t calc_new_green_zone(size_t green,
-                                  double logged_cards_scan_time,
-                                  size_t processed_logged_cards,
-                                  double goal_ms) {
-  // Adjust green zone based on whether we're meeting the time goal.
-  // Limit to max_green_zone.
-  const double inc_k = 1.1, dec_k = 0.9;
-  if (logged_cards_scan_time > goal_ms) {
-    if (green > 0) {
-      green = static_cast<size_t>(green * dec_k);
-    }
-  } else if (logged_cards_scan_time < goal_ms &&
-             processed_logged_cards > green) {
-    green = static_cast<size_t>(MAX2(green * inc_k, green + 1.0));
-    green = MIN2(green, max_green_zone);
-  }
-  return green;
-}
-
-static size_t calc_new_yellow_zone(size_t green, size_t min_yellow_size) {
-  size_t size = green * 2;
-  size = MAX2(size, min_yellow_size);
-  return MIN2(green + size, max_yellow_zone);
-}
-
-static size_t calc_new_red_zone(size_t green, size_t yellow) {
-  return MIN2(yellow + (yellow - green), max_red_zone);
-}
-
-void G1ConcurrentRefine::update_zones(double logged_cards_scan_time,
-                                      size_t processed_logged_cards,
-                                      double goal_ms) {
-  log_trace( CTRL_TAGS )("Updating Refinement Zones: "
-                         "logged cards scan time: %.3fms, "
-                         "processed cards: " SIZE_FORMAT ", "
-                         "goal time: %.3fms",
-                         logged_cards_scan_time,
-                         processed_logged_cards,
-                         goal_ms);
-
-  _green_zone = calc_new_green_zone(_green_zone,
-                                    logged_cards_scan_time,
-                                    processed_logged_cards,
-                                    goal_ms);
-  _yellow_zone = calc_new_yellow_zone(_green_zone, _min_yellow_zone_size);
-  _red_zone = calc_new_red_zone(_green_zone, _yellow_zone);
-
-  assert_zone_constraints_gyr(_green_zone, _yellow_zone, _red_zone);
-  LOG_ZONES("Updated Refinement Zones: "
-            "green: " SIZE_FORMAT ", "
-            "yellow: " SIZE_FORMAT ", "
-            "red: " SIZE_FORMAT,
-            _green_zone, _yellow_zone, _red_zone);
-}
-
-void G1ConcurrentRefine::adjust(double logged_cards_scan_time,
-                                size_t processed_logged_cards,
-                                double goal_ms) {
-  G1DirtyCardQueueSet& dcqs = G1BarrierSet::dirty_card_queue_set();
-
-  if (G1UseAdaptiveConcRefinement) {
-    update_zones(logged_cards_scan_time, processed_logged_cards, goal_ms);
-
-    // Change the barrier params
-    if (max_num_threads() == 0) {
-      // Disable dcqs notification when there are no threads to notify.
-      dcqs.set_process_cards_threshold(G1DirtyCardQueueSet::ProcessCardsThresholdNever);
-    } else {
-      // Worker 0 is the primary; wakeup is via dcqs notification.
-      STATIC_ASSERT(max_yellow_zone <= INT_MAX);
-      size_t activate = activation_threshold(0);
-      dcqs.set_process_cards_threshold(activate);
-    }
-    dcqs.set_max_cards(red_zone());
+void G1ConcurrentRefine::update_pending_cards_target(double pending_cards_time_ms,
+                                                     size_t processed_pending_cards,
+                                                     double goal_ms) {
+  size_t minimum = minimum_pending_cards_target();
+  if ((processed_pending_cards < minimum) || (pending_cards_time_ms == 0.0)) {
+    log_debug(gc, ergo, refine)("Unchanged pending cards target: %zu (processed %zu minimum %zu time %1.2f)",
+                                _pending_cards_target, processed_pending_cards, minimum, pending_cards_time_ms);
+    return;
   }
 
-  size_t curr_queue_size = dcqs.num_cards();
-  if ((dcqs.max_cards() > 0) &&
-      (curr_queue_size >= yellow_zone())) {
-    dcqs.set_max_cards_padding(curr_queue_size);
+  // Base the pending cards budget on the measured rate.
+  double rate = processed_pending_cards / pending_cards_time_ms;
+  size_t new_target = static_cast<size_t>(goal_ms * rate);
+  // Add some hysteresis with previous values.
+  if (is_pending_cards_target_initialized()) {
+    new_target = (new_target + _pending_cards_target) / 2;
+  }
+  // Apply minimum target.
+  new_target = MAX2(new_target, minimum_pending_cards_target());
+  _pending_cards_target = new_target;
+  log_debug(gc, ergo, refine)("New pending cards target: %zu", new_target);
+}
+
+void G1ConcurrentRefine::adjust_after_gc(double pending_cards_time_ms,
+                                         size_t processed_pending_cards,
+                                         double goal_ms) {
+  if (!G1UseConcRefinement) {
+    return;
+  }
+
+  update_pending_cards_target(pending_cards_time_ms,
+                              processed_pending_cards,
+                              goal_ms);
+  if (_thread_control.is_refinement_enabled()) {
+    _needs_adjust = true;
+    if (is_pending_cards_target_initialized()) {
+      _thread_control.activate();
+    }
+  }
+}
+
+uint64_t G1ConcurrentRefine::adjust_threads_wait_ms() const {
+  assert_current_thread_is_control_refinement_thread();
+  if (is_pending_cards_target_initialized()) {
+    // Retry asap when the cause for not getting a prediction was that we temporarily
+    // did not get the heap lock. Otherwise we might wait for too long until we get
+    // back here.
+    if (_heap_was_locked) {
+      return 1;
+    }
+    double available_time_ms = _threads_needed.predicted_time_until_next_gc_ms();
+
+    return _policy->adjust_wait_time_ms(available_time_ms, adjust_threads_period_ms());
   } else {
-    dcqs.set_max_cards_padding(0);
+    // If target not yet initialized then wait forever (until explicitly
+    // activated).  This happens during startup, when we don't bother with
+    // refinement.
+    return 0;
   }
-  dcqs.notify_if_necessary();
 }
 
-G1ConcurrentRefineStats G1ConcurrentRefine::get_and_reset_refinement_stats() {
-  struct CollectStats : public ThreadClosure {
-    G1ConcurrentRefineStats _total_stats;
-    virtual void do_thread(Thread* t) {
-      G1ConcurrentRefineThread* crt = static_cast<G1ConcurrentRefineThread*>(t);
-      G1ConcurrentRefineStats& stats = *crt->refinement_stats();
-      _total_stats += stats;
-      stats.reset();
+bool G1ConcurrentRefine::adjust_num_threads_periodically() {
+  assert_current_thread_is_control_refinement_thread();
+
+  _heap_was_locked = false;
+  // Check whether it's time to do a periodic adjustment if there is no explicit
+  // request pending. We might have spuriously woken up.
+  if (!_needs_adjust) {
+    Tickspan since_adjust = Ticks::now() - _last_adjust;
+    if (since_adjust.milliseconds() < adjust_threads_period_ms()) {
+      _num_threads_wanted = 0;
+      return false;
     }
-  } collector;
-  threads_do(&collector);
-  return collector._total_stats;
-}
-
-size_t G1ConcurrentRefine::activation_threshold(uint worker_id) const {
-  Thresholds thresholds = calc_thresholds(_green_zone, _yellow_zone, worker_id);
-  return activation_level(thresholds);
-}
-
-size_t G1ConcurrentRefine::deactivation_threshold(uint worker_id) const {
-  Thresholds thresholds = calc_thresholds(_green_zone, _yellow_zone, worker_id);
-  return deactivation_level(thresholds);
-}
-
-uint G1ConcurrentRefine::worker_id_offset() {
-  return G1DirtyCardQueueSet::num_par_ids();
-}
-
-void G1ConcurrentRefine::maybe_activate_more_threads(uint worker_id, size_t num_cur_cards) {
-  if (num_cur_cards > activation_threshold(worker_id + 1)) {
-    _thread_control.maybe_activate_next(worker_id);
-  }
-}
-
-bool G1ConcurrentRefine::do_refinement_step(uint worker_id,
-                                            G1ConcurrentRefineStats* stats) {
-  G1DirtyCardQueueSet& dcqs = G1BarrierSet::dirty_card_queue_set();
-
-  size_t curr_cards = dcqs.num_cards();
-  // If the number of the cards falls down into the yellow zone,
-  // that means that the transition period after the evacuation pause has ended.
-  if (curr_cards <= yellow_zone()) {
-    dcqs.discard_max_cards_padding();
   }
 
-  maybe_activate_more_threads(worker_id, curr_cards);
+  // Reset pending request.
+  _needs_adjust = false;
+  size_t available_bytes = 0;
+  if (_policy->try_get_available_bytes_estimate(available_bytes)) {
+    adjust_threads_wanted(available_bytes);
+    _last_adjust = Ticks::now();
+  } else {
+    _heap_was_locked = true;
+    // Defer adjustment to next time.
+    _needs_adjust = true;
+  }
 
-  // Process the next buffer, if there are enough left.
-  return dcqs.refine_completed_buffer_concurrently(worker_id + worker_id_offset(),
-                                                   deactivation_threshold(worker_id),
-                                                   stats);
+  return (_num_threads_wanted > 0) && !heap_was_locked();
+}
+
+void G1ConcurrentRefine::adjust_threads_wanted(size_t available_bytes) {
+  assert_current_thread_is_control_refinement_thread();
+
+  G1Policy* policy = G1CollectedHeap::heap()->policy();
+  const G1Analytics* analytics = policy->analytics();
+
+  size_t num_cards = policy->current_pending_cards();
+
+  _threads_needed.update(_num_threads_wanted,
+                         available_bytes,
+                         num_cards,
+                         _pending_cards_target);
+  uint new_wanted = _threads_needed.threads_needed();
+  if (new_wanted > _thread_control.max_num_threads()) {
+    // Bound the wanted threads by maximum available.
+    new_wanted = _thread_control.max_num_threads();
+  }
+
+  _num_threads_wanted = new_wanted;
+
+  log_debug(gc, refine)("Concurrent refinement: wanted %u, pending cards: %zu (pending-from-gc %zu), "
+                        "predicted: %zu, goal %zu, time-until-next-gc: %1.2fms pred-refine-rate %1.2fc/ms log-rate %1.2fc/ms",
+                        new_wanted,
+                        num_cards,
+                        G1CollectedHeap::heap()->policy()->pending_cards_from_gc(),
+                        _threads_needed.predicted_cards_at_next_gc(),
+                        _pending_cards_target,
+                        _threads_needed.predicted_time_until_next_gc_ms(),
+                        analytics->predict_concurrent_refine_rate_ms(),
+                        analytics->predict_dirtied_cards_rate_ms()
+                        );
+}
+
+bool G1ConcurrentRefine::is_thread_adjustment_needed() const {
+  assert_current_thread_is_control_refinement_thread();
+  return _needs_adjust;
+}
+
+void G1ConcurrentRefine::record_thread_adjustment_needed() {
+  assert_current_thread_is_control_refinement_thread();
+  _needs_adjust = true;
 }

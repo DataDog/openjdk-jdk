@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -103,7 +103,7 @@ class LogInputStream extends InputStream {
             return 0;
         n = (length < n) ? length : n;
         n = in.skip(n);
-        length -= n;
+        length -= (int) n;
         return n;
     }
 
@@ -123,13 +123,5 @@ class LogInputStream extends InputStream {
      */
     public void close() {
         length = 0;
-    }
-
-    /**
-     * Closes the stream when garbage is collected.
-     */
-    @SuppressWarnings("deprecation")
-    protected void finalize() throws IOException {
-        close();
     }
 }

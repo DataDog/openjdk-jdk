@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,48 +25,26 @@
 #ifndef SHARE_MEMORY_METASPACECLOSURE_HPP
 #define SHARE_MEMORY_METASPACECLOSURE_HPP
 
+#include "cppstdlib/type_traits.hpp"
 #include "logging/log.hpp"
 #include "memory/allocation.hpp"
+#include "memory/metaspaceClosureType.hpp"
+#include "metaprogramming/enableIf.hpp"
 #include "oops/array.hpp"
+#include "utilities/debug.hpp"
 #include "utilities/globalDefinitions.hpp"
 #include "utilities/growableArray.hpp"
-#include "utilities/hashtable.inline.hpp"
-
-// The metadata hierarchy is separate from the oop hierarchy
-  class MetaspaceObj;        // no C++ vtable
-//class   Array;             // no C++ vtable
-  class   Annotations;       // no C++ vtable
-  class   ConstantPoolCache; // no C++ vtable
-  class   ConstMethod;       // no C++ vtable
-  class   MethodCounters;    // no C++ vtable
-  class   Symbol;            // no C++ vtable
-  class   Metadata;          // has C++ vtable (so do all subclasses)
-  class     ConstantPool;
-  class     MethodData;
-  class     Method;
-  class     Klass;
-  class       InstanceKlass;
-  class         InstanceMirrorKlass;
-  class         InstanceClassLoaderKlass;
-  class         InstanceRefKlass;
-  class       ArrayKlass;
-  class         ObjArrayKlass;
-  class         TypeArrayKlass;
+#include "utilities/macros.hpp"
+#include "utilities/resizableHashTable.hpp"
 
 // class MetaspaceClosure --
 //
-// This class is used for iterating the objects in the HotSpot Metaspaces. It
+// This class is used for iterating the class metadata objects. It
 // provides an API to walk all the reachable objects starting from a set of
 // root references (such as all Klass'es in the SystemDictionary).
 //
-// Currently it is used for compacting the CDS archive by eliminate temporary
-// objects allocated during archive creation time. See ArchiveBuilder for an example.
-//
-// To support MetaspaceClosure, each subclass of MetaspaceObj must provide
-// a method of the type void metaspace_pointers_do(MetaspaceClosure*). This method
-// should call MetaspaceClosure::push() on every pointer fields of this
-// class that points to a MetaspaceObj. See Annotations::metaspace_pointers_do()
-// for an example.
+// Currently it is used to copy class metadata into the AOT cache.
+// See ArchiveBuilder for an example.
 class MetaspaceClosure {
 public:
   enum Writability {
@@ -75,29 +53,42 @@ public:
     _default
   };
 
-  enum SpecialRef {
-    _method_entry_ref
-  };
+#define METASPACE_CLOSURE_TYPE_NAME_CASE(name) case MetaspaceClosureType::name ## Type: return #name;
+
+  static const char* type_name(MetaspaceClosureType type) {
+    switch(type) {
+    METASPACE_CLOSURE_TYPES_DO(METASPACE_CLOSURE_TYPE_NAME_CASE)
+    default:
+      ShouldNotReachHere();
+      return nullptr;
+    }
+  }
 
   // class MetaspaceClosure::Ref --
   //
-  // MetaspaceClosure can be viewed as a very simple type of copying garbage
-  // collector. For it to function properly, it requires each subclass of
-  // MetaspaceObj to provide two methods:
+  // For type X to be iterable by MetaspaceClosure, X (or one of X's supertypes) must have
+  // the following public functions:
+  //         void metaspace_pointers_do(MetaspaceClosure* it);
+  //         static bool is_read_only_by_default() { return true; }
   //
-  //  size_t size();                                 -- to determine how much data to copy
-  //  void metaspace_pointers_do(MetaspaceClosure*); -- to locate all the embedded pointers
+  // In addition, if X is not a subtype of MetaspaceObj, it must have the following function:
+  //         MetaspaceClosureType type() const;
+  //         int size_in_heapwords() const;
   //
-  // Calling these methods would be trivial if these two were virtual methods.
+  // Currently, the iterable types include all subtypes of MetsapceObj, as well
+  // as GrowableArray (C-heap allocated only), ModuleEntry, and PackageEntry.
+  //
+  // (Note that GrowableArray is supported specially and does not require the above functions.)
+  //
+  // Calling these functions would be trivial if these were virtual functions.
   // However, to save space, MetaspaceObj has NO vtable. The vtable is introduced
   // only in the Metadata class.
   //
-  // To work around the lack of a vtable, we use Ref class with templates
-  // (see ObjectRef, PrimitiveArrayRef and PointerArrayRef)
+  // To work around the lack of a vtable, we use the Ref class with templates
   // so that we can statically discover the type of a object. The use of Ref
   // depends on the fact that:
   //
-  // [1] We don't use polymorphic pointers for MetaspaceObj's that are not subclasses
+  // [1] We don't use polymorphic pointers to MetaspaceObj's that are not subclasses
   //     of Metadata. I.e., we don't do this:
   //     class Klass {
   //         MetaspaceObj *_obj;
@@ -105,144 +96,204 @@ public:
   //         Symbol*     bar() { return (Symbol*)    _obj; }
   //
   // [2] All Array<T> dimensions are statically declared.
+  //
+  // Pointer Tagging
+  //
+  // All metaspace pointers are at least 4 byte aligned. Therefore, it's possible for
+  // certain pointers to contain "tags" in their lowest 2 bits.
+  //
+  // Ref::obj() clears the tag bits in the return values. As a result, most
+  // callers who just want walk a closure of metaspace objects do not need to worry
+  // about the tag bits.
+  //
+  // If you need to use the tags, you can access the tagged pointer with Ref::addr()
+  // and manipulate its parts with strip_tags(), decode_tags() and add_tags()
   class Ref : public CHeapObj<mtMetaspace> {
     Writability _writability;
-    bool _keep_after_pushing;
+    address _enclosing_obj;
     Ref* _next;
-    void* _user_data;
     NONCOPYABLE(Ref);
 
   protected:
     virtual void** mpp() const = 0;
-    Ref(Writability w) : _writability(w), _keep_after_pushing(false), _next(NULL), _user_data(NULL) {}
+    Ref(Writability w) : _writability(w), _enclosing_obj(nullptr), _next(nullptr) {}
   public:
     virtual bool not_null() const = 0;
     virtual int size() const = 0;
     virtual void metaspace_pointers_do(MetaspaceClosure *it) const = 0;
-    virtual void metaspace_pointers_do_at(MetaspaceClosure *it, address new_loc) const = 0;
-    virtual MetaspaceObj::Type msotype() const = 0;
+    virtual MetaspaceClosureType type() const = 0;
     virtual bool is_read_only_by_default() const = 0;
     virtual ~Ref() {}
 
     address obj() const {
-      // In some rare cases (see CPSlot in constantPool.hpp) we store some flags in the lowest
-      // 2 bits of a MetaspaceObj pointer. Unmask these when manipulating the pointer.
-      uintx p = (uintx)*mpp();
-      return (address)(p & (~FLAG_MASK));
+      return strip_tags(*addr());
     }
 
     address* addr() const {
       return (address*)mpp();
     }
 
-    void update(address new_loc) const;
+    // See comments in ArchiveBuilder::remember_embedded_pointer_in_enclosing_obj()
+    address enclosing_obj() const {
+      return _enclosing_obj;
+    }
+    void set_enclosing_obj(address obj) {
+      _enclosing_obj = obj;
+    }
 
     Writability writability() const { return _writability; };
-    void set_keep_after_pushing()   { _keep_after_pushing = true; }
-    bool keep_after_pushing()       { return _keep_after_pushing; }
-    void set_user_data(void* data)  { _user_data = data; }
-    void* user_data()               { return _user_data; }
     void set_next(Ref* n)           { _next = n; }
     Ref* next() const               { return _next; }
+  };
 
-  private:
-    static const uintx FLAG_MASK = 0x03;
+  // Pointer tagging support
+  constexpr static uintx TAG_MASK = 0x03;
 
-    int flag_bits() const {
-      uintx p = (uintx)*mpp();
-      return (int)(p & FLAG_MASK);
+  template <typename T>
+  static T strip_tags(T ptr_with_tags) {
+    uintx n = (uintx)ptr_with_tags;
+    return (T)(n & ~TAG_MASK);
+  }
+
+  template <typename T>
+  static uintx decode_tags(T ptr_with_tags) {
+    uintx n = (uintx)ptr_with_tags;
+    return (n & TAG_MASK);
+  }
+
+  template <typename T>
+  static T add_tags(T ptr, uintx tags) {
+    uintx n = (uintx)ptr;
+    assert((n & TAG_MASK) == 0, "sanity");
+    assert(tags <= TAG_MASK, "sanity");
+    return (T)(n | tags);
+  }
+
+private:
+  template <typename T, ENABLE_IF(std::is_base_of<MetaspaceObj, T>::value)>
+  static int get_size(T* obj) {
+    return obj->size();
+  }
+
+  template <typename T, ENABLE_IF(!std::is_base_of<MetaspaceObj, T>::value)>
+  static int get_size(T* obj) {
+    return obj->size_in_heapwords();
+  }
+
+  // MSORef -- iterate an instance of T, where T::metaspace_pointers_do() exists.
+  template <class T> class MSORef : public Ref {
+    T** _mpp;
+    T* dereference() const {
+      return strip_tags(*_mpp);
+    }
+  protected:
+    virtual void** mpp() const override {
+      return (void**)_mpp;
+    }
+
+  public:
+    MSORef(T** mpp, Writability w) : Ref(w), _mpp(mpp) {}
+
+    virtual bool is_read_only_by_default() const override { return T::is_read_only_by_default(); }
+    virtual bool not_null()                const override { return dereference() != nullptr; }
+    virtual int size()                     const override { return get_size(dereference()); }
+    virtual MetaspaceClosureType type()    const override { return as_type(dereference()->type()); }
+    virtual void metaspace_pointers_do(MetaspaceClosure *it) const override {
+      dereference()->metaspace_pointers_do(it);
     }
   };
 
-private:
-  // -------------------------------------------------- ObjectRef
-  template <class T> class ObjectRef : public Ref {
+  //--------------------------------
+  // Support for GrowableArray<T>
+  //--------------------------------
+
+  // GrowableArrayRef -- iterate an instance of GrowableArray<T>.
+  template <class T> class GrowableArrayRef : public Ref {
+    GrowableArray<T>** _mpp;
+    GrowableArray<T>* dereference() const {
+      return *_mpp;
+    }
+
+  protected:
+    virtual void** mpp() const override {
+      return (void**)_mpp;
+    }
+
+  public:
+    GrowableArrayRef(GrowableArray<T>** mpp, Writability w) : Ref(w), _mpp(mpp) {}
+
+    virtual bool is_read_only_by_default() const override { return false; }
+    virtual bool not_null()                const override { return dereference() != nullptr;  }
+    virtual int size()                     const override { return (int)heap_word_size(sizeof(*dereference())); }
+    virtual MetaspaceClosureType type()    const override { return MetaspaceClosureType::GrowableArrayType; }
+    virtual void metaspace_pointers_do(MetaspaceClosure *it) const override {
+      GrowableArray<T>* array = dereference();
+      log_trace(aot)("Iter(GrowableArray): %p [%d]", array, array->length());
+      array->assert_on_C_heap();
+      it->push_c_array(array->data_addr(), array->capacity());
+    }
+  };
+
+  // For iterating the buffer held by GrowableArray<T>.
+  template <class T> class CArrayRef : public Ref {
     T** _mpp;
+    int _num_elems; // Number of elements
+
+    int byte_size() const {
+      return _num_elems * sizeof(T);
+    }
+
+    // Gives you back the GrowableArray::_data
     T* dereference() const {
       return *_mpp;
     }
+
+    int num_elems() const {
+      return _num_elems;
+    }
+
   protected:
-    virtual void** mpp() const {
+    virtual void** mpp() const override {
       return (void**)_mpp;
     }
 
   public:
-    ObjectRef(T** mpp, Writability w) : Ref(w), _mpp(mpp) {}
-
-    virtual bool is_read_only_by_default() const { return T::is_read_only_by_default(); }
-    virtual bool not_null()                const { return dereference() != NULL; }
-    virtual int size()                     const { return dereference()->size(); }
-    virtual MetaspaceObj::Type msotype()   const { return dereference()->type(); }
-
-    virtual void metaspace_pointers_do(MetaspaceClosure *it) const {
-      dereference()->metaspace_pointers_do(it);
-    }
-    virtual void metaspace_pointers_do_at(MetaspaceClosure *it, address new_loc) const {
-      ((T*)new_loc)->metaspace_pointers_do(it);
-    }
-  };
-
-  // -------------------------------------------------- PrimitiveArrayRef
-  template <class T> class PrimitiveArrayRef : public Ref {
-    Array<T>** _mpp;
-    Array<T>* dereference() const {
-      return *_mpp;
-    }
-  protected:
-    virtual void** mpp() const {
-      return (void**)_mpp;
+    CArrayRef(T** mpp, int num_elems, Writability w)
+      : Ref(w), _mpp(mpp), _num_elems(num_elems) {
+      assert(is_aligned(byte_size(), BytesPerWord), "must be");
     }
 
-  public:
-    PrimitiveArrayRef(Array<T>** mpp, Writability w) : Ref(w), _mpp(mpp) {}
-
-    // all Arrays are read-only by default
-    virtual bool is_read_only_by_default() const { return true; }
-    virtual bool not_null()                const { return dereference() != NULL;  }
-    virtual int size()                     const { return dereference()->size(); }
-    virtual MetaspaceObj::Type msotype()   const { return MetaspaceObj::array_type(sizeof(T)); }
-
-    virtual void metaspace_pointers_do(MetaspaceClosure *it) const {
-      Array<T>* array = dereference();
-      log_trace(cds)("Iter(PrimitiveArray): %p [%d]", array, array->length());
-    }
-    virtual void metaspace_pointers_do_at(MetaspaceClosure *it, address new_loc) const {
-      Array<T>* array = (Array<T>*)new_loc;
-      log_trace(cds)("Iter(PrimitiveArray): %p [%d]", array, array->length());
-    }
-  };
-
-  // -------------------------------------------------- PointerArrayRef
-  template <class T> class PointerArrayRef : public Ref {
-    Array<T*>** _mpp;
-    Array<T*>* dereference() const {
-      return *_mpp;
-    }
-  protected:
-    virtual void** mpp() const {
-      return (void**)_mpp;
+    virtual bool is_read_only_by_default() const override { return false; }
+    virtual bool not_null()                const override { precond(dereference() != nullptr); return true; }
+    virtual int size()                     const override { return (int)heap_word_size(byte_size()); }
+    virtual MetaspaceClosureType type()    const override { return MetaspaceClosureType::CArrayType; }
+    virtual void metaspace_pointers_do(MetaspaceClosure *it) const override {
+      metaspace_pointers_do_impl<T>(it, dereference());
     }
 
-  public:
-    PointerArrayRef(Array<T*>** mpp, Writability w) : Ref(w), _mpp(mpp) {}
-
-    // all Arrays are read-only by default
-    virtual bool is_read_only_by_default() const { return true; }
-    virtual bool not_null()                const { return dereference() != NULL; }
-    virtual int size()                     const { return dereference()->size(); }
-    virtual MetaspaceObj::Type msotype()   const { return MetaspaceObj::array_type(sizeof(T*)); }
-
-    virtual void metaspace_pointers_do(MetaspaceClosure *it) const {
-      metaspace_pointers_do_at_impl(it, dereference());
-    }
-    virtual void metaspace_pointers_do_at(MetaspaceClosure *it, address new_loc) const {
-      metaspace_pointers_do_at_impl(it, (Array<T*>*)new_loc);
-    }
   private:
-    void metaspace_pointers_do_at_impl(MetaspaceClosure *it, Array<T*>* array) const {
-      log_trace(cds)("Iter(ObjectArray): %p [%d]", array, array->length());
-      for (int i = 0; i < array->length(); i++) {
-        T** mpp = array->adr_at(i);
+    // E.g., GrowableArray<int>
+    template <typename U, ENABLE_IF(!std::is_pointer<U>::value && !HAS_METASPACE_POINTERS_DO(U))>
+    void metaspace_pointers_do_impl(MetaspaceClosure* it, T* array) const {
+      log_trace(aot)("Iter(OtherCArray): %p [%d]", array, num_elems());
+    }
+
+    // E.g., GrowableArray<Annotation>
+    template <typename U, ENABLE_IF(!std::is_pointer<U>::value && HAS_METASPACE_POINTERS_DO(U))>
+    void metaspace_pointers_do_impl(MetaspaceClosure* it, T* array) const {
+      log_trace(aot)("Iter(MSOCArray): %p [%d]", array, num_elems());
+      for (int i = 0; i < num_elems(); i++) {
+        T* elm = array + i;
+        elm->metaspace_pointers_do(it);
+      }
+    }
+
+    // E.g., GrowableArray<Klass*>
+    template <typename U, ENABLE_IF(std::is_pointer<U>::value && HAS_METASPACE_POINTERS_DO(typename std::remove_pointer<U>::type))>
+    void metaspace_pointers_do_impl(MetaspaceClosure* it, T* array) const {
+      log_trace(aot)("Iter(MSOPointerCArray): %p [%d]", array, num_elems());
+      for (int i = 0; i < num_elems(); i++) {
+        T* mpp = array + i;
         it->push(mpp);
       }
     }
@@ -251,6 +302,9 @@ private:
   // Normally, chains of references like a->b->c->d are iterated recursively. However,
   // if recursion is too deep, we save the Refs in _pending_refs, and push them later in
   // MetaspaceClosure::finish(). This avoids overflowing the C stack.
+  //
+  // When we are visting d, the _enclosing_ref is c,
+  // When we are visting c, the _enclosing_ref is b, ... and so on.
   static const int MAX_NEST_LEVEL = 5;
   Ref* _pending_refs;
   int _nest_level;
@@ -260,73 +314,60 @@ private:
   void do_push(Ref* ref);
 
 public:
-  MetaspaceClosure(): _pending_refs(NULL), _nest_level(0), _enclosing_ref(NULL) {}
+  MetaspaceClosure(): _pending_refs(nullptr), _nest_level(0), _enclosing_ref(nullptr) {}
   ~MetaspaceClosure();
 
   void finish();
 
-  // enclosing_ref() is used to compute the offset of a field in a C++ class. For example
-  // class Foo { intx scala; Bar* ptr; }
-  //    Foo *f = 0x100;
-  // when the f->ptr field is iterated with do_ref() on 64-bit platforms, we will have
-  //    do_ref(Ref* r) {
-  //       r->addr() == 0x108;                // == &f->ptr;
-  //       enclosing_ref()->obj() == 0x100;   // == foo
-  // So we know that we are iterating upon a field at offset 8 of the object at 0x100.
-  //
-  // Note that if we have stack overflow, do_pending_ref(r) will be called first and
-  // do_ref(r) will be called later, for the same r. In this case, enclosing_ref() is valid only
-  // when do_pending_ref(r) is called, and will return NULL when do_ref(r) is called.
-  Ref* enclosing_ref() const {
-    return _enclosing_ref;
-  }
-
-  // This is called when a reference is placed in _pending_refs. Override this
-  // function if you're using enclosing_ref(). See notes above.
-  virtual void do_pending_ref(Ref* ref) {}
-
   // returns true if we want to keep iterating the pointers embedded inside <ref>
   virtual bool do_ref(Ref* ref, bool read_only) = 0;
 
-  // When you do:
-  //     void MyType::metaspace_pointers_do(MetaspaceClosure* it) {
-  //       it->push(_my_field)
-  //     }
+private:
+  template <class REF_TYPE, typename T>
+  void push_with_ref(T** mpp, Writability w) {
+    // We cannot make stack allocation because the Ref may need to be saved in
+    // _pending_refs to avoid overflowing the C call stack
+    push_impl(new REF_TYPE(mpp, w));
+  }
+
+public:
+  // When MetaspaceClosure::push(...) is called, pick the correct Ref subtype to handle it:
   //
-  // C++ will try to match the "most specific" template function. This one will
-  // will be matched if possible (if mpp is an Array<> of any pointer type).
-  template <typename T> void push(Array<T*>** mpp, Writability w = _default) {
-    push_impl(new PointerArrayRef<T>(mpp, w));
+  // MetaspaceClosure*      it = ...;
+  // Klass*                 o  = ...;  it->push(&o);     => MSORef
+  //
+  // GrowableArrays have a separate "C array" buffer, so they are scanned in two steps:
+  //
+  // GrowableArray<jlong>*      ga1 = ...;  it->push(&ga1);  => GrowableArrayRef => CArrayRef<jlong>
+  // GrowableArray<Annotation>* ga2 = ...;  it->push(&ga2);  => GrowableArrayRef => CArrayRef<Annotation>
+  // GrowableArray<Klass*>*     ga3 = ...;  it->push(&ga3);  => GrowableArrayRef => CArrayRef<Klass*>
+  //
+  // Note that the following will fail to compile:
+  //
+  // MemoryPool*            p  = ...;  it->push(&p);     => MemoryPool doesn't have metaspace_pointers_do
+  // Array<MemoryPool*>*    a6 = ...;  it->push(&a6);    => MemoryPool doesn't have metaspace_pointers_do
+  // Array<int*>*           a7 = ...;  it->push(&a7);    => int doesn't have metaspace_pointers_do
+
+  // --- Regular iterable objects
+  template <typename T>
+  void push(T** mpp, Writability w = _default) {
+    static_assert(HAS_METASPACE_POINTERS_DO(T), "Do not push pointers of arbitrary types");
+    push_with_ref<MSORef<T>>(mpp, w);
   }
 
-  // If the above function doesn't match (mpp is an Array<>, but T is not a pointer type), then
-  // this is the second choice.
-  template <typename T> void push(Array<T>** mpp, Writability w = _default) {
-    push_impl(new PrimitiveArrayRef<T>(mpp, w));
+  template <typename T>
+  void push(GrowableArray<T>** mpp, Writability w = _default) {
+    push_with_ref<GrowableArrayRef<T>>(mpp, w);
   }
 
-  // If the above function doesn't match (mpp is not an Array<> type), then
-  // this will be matched by default.
-  template <class T> void push(T** mpp, Writability w = _default) {
-    push_impl(new ObjectRef<T>(mpp, w));
-  }
-
-  template <class T> void push_method_entry(T** mpp, intptr_t* p) {
-    Ref* ref = new ObjectRef<T>(mpp, _default);
-    push_special(_method_entry_ref, ref, (intptr_t*)p);
-    if (!ref->keep_after_pushing()) {
-      delete ref;
-    }
-  }
-
-  // This is for tagging special pointers that are not a reference to MetaspaceObj. It's currently
-  // used to mark the method entry points in Method/ConstMethod.
-  virtual void push_special(SpecialRef type, Ref* obj, intptr_t* p) {
-    assert(type == _method_entry_ref, "only special type allowed for now");
+  // --- The buffer of GrowableArray<T>
+  template <typename T>
+  void push_c_array(T** mpp, int num_elems, Writability w = _default) {
+    push_impl(new CArrayRef<T>(mpp, num_elems, w));
   }
 };
 
-// This is a special MetaspaceClosure that visits each unique MetaspaceObj once.
+// This is a special MetaspaceClosure that visits each unique object once.
 class UniqueMetaspaceClosure : public MetaspaceClosure {
   static const int INITIAL_TABLE_SIZE = 15889;
   static const int MAX_TABLE_SIZE     = 1000000;
@@ -337,10 +378,11 @@ class UniqueMetaspaceClosure : public MetaspaceClosure {
 public:
   // Gets called the first time we discover an object.
   virtual bool do_unique_ref(Ref* ref, bool read_only) = 0;
-  UniqueMetaspaceClosure() : _has_been_visited(INITIAL_TABLE_SIZE) {}
+  UniqueMetaspaceClosure() : _has_been_visited(INITIAL_TABLE_SIZE, MAX_TABLE_SIZE) {}
 
 private:
-  KVHashtable<address, bool, mtInternal> _has_been_visited;
+  ResizeableHashTable<address, bool, AnyObj::C_HEAP,
+                              mtClassShared> _has_been_visited;
 };
 
 #endif // SHARE_MEMORY_METASPACECLOSURE_HPP

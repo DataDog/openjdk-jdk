@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,7 +28,6 @@ package gc.g1;
  * @summary Test that issuing a periodic collection while the GC locker is
  * held does not crash the VM.
  * @requires vm.gc.G1
- * @modules java.base
  * @run main/othervm/native
  *    -Xbootclasspath/a:.
  *    -XX:+UnlockDiagnosticVMOptions -XX:+WhiteBoxAPI
@@ -58,8 +57,7 @@ public class TestPeriodicCollectionJNI {
     }
 
     public static void main(String[] args) throws InterruptedException {
-        long timeout = 2000;
-        long startTime = System.currentTimeMillis();
+        long timeoutMillis = 2000;
 
         // Start thread doing JNI call
         BlockInNative blocker = new BlockInNative();
@@ -67,10 +65,7 @@ public class TestPeriodicCollectionJNI {
 
         try {
             // Wait for periodic GC timeout to trigger
-            while (System.currentTimeMillis() < startTime + timeout) {
-                System.out.println("Sleeping to let periodic GC trigger...");
-                Thread.sleep(200);
-            }
+            Thread.sleep(timeoutMillis);
         } finally {
             unblock();
         }

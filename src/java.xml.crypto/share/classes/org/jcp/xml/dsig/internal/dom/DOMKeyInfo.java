@@ -21,10 +21,7 @@
  * under the License.
  */
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
- */
-/*
- * $Id: DOMKeyInfo.java 1854026 2019-02-21 09:30:01Z coheigea $
+ * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
  */
 package org.jcp.xml.dsig.internal.dom;
 
@@ -144,14 +141,17 @@ public final class DOMKeyInfo extends DOMStructure implements KeyInfo {
         keyInfoTypes = Collections.unmodifiableList(content);
     }
 
+    @Override
     public String getId() {
         return id;
     }
 
+    @Override
     public List<XMLStructure> getContent() {
         return keyInfoTypes;
     }
 
+    @Override
     public void marshal(XMLStructure parent, XMLCryptoContext context)
         throws MarshalException
     {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,7 +34,6 @@ import javax.imageio.plugins.jpeg.JPEGQTable;
 import java.io.IOException;
 import java.util.List;
 import java.util.ArrayList;
-import java.util.Iterator;
 
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
@@ -84,17 +83,17 @@ class DQTMarkerSegment extends MarkerSegment {
         }
     }
 
+    @Override
     protected Object clone() {
         DQTMarkerSegment newGuy = (DQTMarkerSegment) super.clone();
         newGuy.tables = new ArrayList<>(tables.size());
-        Iterator<Qtable> iter = tables.iterator();
-        while (iter.hasNext()) {
-            Qtable table = iter.next();
+        for (Qtable table : tables) {
             newGuy.tables.add((Qtable) table.clone());
         }
         return newGuy;
     }
 
+    @Override
     IIOMetadataNode getNativeNode() {
         IIOMetadataNode node = new IIOMetadataNode("dqt");
         for (int i= 0; i<tables.size(); i++) {
@@ -108,14 +107,15 @@ class DQTMarkerSegment extends MarkerSegment {
      * Writes the data for this segment to the stream in
      * valid JPEG format.
      */
+    @Override
     void write(ImageOutputStream ios) throws IOException {
         // We don't write DQT segments; the IJG library does.
     }
 
+    @Override
     void print() {
         printTag("DQT");
-        System.out.println("Num tables: "
-                           + Integer.toString(tables.size()));
+        System.out.println("Num tables: " + tables.size());
         for (int i= 0; i<tables.size(); i++) {
             Qtable table = tables.get(i);
             table.print();
@@ -175,7 +175,7 @@ class DQTMarkerSegment extends MarkerSegment {
     /**
      * A quantization table within a DQT marker segment.
      */
-    class Qtable implements Cloneable {
+    static class Qtable implements Cloneable {
         int elementPrecision;
         int tableID;
         final int QTABLE_SIZE = 64;
@@ -268,6 +268,7 @@ class DQTMarkerSegment extends MarkerSegment {
             }
         }
 
+        @Override
         protected Object clone() {
             Qtable newGuy = null;
             try {
@@ -290,9 +291,8 @@ class DQTMarkerSegment extends MarkerSegment {
         }
 
         void print() {
-            System.out.println("Table id: " + Integer.toString(tableID));
-            System.out.println("Element precision: "
-                               + Integer.toString(elementPrecision));
+            System.out.println("Table id: " + tableID);
+            System.out.println("Element precision: " + elementPrecision);
 
             (new JPEGQTable(data)).toString();
             /*

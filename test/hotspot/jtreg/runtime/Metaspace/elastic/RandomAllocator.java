@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2020 SAP SE. All rights reserved.
+ * Copyright (c) 2021 SAP SE. All rights reserved.
+ * Copyright (c) 2021, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,8 @@
 import java.util.ArrayList;
 import java.util.Random;
 
+import jdk.test.whitebox.WhiteBox;
+
 /**
  * RandomAllocator sits atop an arena and allocates from it.
  *
@@ -46,7 +48,11 @@ public class RandomAllocator {
     ArrayList<Allocation> to_dealloc = new ArrayList<>();
 
     long ticks = 0;
-    boolean allocationError = false;
+
+    // Allocate (breathe in) until arena is full, then - to test the arena deallocator - deallocate some allocations
+    // and breathe in again until full.
+    boolean breatheIn = true;
+    int breatheOutTicks = 0;
 
     Random localRandom;
 
@@ -57,15 +63,16 @@ public class RandomAllocator {
 
     // Allocate a random amount from the arena. If dice hits right, add this to the deallocation list.
     void allocateRandomly() {
-        allocationError = false;
-        long word_size = profile.randomAllocationSize();
-        Allocation a = arena.allocate(word_size);
+        long words = profile.randomAllocationSize();
+        Allocation a = arena.allocate(words * Settings.WORD_SIZE);
         if (a != null) {
             if (to_dealloc.size() < 10000) {
                 to_dealloc.add(a);
             }
         } else {
-            allocationError = true;
+            // On allocation error, breathe out a bit
+            breatheIn = false;
+            breatheOutTicks = 0;
         }
     }
 
@@ -80,19 +87,20 @@ public class RandomAllocator {
     }
 
     public void tick() {
-
-        if (!allocationError) {
+        if (breatheIn) {
+            // allocate until we hit the ceiling
             allocateRandomly();
-            if(rollDice(profile.randomDeallocProbability)) {
+            if (rollDice(profile.randomDeallocProbability)) {
                deallocateRandomly();
             }
         } else {
-            deallocateRandomly();
-            allocationError = false;
+            if (++breatheOutTicks < 100) {
+                deallocateRandomly();
+            } else {
+                breatheIn = true;
+            }
         }
-
         ticks ++;
-
     }
 
     public RandomAllocator(MetaspaceTestArena arena) {
@@ -100,6 +108,10 @@ public class RandomAllocator {
         this.profile = AllocationProfile.randomProfile();
         // reproducable randoms (we assume each allocator is only used from within one thread, and gets created from the main thread).
         this.localRandom = new Random(RandomHelper.random().nextInt());
+    }
+
+    long numAllocationFailures() {
+        return arena.numAllocationFailures;
     }
 
     @Override

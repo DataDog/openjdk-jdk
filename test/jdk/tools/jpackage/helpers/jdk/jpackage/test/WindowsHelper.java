@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,18 +22,29 @@
  */
 package jdk.jpackage.test;
 
+import static jdk.jpackage.internal.util.function.ExceptionBox.toUnchecked;
+import static jdk.jpackage.internal.util.function.ThrowingSupplier.toSupplier;
+
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.lang.ref.SoftReference;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.Set;
-import java.util.function.BiConsumer;
-import java.util.stream.Collectors;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
-import jdk.jpackage.test.Functional.ThrowingRunnable;
+import jdk.jpackage.internal.model.DottedVersion;
+import jdk.jpackage.internal.util.function.ThrowingRunnable;
 import jdk.jpackage.test.PackageTest.PackageHandlers;
 
 public class WindowsHelper {
@@ -56,20 +67,29 @@ public class WindowsHelper {
         return PROGRAM_FILES;
     }
 
-    private static Path getInstallationSubDirectory(JPackageCommand cmd) {
+    static Path getInstallationSubDirectory(JPackageCommand cmd) {
         cmd.verifyIsOfType(PackageType.WINDOWS);
-        return Path.of(cmd.getArgumentValue("--install-dir", () -> cmd.name()));
+        return Path.of(cmd.getArgumentValue("--install-dir", cmd::name));
     }
 
-    private static void runMsiexecWithRetries(Executor misexec) {
+    private static int runMsiexecWithRetries(Executor misexec, Optional<Path> msiLog) {
         Executor.Result result = null;
+        final boolean isUnpack = misexec.getExecutable().orElseThrow().equals(Path.of("cmd"));
+        final List<String> origArgs = msiLog.isPresent() ? misexec.getAllArguments() : null;
         for (int attempt = 0; attempt < 8; ++attempt) {
+            msiLog.ifPresent(v -> misexec.clearArguments().addArguments(origArgs).addArgument("/L*v").addArgument(v));
             result = misexec.executeWithoutExitCodeCheck();
 
-            // The given Executor may either be of an msiexe command or an
+            if (result.getExitCode() == 1605) {
+                // ERROR_UNKNOWN_PRODUCT, attempt to uninstall not installed
+                // package
+                return result.getExitCode();
+            }
+
+            // The given Executor may either be of an msiexec command or an
             // unpack.bat script containing the msiexec command. In the later
             // case, when misexec returns 1618, the unpack.bat may return 1603
-            if ((result.exitCode == 1618) || (result.exitCode == 1603)) {
+            if ((result.getExitCode() == 1618) || (result.getExitCode() == 1603 && isUnpack)) {
                 // Another installation is already in progress.
                 // Wait a little and try again.
                 Long timeout = 1000L * (attempt + 3); // from 3 to 10 seconds
@@ -79,192 +99,279 @@ public class WindowsHelper {
             break;
         }
 
-        result.assertExitCodeIsZero();
+        return result.getExitCode();
     }
 
-    static PackageHandlers createMsiPackageHandlers() {
-        BiConsumer<JPackageCommand, Boolean> installMsi = (cmd, install) -> {
-            cmd.verifyIsOfType(PackageType.WIN_MSI);
-            runMsiexecWithRetries(Executor.of("msiexec", "/qn", "/norestart",
-                    install ? "/i" : "/x").addArgument(cmd.outputBundle()));
-        };
-
-        PackageHandlers msi = new PackageHandlers();
-        msi.installHandler = cmd -> installMsi.accept(cmd, true);
-        msi.uninstallHandler = cmd -> installMsi.accept(cmd, false);
-        msi.unpackHandler = (cmd, destinationDir) -> {
-            cmd.verifyIsOfType(PackageType.WIN_MSI);
-            final Path unpackBat = destinationDir.resolve("unpack.bat");
-            final Path unpackDir = destinationDir.resolve(
-                    TKit.removeRootFromAbsolutePath(
-                            getInstallationRootDirectory(cmd)));
-            // Put msiexec in .bat file because can't pass value of TARGETDIR
-            // property containing spaces through ProcessBuilder properly.
-            TKit.createTextFile(unpackBat, List.of(String.join(" ", List.of(
-                    "msiexec",
-                    "/a",
-                    String.format("\"%s\"", cmd.outputBundle().normalize()),
-                    "/qn",
-                    String.format("TARGETDIR=\"%s\"",
-                            unpackDir.toAbsolutePath().normalize())))));
-            runMsiexecWithRetries(Executor.of("cmd", "/c", unpackBat.toString()));
-            return destinationDir;
-        };
-        return msi;
+    static PackageHandlers createMsiPackageHandlers(boolean createMsiLog) {
+        return new PackageHandlers(cmd -> installMsi(cmd, createMsiLog),
+                cmd -> uninstallMsi(cmd, createMsiLog), WindowsHelper::unpackMsi);
     }
 
-    static PackageHandlers createExePackageHandlers() {
-        PackageHandlers exe = new PackageHandlers();
-        // can't have install handler without also having uninstall handler
-        // so following is commented out for now
-        // exe.installHandler = cmd -> {
-        //     cmd.verifyIsOfType(PackageType.WIN_EXE);
-        //     new Executor().setExecutable(cmd.outputBundle()).execute();
-        // };
+    private static Optional<Path> configureMsiLogFile(JPackageCommand cmd, boolean createMsiLog) {
+        final Optional<Path> msiLogFile;
+        if (createMsiLog) {
+            msiLogFile = Optional.of(TKit.createTempFile(String.format("logs\\%s-msi.log",
+                    cmd.packageType().getType())));
+        } else {
+            msiLogFile = Optional.empty();
+        }
 
-        return exe;
+        cmd.winMsiLogFile(msiLogFile.orElse(null));
+
+        return msiLogFile;
+    }
+
+    private static int runMsiInstaller(JPackageCommand cmd, boolean createMsiLog, boolean install) {
+        cmd.verifyIsOfType(PackageType.WIN_MSI);
+        final var msiPath = TransientMsi.create(cmd).path();
+        return runMsiexecWithRetries(Executor.of("msiexec", "/qn", "/norestart",
+                install ? "/i" : "/x").addArgument(msiPath), configureMsiLogFile(cmd, createMsiLog));
+    }
+
+    private static int installMsi(JPackageCommand cmd, boolean createMsiLog) {
+        return runMsiInstaller(cmd, createMsiLog, true);
+    }
+
+    private static void uninstallMsi(JPackageCommand cmd, boolean createMsiLog) {
+        if (Files.exists(cmd.outputBundle())) {
+            runMsiInstaller(cmd, createMsiLog, false);
+        } else {
+            configureMsiLogFile(cmd, false);
+        }
+    }
+
+    private static Path unpackMsi(JPackageCommand cmd, Path destinationDir) {
+        cmd.verifyIsOfType(PackageType.WIN_MSI);
+        configureMsiLogFile(cmd, false);
+        final Path unpackBat = destinationDir.resolve("unpack.bat");
+        final Path unpackDir = destinationDir.resolve(
+                TKit.removeRootFromAbsolutePath(
+                        getInstallationRootDirectory(cmd)));
+
+        final Path msiPath = TransientMsi.create(cmd).path();
+
+        // Put msiexec in .bat file because can't pass value of TARGETDIR
+        // property containing spaces through ProcessBuilder properly.
+        // Set folder permissions to allow msiexec unpack msi bundle.
+        TKit.createTextFile(unpackBat, List.of(
+                String.format("icacls \"%s\" /inheritance:e /grant Users:M",
+                        destinationDir),
+                String.join(" ", List.of(
+                "msiexec",
+                "/a",
+                String.format("\"%s\"", msiPath),
+                "/qn",
+                String.format("TARGETDIR=\"%s\"",
+                        unpackDir.toAbsolutePath().normalize())))));
+        runMsiexecWithRetries(Executor.of("cmd", "/c", unpackBat.toString()), Optional.empty());
+
+        //
+        // WiX3 uses "." as the value of "DefaultDir" field for "ProgramFiles64Folder" folder in msi's Directory table
+        // WiX4 uses "PFiles64" as the value of "DefaultDir" field for "ProgramFiles64Folder" folder in msi's Directory table
+        // msiexec creates "Program Files/./<App Installation Directory>" from WiX3 msi which translates to "Program Files/<App Installation Directory>"
+        // msiexec creates "Program Files/PFiles64/<App Installation Directory>" from WiX4 msi
+        // So for WiX4 msi we need to transform "Program Files/PFiles64/<App Installation Directory>" into "Program Files/<App Installation Directory>"
+        //
+        // WiX4 does the same thing for %LocalAppData%.
+        //
+        for (var extraPathComponent : List.of("PFiles64", "LocalApp")) {
+            if (Files.isDirectory(unpackDir.resolve(extraPathComponent))) {
+                Path installationSubDirectory = getInstallationSubDirectory(cmd);
+                Path from = Path.of(extraPathComponent).resolve(installationSubDirectory);
+                Path to = installationSubDirectory;
+
+                ThrowingRunnable.toRunnable(() -> {
+                    Files.createDirectories(unpackDir.resolve(to).getParent());
+                }).run();
+
+                // Files.move() occasionally results into java.nio.file.AccessDeniedException
+                Executor.tryRunMultipleTimes(ThrowingRunnable.toRunnable(() -> {
+                    TKit.trace(String.format("Convert [%s] into [%s] in [%s] directory", from, to, unpackDir));
+                    final var dstDir = unpackDir.resolve(to);
+                    TKit.deleteDirectoryRecursive(dstDir);
+                    Files.move(unpackDir.resolve(from), dstDir);
+                    TKit.deleteDirectoryRecursive(unpackDir.resolve(extraPathComponent));
+                }), 3, 5);
+            }
+        }
+        return destinationDir;
+    }
+
+    static PackageHandlers createExePackageHandlers(boolean createMsiLog) {
+        return new PackageHandlers(cmd -> installExe(cmd, createMsiLog), WindowsHelper::uninstallExe, Optional.empty());
+    }
+
+    private static int runExeInstaller(JPackageCommand cmd, boolean createMsiLog, boolean install) {
+        cmd.verifyIsOfType(PackageType.WIN_EXE);
+        Executor exec = new Executor().setExecutable(cmd.outputBundle());
+        if (install) {
+            exec.addArgument("/qn").addArgument("/norestart");
+        } else {
+            exec.addArgument("uninstall");
+        }
+        return runMsiexecWithRetries(exec, configureMsiLogFile(cmd, createMsiLog));
+    }
+
+    private static int installExe(JPackageCommand cmd, boolean createMsiLog) {
+        return runExeInstaller(cmd, createMsiLog, true);
+    }
+
+    private static void uninstallExe(JPackageCommand cmd) {
+        if (Files.exists(cmd.outputBundle())) {
+            runExeInstaller(cmd, false, false);
+        } else {
+            configureMsiLogFile(cmd, false);
+        }
+    }
+
+    record TransientMsi(Path path) {
+        static TransientMsi create(JPackageCommand cmd) {
+            var outputMsiPath = cmd.outputBundle().normalize();
+            if (isPathTooLong(outputMsiPath)) {
+                return toSupplier(() -> {
+                    var transientMsiPath = TKit.createTempDirectory("msi-copy").resolve("a.msi").normalize();
+                    TKit.trace(String.format("Copy [%s] to [%s]", outputMsiPath, transientMsiPath));
+                    Files.copy(outputMsiPath, transientMsiPath);
+                    return new TransientMsi(transientMsiPath);
+                }).get();
+            } else {
+                return new TransientMsi(outputMsiPath);
+            }
+        }
+    }
+
+    public enum WixType {
+        WIX3,
+        WIX4,
+        ;
+
+        /**
+         * Returns the file name of the WiX build tool outputting MSI files.
+         *
+         * @return the name of the WiX tool outputting MSI files
+         */
+        public String buildTool() {
+            return switch (this) {
+                case WIX3 -> "light.exe";
+                case WIX4 -> "wix.exe";
+            };
+        }
+    }
+
+    public static WixType getWixTypeFromVerboseJPackageOutput(Executor.Result result) {
+
+        var summaryWixVersion = JPackageStringBundle.MAIN.cannedFormattedString(
+                "summary.property.win-wix-version").getValue() + ": ";
+
+        return result.stdout().stream().filter(str -> {
+            return str.startsWith(summaryWixVersion);
+        }).findFirst().map(str -> {
+            var ver = str.substring(summaryWixVersion.length());
+            if (DottedVersion.compareComponents(DottedVersion.lazy(ver), DottedVersion.greedy("4.0")) < 0) {
+                return WixType.WIX3;
+            } else {
+                return WixType.WIX4;
+            }
+        }).orElseThrow(() -> {
+            return new IllegalArgumentException("Failed to detect WiX version. Likely, the input is missing the summary");
+        });
+    }
+
+    static Optional<Path> toShortPath(Path path) {
+        if (isPathTooLong(path)) {
+            return Optional.of(ShortPathUtils.toShortPath(path));
+        } else {
+            return Optional.empty();
+        }
+    }
+
+    static void verifyDeployedDesktopIntegration(JPackageCommand cmd, boolean installed) {
+        WinShortcutVerifier.verifyDeployedShortcuts(cmd, installed);
+        DesktopIntegrationVerifier.verify(cmd, installed);
     }
 
     public static String getMsiProperty(JPackageCommand cmd, String propertyName) {
         cmd.verifyIsOfType(PackageType.WIN_MSI);
-        return Executor.of("cscript.exe", "//Nologo")
-        .addArgument(TKit.TEST_SRC_ROOT.resolve("resources/query-msi-property.js"))
-        .addArgument(cmd.outputBundle())
-        .addArgument(propertyName)
-        .dumpOutput()
-        .executeAndGetOutput().stream().collect(Collectors.joining("\n"));
+        return MsiDatabaseCache.INSTANCE.findProperty(cmd.outputBundle(), propertyName).orElseThrow();
     }
 
-    private static boolean isUserLocalInstall(JPackageCommand cmd) {
+    public static MsiDatabase.UIAlterations getUIAlterations(JPackageCommand cmd) {
+        cmd.verifyIsOfType(PackageType.WIN_MSI);
+        return MsiDatabaseCache.INSTANCE.uiAlterations(cmd.outputBundle());
+    }
+
+    static Collection<MsiDatabase.Shortcut> getMsiShortcuts(JPackageCommand cmd) {
+        cmd.verifyIsOfType(PackageType.WIN_MSI);
+        return MsiDatabaseCache.INSTANCE.listShortcuts(cmd.outputBundle());
+    }
+
+    public static String getExecutableDescription(Path pathToExeFile) {
+        Executor exec = Executor.of("powershell",
+                "-NoLogo",
+                "-NoProfile",
+                "-Command",
+                "(Get-Item \\\""
+                + pathToExeFile.toAbsolutePath()
+                + "\\\").VersionInfo | select FileDescription");
+
+        var lineIt = exec.dumpOutput().executeAndGetOutput().iterator();
+        while (lineIt.hasNext()) {
+            var line = lineIt.next();
+            if (line.trim().equals("FileDescription")) {
+                // Skip "---------------" and move to the description value
+                lineIt.next();
+                return lineIt.next().trim();
+            }
+        }
+
+        throw new RuntimeException(String.format(
+                "Failed to get file description of [%s]", pathToExeFile));
+    }
+
+    static boolean isUserLocalInstall(JPackageCommand cmd) {
         return cmd.hasArgument("--win-per-user-install");
     }
 
-    static class DesktopIntegrationVerifier {
+    private static boolean isPathTooLong(Path path) {
+        return path.toString().length() > WIN_MAX_PATH;
+    }
 
-        DesktopIntegrationVerifier(JPackageCommand cmd, String name) {
+
+    private static class DesktopIntegrationVerifier {
+
+        static void verify(JPackageCommand cmd, boolean installed) {
             cmd.verifyIsOfType(PackageType.WINDOWS);
-            this.cmd = cmd;
-            this.name = (name == null ? cmd.name() : name);
-            verifyStartMenuShortcut();
-            verifyDesktopShortcut();
-            verifyFileAssociationsRegistry();
-        }
-
-        private void verifyDesktopShortcut() {
-            boolean appInstalled = cmd.appLauncherPath(name).toFile().exists();
-            if (cmd.hasArgument("--win-shortcut")) {
-                if (isUserLocalInstall(cmd)) {
-                    verifyUserLocalDesktopShortcut(appInstalled);
-                    verifySystemDesktopShortcut(false);
-                } else {
-                    verifySystemDesktopShortcut(appInstalled);
-                    verifyUserLocalDesktopShortcut(false);
-                }
-            } else {
-                verifySystemDesktopShortcut(false);
-                verifyUserLocalDesktopShortcut(false);
+            for (var faFile : cmd.getAllArgumentValues("--file-associations")) {
+                verifyFileAssociationsRegistry(Path.of(faFile), installed);
             }
         }
 
-        private Path desktopShortcutPath() {
-            return Path.of(name + ".lnk");
-        }
+        private static void verifyFileAssociationsRegistry(Path faFile, boolean installed) {
 
-        private void verifyShortcut(Path path, boolean exists) {
-            if (exists) {
-                TKit.assertFileExists(path);
-            } else {
-                TKit.assertPathExists(path, false);
-            }
-        }
+            TKit.trace(String.format(
+                    "Get file association properties from [%s] file",
+                    faFile));
 
-        private void verifySystemDesktopShortcut(boolean exists) {
-            Path dir = Path.of(queryRegistryValueCache(
-                    SYSTEM_SHELL_FOLDERS_REGKEY, "Common Desktop"));
-            verifyShortcut(dir.resolve(desktopShortcutPath()), exists);
-        }
+            var faProps = new Properties();
 
-        private void verifyUserLocalDesktopShortcut(boolean exists) {
-            Path dir = Path.of(
-                    queryRegistryValueCache(USER_SHELL_FOLDERS_REGKEY, "Desktop"));
-            verifyShortcut(dir.resolve(desktopShortcutPath()), exists);
-        }
-
-        private void verifyStartMenuShortcut() {
-            boolean appInstalled = cmd.appLauncherPath(name).toFile().exists();
-            if (cmd.hasArgument("--win-menu")) {
-                if (isUserLocalInstall(cmd)) {
-                    verifyUserLocalStartMenuShortcut(appInstalled);
-                    verifySystemStartMenuShortcut(false);
-                } else {
-                    verifySystemStartMenuShortcut(appInstalled);
-                    verifyUserLocalStartMenuShortcut(false);
-                }
-            } else {
-                verifySystemStartMenuShortcut(false);
-                verifyUserLocalStartMenuShortcut(false);
-            }
-        }
-
-        private Path startMenuShortcutPath() {
-            return Path.of(cmd.getArgumentValue("--win-menu-group",
-                    () -> "Unknown"), name + ".lnk");
-        }
-
-        private void verifyStartMenuShortcut(Path shortcutsRoot, boolean exists) {
-            Path shortcutPath = shortcutsRoot.resolve(startMenuShortcutPath());
-            verifyShortcut(shortcutPath, exists);
-            if (!exists) {
-                TKit.assertPathNotEmptyDirectory(shortcutPath.getParent());
-            }
-        }
-
-        private void verifySystemStartMenuShortcut(boolean exists) {
-            verifyStartMenuShortcut(Path.of(queryRegistryValueCache(
-                    SYSTEM_SHELL_FOLDERS_REGKEY, "Common Programs")), exists);
-
-        }
-
-        private void verifyUserLocalStartMenuShortcut(boolean exists) {
-            verifyStartMenuShortcut(Path.of(queryRegistryValueCache(
-                    USER_SHELL_FOLDERS_REGKEY, "Programs")), exists);
-        }
-
-        private void verifyFileAssociationsRegistry() {
-            Stream.of(cmd.getAllArgumentValues("--file-associations")).map(
-                    Path::of).forEach(this::verifyFileAssociationsRegistry);
-        }
-
-        private void verifyFileAssociationsRegistry(Path faFile) {
-            boolean appInstalled = cmd.appLauncherPath(name).toFile().exists();
-            try {
-                TKit.trace(String.format(
-                        "Get file association properties from [%s] file",
-                        faFile));
-                Map<String, String> faProps = Files.readAllLines(faFile).stream().filter(
-                        line -> line.trim().startsWith("extension=") || line.trim().startsWith(
-                        "mime-type=")).map(
-                                line -> {
-                                    String[] keyValue = line.trim().split("=", 2);
-                                    return Map.entry(keyValue[0], keyValue[1]);
-                                }).collect(Collectors.toMap(
-                                entry -> entry.getKey(),
-                                entry -> entry.getValue()));
-                String suffix = faProps.get("extension");
-                String contentType = faProps.get("mime-type");
+            try (var reader = Files.newBufferedReader(faFile)) {
+                faProps.load(reader);
+                String suffix = faProps.getProperty("extension");
+                String contentType = faProps.getProperty("mime-type");
                 TKit.assertNotNull(suffix, String.format(
                         "Check file association suffix [%s] is found in [%s] property file",
                         suffix, faFile));
                 TKit.assertNotNull(contentType, String.format(
                         "Check file association content type [%s] is found in [%s] property file",
                         contentType, faFile));
-                verifyFileAssociations(appInstalled, "." + suffix, contentType);
+                verifyFileAssociations(installed, "." + suffix, contentType);
+
             } catch (IOException ex) {
-                throw new RuntimeException(ex);
+                throw new UncheckedIOException(ex);
             }
         }
 
-        private void verifyFileAssociations(boolean exists, String suffix,
+        private static void verifyFileAssociations(boolean exists, String suffix,
                 String contentType) {
             String contentTypeFromRegistry = queryRegistryValue(Path.of(
                     "HKLM\\Software\\Classes", suffix).toString(),
@@ -285,16 +392,14 @@ public class WindowsHelper {
                         "Check content type in registry not found");
             }
         }
-
-        private final JPackageCommand cmd;
-        private final String name;
     }
 
-    private static String queryRegistryValue(String keyPath, String valueName) {
+
+    static String queryRegistryValue(String keyPath, String valueName) {
         var status = Executor.of("reg", "query", keyPath, "/v", valueName)
                 .saveOutput()
                 .executeWithoutExitCodeCheck();
-        if (status.exitCode == 1) {
+        if (status.getExitCode() == 1) {
             // Should be the case of no such registry value or key
             String lookupString = "ERROR: The system was unable to find the specified registry key or value.";
             TKit.assertTextStream(lookupString)
@@ -309,9 +414,26 @@ public class WindowsHelper {
         }
 
         String value = status.assertExitCodeIsZero().getOutput().stream().skip(2).findFirst().orElseThrow();
-        // Extract the last field from the following line:
-        //     Common Desktop    REG_SZ    C:\Users\Public\Desktop
-        value = value.split("    REG_SZ    ")[1];
+        // Extract the last field from the following lines:
+        //    (Default)    REG_SZ    test1
+        //    string_val    REG_SZ    test2
+        //    string_val_empty    REG_SZ
+        //    bin_val    REG_BINARY    4242
+        //    bin_val_empty    REG_BINARY
+        //    dword_val    REG_DWORD    0x2a
+        //    qword_val    REG_QWORD    0x2a
+        //    multi_string_val    REG_MULTI_SZ    test3\0test4
+        //    multi_string_val_empty    REG_MULTI_SZ
+        //    expand_string_val    REG_EXPAND_SZ    test5
+        //    expand_string_val_empty    REG_EXPAND_SZ
+        String[] parts = value.split(" {4}REG_[A-Z_]+ {4}");
+        if (parts.length == 1) {
+            value = "";
+        } else if (parts.length == 2) {
+            value = parts[1];
+        } else {
+            throw new RuntimeException(String.format("Failed to extract registry value from string [%s]", value));
+        }
 
         TKit.trace(String.format("Registry value [%s] at [%s] path is [%s]",
                 valueName, keyPath, value));
@@ -319,31 +441,224 @@ public class WindowsHelper {
         return value;
     }
 
-    private static String queryRegistryValueCache(String keyPath,
-            String valueName) {
-        String key = String.format("[%s][%s]", keyPath, valueName);
-        String value = REGISTRY_VALUES.get(key);
-        if (value == null) {
-            value = queryRegistryValue(keyPath, valueName);
-            REGISTRY_VALUES.put(key, value);
+    // See .NET special folders
+    private enum SpecialFolderDotNet {
+        Desktop,
+        CommonDesktop,
+
+        Programs,
+        CommonPrograms,
+
+        ProgramFiles,
+
+        LocalApplicationData,
+        ;
+
+        Path getPath() {
+            final var str = Executor.of("powershell", "-NoLogo", "-NoProfile",
+                    "-NonInteractive", "-Command",
+                    String.format("[Environment]::GetFolderPath('%s')", name())
+                    ).saveFirstLineOfOutput().execute().getFirstLineOfOutput();
+
+            TKit.trace(String.format("Value of .NET special folder '%s' is [%s]", name(), str));
+
+            return Path.of(str);
+        }
+    }
+
+    private record RegValuePath(String keyPath, String valueName) {
+        RegValuePath {
+            Objects.requireNonNull(keyPath);
+            Objects.requireNonNull(valueName);
         }
 
-        return value;
+        Optional<String> findValue() {
+            return Optional.ofNullable(queryRegistryValue(keyPath, valueName));
+        }
     }
+
+    enum SpecialFolder {
+        COMMON_START_MENU_PROGRAMS(
+                SYSTEM_SHELL_FOLDERS_REGKEY,
+                "Common Programs",
+                "ProgramMenuFolder",
+                SpecialFolderDotNet.CommonPrograms),
+        USER_START_MENU_PROGRAMS(
+                USER_SHELL_FOLDERS_REGKEY,
+                "Programs",
+                "ProgramMenuFolder",
+                SpecialFolderDotNet.Programs),
+
+        COMMON_DESKTOP(
+                SYSTEM_SHELL_FOLDERS_REGKEY,
+                "Common Desktop",
+                "DesktopFolder",
+                SpecialFolderDotNet.CommonDesktop),
+        USER_DESKTOP(
+                USER_SHELL_FOLDERS_REGKEY,
+                "Desktop",
+                "DesktopFolder",
+                SpecialFolderDotNet.Desktop),
+
+        PROGRAM_FILES("ProgramFiles64Folder", SpecialFolderDotNet.ProgramFiles),
+
+        LOCAL_APPLICATION_DATA("LocalAppDataFolder", SpecialFolderDotNet.LocalApplicationData),
+        ;
+
+        SpecialFolder(String keyPath, String valueName, String msiPropertyName) {
+            reg = Optional.of(new RegValuePath(keyPath, valueName));
+            alt = Optional.empty();
+            this.msiPropertyName = Objects.requireNonNull(msiPropertyName);
+        }
+
+        SpecialFolder(String keyPath, String valueName, String msiPropertyName, SpecialFolderDotNet alt) {
+            reg = Optional.of(new RegValuePath(keyPath, valueName));
+            this.alt = Optional.of(alt);
+            this.msiPropertyName = Objects.requireNonNull(msiPropertyName);
+        }
+
+        SpecialFolder(String msiPropertyName, SpecialFolderDotNet alt) {
+            reg = Optional.empty();
+            this.alt = Optional.of(alt);
+            this.msiPropertyName = Objects.requireNonNull(msiPropertyName);
+        }
+
+        static Optional<SpecialFolder> findMsiProperty(String pathComponent, boolean allUsers) {
+            Objects.requireNonNull(pathComponent);
+            String regPath;
+            if (allUsers) {
+                regPath = SYSTEM_SHELL_FOLDERS_REGKEY;
+            } else {
+                regPath = USER_SHELL_FOLDERS_REGKEY;
+            }
+            return Stream.of(values())
+                    .filter(v -> v.msiPropertyName.equals(pathComponent))
+                    .filter(v -> {
+                        return v.reg.map(r -> r.keyPath().equals(regPath)).orElse(true);
+                    })
+                    .findFirst();
+        }
+
+        String getMsiPropertyName() {
+            return msiPropertyName;
+        }
+
+        Path getPath() {
+            return CACHE.computeIfAbsent(this, k -> reg.flatMap(RegValuePath::findValue).map(Path::of).orElseGet(() -> {
+                return alt.map(SpecialFolderDotNet::getPath).orElseThrow(() -> {
+                    return new NoSuchElementException(String.format("Failed to find path to %s folder", name()));
+                });
+            }));
+        }
+
+        private final Optional<RegValuePath> reg;
+        private final Optional<SpecialFolderDotNet> alt;
+        // One of "System Folder Properties" from https://learn.microsoft.com/en-us/windows/win32/msi/property-reference
+        private final String msiPropertyName;
+
+        private static final Map<SpecialFolder, Path> CACHE = new ConcurrentHashMap<>();
+    }
+
+    private static final class ShortPathUtils {
+        private ShortPathUtils() {
+            try {
+                var shortPathUtilsClass = Class.forName("jdk.jpackage.internal.ShortPathUtils");
+
+                getShortPathWrapper = shortPathUtilsClass.getDeclaredMethod(
+                        "getShortPathWrapper", String.class);
+                // Note: this reflection call requires
+                // --add-opens jdk.jpackage/jdk.jpackage.internal=ALL-UNNAMED
+                getShortPathWrapper.setAccessible(true);
+            } catch (ClassNotFoundException | NoSuchMethodException
+                    | SecurityException ex) {
+                throw toUnchecked(ex);
+            }
+        }
+
+        static Path toShortPath(Path path) {
+            return Path.of(toSupplier(() -> (String) INSTANCE.getShortPathWrapper.invoke(
+                    null, path.toString())).get());
+        }
+
+        private final Method getShortPathWrapper;
+
+        private static final ShortPathUtils INSTANCE = new ShortPathUtils();
+    }
+
+
+    private static final class MsiDatabaseCache {
+
+        Optional<String> findProperty(Path msiPath, String propertyName) {
+            return ensureTables(msiPath, MsiDatabase.Table.FIND_PROPERTY_REQUIRED_TABLES).findProperty(propertyName);
+        }
+
+        Collection<MsiDatabase.Shortcut> listShortcuts(Path msiPath) {
+            return ensureTables(msiPath, MsiDatabase.Table.LIST_SHORTCUTS_REQUIRED_TABLES).listShortcuts();
+        }
+
+        MsiDatabase.UIAlterations uiAlterations(Path msiPath) {
+            return ensureTables(msiPath, MsiDatabase.Table.UI_ALTERATIONS_REQUIRED_TABLES).uiAlterations();
+        }
+
+        MsiDatabase ensureTables(Path msiPath, Set<MsiDatabase.Table> tableNames) {
+            Objects.requireNonNull(msiPath);
+            try {
+                synchronized (items) {
+                    var value = Optional.ofNullable(items.get(msiPath)).map(SoftReference::get).orElse(null);
+                    if (value != null) {
+                        var lastModifiedTime = Files.getLastModifiedTime(msiPath).toInstant();
+                        if (lastModifiedTime.isAfter(value.timestamp())) {
+                            value = null;
+                        } else {
+                            tableNames = Comm.compare(value.db().tableNames(), tableNames).unique2();
+                        }
+                    }
+
+                    if (!tableNames.isEmpty()) {
+                        var idtOutputDir = TKit.createTempDirectory("msi-db");
+                        var db = MsiDatabase.load(msiPath, idtOutputDir, tableNames);
+                        if (value != null) {
+                            value = new MsiDatabaseWithTimestamp(db.append(value.db()), value.timestamp());
+                        } else {
+                            value = new MsiDatabaseWithTimestamp(db, Files.getLastModifiedTime(msiPath).toInstant());
+                        }
+                        items.put(msiPath, new SoftReference<>(value));
+                    }
+
+                    return value.db();
+                }
+            } catch (IOException ex) {
+                throw new UncheckedIOException(ex);
+            }
+        }
+
+        private record MsiDatabaseWithTimestamp(MsiDatabase db, Instant timestamp) {
+
+            MsiDatabaseWithTimestamp {
+                Objects.requireNonNull(db);
+                Objects.requireNonNull(timestamp);
+            }
+        }
+
+        private final Map<Path, SoftReference<MsiDatabaseWithTimestamp>> items = new HashMap<>();
+
+        static final MsiDatabaseCache INSTANCE = new MsiDatabaseCache();
+    }
+
 
     static final Set<Path> CRITICAL_RUNTIME_FILES = Set.of(Path.of(
             "bin\\server\\jvm.dll"));
 
     // jtreg resets %ProgramFiles% environment variable by some reason.
-    private final static Path PROGRAM_FILES = Path.of(Optional.ofNullable(
+    private static final Path PROGRAM_FILES = Path.of(Optional.ofNullable(
             System.getenv("ProgramFiles")).orElse("C:\\Program Files"));
 
-    private final static Path USER_LOCAL = Path.of(System.getProperty(
+    private static final Path USER_LOCAL = Path.of(System.getProperty(
             "user.home"),
             "AppData", "Local");
 
-    private final static String SYSTEM_SHELL_FOLDERS_REGKEY = "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders";
-    private final static String USER_SHELL_FOLDERS_REGKEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders";
+    private static final String SYSTEM_SHELL_FOLDERS_REGKEY = "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders";
+    private static final String USER_SHELL_FOLDERS_REGKEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders";
 
-    private static final Map<String, String> REGISTRY_VALUES = new HashMap<>();
+    private static final int WIN_MAX_PATH = 260;
 }

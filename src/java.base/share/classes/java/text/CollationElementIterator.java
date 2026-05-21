@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -76,17 +76,15 @@ import jdk.internal.icu.text.NormalizerBase;
  * <p>
  * Example of the iterator usage,
  * <blockquote>
- * <pre>
- *
- *  String testString = "This is a test";
- *  Collator col = Collator.getInstance();
- *  if (col instanceof RuleBasedCollator) {
- *      RuleBasedCollator ruleBasedCollator = (RuleBasedCollator)col;
- *      CollationElementIterator collationElementIterator = ruleBasedCollator.getCollationElementIterator(testString);
- *      int primaryOrder = CollationElementIterator.primaryOrder(collationElementIterator.next());
- *          :
- *  }
- * </pre>
+ * {@snippet lang=java :
+ * String testString = "This is a test";
+ * Collator col = Collator.getInstance();
+ * if (col instanceof RuleBasedCollator ruleBasedCollator) {
+ *     CollationElementIterator collationElementIterator = ruleBasedCollator.getCollationElementIterator(testString);
+ *     int primaryOrder = CollationElementIterator.primaryOrder(collationElementIterator.next());
+ *         \u22ee
+ * }
+ * }
  * </blockquote>
  *
  * <p>
@@ -663,7 +661,7 @@ public final class CollationElementIterator
 
         // (the Normalizer is cloned here so that the seeking we do in the next loop
         // won't affect our real position in the text)
-        NormalizerBase tempText = (NormalizerBase)text.clone();
+        NormalizerBase tempText = text.clone();
 
         // extract the next maxLength characters in the string (we have to do this using the
         // Normalizer to ensure that our offsets correspond to those the rest of the
@@ -734,7 +732,7 @@ public final class CollationElementIterator
         pair = list.lastElement();
         int maxLength = pair.entryName.length();
 
-        NormalizerBase tempText = (NormalizerBase)text.clone();
+        NormalizerBase tempText = text.clone();
 
         tempText.next();
         key.setLength(0);
@@ -776,7 +774,7 @@ public final class CollationElementIterator
     private NormalizerBase text = null;
     private int[] buffer = null;
     private int expIndex = 0;
-    private StringBuffer key = new StringBuffer(5);
+    private StringBuilder key = new StringBuilder(5);
     private int swapOrder = 0;
     private RBCollationTables ordering;
     private RuleBasedCollator owner;

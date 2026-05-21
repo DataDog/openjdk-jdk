@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
 
 package com.sun.source.tree;
 
-import java.util.Collections;
 import java.util.List;
 import javax.lang.model.element.Name;
 
@@ -44,10 +43,10 @@ import javax.lang.model.element.Name;
  * </pre>
  *
  * @jls 8.1 Class Declarations
- * @jls 8.9 Enum Types
- * @jls 8.10 Record Types
+ * @jls 8.9 Enum Classes
+ * @jls 8.10 Record Classes
  * @jls 9.1 Interface Declarations
- * @jls 9.6 Annotation Types
+ * @jls 9.6 Annotation Interfaces
  *
  * @author Peter von der Ah&eacute;
  * @author Jonathan Gibbons
@@ -87,23 +86,14 @@ public interface ClassTree extends StatementTree {
     List<? extends Tree> getImplementsClause();
 
     /**
-     * {@preview Associated with sealed classes, a preview feature of the Java language.
-     *
-     *           This method is associated with <i>sealed classes</i>, a preview
-     *           feature of the Java language. Preview features
-     *           may be removed in a future release, or upgraded to permanent
-     *           features of the Java language.}
-     *
      * Returns the subclasses permitted by this type declaration.
      *
      * @implSpec this implementation returns an empty list
      *
      * @return the subclasses
      *
-     * @since 15
+     * @since 17
      */
-    @jdk.internal.PreviewFeature(feature=jdk.internal.PreviewFeature.Feature.SEALED_CLASSES,
-                                             essentialAPI=false)
     default List<? extends Tree> getPermitsClause() {
         return List.of();
     }

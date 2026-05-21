@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,8 +31,8 @@ package gc.arguments;
  * @library /
  * @modules java.base/jdk.internal.misc
  *          java.management
- * @build sun.hotspot.WhiteBox
- * @run driver ClassFileInstaller sun.hotspot.WhiteBox
+ * @build jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run driver gc.arguments.TestSurvivorRatioFlag
  */
 
@@ -41,9 +41,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedList;
 import jdk.test.lib.process.OutputAnalyzer;
-import jdk.test.lib.process.ProcessTools;
 import jdk.test.lib.Utils;
-import sun.hotspot.WhiteBox;
+import jdk.test.whitebox.WhiteBox;
 
 public class TestSurvivorRatioFlag {
 
@@ -78,7 +77,6 @@ public class TestSurvivorRatioFlag {
                 "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
                 "-XX:+UnlockDiagnosticVMOptions",
                 "-XX:+WhiteBoxAPI",
-                "-XX:GCLockerEdenExpansionPercent=0",
                 "-XX:MaxNewSize=" + NEW_SIZE,
                 "-XX:NewSize=" + NEW_SIZE,
                 "-Xmx" + HEAP_SIZE,
@@ -88,8 +86,7 @@ public class TestSurvivorRatioFlag {
                 Integer.toString(ratio)
         );
 
-        ProcessBuilder procBuilder = GCArguments.createJavaProcessBuilder(vmOptions);
-        OutputAnalyzer analyzer = new OutputAnalyzer(procBuilder.start());
+        OutputAnalyzer analyzer = GCArguments.executeLimitedTestJava(vmOptions);
         analyzer.shouldHaveExitValue(0);
     }
 
@@ -157,7 +154,7 @@ public class TestSurvivorRatioFlag {
             long youngGenSize = edenUsage.getMax() + 2 * survivorUsage.getMax();
             // for Paralle GC Min/InitialSurvivorRatio = SurvivorRatio + 2
             long expectedSize = HeapRegionUsageTool.alignDown(youngGenSize / (expectedRatio + 2),
-                    wb.psHeapGenerationAlignment());
+                    wb.getHeapSpaceAlignment());
 
             if (expectedSize != survivorUsage.getCommitted()) {
                 throw new RuntimeException("Expected survivor size is: " + expectedSize

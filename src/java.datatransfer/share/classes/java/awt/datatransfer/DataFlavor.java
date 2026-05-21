@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,6 +35,7 @@ import java.io.ObjectInput;
 import java.io.ObjectOutput;
 import java.io.OptionalDataException;
 import java.io.Reader;
+import java.io.Serial;
 import java.io.StringReader;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
@@ -44,7 +45,6 @@ import java.util.Collections;
 import java.util.Objects;
 
 import sun.datatransfer.DataFlavorUtil;
-import sun.reflect.misc.ReflectUtil;
 
 /**
  * A {@code DataFlavor} provides meta information about data. {@code DataFlavor}
@@ -111,8 +111,11 @@ import sun.reflect.misc.ReflectUtil;
  */
 public class DataFlavor implements Externalizable, Cloneable {
 
+    /**
+     * Use serialVersionUID from JDK 1.2 for interoperability.
+     */
+    @Serial
     private static final long serialVersionUID = 8367026044764648243L;
-    private static final Class<InputStream> ioInputStreamClass = InputStream.class;
 
     /**
      * Tries to load a class from: the bootstrap loader, the system loader, the
@@ -127,31 +130,22 @@ public class DataFlavor implements Externalizable, Cloneable {
                                                    ClassLoader fallback)
         throws ClassNotFoundException
     {
-        ReflectUtil.checkPackageAccess(className);
+        ClassLoader loader = ClassLoader.getSystemClassLoader();
         try {
-            SecurityManager sm = System.getSecurityManager();
-            if (sm != null) {
-                sm.checkPermission(new RuntimePermission("getClassLoader"));
-            }
-            ClassLoader loader = ClassLoader.getSystemClassLoader();
-            try {
-                // bootstrap class loader and system class loader if present
-                return Class.forName(className, true, loader);
-            }
-            catch (ClassNotFoundException exception) {
-                // thread context class loader if and only if present
-                loader = Thread.currentThread().getContextClassLoader();
-                if (loader != null) {
-                    try {
-                        return Class.forName(className, true, loader);
-                    }
-                    catch (ClassNotFoundException e) {
-                        // fallback to user's class loader
-                    }
+            // bootstrap class loader and system class loader if present
+            return Class.forName(className, true, loader);
+        }
+        catch (ClassNotFoundException exception) {
+            // thread context class loader if and only if present
+            loader = Thread.currentThread().getContextClassLoader();
+            if (loader != null) {
+                try {
+                    return Class.forName(className, true, loader);
+                }
+                catch (ClassNotFoundException e) {
+                    // fallback to user's class loader
                 }
             }
-        } catch (SecurityException exception) {
-            // ignore secured class loaders
         }
         return Class.forName(className, true, fallback);
     }
@@ -181,10 +175,10 @@ public class DataFlavor implements Externalizable, Cloneable {
     /*
      * private initializer
      */
-    private static DataFlavor initHtmlDataFlavor(String htmlFlavorType) {
+    private static DataFlavor initHtml(String htmlFlavorType) {
         try {
-            return new DataFlavor ("text/html; class=java.lang.String;document=" +
-                                       htmlFlavorType + ";charset=Unicode");
+            return new DataFlavor("text/html; class=java.lang.String;document="
+                                      + htmlFlavorType + ";charset=Unicode");
         } catch (Exception e) {
             return null;
         }
@@ -288,7 +282,7 @@ public class DataFlavor implements Externalizable, Cloneable {
      *
      * @since 1.8
      */
-    public static DataFlavor selectionHtmlFlavor = initHtmlDataFlavor("selection");
+    public static final DataFlavor selectionHtmlFlavor = initHtml("selection");
 
     /**
      * Represents a piece of an HTML markup. If possible, the markup received
@@ -302,7 +296,7 @@ public class DataFlavor implements Externalizable, Cloneable {
      *
      * @since 1.8
      */
-    public static DataFlavor fragmentHtmlFlavor = initHtmlDataFlavor("fragment");
+    public static final DataFlavor fragmentHtmlFlavor = initHtml("fragment");
 
     /**
      * Represents a piece of an HTML markup. If possible, the markup received
@@ -316,7 +310,7 @@ public class DataFlavor implements Externalizable, Cloneable {
      *
      * @since 1.8
      */
-    public static DataFlavor allHtmlFlavor = initHtmlDataFlavor("all");
+    public static final DataFlavor allHtmlFlavor = initHtml("all");
 
     /**
      * Constructs a new {@code DataFlavor}. This constructor is provided only
@@ -1139,7 +1133,7 @@ public class DataFlavor implements Externalizable, Cloneable {
      * @return the default representation class
      */
     public final Class<?> getDefaultRepresentationClass() {
-        return ioInputStreamClass;
+        return java.io.InputStream.class;
     }
 
     /**
@@ -1158,7 +1152,7 @@ public class DataFlavor implements Externalizable, Cloneable {
      *         {@code java.io.InputStream}
      */
     public boolean isRepresentationClassInputStream() {
-        return ioInputStreamClass.isAssignableFrom(representationClass);
+        return java.io.InputStream.class.isAssignableFrom(representationClass);
     }
 
     /**
@@ -1292,6 +1286,9 @@ public class DataFlavor implements Externalizable, Cloneable {
 
     /**
      * Serializes this {@code DataFlavor}.
+     *
+     * @serialData The {@code mimeType} field with the {@code humanPresentableName} parameter set,
+     * followed by the {@code representationClass} field
      */
    public synchronized void writeExternal(ObjectOutput os) throws IOException {
        if (mimeType != null) {

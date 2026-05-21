@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,27 +25,76 @@
 
 package com.sun.java.swing.plaf.windows;
 
-import javax.swing.*;
-import javax.swing.border.*;
-import javax.swing.filechooser.*;
-import javax.swing.event.*;
-import javax.swing.plaf.*;
-import javax.swing.plaf.basic.*;
-import java.awt.*;
-import java.awt.event.*;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.ComponentOrientation;
+import java.awt.Dimension;
+import java.awt.Graphics;
+import java.awt.Insets;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
 import java.awt.image.BufferedImage;
-import java.beans.*;
+import java.beans.PropertyChangeEvent;
+import java.beans.PropertyChangeListener;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.util.*;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Locale;
+import java.util.Vector;
+
+import javax.accessibility.AccessibleContext;
+import javax.swing.AbstractListModel;
+import javax.swing.Action;
+import javax.swing.ActionMap;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.ButtonGroup;
+import javax.swing.ComboBoxModel;
+import javax.swing.DefaultButtonModel;
+import javax.swing.DefaultListCellRenderer;
+import javax.swing.Icon;
+import javax.swing.ImageIcon;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.JFileChooser;
+import javax.swing.JLabel;
+import javax.swing.JList;
+import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.JRadioButtonMenuItem;
+import javax.swing.JTextField;
+import javax.swing.JToolBar;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
+import javax.swing.border.EmptyBorder;
+import javax.swing.event.ListSelectionEvent;
+import javax.swing.event.ListSelectionListener;
+import javax.swing.event.PopupMenuEvent;
+import javax.swing.event.PopupMenuListener;
+import javax.swing.filechooser.FileFilter;
+import javax.swing.filechooser.FileSystemView;
+import javax.swing.filechooser.FileView;
+import javax.swing.plaf.ActionMapUIResource;
+import javax.swing.plaf.ComponentUI;
+import javax.swing.plaf.InsetsUIResource;
+import javax.swing.plaf.basic.BasicDirectoryModel;
+import javax.swing.plaf.basic.BasicFileChooserUI;
 
 import sun.awt.shell.ShellFolder;
-import sun.swing.*;
-
-import javax.accessibility.*;
+import sun.swing.FilePane;
+import sun.swing.SwingUtilities2;
+import sun.swing.WindowsPlacesBar;
 
 /**
  * Windows {@literal L&F} implementation of a FileChooser.
@@ -145,61 +194,75 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
         super(filechooser);
     }
 
+    @Override
     public void installUI(JComponent c) {
         super.installUI(c);
     }
 
+    @Override
     public void uninstallComponents(JFileChooser fc) {
         fc.removeAll();
     }
 
-    private class WindowsFileChooserUIAccessor implements FilePane.FileChooserUIAccessor {
+    private final class WindowsFileChooserUIAccessor implements FilePane.FileChooserUIAccessor {
+        @Override
         public JFileChooser getFileChooser() {
             return WindowsFileChooserUI.this.getFileChooser();
         }
 
+        @Override
         public BasicDirectoryModel getModel() {
             return WindowsFileChooserUI.this.getModel();
         }
 
+        @Override
         public JPanel createList() {
             return WindowsFileChooserUI.this.createList(getFileChooser());
         }
 
+        @Override
         public JPanel createDetailsView() {
             return WindowsFileChooserUI.this.createDetailsView(getFileChooser());
         }
 
+        @Override
         public boolean isDirectorySelected() {
             return WindowsFileChooserUI.this.isDirectorySelected();
         }
 
+        @Override
         public File getDirectory() {
             return WindowsFileChooserUI.this.getDirectory();
         }
 
+        @Override
         public Action getChangeToParentDirectoryAction() {
             return WindowsFileChooserUI.this.getChangeToParentDirectoryAction();
         }
 
+        @Override
         public Action getApproveSelectionAction() {
             return WindowsFileChooserUI.this.getApproveSelectionAction();
         }
 
+        @Override
         public Action getNewFolderAction() {
             return WindowsFileChooserUI.this.getNewFolderAction();
         }
 
+        @Override
         public MouseListener createDoubleClickListener(JList<?> list) {
             return WindowsFileChooserUI.this.createDoubleClickListener(getFileChooser(),
                                                                        list);
         }
 
+        @Override
         public ListSelectionListener createListSelectionListener() {
             return WindowsFileChooserUI.this.createListSelectionListener(getFileChooser());
         }
     }
 
+    @Override
     public void installComponents(JFileChooser fc) {
         filePane = new FilePane(new WindowsFileChooserUIAccessor());
         fc.addPropertyChangeListener(filePane);
@@ -224,7 +287,6 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
         fc.add(topPanel, BorderLayout.NORTH);
 
         // ComboBox Label
-        @SuppressWarnings("serial") // anonymous class
         JLabel tmp1 = new JLabel(lookInLabelText, JLabel.TRAILING) {
             public Dimension getPreferredSize() {
                 return getMinimumSize();
@@ -246,7 +308,6 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
         topPanel.add(Box.createRigidArea(new Dimension(8,0)));
 
         // CurrentDir ComboBox
-        @SuppressWarnings("serial") // anonymous class
         JComboBox<File> tmp2 = new JComboBox<File>() {
             public Dimension getMinimumSize() {
                 Dimension d = super.getMinimumSize();
@@ -322,6 +383,10 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
 
         viewMenuButton.addMouseListener(new MouseAdapter() {
             public void mousePressed(MouseEvent e) {
+                if (!getFileChooser().isEnabled()) {
+                    return;
+                }
+
                 if (SwingUtilities.isLeftMouseButton(e) && !viewMenuButton.isSelected()) {
                     viewMenuButton.setSelected(true);
 
@@ -331,6 +396,10 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
         });
         viewMenuButton.addKeyListener(new KeyAdapter() {
             public void keyPressed(KeyEvent e) {
+                if (!getFileChooser().isEnabled()) {
+                    return;
+                }
+
                 // Forbid keyboard actions if the button is not in rollover state
                 if (e.getKeyCode() == KeyEvent.VK_SPACE && viewMenuButton.getModel().isRollover()) {
                     viewMenuButton.setSelected(true);
@@ -420,7 +489,6 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
         fileAndFilterPanel.add(Box.createRigidArea(vstrut8));
         fileAndFilterPanel.setLayout(new BoxLayout(fileAndFilterPanel, BoxLayout.Y_AXIS));
 
-        @SuppressWarnings("serial") // anonymous class
         JTextField tmp3 = new JTextField(35) {
             public Dimension getMaximumSize() {
                 return new Dimension(Short.MAX_VALUE, super.getPreferredSize().height);
@@ -461,7 +529,6 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
         // buttons
         getButtonPanel().setLayout(new BoxLayout(getButtonPanel(), BoxLayout.Y_AXIS));
 
-        @SuppressWarnings("serial") // anonymous class
         JButton tmp4 = new JButton(getApproveButtonText(fc)) {
             public Dimension getMaximumSize() {
                 return approveButton.getPreferredSize().width > cancelButton.getPreferredSize().width ?
@@ -480,7 +547,6 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
         getButtonPanel().add(approveButton);
         getButtonPanel().add(Box.createRigidArea(vstrut4));
 
-        @SuppressWarnings("serial") // anonymous class
         JButton tmp5 = new JButton(cancelButtonText) {
             public Dimension getMaximumSize() {
                 return approveButton.getPreferredSize().width > cancelButton.getPreferredSize().width ?
@@ -532,6 +598,7 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
         return bottomPanel;
     }
 
+    @Override
     protected void installStrings(JFileChooser fc) {
         super.installStrings(fc);
 
@@ -563,6 +630,7 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
         return SwingUtilities2.getUIDefaultsInt(key, l);
     }
 
+    @Override
     protected void installListeners(JFileChooser fc) {
         super.installListeners(fc);
         ActionMap actionMap = getActionMap();
@@ -593,24 +661,12 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
      * @param fc a <code>JFileChooser</code>
      * @return a <code>ListSelectionListener</code>
      */
+    @Override
     public ListSelectionListener createListSelectionListener(JFileChooser fc) {
         return super.createListSelectionListener(fc);
     }
 
-    // Obsolete class, not used in this version.
-    @SuppressWarnings("serial")
-    protected class WindowsNewFolderAction extends NewFolderAction {
-    }
-
-    // Obsolete class, not used in this version.
-    protected class SingleClickListener extends MouseAdapter {
-    }
-
-    // Obsolete class, not used in this version.
-    @SuppressWarnings("serial") // Superclass is not serializable across versions
-    protected class FileRenderer extends DefaultListCellRenderer  {
-    }
-
+    @Override
     public void uninstallUI(JComponent c) {
         // Remove listeners
         c.removePropertyChangeListener(filterComboBoxModel);
@@ -821,6 +877,7 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
      * Listen for filechooser property changes, such as
      * the selected file changing, or the type of the dialog changing.
      */
+    @Override
     public PropertyChangeListener createPropertyChangeListener(JFileChooser fc) {
         return new PropertyChangeListener() {
             public void propertyChange(PropertyChangeEvent e) {
@@ -875,14 +932,17 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
         getBottomPanel().add(getButtonPanel());
     }
 
+    @Override
     public void ensureFileIsVisible(JFileChooser fc, File f) {
         filePane.ensureFileIsVisible(fc, f);
     }
 
+    @Override
     public void rescanCurrentDirectory(JFileChooser fc) {
         filePane.rescanCurrentDirectory();
     }
 
+    @Override
     public String getFileName() {
         if(filenameTextField != null) {
             return filenameTextField.getText();
@@ -891,6 +951,7 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
         }
     }
 
+    @Override
     public void setFileName(String filename) {
         if(filenameTextField != null) {
             filenameTextField.setText(filename);
@@ -904,6 +965,7 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
      * @param directorySelected if a directory is currently selected.
      * @since 1.4
      */
+    @Override
     protected void setDirectorySelected(boolean directorySelected) {
         super.setDirectorySelected(directorySelected);
         JFileChooser chooser = getFileChooser();
@@ -918,11 +980,13 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
         }
     }
 
+    @Override
     public String getDirectoryName() {
         // PENDING(jeff) - get the name from the directory combobox
         return null;
     }
 
+    @Override
     public void setDirectoryName(String dirname) {
         // PENDING(jeff) - set the name in the directory combobox
     }
@@ -931,7 +995,6 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
         return new DirectoryComboBoxRenderer();
     }
 
-    @SuppressWarnings("serial") // anonymous class
     private static JButton createToolButton(Action a, Icon defaultIcon, String toolTipText, String accessibleName) {
         final JButton result = new JButton(a);
 
@@ -995,8 +1058,9 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
     // Renderer for DirectoryComboBox
     //
     @SuppressWarnings("serial") // Superclass is not serializable across versions
-    class DirectoryComboBoxRenderer extends DefaultListCellRenderer  {
+    final class DirectoryComboBoxRenderer extends DefaultListCellRenderer  {
         IndentIcon ii = new IndentIcon();
+        @Override
         public Component getListCellRendererComponent(JList<?> list, Object value,
                                                       int index, boolean isSelected,
                                                       boolean cellHasFocus) {
@@ -1014,16 +1078,19 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
             ii.depth = directoryComboBoxModel.getDepth(index);
             setIcon(ii);
 
+            putClientProperty("html.disable", getFileChooser().getClientProperty("html.disable"));
+
             return this;
         }
     }
 
     static final int space = 10;
-    class IndentIcon implements Icon {
+    static final class IndentIcon implements Icon {
 
         Icon icon = null;
         int depth = 0;
 
+        @Override
         public void paintIcon(Component c, Graphics g, int x, int y) {
             if (c.getComponentOrientation().isLeftToRight()) {
                 icon.paintIcon(c, g, x+depth*space, y);
@@ -1032,10 +1099,12 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
             }
         }
 
+        @Override
         public int getIconWidth() {
             return icon.getIconWidth() + depth*space;
         }
 
+        @Override
         public int getIconHeight() {
             return icon.getIconHeight();
         }
@@ -1043,7 +1112,7 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
     }
 
     //
-    // DataModel for DirectoryComboxbox
+    // DataModel for DirectoryCombobox
     //
     protected DirectoryComboBoxModel createDirectoryComboBoxModel(JFileChooser fc) {
         return new DirectoryComboBoxModel();
@@ -1105,9 +1174,9 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
                 File sf = useShellFolder ? ShellFolder.getShellFolder(canonical)
                                          : canonical;
                 File f = sf;
-                Vector<File> path = new Vector<File>(10);
+                ArrayList<File> path = new ArrayList<File>(10);
                 do {
-                    path.addElement(f);
+                    path.add(f);
                 } while ((f = f.getParentFile()) != null);
 
                 int pathCount = path.size();
@@ -1150,19 +1219,23 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
             return (depths != null && i >= 0 && i < depths.length) ? depths[i] : 0;
         }
 
+        @Override
         public void setSelectedItem(Object selectedDirectory) {
             this.selectedDirectory = (File)selectedDirectory;
             fireContentsChanged(this, -1, -1);
         }
 
+        @Override
         public Object getSelectedItem() {
             return selectedDirectory;
         }
 
+        @Override
         public int getSize() {
             return directories.size();
         }
 
+        @Override
         public File getElementAt(int index) {
             return directories.elementAt(index);
         }
@@ -1180,14 +1253,15 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
      */
     @SuppressWarnings("serial") // Superclass is not serializable across versions
     public class FilterComboBoxRenderer extends DefaultListCellRenderer {
+        @Override
         public Component getListCellRendererComponent(JList<?> list,
             Object value, int index, boolean isSelected,
             boolean cellHasFocus) {
 
             super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
 
-            if (value != null && value instanceof FileFilter) {
-                setText(((FileFilter)value).getDescription());
+            if (value instanceof FileFilter fileFilter) {
+                setText(fileFilter.getDescription());
             }
 
             return this;
@@ -1195,7 +1269,7 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
     }
 
     //
-    // DataModel for Types Comboxbox
+    // DataModel for Types Combobox
     //
     protected FilterComboBoxModel createFilterComboBoxModel() {
         return new FilterComboBoxModel();
@@ -1213,6 +1287,7 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
             filters = getFileChooser().getChoosableFileFilters();
         }
 
+        @Override
         public void propertyChange(PropertyChangeEvent e) {
             String prop = e.getPropertyName();
             if(prop == JFileChooser.CHOOSABLE_FILE_FILTER_CHANGED_PROPERTY) {
@@ -1223,6 +1298,7 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
             }
         }
 
+        @Override
         public void setSelectedItem(Object filter) {
             if(filter != null) {
                 getFileChooser().setFileFilter((FileFilter) filter);
@@ -1230,11 +1306,12 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
             }
         }
 
+        @Override
         public Object getSelectedItem() {
             // Ensure that the current filter is in the list.
-            // NOTE: we shouldnt' have to do this, since JFileChooser adds
+            // NOTE: we shouldn't have to do this, since JFileChooser adds
             // the filter to the choosable filters list when the filter
-            // is set. Lets be paranoid just in case someone overrides
+            // is set. Let's be paranoid just in case someone overrides
             // setFileFilter in JFileChooser.
             FileFilter currentFilter = getFileChooser().getFileFilter();
             boolean found = false;
@@ -1251,6 +1328,7 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
             return getFileChooser().getFileFilter();
         }
 
+        @Override
         public int getSize() {
             if(filters != null) {
                 return filters.length;
@@ -1259,6 +1337,7 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
             }
         }
 
+        @Override
         public FileFilter getElementAt(int index) {
             if(index > getSize() - 1) {
                 // This shouldn't happen. Try to recover gracefully.
@@ -1288,16 +1367,19 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
 
 
 
+        @Override
         public void actionPerformed(ActionEvent e) {
             File f = (File)directoryComboBox.getSelectedItem();
             getFileChooser().setCurrentDirectory(f);
         }
     }
 
+    @Override
     protected JButton getApproveButton(JFileChooser fc) {
         return approveButton;
     }
 
+    @Override
     public FileView getFileView(JFileChooser fc) {
         return fileView;
     }
@@ -1308,6 +1390,7 @@ public class WindowsFileChooserUI extends BasicFileChooserUI {
     protected class WindowsFileView extends BasicFileView {
         /* FileView type descriptions */
 
+        @Override
         public Icon getIcon(File f) {
             Icon icon = getCachedIcon(f);
             if (icon != null) {

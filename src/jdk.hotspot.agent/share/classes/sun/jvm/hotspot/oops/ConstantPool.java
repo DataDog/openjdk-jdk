@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,7 @@ package sun.jvm.hotspot.oops;
 import java.io.*;
 import java.util.*;
 import sun.jvm.hotspot.debugger.*;
+import sun.jvm.hotspot.interpreter.Bytecodes;
 import sun.jvm.hotspot.runtime.*;
 import sun.jvm.hotspot.types.*;
 import sun.jvm.hotspot.utilities.*;
@@ -87,8 +88,11 @@ public class ConstantPool extends Metadata implements ClassConstants {
   private static synchronized void initialize(TypeDataBase db) throws WrongTypeException {
     Type type   = db.lookupType("ConstantPool");
     tags        = type.getAddressField("_tags");
-    operands    = type.getAddressField("_operands");
     cache       = type.getAddressField("_cache");
+    bsm_entries = type.getField("_bsm_entries").getOffset();
+    Type bsmae_type = db.lookupType("BSMAttributeEntries");
+    bsm_entries_offsets = bsmae_type.getAddressField("_offsets");
+    bsm_entries_bootstrap_methods = bsmae_type.getAddressField("_bootstrap_methods");
     poolHolder  = new MetadataField(type.getAddressField("_pool_holder"), 0);
     length      = new CIntField(type.getCIntegerField("_length"), 0);
     resolved_klasses = type.getAddressField("_resolved_klasses");
@@ -99,9 +103,9 @@ public class ConstantPool extends Metadata implements ClassConstants {
     headerSize  = type.getSize();
     elementSize = 0;
     // fetch constants:
-    INDY_BSM_OFFSET = db.lookupIntConstant("ConstantPool::_indy_bsm_offset").intValue();
-    INDY_ARGC_OFFSET = db.lookupIntConstant("ConstantPool::_indy_argc_offset").intValue();
-    INDY_ARGV_OFFSET = db.lookupIntConstant("ConstantPool::_indy_argv_offset").intValue();
+    INDY_BSM_OFFSET = db.lookupIntConstant("BSMAttributeEntry::_bsmi_offset").intValue();
+    INDY_ARGC_OFFSET = db.lookupIntConstant("BSMAttributeEntry::_argc_offset").intValue();
+    INDY_ARGV_OFFSET = db.lookupIntConstant("BSMAttributeEntry::_argv_offset").intValue();
   }
 
   public ConstantPool(Address addr) {
@@ -111,9 +115,11 @@ public class ConstantPool extends Metadata implements ClassConstants {
   public boolean isConstantPool()      { return true; }
 
   private static AddressField tags;
-  private static AddressField operands;
   private static AddressField cache;
   private static AddressField resolved_klasses;
+  private static long bsm_entries; // Offset in the constantpool where the Bsm_Entries are found
+  private static AddressField bsm_entries_offsets;
+  private static AddressField bsm_entries_bootstrap_methods;
   private static MetadataField poolHolder;
   private static CIntField length; // number of elements in oop
   private static CIntField majorVersion;
@@ -129,10 +135,9 @@ public class ConstantPool extends Metadata implements ClassConstants {
   private static int INDY_ARGV_OFFSET;
 
   public U1Array           getTags()       { return new U1Array(tags.getValue(getAddress())); }
-  public U2Array           getOperands()   { return new U2Array(operands.getValue(getAddress())); }
   public ConstantPoolCache getCache()      {
     Address addr = cache.getValue(getAddress());
-    return (ConstantPoolCache) VMObjectFactory.newObject(ConstantPoolCache.class, addr);
+    return VMObjectFactory.newObject(ConstantPoolCache.class, addr);
   }
   public InstanceKlass     getPoolHolder() { return (InstanceKlass)poolHolder.getValue(this); }
   public int               getLength()     { return (int)length.getValue(getAddress()); }
@@ -182,7 +187,7 @@ public class ConstantPool extends Metadata implements ClassConstants {
   }
 
   public ConstantTag getTagAt(long index) {
-    return new ConstantTag((byte)getTags().at((int) index));
+    return new ConstantTag(getTags().at((int) index));
   }
 
   public CPSlot getSlotAt(long index) {
@@ -216,18 +221,14 @@ public class ConstantPool extends Metadata implements ClassConstants {
   }
 
   public long getLongAt(long index) {
-    int oneHalf = getAddress().getJIntAt(indexOffset(index + 1));
-    int otherHalf   = getAddress().getJIntAt(indexOffset(index));
-    // buildLongFromIntsPD accepts higher address value, lower address value
-    // in that order.
-    return VM.getVM().buildLongFromIntsPD(oneHalf, otherHalf);
+    return getAddress().getJLongAt(indexOffset(index));
   }
 
   public double getDoubleAt(long index) {
     return Double.longBitsToDouble(getLongAt(index));
   }
 
-  public int getFieldOrMethodAt(int which) {
+  public int getFieldOrMethodAt(int which, int code) {
     if (DEBUG) {
       System.err.print("ConstantPool.getFieldOrMethodAt(" + which + "): new index = ");
     }
@@ -237,7 +238,7 @@ public class ConstantPool extends Metadata implements ClassConstants {
       i = which;
     } else {
       // change byte-ordering and go via cache
-      i = cache.getEntryAt(0xFFFF & which).getConstantPoolIndex();
+      i = to_cp_index(which, code);
     }
     if (Assert.ASSERTS_ENABLED) {
       Assert.that(getTagAt(i).isFieldOrMethod(), "Corrupted constant pool");
@@ -252,6 +253,32 @@ public class ConstantPool extends Metadata implements ClassConstants {
     return res;
   }
 
+  private int invokedynamicBootstrapRefIndexAt(int indyIndex) {
+    return getCache().getIndyEntryAt(indyIndex).getConstantPoolIndex();
+  }
+
+  // Translate index, which could be CPCache index or Indy index, to a constant pool index
+  public int to_cp_index(int index, int code) {
+    Assert.that(getCache() != null, "'index' is a rewritten index so this class must have been rewritten");
+    switch(code) {
+      case Bytecodes._invokedynamic:
+        return invokedynamicBootstrapRefIndexAt(index);
+      case Bytecodes._getfield:
+      case Bytecodes._getstatic:
+      case Bytecodes._putfield:
+      case Bytecodes._putstatic:
+        return getCache().getFieldEntryAt(index).getConstantPoolIndex();
+      case Bytecodes._invokeinterface:
+      case Bytecodes._invokehandle:
+      case Bytecodes._invokespecial:
+      case Bytecodes._invokestatic:
+      case Bytecodes._invokevirtual:
+        return getCache().getMethodEntryAt(index).getConstantPoolIndex();
+      default:
+        throw new InternalError("Unexpected bytecode: " + code);
+    }
+  }
+
   public int[] getNameAndTypeAt(int which) {
     if (Assert.ASSERTS_ENABLED) {
       Assert.that(getTagAt(which).isNameAndType(), "Corrupted constant pool: " + which + " " + getTagAt(which));
@@ -263,81 +290,40 @@ public class ConstantPool extends Metadata implements ClassConstants {
     return new int[] { extractLowShortFromInt(i), extractHighShortFromInt(i) };
   }
 
-  public Symbol getNameRefAt(int which) {
-    return implGetNameRefAt(which, false);
+  public Symbol getNameRefAt(int which, int code) {
+    int name_index = getNameRefIndexAt(getNameAndTypeRefIndexAt(which, code));
+    return getSymbolAt(name_index);
   }
 
-  public Symbol uncachedGetNameRefAt(int which) {
-    return implGetNameRefAt(which, true);
+  public Symbol uncachedGetNameRefAt(int cp_index) {
+    int name_index = getNameRefIndexAt(uncachedGetNameAndTypeRefIndexAt(cp_index));
+    return getSymbolAt(name_index);
   }
 
-  private Symbol implGetNameRefAt(int which, boolean uncached) {
-    int signatureIndex = getNameRefIndexAt(implNameAndTypeRefIndexAt(which, uncached));
+  public Symbol getSignatureRefAt(int which, int code) {
+    int signatureIndex = getSignatureRefIndexAt(getNameAndTypeRefIndexAt(which, code));
     return getSymbolAt(signatureIndex);
   }
 
-  public Symbol getSignatureRefAt(int which) {
-    return implGetSignatureRefAt(which, false);
-  }
-
-  public Symbol uncachedGetSignatureRefAt(int which) {
-    return implGetSignatureRefAt(which, true);
-  }
-
-  private Symbol implGetSignatureRefAt(int which, boolean uncached) {
-    int signatureIndex = getSignatureRefIndexAt(implNameAndTypeRefIndexAt(which, uncached));
+  public Symbol uncachedGetSignatureRefAt(int cp_index) {
+    int signatureIndex = getSignatureRefIndexAt(uncachedGetNameAndTypeRefIndexAt(cp_index));
     return getSymbolAt(signatureIndex);
   }
 
-  public static boolean isInvokedynamicIndex(int i) { return (i < 0); }
-
-  public static int  decodeInvokedynamicIndex(int i) { Assert.that(isInvokedynamicIndex(i),  ""); return ~i; }
-
-  // The invokedynamic points at a CP cache entry.  This entry points back
-  // at the original CP entry (CONSTANT_InvokeDynamic) and also (via f2) at an entry
-  // in the resolved_references array (which provides the appendix argument).
-  public int invokedynamicCPCacheIndex(int index) {
-    Assert.that(isInvokedynamicIndex(index), "should be a invokedynamic index");
-    return decodeInvokedynamicIndex(index);
-  }
-
-  ConstantPoolCacheEntry invokedynamicCPCacheEntryAt(int index) {
-    // decode index that invokedynamic points to.
-    int cpCacheIndex = invokedynamicCPCacheIndex(index);
-    return getCache().getEntryAt(cpCacheIndex);
-  }
-
-  private int implNameAndTypeRefIndexAt(int which, boolean uncached) {
-    int i = which;
-    if (!uncached && getCache() != null) {
-      if (isInvokedynamicIndex(which)) {
-        // Invokedynamic index is index into resolved_references
-        int poolIndex = invokedynamicCPCacheEntryAt(which).getConstantPoolIndex();
-        poolIndex = invokeDynamicNameAndTypeRefIndexAt(poolIndex);
-        Assert.that(getTagAt(poolIndex).isNameAndType(), "");
-        return poolIndex;
-      }
-      // change byte-ordering and go via cache
-      i = remapInstructionOperandFromCache(which);
-    } else {
-      if (getTagAt(which).isInvokeDynamic() || getTagAt(which).isDynamicConstant()) {
-        int poolIndex = invokeDynamicNameAndTypeRefIndexAt(which);
-        Assert.that(getTagAt(poolIndex).isNameAndType(), "");
-        return poolIndex;
-      }
+  public int uncachedGetNameAndTypeRefIndexAt(int cp_index) {
+    if (getTagAt(cp_index).isInvokeDynamic() || getTagAt(cp_index).isDynamicConstant()) {
+      int poolIndex = invokeDynamicNameAndTypeRefIndexAt(cp_index);
+      Assert.that(getTagAt(poolIndex).isNameAndType(), "");
+      return poolIndex;
     }
     // assert(tag_at(i).is_field_or_method(), "Corrupted constant pool");
     // assert(!tag_at(i).is_invoke_dynamic(), "Must be handled above");
-    int refIndex = getIntAt(i);
+    int refIndex = getIntAt(cp_index);
     return extractHighShortFromInt(refIndex);
   }
 
-  private int remapInstructionOperandFromCache(int operand) {
-    int cpc_index = operand;
-    // DEBUG_ONLY(cpc_index -= CPCACHE_INDEX_TAG);
-    // assert((int)(u2)cpc_index == cpc_index, "clean u2");
-    int member_index = getCache().getEntryAt(cpc_index).getConstantPoolIndex();
-    return member_index;
+  public int getNameAndTypeRefIndexAt(int index, int code) {
+    return uncachedGetNameAndTypeRefIndexAt(to_cp_index(index, code));
   }
 
   public int invokeDynamicNameAndTypeRefIndexAt(int which) {
@@ -363,18 +349,18 @@ public class ConstantPool extends Metadata implements ClassConstants {
   }
 
   // returns null, if not resolved.
-  public Klass getFieldOrMethodKlassRefAt(int which) {
-    int refIndex = getFieldOrMethodAt(which);
+  public Klass getFieldOrMethodKlassRefAt(int which, int code) {
+    int refIndex = getFieldOrMethodAt(which, code);
     int klassIndex = extractLowShortFromInt(refIndex);
     return getKlassAt(klassIndex);
   }
 
   // returns null, if not resolved.
-  public Method getMethodRefAt(int which) {
-    Klass klass = getFieldOrMethodKlassRefAt(which);
+  public Method getMethodRefAt(int which, int code) {
+    Klass klass = getFieldOrMethodKlassRefAt(which, code);
     if (klass == null) return null;
-    Symbol name = getNameRefAt(which);
-    Symbol sig  = getSignatureRefAt(which);
+    Symbol name = getNameRefAt(which, code);
+    Symbol sig  = getSignatureRefAt(which, code);
     // Consider the super class for arrays. (java.lang.Object)
     if (klass.isArrayKlass()) {
        klass = klass.getJavaSuper();
@@ -383,16 +369,12 @@ public class ConstantPool extends Metadata implements ClassConstants {
   }
 
   // returns null, if not resolved.
-  public Field getFieldRefAt(int which) {
-    InstanceKlass klass = (InstanceKlass)getFieldOrMethodKlassRefAt(which);
+  public Field getFieldRefAt(int which, int code) {
+    InstanceKlass klass = (InstanceKlass)getFieldOrMethodKlassRefAt(which, code);
     if (klass == null) return null;
-    Symbol name = getNameRefAt(which);
-    Symbol sig  = getSignatureRefAt(which);
+    Symbol name = getNameRefAt(which, code);
+    Symbol sig  = getSignatureRefAt(which, code);
     return klass.findField(name.asString(), sig.asString());
-  }
-
-  public int getNameAndTypeRefIndexAt(int index) {
-    return implNameAndTypeRefIndexAt(index, false);
   }
 
   /** Lookup for entries consisting of (name_index, signature_index) */
@@ -457,27 +439,68 @@ public class ConstantPool extends Metadata implements ClassConstants {
     return res;
   }
 
+  private U4Array getOffsets() {
+     Address a =  getAddress().addOffsetTo(bsm_entries);
+     if (a == null) return null;
+     a = bsm_entries_offsets.getValue(a);
+     return VMObjectFactory.newObject(U4Array.class, a);
+  }
+  private U2Array getBootstrapMethods() {
+    Address a =  getAddress().addOffsetTo(bsm_entries);
+    if (a == null) return null;
+    return VMObjectFactory.newObject(U2Array.class, bsm_entries_bootstrap_methods.getValue(a));
+  }
+
+  public int getBootstrapMethodsCount() {
+    U4Array offsets = getOffsets();
+    int count = 0;
+    if (offsets != null) {
+      count = offsets.length();
+    }
+    if (DEBUG) {
+      System.err.println("ConstantPool.getBootstrapMethodsCount: count = " + count);
+    }
+    return count;
+  }
+
+  public int getBootstrapMethodArgsCount(int bsmIndex) {
+    U4Array offs = getOffsets();
+    U2Array bsms = getBootstrapMethods();
+    if (Assert.ASSERTS_ENABLED) {
+      Assert.that(offs != null && bsms != null, "BSM attribute is not present");
+    }
+    int argc = bsms.at(offs.at(bsmIndex) + INDY_ARGC_OFFSET);
+    if (DEBUG) {
+      System.err.println("ConstantPool.getBootstrapMethodArgsCount: bsm index = " + bsmIndex + ", args count = " + argc);
+    }
+    return argc;
+  }
+
+  public short[] getBootstrapMethodAt(int bsmIndex) {
+    U4Array offs = getOffsets();
+    U2Array bsms = getBootstrapMethods();
+    if (offs == null || bsms == null) return null; // safety first
+    int basePos = offs.at(bsmIndex);
+    int argv = basePos + INDY_ARGV_OFFSET;
+    int argc = getBootstrapMethodArgsCount(bsmIndex);
+    int endPos = argv + argc;
+    short[] values = new short[endPos - basePos];
+    for (int j = 0; j < values.length; j++) {
+      values[j] = bsms.at(basePos+j);
+    }
+    return values;
+  }
+
   /** Lookup for multi-operand (InvokeDynamic, Dynamic) entries. */
   public short[] getBootstrapSpecifierAt(int i) {
     if (Assert.ASSERTS_ENABLED) {
       Assert.that(getTagAt(i).isInvokeDynamic() || getTagAt(i).isDynamicConstant(), "Corrupted constant pool");
     }
     int bsmSpec = extractLowShortFromInt(this.getIntAt(i));
-    U2Array operands = getOperands();
-    if (operands == null)  return null;  // safety first
-    int basePos = VM.getVM().buildIntFromShorts(operands.at(bsmSpec * 2 + 0),
-                                                operands.at(bsmSpec * 2 + 1));
-    int argv = basePos + INDY_ARGV_OFFSET;
-    int argc = operands.at(basePos + INDY_ARGC_OFFSET);
-    int endPos = argv + argc;
-    short[] values = new short[endPos - basePos];
-    for (int j = 0; j < values.length; j++) {
-        values[j] = operands.at(basePos+j);
-    }
-    return values;
+    return getBootstrapMethodAt(bsmSpec);
   }
 
-  final private static String[] nameForTag = new String[] {
+  private static final String[] nameForTag = new String[] {
   };
 
   private String nameForTag(int tag) {
@@ -513,10 +536,10 @@ public class ConstantPool extends Metadata implements ClassConstants {
     super.iterateFields(visitor);
     visitor.doMetadata(poolHolder, true);
 
-      final int length = (int) getLength();
+      final int length = getLength();
       // zero'th pool entry is always invalid. ignore it.
       for (int index = 1; index < length; index++) {
-      int ctag = (int) getTags().at((int) index);
+      int ctag = getTags().at(index);
         switch (ctag) {
         case JVM_CONSTANT_ClassIndex:
         case JVM_CONSTANT_StringIndex:
@@ -566,7 +589,7 @@ public class ConstantPool extends Metadata implements ClassConstants {
           Map<String, Short> utf8ToIndex = new HashMap<>();
       DataOutputStream dos = new DataOutputStream(os);
       U1Array tags = getTags();
-      int len = (int)getLength();
+      int len = getLength();
       int ci = 0; // constant pool index
 
       // collect all modified UTF-8 Strings from Constant Pool
@@ -631,10 +654,10 @@ public class ConstantPool extends Metadata implements ClassConstants {
 
               case JVM_CONSTANT_Class: {
                   dos.writeByte(cpConstType);
-                  // Klass already resolved. ConstantPool constains Klass*.
+                  // Klass already resolved. ConstantPool contains Klass*.
                   Klass refKls = (Klass)Metadata.instantiateWrapperFor(getAddressAtRaw(ci));
                   String klassName = refKls.getName().asString();
-                  Short s = (Short) utf8ToIndex.get(klassName);
+                  Short s = utf8ToIndex.get(klassName);
                   dos.writeShort(s.shortValue());
                   if (DEBUG) debugMessage("CP[" + ci  + "] = class " + s);
                   break;
@@ -645,7 +668,7 @@ public class ConstantPool extends Metadata implements ClassConstants {
               case JVM_CONSTANT_UnresolvedClass: {
                   dos.writeByte(JVM_CONSTANT_Class);
                   String klassName = getSymbolAt(ci).asString();
-                  Short s = (Short) utf8ToIndex.get(klassName);
+                  Short s = utf8ToIndex.get(klassName);
                   dos.writeShort(s.shortValue());
                   if (DEBUG) debugMessage("CP[" + ci + "] = class " + s);
                   break;
@@ -654,7 +677,7 @@ public class ConstantPool extends Metadata implements ClassConstants {
               case JVM_CONSTANT_String: {
                   dos.writeByte(cpConstType);
                   String str = getUnresolvedStringAt(ci).asString();
-                  Short s = (Short) utf8ToIndex.get(str);
+                  Short s = utf8ToIndex.get(str);
                   dos.writeShort(s.shortValue());
                   if (DEBUG) debugMessage("CP[" + ci + "] = string " + s);
                   break;
@@ -749,4 +772,10 @@ public class ConstantPool extends Metadata implements ClassConstants {
     // must stay in sync with ConstantPool::name_and_type_at_put, method_at_put, etc.
     return val & 0xFFFF;
   }
+
+  // Return the offset of the requested Bootstrap Method in the operands array
+  private int getOperandOffsetAt(U2Array operands, int bsmIndex) {
+      return 0;
+  }
+
 }

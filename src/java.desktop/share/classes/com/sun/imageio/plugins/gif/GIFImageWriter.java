@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -631,10 +631,10 @@ public class GIFImageWriter extends ImageWriter {
                     if (imageMetadata.transparentColorFlag) {
                         imageMetadata.transparentColorIndex = index;
                     }
-                    /* NB: transparentColorFlag might have not beed reset for
-                       greyscale images but explicitly reseting it here
-                       is potentially not right thing to do until we have way
-                       to find whether current value was explicitly set by
+                    /* NB: transparentColorFlag might have not been reset for
+                       greyscale images but explicitly resetting it here
+                       is potentially not the right thing to do until we have a way
+                       to find whether the current value was explicitly set by
                        the user.
                     */
                 }
@@ -659,7 +659,7 @@ public class GIFImageWriter extends ImageWriter {
                 streamMetadata.version = "89a";
             }
 
-            // Set the Logical Screen Desriptor if not set.
+            // Set the Logical Screen Descriptor if not set.
             if (streamMetadata.logicalScreenWidth ==
                 GIFMetadata.UNDEFINED_INTEGER_VALUE)
             {
@@ -734,6 +734,7 @@ public class GIFImageWriter extends ImageWriter {
         if (writeTrailer) {
             writeTrailer();
         }
+        stream.flush();
     }
 
     /**
@@ -1252,11 +1253,10 @@ public class GIFImageWriter extends ImageWriter {
       throws IOException {
         if (im.comments != null) {
             try {
-                Iterator<byte[]> iter = im.comments.iterator();
-                while (iter.hasNext()) {
+                for (byte[] bytes : im.comments) {
                     stream.write(0x21);
                     stream.write(0xfe);
-                    writeBlocks(iter.next());
+                    writeBlocks(bytes);
                     stream.write(0x00);
                 }
             } catch (IOException e) {

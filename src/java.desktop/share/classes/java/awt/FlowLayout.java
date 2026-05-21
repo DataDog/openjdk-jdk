@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,7 @@ package java.awt;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
+import java.io.Serial;
 
 /**
  * A flow layout arranges components in a directional flow, much
@@ -50,31 +51,36 @@ import java.io.ObjectInputStream;
  * <li>{@link #TRAILING TRAILING}
  * </ul>
  * <p>
- * For example, the following picture shows an applet using the flow
+ * For example, the following picture shows a window using the flow
  * layout manager (its default layout manager) to position three buttons:
  * <p>
- * <img src="doc-files/FlowLayout-1.gif"
+ * <img src="doc-files/FlowLayout-1.png"
  * ALT="Graphic of Layout for Three Buttons"
- * style="margin: 7px 10px;">
+ * >
  * <p>
- * Here is the code for this applet:
+ * Here is the code for this program:
  *
- * <hr><blockquote><pre>
- * import java.awt.*;
- * import java.applet.Applet;
+ * {@snippet lang='java':
+ * import java.awt.Button;
+ * import java.awt.EventQueue;
+ * import java.awt.FlowLayout;
+ * import java.awt.Frame;
  *
- * public class myButtons extends Applet {
- *     Button button1, button2, button3;
- *     public void init() {
- *         button1 = new Button("Ok");
- *         button2 = new Button("Open");
- *         button3 = new Button("Close");
- *         add(button1);
- *         add(button2);
- *         add(button3);
+ * public class FlowLayoutExample {
+ *
+ *     public static void main(String[] args) throws Exception {
+ *         EventQueue.invokeAndWait(() -> {
+ *             Frame frame = new Frame("FlowLayout");
+ *             frame.setLayout(new FlowLayout());
+ *             frame.add(new Button("OK"));
+ *             frame.add(new Button("Open"));
+ *             frame.add(new Button("Close"));
+ *             frame.pack();
+ *             frame.setVisible(true);
+ *         });
  *     }
  * }
- * </pre></blockquote><hr>
+ * }
  * <p>
  * A flow layout lets each component assume its natural (preferred) size.
  *
@@ -187,13 +193,14 @@ public class FlowLayout implements LayoutManager, java.io.Serializable {
     int vgap;
 
     /**
-     * If true, components will be aligned on their baseline.
+     * @serial If true, components will be aligned on their baseline.
      */
     private boolean alignOnBaseline;
 
-    /*
-     * JDK 1.1 serialVersionUID
+    /**
+     * Use serialVersionUID from JDK 1.1 for interoperability.
      */
+     @Serial
      private static final long serialVersionUID = -7262534875583282631L;
 
     /**
@@ -649,8 +656,8 @@ public class FlowLayout implements LayoutManager, java.io.Serializable {
     //
     private static final int currentSerialVersion = 1;
     /**
-     * This represent the {@code currentSerialVersion}
-     * which is bein used.  It will be one of two values:
+     * This represents the {@code currentSerialVersion}
+     * which is being used.  It will be one of two values:
      * {@code 0} versions before Java 2 platform v1.2,
      * {@code 1} versions after  Java 2 platform v1.2.
      *
@@ -662,13 +669,14 @@ public class FlowLayout implements LayoutManager, java.io.Serializable {
     /**
      * Reads this object out of a serialization stream, handling
      * objects written by older versions of the class that didn't contain all
-     * of the fields we use now..
+     * of the fields we use now.
      *
      * @param  stream the {@code ObjectInputStream} to read
      * @throws ClassNotFoundException if the class of a serialized object could
      *         not be found
      * @throws IOException if an I/O error occurs
      */
+    @Serial
     private void readObject(ObjectInputStream stream)
          throws IOException, ClassNotFoundException
     {

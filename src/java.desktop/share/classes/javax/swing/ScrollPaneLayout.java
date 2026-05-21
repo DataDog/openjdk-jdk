@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,8 +38,8 @@ import java.io.Serializable;
 
 
 /**
- * The layout manager used by <code>JScrollPane</code>.
- * <code>JScrollPaneLayout</code> is
+ * The layout manager used by {@code JScrollPane}.
+ * {@code ScrollPaneLayout} is
  * responsible for nine components: a viewport, two scrollbars,
  * a row header, a column header, and four "corner" components.
  * <p>
@@ -230,7 +230,7 @@ public class ScrollPaneLayout
      *
      * @param s the component identifier
      * @param c the component to be added
-     * @exception IllegalArgumentException if <code>s</code> is an invalid key
+     * @throws IllegalArgumentException if <code>s</code> is an invalid key
      */
     public void addLayoutComponent(String s, Component c)
     {
@@ -328,7 +328,7 @@ public class ScrollPaneLayout
      * with the Swing 1.0.2 (and earlier) versions of this class.
      *
      * @param x an integer giving the display policy
-     * @exception IllegalArgumentException if <code>x</code> is an invalid
+     * @throws IllegalArgumentException if <code>x</code> is an invalid
      *          vertical scroll bar policy, as listed above
      */
     public void setVerticalScrollBarPolicy(int x) {
@@ -366,7 +366,7 @@ public class ScrollPaneLayout
      * with the Swing 1.0.2 (and earlier) versions of this class.
      *
      * @param x an int giving the display policy
-     * @exception IllegalArgumentException if <code>x</code> is not a valid
+     * @throws IllegalArgumentException if <code>x</code> is not a valid
      *          horizontal scrollbar policy, as listed above
      */
     public void setHorizontalScrollBarPolicy(int x) {

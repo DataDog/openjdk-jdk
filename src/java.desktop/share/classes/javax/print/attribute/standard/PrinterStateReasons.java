@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 
 package javax.print.attribute.standard;
 
+import java.io.Serial;
 import java.util.AbstractSet;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -88,6 +89,7 @@ public final class PrinterStateReasons
     /**
      * Use serialVersionUID from JDK 1.4 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = -3731791085163619457L;
 
     /**
@@ -163,6 +165,7 @@ public final class PrinterStateReasons
      *         {@link Severity Severity}
      * @since 1.5
      */
+    @Override
     public Severity put(PrinterStateReason reason, Severity severity) {
         if (reason == null) {
             throw new NullPointerException("reason is null");
@@ -183,6 +186,7 @@ public final class PrinterStateReasons
      * @return printing attribute class (category), an instance of class
      *         {@link Class java.lang.Class}
      */
+    @Override
     public final Class<? extends Attribute> getCategory() {
         return PrinterStateReasons.class;
     }
@@ -196,6 +200,7 @@ public final class PrinterStateReasons
      *
      * @return attribute category name
      */
+    @Override
     public final String getName() {
         return "printer-state-reasons";
     }
@@ -225,7 +230,7 @@ public final class PrinterStateReasons
         return new PrinterStateReasonSet (severity, entrySet());
     }
 
-    private class PrinterStateReasonSet
+    private static class PrinterStateReasonSet
         extends AbstractSet<PrinterStateReason>
     {
         private Severity mySeverity;
@@ -238,23 +243,23 @@ public final class PrinterStateReasons
             myEntrySet = entrySet;
         }
 
+        @Override
         public int size() {
             int result = 0;
-            Iterator<PrinterStateReason> iter = iterator();
-            while (iter.hasNext()) {
-                iter.next();
+            for (PrinterStateReason ignored : this) {
                 ++ result;
             }
             return result;
         }
 
+        @Override
         public Iterator<PrinterStateReason> iterator() {
             return new PrinterStateReasonSetIterator(mySeverity,
                                                      myEntrySet.iterator());
         }
     }
 
-    private class PrinterStateReasonSetIterator implements Iterator<PrinterStateReason> {
+    private static class PrinterStateReasonSetIterator implements Iterator<PrinterStateReason> {
         private Severity mySeverity;
         private Iterator<Map.Entry<PrinterStateReason, Severity>> myIterator;
         private Map.Entry<PrinterStateReason, Severity> myEntry;
@@ -276,10 +281,12 @@ public final class PrinterStateReasons
             }
         }
 
+        @Override
         public boolean hasNext() {
             return myEntry != null;
         }
 
+        @Override
         public PrinterStateReason next() {
             if (myEntry == null) {
                 throw new NoSuchElementException();
@@ -289,6 +296,7 @@ public final class PrinterStateReasons
             return result;
         }
 
+        @Override
         public void remove() {
             throw new UnsupportedOperationException();
         }

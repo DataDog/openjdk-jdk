@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,8 @@
  */
 
 package java.security.cert;
+
+import jdk.internal.vm.annotation.Stable;
 
 import java.net.URI;
 
@@ -55,9 +57,10 @@ public final class URICertStoreParameters implements CertStoreParameters {
     private final URI uri;
 
     /*
-     * Hash code for this parameters.
+     * Hash code for this parameters object.
      */
-    private int myhash = -1;
+    @Stable
+    private int myhash;
 
     /**
      * Creates an instance of {@code URICertStoreParameters} with the
@@ -100,17 +103,16 @@ public final class URICertStoreParameters implements CertStoreParameters {
     }
 
     /**
-     * Returns a hash code value for this parameters object.
+     * {@return a hash code value for this parameters object}
      * The hash code is generated using the URI supplied at construction.
-     *
-     * @return a hash code value for this parameters.
      */
     @Override
     public int hashCode() {
-        if (myhash == -1) {
-            myhash = uri.hashCode()*7;
+        int h = myhash;
+        if (h == 0) {
+            myhash = h = uri.hashCode()*7;
         }
-        return myhash;
+        return h;
     }
 
     /**
@@ -118,22 +120,17 @@ public final class URICertStoreParameters implements CertStoreParameters {
      * Two URICertStoreParameters are considered equal if the URIs used
      * to construct them are equal.
      *
-     * @param p the object to test for equality with this parameters.
+     * @param p the object to test for equality with this parameters object.
      *
      * @return true if the specified object is equal to this parameters object.
      */
     @Override
     public boolean equals(Object p) {
-        if (p == null || (!(p instanceof URICertStoreParameters))) {
-            return false;
-        }
-
         if (p == this) {
             return true;
         }
-
-        URICertStoreParameters other = (URICertStoreParameters)p;
-        return uri.equals(other.getURI());
+        return p instanceof URICertStoreParameters other
+                && uri.equals(other.getURI());
     }
 
     /**

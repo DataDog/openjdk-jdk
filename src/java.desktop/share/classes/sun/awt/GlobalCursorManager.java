@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -61,7 +61,7 @@ public abstract class GlobalCursorManager {
                 }
             }
             if (shouldPost) {
-                SunToolkit.postEvent(SunToolkit.targetToAppContext(heavy), in);
+                SunToolkit.postEvent(in);
             }
         }
     }
@@ -196,7 +196,7 @@ public abstract class GlobalCursorManager {
                 // If findComponentAt returns null, then something bad has
                 // happened. For example, the heavyweight Component may
                 // have been hidden or disabled by another thread. In that
-                // case, we'll just use the originial heavyweight.
+                // case, we'll just use the original heavyweight.
                 if (c != null) {
                     comp = c;
                 }

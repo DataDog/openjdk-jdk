@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2004, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,12 +26,10 @@
 package sun.awt;
 
 import java.awt.Color;
-
-import java.io.UnsupportedEncodingException;
-
 import java.util.HashMap;
 import java.util.Map;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 /**
  * Per-screen XSETTINGS.
@@ -60,7 +58,7 @@ public class XSettings {
     /**
      * TBS ...
      */
-    class Update {
+    final class Update {
 
         /* byte order mark */
         private static final int LITTLE_ENDIAN = 0;
@@ -198,12 +196,7 @@ public class XSettings {
         {
             needBytes(len);
 
-            String str = null;
-            try {
-                str = new String(data, idx, len, "UTF-8");
-            } catch (UnsupportedEncodingException e) {
-                // XXX: cannot happen, "UTF-8" is always supported
-            }
+            String str = new String(data, idx, len, UTF_8);
 
             idx = (idx + len + 3) & ~0x3;
             return str;
@@ -239,7 +232,7 @@ public class XSettings {
         /**
          * Parses a particular x setting.
          *
-         * @exception IndexOutOfBoundsException if there isn't enough
+         * @throws IndexOutOfBoundsException if there isn't enough
          *     data for a setting.
          */
         private void updateOne(long currentSerial)

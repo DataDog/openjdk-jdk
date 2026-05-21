@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,24 +22,49 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+
 package javax.swing.plaf.synth;
 
-import java.awt.*;
-import java.beans.*;
-import java.io.*;
-import java.lang.ref.*;
-import java.net.*;
-import java.security.*;
-import java.text.*;
-import java.util.*;
-import javax.swing.*;
-import javax.swing.plaf.*;
-import javax.swing.plaf.basic.*;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Dimension;
+import java.awt.Frame;
+import java.awt.Graphics;
+import java.awt.Insets;
+import java.awt.KeyboardFocusManager;
+import java.awt.Rectangle;
+import java.awt.Toolkit;
+import java.awt.Window;
+import java.beans.PropertyChangeEvent;
+import java.beans.PropertyChangeListener;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.NotSerializableException;
+import java.io.Serial;
+import java.io.Serializable;
+import java.lang.ref.ReferenceQueue;
+import java.lang.ref.WeakReference;
+import java.text.ParseException;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
 
-import sun.awt.*;
-import sun.security.action.*;
-import sun.swing.*;
-import sun.swing.plaf.synth.*;
+import javax.swing.JComponent;
+import javax.swing.JMenu;
+import javax.swing.LookAndFeel;
+import javax.swing.SwingUtilities;
+import javax.swing.UIDefaults;
+import javax.swing.UIManager;
+import javax.swing.plaf.ComponentUI;
+import javax.swing.plaf.InsetsUIResource;
+import javax.swing.plaf.basic.BasicLookAndFeel;
+
+import sun.awt.SunToolkit;
+import sun.swing.DefaultLookup;
+import sun.swing.SwingAccessor;
+import sun.swing.SwingUtilities2;
+import sun.swing.plaf.synth.SynthFileChooserUI;
 
 /**
  * SynthLookAndFeel provides the basis for creating a customized look and
@@ -75,31 +100,13 @@ public class SynthLookAndFeel extends BasicLookAndFeel {
     static final Insets EMPTY_UIRESOURCE_INSETS = new InsetsUIResource(
                                                             0, 0, 0, 0);
 
-    /**
-     * AppContext key to get the current SynthStyleFactory.
-     */
-    private static final Object STYLE_FACTORY_KEY =
-                  new StringBuffer("com.sun.java.swing.plaf.gtk.StyleCache");
+    private static ComponentUI selectedUI;
+    private static int selectedUIStateValue;
 
     /**
-     * AppContext key to get selectedUI.
-     */
-    private static final Object SELECTED_UI_KEY = new StringBuilder("selectedUI");
-
-    /**
-     * AppContext key to get selectedUIState.
-     */
-    private static final Object SELECTED_UI_STATE_KEY = new StringBuilder("selectedUIState");
-
-    /**
-     * The last SynthStyleFactory that was asked for from AppContext
-     * <code>lastContext</code>.
+     * The last SynthStyleFactory that was set.
      */
     private static SynthStyleFactory lastFactory;
-    /**
-     * AppContext lastLAF came from.
-     */
-    private static AppContext lastContext;
 
     /**
      * SynthStyleFactory for the this SynthLookAndFeel.
@@ -115,7 +122,7 @@ public class SynthLookAndFeel extends BasicLookAndFeel {
     private Handler _handler;
 
     static ComponentUI getSelectedUI() {
-        return (ComponentUI) AppContext.getAppContext().get(SELECTED_UI_KEY);
+        return selectedUI;
     }
 
     /**
@@ -156,23 +163,20 @@ public class SynthLookAndFeel extends BasicLookAndFeel {
             }
         }
 
-        AppContext context = AppContext.getAppContext();
-
-        context.put(SELECTED_UI_KEY, uix);
-        context.put(SELECTED_UI_STATE_KEY, Integer.valueOf(selectedUIState));
+        selectedUI = uix;
+        selectedUIStateValue = selectedUIState;
     }
 
     static int getSelectedUIState() {
-        Integer result = (Integer) AppContext.getAppContext().get(SELECTED_UI_STATE_KEY);
-
-        return result == null ? 0 : result.intValue();
+        return selectedUIStateValue;
     }
 
     /**
      * Clears out the selected UI that was last set in setSelectedUI.
      */
     static void resetSelectedUI() {
-        AppContext.getAppContext().remove(SELECTED_UI_KEY);
+        selectedUI = null;
+        selectedUIStateValue = 0;
     }
 
 
@@ -184,12 +188,8 @@ public class SynthLookAndFeel extends BasicLookAndFeel {
      */
     public static void setStyleFactory(SynthStyleFactory cache) {
         // We assume the setter is called BEFORE the getter has been invoked
-        // for a particular AppContext.
         synchronized(SynthLookAndFeel.class) {
-            AppContext context = AppContext.getAppContext();
             lastFactory = cache;
-            lastContext = context;
-            context.put(STYLE_FACTORY_KEY, cache);
         }
     }
 
@@ -200,13 +200,6 @@ public class SynthLookAndFeel extends BasicLookAndFeel {
      */
     public static SynthStyleFactory getStyleFactory() {
         synchronized(SynthLookAndFeel.class) {
-            AppContext context = AppContext.getAppContext();
-
-            if (lastContext == context) {
-                return lastFactory;
-            }
-            lastContext = context;
-            lastFactory = (SynthStyleFactory) context.get(STYLE_FACTORY_KEY);
             return lastFactory;
         }
     }
@@ -252,7 +245,7 @@ public class SynthLookAndFeel extends BasicLookAndFeel {
     }
 
     /**
-     * A convience method that will reset the Style of StyleContext if
+     * A convenience method that will reset the Style of StyleContext if
      * necessary.
      *
      * @return newStyle
@@ -577,38 +570,7 @@ public class SynthLookAndFeel extends BasicLookAndFeel {
         }
 
         new SynthParser().parse(input, (DefaultSynthStyleFactory) factory,
-                                null, resourceBase, defaultsMap);
-    }
-
-    /**
-     * Loads the set of <code>SynthStyle</code>s that will be used by
-     * this <code>SynthLookAndFeel</code>. Path based resources are resolved
-     * relatively to the specified <code>URL</code> of the style. For example
-     * an <code>Image</code> would be resolved by
-     * <code>new URL(synthFile, path)</code>. Refer to
-     * <a href="doc-files/synthFileFormat.html">Synth File Format</a> for more
-     * information.
-     *
-     * @param url the <code>URL</code> to load the set of
-     *     <code>SynthStyle</code> from
-     * @throws ParseException if there is an error in parsing
-     * @throws IllegalArgumentException if synthSet is <code>null</code>
-     * @throws IOException if synthSet cannot be opened as an <code>InputStream</code>
-     * @since 1.6
-     */
-    public void load(URL url) throws ParseException, IOException {
-        if (url == null) {
-            throw new IllegalArgumentException(
-                "You must supply a valid Synth set URL");
-        }
-
-        if (defaultsMap == null) {
-            defaultsMap = new HashMap<String, Object>();
-        }
-
-        InputStream input = url.openStream();
-        new SynthParser().parse(input, (DefaultSynthStyleFactory) factory,
-                                url, null, defaultsMap);
+                                resourceBase, defaultsMap);
     }
 
     /**
@@ -693,6 +655,15 @@ public class SynthLookAndFeel extends BasicLookAndFeel {
                    "RIGHT", "selectParent",
                 "KP_RIGHT", "selectParent",
                   });
+
+        table.put("Menu.shortcutKeys",
+                  new int[] {
+                          SwingUtilities2.getSystemMnemonicKeyMask(),
+                          SwingUtilities2.setAltGraphMask(
+                             SwingUtilities2.getSystemMnemonicKeyMask())
+                  });
+
+        table.put("PasswordField.echoChar", '*');
 
         // enabled antialiasing depending on desktop settings
         flushUnreferenced();
@@ -905,8 +876,11 @@ public class SynthLookAndFeel extends BasicLookAndFeel {
                 Runnable uiUpdater = new Runnable() {
                     @Override
                     public void run() {
-                        updateAllUIs();
-                        setUpdatePending(false);
+                        try {
+                            updateAllUIs();
+                        } finally {
+                            setUpdatePending(false);
+                        }
                     }
                 };
                 SwingUtilities.invokeLater(uiUpdater);
@@ -914,6 +888,7 @@ public class SynthLookAndFeel extends BasicLookAndFeel {
         }
     }
 
+    @Serial
     private void writeObject(java.io.ObjectOutputStream out)
             throws IOException {
         throw new NotSerializableException(this.getClass().getName());
@@ -965,6 +940,9 @@ public class SynthLookAndFeel extends BasicLookAndFeel {
                 SynthStyle style = context.getStyle();
                 int state = context.getComponentState();
 
+                if (style == null) {
+                    return;
+                }
                 // Get the current background color.
                 Color currBG = style.getColor(context, ColorType.BACKGROUND);
 

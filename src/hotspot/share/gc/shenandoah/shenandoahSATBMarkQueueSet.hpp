@@ -25,24 +25,25 @@
 #ifndef SHARE_GC_SHENANDOAH_SHENANDOAHSATBMARKQUEUESET_HPP
 #define SHARE_GC_SHENANDOAH_SHENANDOAHSATBMARKQUEUESET_HPP
 
+#include "gc/shared/bufferNode.hpp"
 #include "gc/shared/satbMarkQueue.hpp"
-#include "gc/shenandoah/shenandoahHeap.hpp"
-#include "runtime/mutex.hpp"
-#include "runtime/thread.hpp"
-
-class ShenandoahSATBMarkQueue: public SATBMarkQueue {
-protected:
-  virtual void handle_completed_buffer();
-public:
-  ShenandoahSATBMarkQueue(SATBMarkQueueSet* qset) : SATBMarkQueue(qset) {}
-};
 
 class ShenandoahSATBMarkQueueSet : public SATBMarkQueueSet {
-public:
-  ShenandoahSATBMarkQueueSet(BufferNode::Allocator* allocator);
+private:
+  bool _filter_out_young;
 
-  virtual SATBMarkQueue& satb_queue_for_thread(Thread* const t) const;
-  virtual void filter(SATBMarkQueue* queue);
+public:
+  explicit ShenandoahSATBMarkQueueSet(BufferNode::Allocator* allocator);
+
+  SATBMarkQueue& satb_queue_for_thread(Thread* const t) const override;
+  void filter(SATBMarkQueue& queue) override;
+  void set_filter_out_young(bool filter_out_young) {
+    _filter_out_young = filter_out_young;
+  }
+
+  bool get_filter_out_young() const {
+    return _filter_out_young;
+  }
 };
 
 #endif // SHARE_GC_SHENANDOAH_SHENANDOAHSATBMARKQUEUESET_HPP

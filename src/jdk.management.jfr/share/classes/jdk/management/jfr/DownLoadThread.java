@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,13 +29,18 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 
+import jdk.jfr.internal.management.ManagementSupport;
+import jdk.jfr.internal.management.HiddenWait;
+
 final class DownLoadThread extends Thread {
     private final RemoteRecordingStream stream;
     private final Instant startTime;
     private final Instant endTime;
     private final DiskRepository diskRepository;
+    private final HiddenWait threadSleeper = new HiddenWait();
 
-    DownLoadThread(RemoteRecordingStream stream) {
+    DownLoadThread(RemoteRecordingStream stream, String name) {
+        super(name);
         this.stream = stream;
         this.startTime = stream.startTime;
         this.endTime = stream.endTime;
@@ -61,21 +66,13 @@ final class DownLoadThread extends Thread {
                 if (bytes.length != 0) {
                     diskRepository.write(bytes);
                 } else {
-                    takeNap();
+                    threadSleeper.takeNap(1000);
                 }
             }
         } catch (IOException ioe) {
-           // ignore
+            ManagementSupport.logDebug(ioe.getMessage());
         } finally {
            diskRepository.complete();
-        }
-    }
-
-    private void takeNap() {
-        try {
-            Thread.sleep(1000);
-        } catch (InterruptedException ie) {
-            // ignore
         }
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,6 @@
 package sun.nio.ch;
 
 import java.io.IOException;
-import java.nio.channels.ClosedSelectorException;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.spi.SelectorProvider;
@@ -58,9 +57,8 @@ class EPollSelectorImpl extends SelectorImpl {
     // address of poll array when polling with epoll_wait
     private final long pollArrayAddress;
 
-    // file descriptors used for interrupt
-    private final int fd0;
-    private final int fd1;
+    // eventfd object used for interrupt
+    private final EventFD eventfd;
 
     // maps file descriptor to selection key, synchronize on selector
     private final Map<Integer, SelectionKeyImpl> fdToKey = new HashMap<>();
@@ -80,22 +78,16 @@ class EPollSelectorImpl extends SelectorImpl {
         this.pollArrayAddress = EPoll.allocatePollArray(NUM_EPOLLEVENTS);
 
         try {
-            long fds = IOUtil.makePipe(false);
-            this.fd0 = (int) (fds >>> 32);
-            this.fd1 = (int) fds;
+            this.eventfd = new EventFD();
+            IOUtil.configureBlocking(IOUtil.newFD(eventfd.efd()), false);
         } catch (IOException ioe) {
             EPoll.freePollArray(pollArrayAddress);
             FileDispatcherImpl.closeIntFD(epfd);
             throw ioe;
         }
 
-        // register one end of the socket pair for wakeups
-        EPoll.ctl(epfd, EPOLL_CTL_ADD, fd0, EPOLLIN);
-    }
-
-    private void ensureOpen() {
-        if (!isOpen())
-            throw new ClosedSelectorException();
+        // register the eventfd object for wakeups
+        EPoll.ctl(epfd, EPOLL_CTL_ADD, eventfd.efd(), EPOLLIN);
     }
 
     @Override
@@ -112,29 +104,69 @@ class EPollSelectorImpl extends SelectorImpl {
         int numEntries;
         processUpdateQueue();
         processDeregisterQueue();
-        try {
-            begin(blocking);
 
-            do {
-                long startTime = timedPoll ? System.nanoTime() : 0;
-                numEntries = EPoll.wait(epfd, pollArrayAddress, NUM_EPOLLEVENTS, to);
-                if (numEntries == IOStatus.INTERRUPTED && timedPoll) {
-                    // timed poll interrupted so need to adjust timeout
-                    long adjust = System.nanoTime() - startTime;
-                    to -= TimeUnit.MILLISECONDS.convert(adjust, TimeUnit.NANOSECONDS);
-                    if (to <= 0) {
-                        // timeout expired so no retry
-                        numEntries = 0;
+        if (Thread.currentThread().isVirtual()) {
+            numEntries = (timedPoll)
+                    ? timedPoll(TimeUnit.MILLISECONDS.toNanos(to))
+                    : untimedPoll(blocking);
+        } else {
+            try {
+                begin(blocking);
+                do {
+                    long startTime = timedPoll ? System.nanoTime() : 0;
+                    numEntries = EPoll.wait(epfd, pollArrayAddress, NUM_EPOLLEVENTS, to);
+                    if (numEntries == IOStatus.INTERRUPTED && timedPoll) {
+                        // timed poll interrupted so need to adjust timeout
+                        long adjust = System.nanoTime() - startTime;
+                        to -= (int) TimeUnit.NANOSECONDS.toMillis(adjust);
+                        if (to <= 0) {
+                            // timeout expired so no retry
+                            numEntries = 0;
+                        }
                     }
-                }
-            } while (numEntries == IOStatus.INTERRUPTED);
-            assert IOStatus.check(numEntries);
-
-        } finally {
-            end(blocking);
+                } while (numEntries == IOStatus.INTERRUPTED);
+            } finally {
+                end(blocking);
+            }
         }
+        assert IOStatus.check(numEntries);
+
         processDeregisterQueue();
         return processEvents(numEntries, action);
+    }
+
+    /**
+     * If blocking, parks the current virtual thread until a file descriptor is polled
+     * or the thread is interrupted.
+     */
+    private int untimedPoll(boolean block) throws IOException {
+        int numEntries = EPoll.wait(epfd, pollArrayAddress, NUM_EPOLLEVENTS, 0);
+        if (block) {
+            while (numEntries == 0 && !Thread.currentThread().isInterrupted()) {
+                Poller.pollSelector(epfd, 0);
+                numEntries = EPoll.wait(epfd, pollArrayAddress, NUM_EPOLLEVENTS, 0);
+            }
+        }
+        return numEntries;
+    }
+
+    /**
+     * Parks the current virtual thread until a file descriptor is polled, or the thread
+     * is interrupted, for up to the specified waiting time.
+     */
+    private int timedPoll(long nanos) throws IOException {
+        long startNanos = System.nanoTime();
+        int numEntries = EPoll.wait(epfd, pollArrayAddress, NUM_EPOLLEVENTS, 0);
+        while (numEntries == 0 && !Thread.currentThread().isInterrupted()) {
+            long remainingNanos = nanos - (System.nanoTime() - startNanos);
+            if (remainingNanos <= 0) {
+                // timeout
+                break;
+            }
+            Poller.pollSelector(epfd, remainingNanos);
+            numEntries = EPoll.wait(epfd, pollArrayAddress, NUM_EPOLLEVENTS, 0);
+        }
+        return numEntries;
     }
 
     /**
@@ -188,7 +220,7 @@ class EPollSelectorImpl extends SelectorImpl {
         for (int i=0; i<numEntries; i++) {
             long event = EPoll.getEvent(pollArrayAddress, i);
             int fd = EPoll.getDescriptor(event);
-            if (fd == fd0) {
+            if (fd == eventfd.efd()) {
                 interrupted = true;
             } else {
                 SelectionKeyImpl ski = fdToKey.get(fd);
@@ -218,8 +250,7 @@ class EPollSelectorImpl extends SelectorImpl {
         FileDispatcherImpl.closeIntFD(epfd);
         EPoll.freePollArray(pollArrayAddress);
 
-        FileDispatcherImpl.closeIntFD(fd0);
-        FileDispatcherImpl.closeIntFD(fd1);
+        eventfd.close();
     }
 
     @Override
@@ -240,7 +271,6 @@ class EPollSelectorImpl extends SelectorImpl {
 
     @Override
     public void setEventOps(SelectionKeyImpl ski) {
-        ensureOpen();
         synchronized (updateLock) {
             updateKeys.addLast(ski);
         }
@@ -251,7 +281,7 @@ class EPollSelectorImpl extends SelectorImpl {
         synchronized (interruptLock) {
             if (!interruptTriggered) {
                 try {
-                    IOUtil.write1(fd1, (byte)0);
+                    eventfd.set();
                 } catch (IOException ioe) {
                     throw new InternalError(ioe);
                 }
@@ -263,7 +293,7 @@ class EPollSelectorImpl extends SelectorImpl {
 
     private void clearInterrupt() throws IOException {
         synchronized (interruptLock) {
-            IOUtil.drain(fd0);
+            eventfd.reset();
             interruptTriggered = false;
         }
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -118,19 +118,16 @@ public class ComponentSampleModel extends SampleModel
      * @param scanlineStride the line stride of the region of image
      *     data described
      * @param bandOffsets the offsets of all bands
-     * @throws IllegalArgumentException if {@code w} or
-     *         {@code h} is not greater than 0
-     * @throws IllegalArgumentException if {@code pixelStride}
-     *         is less than 0
-     * @throws IllegalArgumentException if {@code scanlineStride}
-     *         is less than 0
-     * @throws IllegalArgumentException if {@code numBands}
-     *         is less than 1
+     * @throws IllegalArgumentException if {@code w} and {@code h}
+     *         are not both greater than 0
      * @throws IllegalArgumentException if the product of {@code w}
-     *         and {@code h} is greater than
-     *         {@code Integer.MAX_VALUE}
+     *         and {@code h} is greater than {@code Integer.MAX_VALUE}
+     * @throws IllegalArgumentException if {@code pixelStride} is less than 0
+     * @throws IllegalArgumentException if {@code scanlineStride} is less than 0
+     * @throws NullPointerException if {@code bandOffsets} is {@code null}
+     * @throws IllegalArgumentException if {@code bandOffsets.length} is 0
      * @throws IllegalArgumentException if {@code dataType} is not
-     *         one of the supported data types
+     *         one of the supported data types for this sample model.
      */
     public ComponentSampleModel(int dataType,
                                 int w, int h,
@@ -150,17 +147,11 @@ public class ComponentSampleModel extends SampleModel
         if (scanlineStride < 0) {
             throw new IllegalArgumentException("Scanline stride must be >= 0");
         }
-        if (numBands < 1) {
-            throw new IllegalArgumentException("Must have at least one band.");
-        }
         if ((dataType < DataBuffer.TYPE_BYTE) ||
             (dataType > DataBuffer.TYPE_DOUBLE)) {
             throw new IllegalArgumentException("Unsupported dataType.");
         }
         bankIndices = new int[numBands];
-        for (int i=0; i<numBands; i++) {
-            bankIndices[i] = 0;
-        }
         verify();
     }
 
@@ -181,19 +172,22 @@ public class ComponentSampleModel extends SampleModel
      *     data described
      * @param bankIndices the bank indices of all bands
      * @param bandOffsets the band offsets of all bands
-     * @throws IllegalArgumentException if {@code w} or
-     *         {@code h} is not greater than 0
-     * @throws IllegalArgumentException if {@code pixelStride}
-     *         is less than 0
-     * @throws IllegalArgumentException if {@code scanlineStride}
-     *         is less than 0
+     * @throws IllegalArgumentException if {@code w} and {@code h}
+     *         are not both greater than 0
+     * @throws IllegalArgumentException if the product of {@code w}
+     *         and {@code h} is greater than {@code Integer.MAX_VALUE}
+     * @throws IllegalArgumentException if {@code pixelStride} is less than 0
+     * @throws IllegalArgumentException if {@code scanlineStride} is less than 0
+     * @throws NullPointerException if {@code bankIndices} is {@code null}
+     * @throws NullPointerException if {@code bandOffsets} is {@code null}
+     * @throws IllegalArgumentException if {@code bandOffsets.length} is 0
      * @throws IllegalArgumentException if the length of
      *         {@code bankIndices} does not equal the length of
-     *         {@code bankOffsets}
+     *         {@code bandOffsets}
      * @throws IllegalArgumentException if any of the bank indices
      *         of {@code bandIndices} is less than 0
      * @throws IllegalArgumentException if {@code dataType} is not
-     *         one of the supported data types
+     *         one of the supported data types for this sample model
      */
     public ComponentSampleModel(int dataType,
                                 int w, int h,
@@ -207,6 +201,10 @@ public class ComponentSampleModel extends SampleModel
         this.scanlineStride  = scanlineStride;
         this.bandOffsets = bandOffsets.clone();
         this.bankIndices = bankIndices.clone();
+        if (this.bandOffsets.length != this.bankIndices.length) {
+            throw new IllegalArgumentException("Length of bandOffsets must "+
+                                               "equal length of bankIndices.");
+        }
         if (pixelStride < 0) {
             throw new IllegalArgumentException("Pixel stride must be >= 0");
         }
@@ -235,10 +233,6 @@ public class ComponentSampleModel extends SampleModel
         }
         numBanks         = maxBank+1;
         numBands         = this.bandOffsets.length;
-        if (this.bandOffsets.length != this.bankIndices.length) {
-            throw new IllegalArgumentException("Length of bandOffsets must "+
-                                               "equal length of bankIndices.");
-        }
         verify();
     }
 
@@ -509,7 +503,11 @@ public class ComponentSampleModel extends SampleModel
     }
 
     /** Returns the number of bits per sample for the specified band.
-     *  @param band the specified band
+     * <p>
+     * Since all bands of a {@code ComponentSampleModel} are the same
+     * size, this method ignores the {@code band} parameter and returns
+     * the size of the first (0th) band.
+     *  @param band the specified band (ignored)
      *  @return the number of bits per sample for the specified band.
      */
     public final int getSampleSize(int band) {
@@ -606,7 +604,7 @@ public class ComponentSampleModel extends SampleModel
      * @return the data of the specified pixel
      * @see #setDataElements(int, int, Object, DataBuffer)
      *
-     * @throws NullPointerException if data is null.
+     * @throws NullPointerException if {@code data} is {@code null}.
      * @throws ArrayIndexOutOfBoundsException if the coordinates are
      * not in bounds, or if obj is too small to hold the output.
      */
@@ -713,20 +711,10 @@ public class ComponentSampleModel extends SampleModel
     }
 
     /**
-     * Returns all samples for the specified pixel in an int array,
-     * one sample per array element.
-     * An {@code ArrayIndexOutOfBoundsException} might be thrown if
-     * the coordinates are not in bounds.
-     * @param x         the X coordinate of the pixel location
-     * @param y         the Y coordinate of the pixel location
-     * @param iArray    If non-null, returns the samples in this array
-     * @param data      The DataBuffer containing the image data
-     * @return the samples of the specified pixel.
-     * @see #setPixel(int, int, int[], DataBuffer)
-     *
-     * @throws NullPointerException if data is null.
+     * {@inheritDoc}
+     * @throws NullPointerException if {@code data} is {@code null}.
      * @throws ArrayIndexOutOfBoundsException if the coordinates are
-     * not in bounds, or if iArray is too small to hold the output.
+     * not in bounds, or if {@code iArray} is too small to hold the output.
      */
     public int[] getPixel(int x, int y, int[] iArray, DataBuffer data) {
         if ((x < 0) || (y < 0) || (x >= width) || (y >= height)) {
@@ -748,26 +736,19 @@ public class ComponentSampleModel extends SampleModel
     }
 
     /**
-     * Returns all samples for the specified rectangle of pixels in
-     * an int array, one sample per array element.
-     * An {@code ArrayIndexOutOfBoundsException} might be thrown if
-     * the coordinates are not in bounds.
-     * @param x         The X coordinate of the upper left pixel location
-     * @param y         The Y coordinate of the upper left pixel location
-     * @param w         The width of the pixel rectangle
-     * @param h         The height of the pixel rectangle
-     * @param iArray    If non-null, returns the samples in this array
-     * @param data      The DataBuffer containing the image data
-     * @return the samples of the pixels within the specified region.
-     * @see #setPixels(int, int, int, int, int[], DataBuffer)
+     * {@inheritDoc}
+     * @throws NullPointerException if {@code data} is {@code null}.
+     * @throws ArrayIndexOutOfBoundsException if the coordinates are
+     * not in bounds, or {@code w} or {@code h} is negative
+     * or if {@code iArray} is too small to hold the output.
      */
     public int[] getPixels(int x, int y, int w, int h,
                            int[] iArray, DataBuffer data) {
         int x1 = x + w;
         int y1 = y + h;
 
-        if (x < 0 || x >= width || w > width || x1 < 0 || x1 > width ||
-            y < 0 || y >= height || y > height || y1 < 0 || y1 >  height)
+        if (x < 0 || (w < 0) || x >= width || w > width || x1 < 0 || x1 > width ||
+            y < 0 || (h < 0) || y >= height || y > height || y1 < 0 || y1 > height)
         {
             throw new ArrayIndexOutOfBoundsException
                 ("Coordinate out of bounds!");
@@ -796,16 +777,10 @@ public class ComponentSampleModel extends SampleModel
     }
 
     /**
-     * Returns as int the sample in a specified band for the pixel
-     * located at (x,y).
-     * An {@code ArrayIndexOutOfBoundsException} might be thrown if
-     * the coordinates are not in bounds.
-     * @param x         the X coordinate of the pixel location
-     * @param y         the Y coordinate of the pixel location
-     * @param b         the band to return
-     * @param data      the {@code DataBuffer} containing the image data
-     * @return the sample in a specified band for the specified pixel
-     * @see #setSample(int, int, int, int, DataBuffer)
+     * {@inheritDoc}
+     * @throws NullPointerException if {@code data} is {@code null}.
+     * @throws ArrayIndexOutOfBoundsException if the coordinates or
+     * the band index are not in bounds.
      */
     public int getSample(int x, int y, int b, DataBuffer data) {
         // Bounds check for 'b' will be performed automatically
@@ -820,16 +795,10 @@ public class ComponentSampleModel extends SampleModel
     }
 
     /**
-     * Returns the sample in a specified band
-     * for the pixel located at (x,y) as a float.
-     * An {@code ArrayIndexOutOfBoundsException} might be
-     * thrown if the coordinates are not in bounds.
-     * @param x         The X coordinate of the pixel location
-     * @param y         The Y coordinate of the pixel location
-     * @param b         The band to return
-     * @param data      The DataBuffer containing the image data
-     * @return a float value representing the sample in the specified
-     * band for the specified pixel.
+     * {@inheritDoc}
+     * @throws NullPointerException if {@code data} is {@code null}.
+     * @throws ArrayIndexOutOfBoundsException if the coordinates or
+     * the band index are not in bounds.
      */
     public float getSampleFloat(int x, int y, int b, DataBuffer data) {
         // Bounds check for 'b' will be performed automatically
@@ -843,18 +812,11 @@ public class ComponentSampleModel extends SampleModel
                                          bandOffsets[b]);
         return sample;
     }
-
     /**
-     * Returns the sample in a specified band
-     * for a pixel located at (x,y) as a double.
-     * An {@code ArrayIndexOutOfBoundsException} might be
-     * thrown if the coordinates are not in bounds.
-     * @param x         The X coordinate of the pixel location
-     * @param y         The Y coordinate of the pixel location
-     * @param b         The band to return
-     * @param data      The DataBuffer containing the image data
-     * @return a double value representing the sample in the specified
-     * band for the specified pixel.
+     * {@inheritDoc}
+     * @throws NullPointerException if {@code data} is {@code null}.
+     * @throws ArrayIndexOutOfBoundsException if the coordinates or
+     * the band index are not in bounds.
      */
     public double getSampleDouble(int x, int y, int b, DataBuffer data) {
         // Bounds check for 'b' will be performed automatically
@@ -870,25 +832,16 @@ public class ComponentSampleModel extends SampleModel
     }
 
     /**
-     * Returns the samples in a specified band for the specified rectangle
-     * of pixels in an int array, one sample per data array element.
-     * An {@code ArrayIndexOutOfBoundsException} might be thrown if
-     * the coordinates are not in bounds.
-     * @param x         The X coordinate of the upper left pixel location
-     * @param y         The Y coordinate of the upper left pixel location
-     * @param w         the width of the pixel rectangle
-     * @param h         the height of the pixel rectangle
-     * @param b         the band to return
-     * @param iArray    if non-{@code null}, returns the samples
-     *                  in this array
-     * @param data      the {@code DataBuffer} containing the image data
-     * @return the samples in the specified band of the specified pixel
-     * @see #setSamples(int, int, int, int, int, int[], DataBuffer)
+     * {@inheritDoc}
+     * @throws NullPointerException if {@code data} is {@code null}.
+     * @throws ArrayIndexOutOfBoundsException if the coordinates or
+     * band index are not in bounds, or {@code w} or {@code h} is negative,
+     * or if {@code iArray} is too small to hold the output.
      */
     public int[] getSamples(int x, int y, int w, int h, int b,
                             int[] iArray, DataBuffer data) {
         // Bounds check for 'b' will be performed automatically
-        if ((x < 0) || (y < 0) || (x + w > width) || (y + h > height)) {
+        if ((x < 0) || (y < 0) || (w < 0) || ( h < 0) || (x + w > width) || (y + h > height)) {
             throw new ArrayIndexOutOfBoundsException
                 ("Coordinate out of bounds!");
         }
@@ -949,6 +902,9 @@ public class ComponentSampleModel extends SampleModel
      * @param obj       a primitive array containing pixel data
      * @param data      the DataBuffer containing the image data
      * @see #getDataElements(int, int, Object, DataBuffer)
+     * @throws NullPointerException if {@code obj} or {@code data} is {@code null}.
+     * @throws ArrayIndexOutOfBoundsException if the coordinates are
+     * not in bounds, or if obj is too small to hold the input.
      */
     public void setDataElements(int x, int y, Object obj, DataBuffer data) {
         if ((x < 0) || (y < 0) || (x >= width) || (y >= height)) {
@@ -1017,15 +973,10 @@ public class ComponentSampleModel extends SampleModel
     }
 
     /**
-     * Sets a pixel in the {@code DataBuffer} using an int array of
-     * samples for input.  An {@code ArrayIndexOutOfBoundsException}
-     * might be thrown if the coordinates are
-     * not in bounds.
-     * @param x         The X coordinate of the pixel location
-     * @param y         The Y coordinate of the pixel location
-     * @param iArray    The input samples in an int array
-     * @param data      The DataBuffer containing the image data
-     * @see #getPixel(int, int, int[], DataBuffer)
+     * {@inheritDoc}
+     * @throws NullPointerException if {@code iArray} or {@code data} is {@code null}.
+     * @throws ArrayIndexOutOfBoundsException if the coordinates are
+     * not in bounds, or if {@code iArray} is too small to hold the input.
      */
     public void setPixel(int x, int y, int[] iArray, DataBuffer data) {
         if ((x < 0) || (y < 0) || (x >= width) || (y >= height)) {
@@ -1040,25 +991,19 @@ public class ComponentSampleModel extends SampleModel
     }
 
     /**
-     * Sets all samples for a rectangle of pixels from an int array containing
-     * one sample per array element.
-     * An {@code ArrayIndexOutOfBoundsException} might be thrown if the
-     * coordinates are not in bounds.
-     * @param x         The X coordinate of the upper left pixel location
-     * @param y         The Y coordinate of the upper left pixel location
-     * @param w         The width of the pixel rectangle
-     * @param h         The height of the pixel rectangle
-     * @param iArray    The input samples in an int array
-     * @param data      The DataBuffer containing the image data
-     * @see #getPixels(int, int, int, int, int[], DataBuffer)
+     * {@inheritDoc}
+     * @throws NullPointerException if {@code iArray} or {@code data} is {@code null}.
+     * @throws ArrayIndexOutOfBoundsException if the coordinates are
+     * not in bounds, or {@code w} or {@code h} is negative
+     * or if {@code iArray} is too small to hold the input.
      */
     public void setPixels(int x, int y, int w, int h,
                           int[] iArray, DataBuffer data) {
         int x1 = x + w;
         int y1 = y + h;
 
-        if (x < 0 || x >= width || w > width || x1 < 0 || x1 > width ||
-            y < 0 || y >= height || h > height || y1 < 0 || y1 >  height)
+        if (x < 0 || w < 0 || x >= width || w > width || x1 < 0 || x1 > width ||
+            y < 0 || h < 0 || y >= height || h > height || y1 < 0 || y1 > height)
         {
             throw new ArrayIndexOutOfBoundsException
                 ("Coordinate out of bounds!");
@@ -1081,16 +1026,10 @@ public class ComponentSampleModel extends SampleModel
     }
 
     /**
-     * Sets a sample in the specified band for the pixel located at (x,y)
-     * in the {@code DataBuffer} using an int for input.
-     * An {@code ArrayIndexOutOfBoundsException} might be thrown if the
-     * coordinates are not in bounds.
-     * @param x         The X coordinate of the pixel location
-     * @param y         The Y coordinate of the pixel location
-     * @param b         the band to set
-     * @param s         the input sample as an int
-     * @param data      the DataBuffer containing the image data
-     * @see #getSample(int, int, int, DataBuffer)
+     * {@inheritDoc}
+     * @throws NullPointerException if {@code data} is {@code null}.
+     * @throws ArrayIndexOutOfBoundsException if the coordinates or
+     * the band index are not in bounds.
      */
     public void setSample(int x, int y, int b, int s,
                           DataBuffer data) {
@@ -1104,16 +1043,10 @@ public class ComponentSampleModel extends SampleModel
     }
 
     /**
-     * Sets a sample in the specified band for the pixel located at (x,y)
-     * in the {@code DataBuffer} using a float for input.
-     * An {@code ArrayIndexOutOfBoundsException} might be thrown if
-     * the coordinates are not in bounds.
-     * @param x         The X coordinate of the pixel location
-     * @param y         The Y coordinate of the pixel location
-     * @param b         The band to set
-     * @param s         The input sample as a float
-     * @param data      The DataBuffer containing the image data
-     * @see #getSample(int, int, int, DataBuffer)
+     * {@inheritDoc}
+     * @throws NullPointerException if {@code data} is {@code null}.
+     * @throws ArrayIndexOutOfBoundsException if the coordinates or
+     * the band index are not in bounds.
      */
     public void setSample(int x, int y, int b,
                           float s ,
@@ -1129,16 +1062,10 @@ public class ComponentSampleModel extends SampleModel
     }
 
     /**
-     * Sets a sample in the specified band for the pixel located at (x,y)
-     * in the {@code DataBuffer} using a double for input.
-     * An {@code ArrayIndexOutOfBoundsException} might be thrown if
-     * the coordinates are not in bounds.
-     * @param x         The X coordinate of the pixel location
-     * @param y         The Y coordinate of the pixel location
-     * @param b         The band to set
-     * @param s         The input sample as a double
-     * @param data      The DataBuffer containing the image data
-     * @see #getSample(int, int, int, DataBuffer)
+     * {@inheritDoc}
+     * @throws NullPointerException if {@code data} is {@code null}.
+     * @throws ArrayIndexOutOfBoundsException if the coordinates or
+     * the band index are not in bounds.
      */
     public void setSample(int x, int y, int b,
                           double s,
@@ -1154,23 +1081,16 @@ public class ComponentSampleModel extends SampleModel
     }
 
     /**
-     * Sets the samples in the specified band for the specified rectangle
-     * of pixels from an int array containing one sample per data array element.
-     * An {@code ArrayIndexOutOfBoundsException} might be thrown if the
-     * coordinates are not in bounds.
-     * @param x         The X coordinate of the upper left pixel location
-     * @param y         The Y coordinate of the upper left pixel location
-     * @param w         The width of the pixel rectangle
-     * @param h         The height of the pixel rectangle
-     * @param b         The band to set
-     * @param iArray    The input samples in an int array
-     * @param data      The DataBuffer containing the image data
-     * @see #getSamples(int, int, int, int, int, int[], DataBuffer)
+     * {@inheritDoc}
+     * @throws NullPointerException if {@code iArray} or {@code data} is {@code null}.
+     * @throws ArrayIndexOutOfBoundsException if the coordinates or
+     * band index are not in bounds, or {@code w} or {@code h} is negative,
+     * or if {@code iArray} is too small to hold the input.
      */
     public void setSamples(int x, int y, int w, int h, int b,
                            int[] iArray, DataBuffer data) {
         // Bounds check for 'b' will be performed automatically
-        if ((x < 0) || (y < 0) || (x + w > width) || (y + h > height)) {
+        if ((x < 0) || (y < 0) || (w < 0) || (h < 0) || (x + w > width) || (y + h > height)) {
             throw new ArrayIndexOutOfBoundsException
                 ("Coordinate out of bounds!");
         }
@@ -1188,18 +1108,16 @@ public class ComponentSampleModel extends SampleModel
     }
 
     public boolean equals(Object o) {
-        if ((o == null) || !(o instanceof ComponentSampleModel)) {
+        if (!(o instanceof ComponentSampleModel that)) {
             return false;
         }
 
-        ComponentSampleModel that = (ComponentSampleModel)o;
         return this.width == that.width &&
             this.height == that.height &&
             this.numBands == that.numBands &&
             this.dataType == that.dataType &&
             Arrays.equals(this.bandOffsets, that.bandOffsets) &&
             Arrays.equals(this.bankIndices, that.bankIndices) &&
-            this.numBands == that.numBands &&
             this.numBanks == that.numBanks &&
             this.scanlineStride == that.scanlineStride &&
             this.pixelStride == that.pixelStride;
@@ -1224,8 +1142,6 @@ public class ComponentSampleModel extends SampleModel
             hash ^= bankIndices[i];
             hash <<= 8;
         }
-        hash ^= numBands;
-        hash <<= 8;
         hash ^= numBanks;
         hash <<= 8;
         hash ^= scanlineStride;

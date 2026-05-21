@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,11 @@
 
 package sun.nio.fs;
 
-import java.nio.file.attribute.*;
-import java.util.*;
 import java.io.IOException;
+import java.nio.file.attribute.FileAttributeView;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.UserDefinedFileAttributeView;
+import java.util.Arrays;
 
 /**
  * Bsd implementation of FileStore
@@ -76,5 +78,43 @@ class BsdFileStore
         }
 
         throw new IOException("Mount point not found in fstab");
+    }
+
+    @Override
+    public boolean supportsFileAttributeView(Class<? extends FileAttributeView> type) {
+        // support UserDefinedAttributeView if extended attributes enabled
+        if (type == UserDefinedFileAttributeView.class) {
+            // lookup fstypes.properties
+            FeatureStatus status = checkIfFeaturePresent("user_xattr");
+            if (status == FeatureStatus.PRESENT)
+                return true;
+            if (status == FeatureStatus.NOT_PRESENT)
+                return false;
+
+            // typical macOS file system types that are known to support xattr
+            String fstype = entry().fstype();
+            if ("hfs".equals(fstype) || "apfs".equals(fstype)) {
+                return true;
+            }
+
+            // probe file system capabilities
+            UnixPath dir = new UnixPath(file().getFileSystem(), entry().dir());
+            return isExtendedAttributesEnabled(dir);
+        }
+        // POSIX attributes not supported on FAT32
+        if (type == PosixFileAttributeView.class &&
+            entry().fstype().equals("msdos"))
+            return false;
+        return super.supportsFileAttributeView(type);
+    }
+
+    @Override
+    public boolean supportsFileAttributeView(String name) {
+        if (name.equals("user"))
+            return supportsFileAttributeView(UserDefinedFileAttributeView.class);
+        // UNIX attributes not supported on FAT32
+        if (name.equals("unix") && entry().fstype().equals("msdos"))
+            return false;
+        return super.supportsFileAttributeView(name);
     }
 }

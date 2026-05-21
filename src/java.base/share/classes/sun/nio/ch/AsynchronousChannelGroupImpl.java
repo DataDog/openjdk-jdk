@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,14 +30,11 @@ import java.nio.channels.AsynchronousChannelGroup;
 import java.nio.channels.spi.AsynchronousChannelProvider;
 import java.io.IOException;
 import java.io.FileDescriptor;
+import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.security.PrivilegedAction;
-import java.security.AccessController;
-import java.security.AccessControlContext;
-import sun.security.action.GetIntegerAction;
 
 /**
  * Base implementation of AsynchronousChannelGroup
@@ -48,8 +45,8 @@ abstract class AsynchronousChannelGroupImpl
 {
     // number of internal threads handling I/O events when using an unbounded
     // thread pool. Internal threads do not dispatch to completion handlers.
-    private static final int internalThreadCount = AccessController.doPrivileged(
-        new GetIntegerAction("sun.nio.ch.internalThreadPoolSize", 1));
+    private static final int internalThreadCount =
+        Integer.getInteger("sun.nio.ch.internalThreadPoolSize", 1);
 
     // associated thread pool
     private final ThreadPool pool;
@@ -58,7 +55,7 @@ abstract class AsynchronousChannelGroupImpl
     private final AtomicInteger threadCount = new AtomicInteger();
 
     // associated Executor for timeouts
-    private ScheduledThreadPoolExecutor timeoutExecutor;
+    private final ScheduledThreadPoolExecutor timeoutExecutor;
 
     // task queue for when using a fixed thread pool. In that case, a thread
     // waiting on I/O events must be awoken to poll tasks from this queue.
@@ -115,15 +112,9 @@ abstract class AsynchronousChannelGroupImpl
     }
 
     private void startInternalThread(final Runnable task) {
-        AccessController.doPrivileged(new PrivilegedAction<>() {
-            @Override
-            public Void run() {
-                // internal threads should not be visible to application so
-                // cannot use user-supplied thread factory
-                ThreadPool.defaultThreadFactory().newThread(task).start();
-                return null;
-            }
-         });
+        // internal threads should not be visible to application so
+        // cannot use user-supplied thread factory
+        ThreadPool.defaultThreadFactory().newThread(task).start();
     }
 
     protected final void startThreads(Runnable task) {
@@ -246,16 +237,8 @@ abstract class AsynchronousChannelGroupImpl
     abstract void shutdownHandlerTasks();
 
     private void shutdownExecutors() {
-        AccessController.doPrivileged(
-            new PrivilegedAction<>() {
-                public Void run() {
-                    pool.executor().shutdown();
-                    timeoutExecutor.shutdown();
-                    return null;
-                }
-            },
-            null,
-            new RuntimePermission("modifyThread"));
+        pool.executor().shutdown();
+        timeoutExecutor.shutdown();
     }
 
     @Override
@@ -317,25 +300,7 @@ abstract class AsynchronousChannelGroupImpl
      */
     @Override
     public final void execute(Runnable task) {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null) {
-            // when a security manager is installed then the user's task
-            // must be run with the current calling context
-            final AccessControlContext acc = AccessController.getContext();
-            final Runnable delegate = task;
-            task = new Runnable() {
-                @Override
-                public void run() {
-                    AccessController.doPrivileged(new PrivilegedAction<>() {
-                        @Override
-                        public Void run() {
-                            delegate.run();
-                            return null;
-                        }
-                    }, acc);
-                }
-            };
-        }
+        Objects.requireNonNull(task, "task");
         executeOnPooledThread(task);
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,24 +22,23 @@
  */
 
 import java.lang.Integer;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
 import java.util.Random;
-import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.IntFunction;
 import java.util.function.IntUnaryOperator;
 import java.util.stream.Stream;
+import java.util.List;
 import java.util.stream.Collectors;
+
+import jdk.incubator.vector.VectorSpecies;
+import jdk.test.lib.Utils;
 
 import org.testng.Assert;
 
 public class AbstractVectorTest {
 
-    static final Random RAND = new Random(Integer.getInteger("jdk.incubator.vector.test.random-seed", 1337));
+    static final Random RAND = Utils.getRandomInstance();
 
     interface ToBoolF {
         boolean apply(int i);
@@ -84,20 +83,6 @@ public class AbstractVectorTest {
         };
     }
 
-    static final Collection<ByteOrder> BYTE_ORDER_VALUES = Set.of(
-            ByteOrder.BIG_ENDIAN, ByteOrder.LITTLE_ENDIAN);
-
-    static final List<IntFunction<ByteBuffer>> BYTE_BUFFER_GENERATORS = List.of(
-            withToString("HB:RW:NE", (int s) -> {
-                return ByteBuffer.allocate(s)
-                        .order(ByteOrder.nativeOrder());
-            }),
-            withToString("DB:RW:NE", (int s) -> {
-                return ByteBuffer.allocateDirect(s)
-                        .order(ByteOrder.nativeOrder());
-            })
-    );
-
     static final List<IntFunction<boolean[]>> BOOL_ARRAY_GENERATORS = List.of(
             withToString("boolean[i % 2]", (int s) -> {
                 return fill_boolean(s,
@@ -106,20 +91,6 @@ public class AbstractVectorTest {
             withToString("boolean[i % 5]", (int s) -> {
                 return fill_boolean(s,
                             i -> ((i % 5) == 0));
-            })
-    );
-    static final List<IntFunction<int[]>> INDEX_GENERATORS = List.of(
-            withToString("index[i -> i]", (int s) -> {
-                return fillInts(s,
-                                i -> i);
-            }),
-            withToString("index[i -> size - i - 1]", (int s) -> {
-                return fillInts(s,
-                                i -> s - i - 1);
-            }),
-            withToString("index[i -> (i % 2) == 0 ? i : s - i - 1]", (int s) -> {
-                return fillInts(s,
-                                i -> (i % 2) == 0 ? i : s - i - 1);
             })
     );
 
@@ -139,15 +110,12 @@ public class AbstractVectorTest {
     }
 
     static final List<IntFunction<boolean[]>> BOOLEAN_MASK_GENERATORS = List.of(
-            withToString("mask[i % 2]", (int l) -> {
-                boolean[] a = new boolean[l];
-                for (int i = 0; i < l; i++) {
-                    a[i] = (i % 2 == 0);
-                }
-                return a;
+            withToString("mask[i % 2]", (int s) -> {
+                return fill_boolean(s,
+                        i -> ((i % 2) == 0));
             }),
-            withToString("mask[true]", (int l) -> {
-                boolean[] a = new boolean[l];
+            withToString("mask[true]", (int s) -> {
+                boolean[] a = new boolean[s];
                 Arrays.fill(a, true);
                 return a;
             }),
@@ -160,10 +128,29 @@ public class AbstractVectorTest {
                 flatMap(fa -> BOOLEAN_MASK_GENERATORS.stream().skip(1).map(
                                       fb -> List.of(fa, fb))).collect(Collectors.toList());
 
+    static long[] pack_booleans_to_longs(boolean[] mask) {
+        int totalLongs = (mask.length + 63) / 64; // ceil division
+        long[] packed = new long[totalLongs];
+        for (int i = 0; i < mask.length; i++) {
+            int longIndex = i / 64;
+            int bitIndex = i % 64;
+            if (mask[i]) {
+                packed[longIndex] |= 1L << bitIndex;
+            }
+        }
+        return packed;
+    }
+
+    static final List<IntFunction<long[]>> LONG_MASK_GENERATORS = BOOLEAN_MASK_GENERATORS.stream()
+            .map(f -> withToString(
+                    f.toString().replace("mask", "long_mask"),
+                    (IntFunction<long[]>) (int l) -> pack_booleans_to_longs(f.apply(l))
+            ))
+            .collect(Collectors.toList());
+
     static final List<BiFunction<Integer,Integer,int[]>> INT_SHUFFLE_GENERATORS = List.of(
-            withToStringBi("shuffle[random]", (Integer l, Integer m) -> {
-                return RAND.ints(l, 0, m).toArray();
-            })
+            withToStringBi("shuffle[random]",
+                    (Integer l, Integer m) -> RAND.ints(l, 0, m).toArray())
     );
 
     interface RangeIntOp {
@@ -202,16 +189,9 @@ public class AbstractVectorTest {
     );
 
     static final List<BiFunction<Integer,Integer,int[]>> INT_INDEX_GENERATORS = List.of(
-            withToStringBi("index[random]", (Integer l, Integer m) -> {
-                return RAND.ints(l, 0, m).toArray();
-            })
+            withToStringBi("index[random]",
+                    (Integer l, Integer m) -> RAND.ints(l, 0, m).toArray())
     );
-
-    static int countTrailingFalse(boolean[] m) {
-        int i;
-        for (i = m.length - 1; i >= 0 && !m[i]; i--);
-        return m.length - 1 - i;
-    }
 
     static boolean isIndexOutOfBoundsForMask(boolean[] mask, int offset, int length) {
         return isIndexOutOfBoundsForMask(mask, offset, length, 1);
@@ -247,18 +227,17 @@ public class AbstractVectorTest {
         return a;
     }
 
-    interface FBooleanBinOp {
-        boolean apply(boolean a, boolean b);
-    }
-
-    static void assertArraysEquals(boolean[] a, boolean[] b, boolean[] r, FBooleanBinOp f) {
-        int i = 0;
-        try {
-            for (; i < a.length; i++) {
-                Assert.assertEquals(r[i], f.apply(a[i], b[i]));
-            }
-        } catch (AssertionError e) {
-            Assert.assertEquals(r[i], f.apply(a[i], b[i]), "(" + a[i] + ", " + b[i] + ") at index #" + i);
+    // Non-optimized test partial wrap derived from the Spec:
+    // Validation function for lane indexes which may be out of the valid range of [0..VLENGTH-1].
+    // The index is forced into this range by adding or subtracting a suitable multiple of VLENGTH.
+    // Specifically, the index is reduced into the required range by computing the value of length-floor, where
+    // floor=vectorSpecies().loopBound(length) is the next lower multiple of VLENGTH.
+    // As long as VLENGTH is a power of two, then the reduced index also equal to index & (VLENGTH - 1).
+    static int testPartiallyWrapIndex(VectorSpecies<?> vsp, int index) {
+        if (index >= 0 && index < vsp.length()) {
+            return index;
         }
+        int wrapped = Math.floorMod(index, vsp.length());
+        return wrapped - vsp.length();
     }
 }

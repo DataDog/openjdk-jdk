@@ -37,7 +37,7 @@
  *     Test checks that agent's JAR file is appended at the end of the system class path.
  *     Agent's JAR file contains modified class java.util.TooManyListenersException (it is assumed
  *     that this class isn't loaded before agent is loaded), agent instantiates TooManyListenersException
- *     and checks that non-modified version of this class was loaded from rt.jar (not from agent's JAR).
+ *     and checks that non-modified version of this class was loaded from the jdk image (not from agent's JAR).
  *
  * @library /vmTestbase
  *          /test/lib
@@ -60,7 +60,7 @@
  *      -cfm attach024Agent00.jar ${test.src}/attach024Agent00.mf
  *      -C ./bin/classes
  *      java/util/TooManyListenersException.class
- * @run driver ClassFileInstaller
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller
  *      nsk.jvmti.AttachOnDemand.attach024.attach024Agent00
  * @run driver ExecDriver --cmd
  *      ${compile.jdk}/bin/jar

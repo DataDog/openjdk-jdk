@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,7 +28,6 @@ package jdk.internal.net.http.websocket;
 import java.net.http.HttpClient;
 import java.net.http.HttpClient.Version;
 import java.net.http.HttpHeaders;
-import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.net.http.WebSocketHandshakeException;
@@ -40,17 +39,13 @@ import jdk.internal.net.http.common.Pair;
 import jdk.internal.net.http.common.Utils;
 
 import java.io.IOException;
-import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.net.ProxySelector;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.net.URLPermission;
 import java.nio.charset.StandardCharsets;
-import java.security.AccessController;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.security.PrivilegedAction;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.Base64;
@@ -62,13 +57,13 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static java.lang.String.format;
+import static jdk.internal.net.http.common.Utils.copyProxy;
 import static jdk.internal.net.http.common.Utils.isValidName;
-import static jdk.internal.net.http.common.Utils.permissionForProxy;
 import static jdk.internal.net.http.common.Utils.stringOf;
+import static jdk.internal.util.Exceptions.filterNonSocketInfo;
+import static jdk.internal.util.Exceptions.formatMsg;
 
 public class OpeningHandshake {
 
@@ -114,7 +109,6 @@ public class OpeningHandshake {
     public OpeningHandshake(BuilderImpl b) {
         checkURI(b.getUri());
         Proxy proxy = proxyFor(b.getProxySelector(), b.getUri());
-        checkPermissions(b, proxy);
         this.client = b.getClient();
         URI httpURI = createRequestURI(b.getUri());
         HttpRequestBuilderImpl requestBuilder = new HttpRequestBuilderImpl(httpURI);
@@ -150,7 +144,7 @@ public class OpeningHandshake {
     private static Collection<String> createRequestSubprotocols(
             Collection<String> subprotocols)
     {
-        LinkedHashSet<String> sp = new LinkedHashSet<>(subprotocols.size(), 1);
+        LinkedHashSet<String> sp = LinkedHashSet.newLinkedHashSet(subprotocols.size());
         for (String s : subprotocols) {
             if (s.trim().isEmpty() || !isValidName(s)) {
                 throw illegal("Bad subprotocol syntax: " + s);
@@ -188,10 +182,8 @@ public class OpeningHandshake {
     }
 
     public CompletableFuture<Result> send() {
-        PrivilegedAction<CompletableFuture<Result>> pa = () ->
-                client.sendAsync(this.request, BodyHandlers.ofString())
+        return client.sendAsync(this.request, BodyHandlers.ofString())
                       .thenCompose(this::resultFrom);
-        return AccessController.doPrivileged(pa);
     }
 
     /*
@@ -280,7 +272,7 @@ public class OpeningHandshake {
             throws CheckFailedException
     {
         Optional<String> opt = responseHeaders.firstValue(HEADER_PROTOCOL);
-        if (!opt.isPresent()) {
+        if (opt.isEmpty()) {
             // If there is no such header in the response, then the server
             // doesn't want to use any subprotocol
             return "";
@@ -347,9 +339,13 @@ public class OpeningHandshake {
         if (!("ws".equalsIgnoreCase(scheme) || "wss".equalsIgnoreCase(scheme)))
             throw illegal("invalid URI scheme: " + scheme);
         if (uri.getHost() == null)
-            throw illegal("URI must contain a host: " + uri);
+            throw new IllegalArgumentException(
+                formatMsg("URI must contain a host%s",
+                          filterNonSocketInfo(uri.toString()).prefixWith(": ")));
         if (uri.getFragment() != null)
-            throw illegal("URI must not contain a fragment: " + uri);
+            throw new IllegalArgumentException(
+                formatMsg("URI must not contain a fragment%s",
+                          filterNonSocketInfo(uri.toString()).prefixWith(": ")));
         return uri;
     }
 
@@ -362,7 +358,7 @@ public class OpeningHandshake {
      * or {@code null} if none is required or applicable.
      */
     private static Proxy proxyFor(Optional<ProxySelector> selector, URI uri) {
-        if (!selector.isPresent()) {
+        if (selector.isEmpty()) {
             return null;
         }
         URI requestURI = createRequestURI(uri); // Based on the HTTP scheme
@@ -374,29 +370,7 @@ public class OpeningHandshake {
         if (proxy.type() != Proxy.Type.HTTP) {
             return null;
         }
-        return proxy;
+        return copyProxy(proxy);
     }
 
-    /**
-     * Performs the necessary security permissions checks to connect ( possibly
-     * through a proxy ) to the builders WebSocket URI.
-     *
-     * @throws SecurityException if the security manager denies access
-     */
-    static void checkPermissions(BuilderImpl b, Proxy proxy) {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm == null) {
-            return;
-        }
-        Stream<String> headers = b.getHeaders().stream().map(p -> p.first).distinct();
-        URLPermission perm1 = Utils.permissionForServer(b.getUri(), "", headers);
-        sm.checkPermission(perm1);
-        if (proxy == null) {
-            return;
-        }
-        URLPermission perm2 = permissionForProxy((InetSocketAddress) proxy.address());
-        if (perm2 != null) {
-            sm.checkPermission(perm2);
-        }
-    }
 }

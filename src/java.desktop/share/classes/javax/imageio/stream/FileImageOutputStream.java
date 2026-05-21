@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,6 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import com.sun.imageio.stream.CloseableDisposerRecord;
-import com.sun.imageio.stream.StreamFinalizer;
 import sun.java2d.Disposer;
 
 /**
@@ -44,7 +43,7 @@ public class FileImageOutputStream extends ImageOutputStreamImpl {
     private RandomAccessFile raf;
 
     /** The referent to be registered with the Disposer. */
-    private final Object disposerReferent;
+    private final Object disposerReferent = new Object();
 
     /** The DisposerRecord that closes the underlying RandomAccessFile. */
     private final CloseableDisposerRecord disposerRecord;
@@ -55,14 +54,12 @@ public class FileImageOutputStream extends ImageOutputStreamImpl {
      *
      * @param f a {@code File} to write to.
      *
-     * @exception IllegalArgumentException if {@code f} is
+     * @throws IllegalArgumentException if {@code f} is
      * {@code null}.
-     * @exception SecurityException if a security manager exists
-     * and does not allow write access to the file.
-     * @exception FileNotFoundException if {@code f} does not denote
+     * @throws FileNotFoundException if {@code f} does not denote
      * a regular file or it cannot be opened for reading and writing for any
      * other reason.
-     * @exception IOException if an I/O error occurs.
+     * @throws IOException if an I/O error occurs.
      */
     public FileImageOutputStream(File f)
         throws FileNotFoundException, IOException {
@@ -75,7 +72,7 @@ public class FileImageOutputStream extends ImageOutputStreamImpl {
      *
      * @param raf a {@code RandomAccessFile} to write to.
      *
-     * @exception IllegalArgumentException if {@code raf} is
+     * @throws IllegalArgumentException if {@code raf} is
      * {@code null}.
      */
     public FileImageOutputStream(RandomAccessFile raf) {
@@ -83,14 +80,13 @@ public class FileImageOutputStream extends ImageOutputStreamImpl {
             throw new IllegalArgumentException("raf == null!");
         }
         this.raf = raf;
+        try {
+            this.streamPos = raf.getFilePointer();
+        } catch (IOException ignored) {
+        }
 
         disposerRecord = new CloseableDisposerRecord(raf);
-        if (getClass() == FileImageOutputStream.class) {
-            disposerReferent = new Object();
-            Disposer.addRecord(disposerReferent, disposerRecord);
-        } else {
-            disposerReferent = new StreamFinalizer(this);
-        }
+        Disposer.addRecord(disposerReferent, disposerRecord);
     }
 
     public int read() throws IOException {
@@ -141,9 +137,9 @@ public class FileImageOutputStream extends ImageOutputStreamImpl {
      * performed.  The file length will not be increased until a write
      * is performed.
      *
-     * @exception IndexOutOfBoundsException if {@code pos} is smaller
+     * @throws IndexOutOfBoundsException if {@code pos} is smaller
      * than the flushed position.
-     * @exception IOException if any other I/O error occurs.
+     * @throws IOException if any other I/O error occurs.
      */
     public void seek(long pos) throws IOException {
         checkClosed();
@@ -159,24 +155,5 @@ public class FileImageOutputStream extends ImageOutputStreamImpl {
         super.close();
         disposerRecord.dispose(); // this closes the RandomAccessFile
         raf = null;
-    }
-
-    /**
-     * {@inheritDoc}
-     *
-     * @deprecated The {@code finalize} method has been deprecated.
-     *     Subclasses that override {@code finalize} in order to perform cleanup
-     *     should be modified to use alternative cleanup mechanisms and
-     *     to remove the overriding {@code finalize} method.
-     *     When overriding the {@code finalize} method, its implementation must explicitly
-     *     ensure that {@code super.finalize()} is invoked as described in {@link Object#finalize}.
-     *     See the specification for {@link Object#finalize()} for further
-     *     information about migration options.
-     */
-    @Deprecated(since="9")
-    protected void finalize() throws Throwable {
-        // Empty finalizer: for performance reasons we instead use the
-        // Disposer mechanism for ensuring that the underlying
-        // RandomAccessFile is closed prior to garbage collection
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2000, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -56,7 +56,7 @@ public class SearchControls implements java.io.Serializable {
      * <p>
      * The value of this constant is {@code 0}.
      */
-    public final static int OBJECT_SCOPE = 0;
+    public static final int OBJECT_SCOPE = 0;
 
     /**
      * Search one level of the named context.
@@ -70,7 +70,7 @@ public class SearchControls implements java.io.Serializable {
      * <p>
      * The value of this constant is {@code 1}.
      */
-    public final static int ONELEVEL_SCOPE = 1;
+    public static final int ONELEVEL_SCOPE = 1;
     /**
      * Search the entire subtree rooted at the named object.
      *<p>
@@ -92,7 +92,7 @@ public class SearchControls implements java.io.Serializable {
      * <p>
      * The value of this constant is {@code 2}.
      */
-    public final static int SUBTREE_SCOPE = 2;
+    public static final int SUBTREE_SCOPE = 2;
 
     /**
      * Contains the scope with which to apply the search. One of
@@ -163,16 +163,16 @@ public class SearchControls implements java.io.Serializable {
      * Constructs a search constraints using arguments.
      * @param scope     The search scope.  One of:
      *                  OBJECT_SCOPE, ONELEVEL_SCOPE, SUBTREE_SCOPE.
-     * @param timelim   The number of milliseconds to wait before returning.
-     *                  If 0, wait indefinitely.
-     * @param deref     If true, dereference links during search.
      * @param countlim  The maximum number of entries to return.  If 0, return
      *                  all entries that satisfy filter.
-     * @param retobj    If true, return the object bound to the name of the
-     *                  entry; if false, do not return object.
+     * @param timelim   The number of milliseconds to wait before returning.
+     *                  If 0, wait indefinitely.
      * @param attrs     The identifiers of the attributes to return along with
      *                  the entry.  If null, return all attributes. If empty
      *                  return no attributes.
+     * @param retobj    If true, return the object bound to the name of the
+     *                  entry; if false, do not return object.
+     * @param deref     If true, dereference links during search.
      */
     public SearchControls(int scope,
                              long countlim,

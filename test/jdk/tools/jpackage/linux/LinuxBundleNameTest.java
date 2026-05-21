@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,7 +21,7 @@
  * questions.
  */
 
-import jdk.jpackage.test.TKit;
+import jdk.jpackage.test.Annotations.Test;
 import jdk.jpackage.test.PackageTest;
 import jdk.jpackage.test.PackageType;
 
@@ -43,30 +43,30 @@ import jdk.jpackage.test.PackageType;
 /*
  * @test
  * @summary jpackage with --linux-package-name
- * @library ../helpers
+ * @library /test/jdk/tools/jpackage/helpers
  * @key jpackagePlatformPackage
  * @build jdk.jpackage.test.*
+ * @build LinuxBundleNameTest
  * @requires (os.family == "linux")
- * @modules jdk.jpackage/jdk.jpackage.internal
- * @run main/othervm/timeout=360 -Xmx512m LinuxBundleNameTest
+ * @run main/othervm/timeout=360 -Xmx512m jdk.jpackage.test.Main
+ *  --jpt-run=LinuxBundleNameTest
  */
 public class LinuxBundleNameTest {
 
-    public static void main(String[] args) {
+    @Test
+    public static void test() {
         final String PACKAGE_NAME = "quickbrownfox2";
 
-        TKit.run(args, () -> {
-            new PackageTest()
-            .forTypes(PackageType.LINUX)
-            .configureHelloApp()
-            .addInitializer(cmd -> {
-                cmd.addArguments("--linux-package-name", PACKAGE_NAME);
-            })
-            .forTypes(PackageType.LINUX_DEB)
-            .addBundlePropertyVerifier("Package", PACKAGE_NAME)
-            .forTypes(PackageType.LINUX_RPM)
-            .addBundlePropertyVerifier("Name", PACKAGE_NAME)
-            .run();
-        });
+        new PackageTest()
+                .forTypes(PackageType.LINUX)
+                .configureHelloApp()
+                .addInitializer(cmd -> {
+                    cmd.addArguments("--linux-package-name", PACKAGE_NAME);
+                })
+                .forTypes(PackageType.LINUX_DEB)
+                .addBundlePropertyVerifier("Package", PACKAGE_NAME)
+                .forTypes(PackageType.LINUX_RPM)
+                .addBundlePropertyVerifier("Name", PACKAGE_NAME)
+                .run();
     }
 }

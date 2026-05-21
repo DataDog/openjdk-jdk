@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,38 +25,19 @@
 
 package sun.security.ssl;
 
-import java.security.*;
+import java.security.Provider;
 import java.util.*;
 import static sun.security.util.SecurityConstants.PROVIDER_VER;
 
 /**
  * The JSSE provider.
- *
- * SunJSSE now supports an experimental FIPS compliant mode when used with an
- * appropriate FIPS certified crypto provider. In FIPS mode, we:
- *  . allow only TLS 1.0 or later
- *  . allow only FIPS approved ciphersuites
- *  . perform all crypto in the FIPS crypto provider
- *
- * It is currently not possible to use both FIPS compliant SunJSSE and
- * standard JSSE at the same time because of the various static data structures
- * we use.
- *
- * However, we do want to allow FIPS mode to be enabled at runtime and without
- * editing the java.security file. That means we need to allow
- * Security.removeProvider("SunJSSE") to work, which creates an instance of
- * this class in non-FIPS mode. That is why we delay the selection of the mode
- * as long as possible. This is until we open an SSL/TLS connection and the
- * data structures need to be initialized or until SunJSSE is initialized in
- * FIPS mode.
- *
  */
 public class SunJSSE extends java.security.Provider {
 
     @java.io.Serial
     private static final long serialVersionUID = 3231825739635378733L;
 
-    private static String info = "Sun JSSE provider" +
+    private static final String info = "Sun JSSE provider" +
         "(PKCS12, SunX509/PKIX key/trust factories, " +
         "SSLv3/TLSv1/TLSv1.1/TLSv1.2/TLSv1.3/DTLSv1.0/DTLSv1.2)";
 
@@ -65,19 +46,12 @@ public class SunJSSE extends java.security.Provider {
         registerAlgorithms();
     }
 
-    private void registerAlgorithms() {
-        AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            doRegister();
-            return null;
-        });
-    }
-
     private void ps(String type, String algo, String cn,
             List<String> a, HashMap<String, String> attrs) {
         putService(new Provider.Service(this, type, algo, cn, a, attrs));
     }
 
-    private void doRegister() {
+    private void registerAlgorithms() {
         ps("Signature", "MD5andSHA1withRSA",
             "sun.security.ssl.RSASignature", null, null);
 

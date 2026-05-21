@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -20,6 +20,8 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+
+import jdk.internal.net.http.websocket.Frame;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -92,6 +94,7 @@ public class DummyWebSocketServer implements Closeable {
     private volatile InetSocketAddress address;
     private ByteBuffer read = ByteBuffer.allocate(16384);
     private final CountDownLatch readReady = new CountDownLatch(1);
+    private volatile int receiveBufferSize;
 
     private static class Credentials {
         private final String name;
@@ -149,7 +152,7 @@ public class DummyWebSocketServer implements Closeable {
                         err.println("Error in connection: " + channel + ", " + e);
                     } finally {
                         err.println("Closed: " + channel);
-                        close(channel);
+                        closeChannel(channel);
                         readReady.countDown();
                     }
                 }
@@ -183,6 +186,10 @@ public class DummyWebSocketServer implements Closeable {
         }
     }
 
+    protected void closeChannel(SocketChannel channel) {
+        close(channel);
+    }
+
     protected void write(SocketChannel ch) throws IOException { }
 
     protected final void serve(SocketChannel channel)
@@ -212,9 +219,98 @@ public class DummyWebSocketServer implements Closeable {
         }
     }
 
+    public List<DecodedFrame> readFrames() throws InterruptedException {
+        ByteBuffer buffer = read();
+        Frame.Reader reader = new Frame.Reader();
+        DecodedFrameCollector consumer = new DecodedFrameCollector();
+        while (buffer.hasRemaining()) {
+            reader.readFrame(buffer, consumer);
+        }
+        return consumer.frames;
+    }
+
+    private static final class DecodedFrameCollector implements Frame.Consumer {
+
+        private final Frame.Masker masker = new Frame.Masker();
+
+        private final List<DecodedFrame> frames = new ArrayList<>();
+
+        private ByteBuffer data;
+
+        private Frame.Opcode opcode;
+
+        private boolean last;
+
+        @Override
+        public void fin(boolean value) {
+            last = value;
+        }
+
+        @Override
+        public void rsv1(boolean value) {
+            if (value) {
+                throw new AssertionError();
+            }
+        }
+
+        @Override
+        public void rsv2(boolean value) {
+            if (value) {
+                throw new AssertionError();
+            }
+        }
+
+        @Override
+        public void rsv3(boolean value) {
+            if (value) {
+                throw new AssertionError();
+            }
+        }
+
+        @Override
+        public void opcode(Frame.Opcode value) {
+            opcode = value;
+        }
+
+        @Override
+        public void mask(boolean value) {
+            if (!value) { // Frames from the client MUST be masked
+                throw new AssertionError();
+            }
+        }
+
+        @Override
+        public void payloadLen(long value) {
+            data = ByteBuffer.allocate((int) value);
+        }
+
+        @Override
+        public void maskingKey(int value) {
+            masker.setMask(value);
+        }
+
+        @Override
+        public void payloadData(ByteBuffer data) {
+            masker.applyMask(data, this.data);
+        }
+
+        @Override
+        public void endFrame() {
+            frames.add(new DecodedFrame(opcode, this.data.flip(), last));
+        }
+
+    }
+
+    public record DecodedFrame(Frame.Opcode opcode, ByteBuffer data, boolean last) {}
+
     public ByteBuffer read() throws InterruptedException {
         readReady.await();
         return read.duplicate().asReadOnlyBuffer().flip();
+    }
+
+    public void setReceiveBufferSize(int bufsize) {
+        assert ssc == null : "Must configure before calling open()";
+        this.receiveBufferSize = bufsize;
     }
 
     public void open() throws IOException {
@@ -225,6 +321,15 @@ public class DummyWebSocketServer implements Closeable {
         ssc = ServerSocketChannel.open();
         try {
             ssc.configureBlocking(true);
+            var bufsize = receiveBufferSize;
+            if (bufsize > 0) {
+                err.printf("Configuring receive buffer size to %d%n", bufsize);
+                try {
+                    ssc.setOption(StandardSocketOptions.SO_RCVBUF, bufsize);
+                } catch (IOException x) {
+                    err.printf("Failed to configure receive buffer size to %d%n", bufsize);
+                }
+            }
             ssc.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
             address = (InetSocketAddress) ssc.getLocalAddress();
             thread.start();
@@ -246,7 +351,14 @@ public class DummyWebSocketServer implements Closeable {
         if (!started.get()) {
             throw new IllegalStateException("Not yet started");
         }
-        return URI.create("ws://localhost:" + address.getPort());
+        String ip = address.getAddress().isAnyLocalAddress()
+                ? InetAddress.getLoopbackAddress().getHostAddress()
+                : address.getAddress().getHostAddress();
+        if (ip.indexOf(':') >= 0) {
+            ip = String.format("[%s]", ip);
+        }
+
+        return URI.create("ws://" + ip + ":" + address.getPort());
     }
 
     private boolean readRequest(SocketChannel channel, StringBuilder request)

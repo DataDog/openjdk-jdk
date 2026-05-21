@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -47,7 +45,7 @@ import jdk.test.lib.jfr.Events;
 /**
  * @test
  * @summary Test Shutdown event
- * @key jfr
+ * @requires vm.flagless
  * @requires vm.hasJFR
  * @library /test/lib
  * @modules jdk.jfr
@@ -66,7 +64,26 @@ public class TestShutdownEvent {
              new TestSig("INT")
     };
 
+    /*
+     * We don't run if -esa is specified, because parser invariants are not
+     * guaranteed for emergency dumps, which are provided on a best-effort basis only.
+     */
+    private static boolean hasIncompatibleTestOptions() {
+        String testVmOpts[] = System.getProperty("test.vm.opts","").split("\\s+");
+        for (String s : testVmOpts) {
+            if (s.equals("-esa")) {
+                System.out.println("Incompatible option: " + s + " specified. Skipping test.");
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static void main(String[] args) throws Throwable {
+        if (hasIncompatibleTestOptions()) {
+            return;
+        }
+
         for (int i = 0; i < subTests.length; ++i) {
             int attempts = subTests[i].attempts();
             if (attempts == 0) {
@@ -91,11 +108,12 @@ public class TestShutdownEvent {
     }
 
     private static void runSubtest(int subTestIndex) throws Exception {
-        ProcessBuilder pb = ProcessTools.createTestJvm(
+        ProcessBuilder pb = ProcessTools.createTestJavaProcessBuilder(
                                 "-Xlog:jfr=debug",
                                 "-XX:-CreateCoredumpOnCrash",
+                                "-XX:-TieredCompilation",
                                 "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
-                                "-XX:StartFlightRecording=filename=./dumped.jfr,dumponexit=true,settings=default",
+                                "-XX:StartFlightRecording:filename=./dumped.jfr,dumponexit=true,settings=default",
                                 "jdk.jfr.event.runtime.TestShutdownEvent$TestMain",
                                 String.valueOf(subTestIndex));
         OutputAnalyzer output = ProcessTools.executeProcess(pb);
@@ -115,7 +133,7 @@ public class TestShutdownEvent {
             .collect(Collectors.toList());
 
         Asserts.assertEquals(filteredEvents.size(), 1);
-        RecordedEvent event = filteredEvents.get(0);
+        RecordedEvent event = filteredEvents.getFirst();
         subTests[subTestIndex].verifyEvents(event, exitCode);
     }
 

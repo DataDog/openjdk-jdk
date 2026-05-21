@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -58,8 +58,6 @@ import java.awt.peer.ComponentPeer;
 import java.awt.peer.ContainerPeer;
 import java.awt.peer.KeyboardFocusManagerPeer;
 import java.lang.reflect.Field;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.swing.JComponent;
@@ -68,14 +66,17 @@ import javax.swing.SwingUtilities;
 
 import com.sun.java.swing.SwingUtilities3;
 import sun.awt.AWTAccessor;
+import sun.awt.CGraphicsDevice;
 import sun.awt.PaintEventDispatcher;
 import sun.awt.RepaintArea;
 import sun.awt.SunToolkit;
 import sun.awt.event.IgnorePaintEvent;
 import sun.awt.image.SunVolatileImage;
 import sun.java2d.SunGraphics2D;
+import sun.java2d.metal.MTLRenderQueue;
 import sun.java2d.opengl.OGLRenderQueue;
 import sun.java2d.pipe.Region;
+import sun.java2d.pipe.RenderQueue;
 import sun.util.logging.PlatformLogger;
 
 public abstract class LWComponentPeer<T extends Component, D extends JComponent>
@@ -258,34 +259,25 @@ public abstract class LWComponentPeer<T extends Component, D extends JComponent>
      * and followed by setToolkitAWTEventListener()
      */
     protected final AWTEventListener getToolkitAWTEventListener() {
-        return AccessController.doPrivileged(new PrivilegedAction<AWTEventListener>() {
-            public AWTEventListener run() {
-                Toolkit toolkit = Toolkit.getDefaultToolkit();
-                try {
-                    Field field = Toolkit.class.getDeclaredField("eventListener");
-                    field.setAccessible(true);
-                    return (AWTEventListener) field.get(toolkit);
-                } catch (Exception e) {
-                    throw new InternalError(e.toString());
-                }
-            }
-        });
+        Toolkit toolkit = Toolkit.getDefaultToolkit();
+        try {
+            Field field = Toolkit.class.getDeclaredField("eventListener");
+            field.setAccessible(true);
+            return (AWTEventListener) field.get(toolkit);
+        } catch (Exception e) {
+            throw new InternalError(e.toString());
+        }
     }
 
     protected final void setToolkitAWTEventListener(final AWTEventListener listener) {
-        AccessController.doPrivileged(new PrivilegedAction<Void>() {
-            public Void run() {
-                Toolkit toolkit = Toolkit.getDefaultToolkit();
-                try {
-                    Field field = Toolkit.class.getDeclaredField("eventListener");
-                    field.setAccessible(true);
-                    field.set(toolkit, listener);
-                } catch (Exception e) {
-                    throw new InternalError(e.toString());
-                }
-                return null;
-            }
-        });
+        Toolkit toolkit = Toolkit.getDefaultToolkit();
+        try {
+            Field field = Toolkit.class.getDeclaredField("eventListener");
+            field.setAccessible(true);
+            field.set(toolkit, listener);
+        } catch (Exception e) {
+            throw new InternalError(e.toString());
+        }
     }
 
     /**
@@ -1414,7 +1406,8 @@ public abstract class LWComponentPeer<T extends Component, D extends JComponent>
     }
 
     protected static final void flushOnscreenGraphics(){
-        final OGLRenderQueue rq = OGLRenderQueue.getInstance();
+        RenderQueue rq =  CGraphicsDevice.usingMetalPipeline() ?
+                MTLRenderQueue.getInstance() : OGLRenderQueue.getInstance();
         rq.lock();
         try {
             rq.flushNow();

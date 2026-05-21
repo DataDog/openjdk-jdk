@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,12 +25,12 @@
 #ifndef CGROUP_SUBSYSTEM_LINUX_HPP
 #define CGROUP_SUBSYSTEM_LINUX_HPP
 
-#include "memory/allocation.hpp"
-#include "runtime/os.hpp"
 #include "logging/log.hpp"
+#include "memory/allocation.hpp"
+#include "osContainer_linux.hpp"
+#include "runtime/os.hpp"
 #include "utilities/globalDefinitions.hpp"
 #include "utilities/macros.hpp"
-#include "osContainer_linux.hpp"
 
 // Shared cgroups code (used by cgroup version 1 and version 2)
 
@@ -61,154 +61,141 @@
 #define INVALID_CGROUPS_NO_MOUNT 5
 #define INVALID_CGROUPS_GENERIC  6
 
-// Four controllers: cpu, cpuset, cpuacct, memory
-#define CG_INFO_LENGTH 4
+// Five controllers: cpu, cpuset, cpuacct, memory, pids
+#define CG_INFO_LENGTH 5
 #define CPUSET_IDX     0
 #define CPU_IDX        1
 #define CPUACCT_IDX    2
 #define MEMORY_IDX     3
+#define PIDS_IDX       4
 
-typedef char * cptr;
+#define CONTAINER_READ_NUMBER_CHECKED(controller, filename, log_string, retval)       \
+{                                                                                     \
+  bool is_ok;                                                                         \
+  is_ok = controller->read_number(filename, retval);                                  \
+  if (!is_ok) {                                                                       \
+    log_trace(os, container)(log_string " failed");                                   \
+    return false;                                                                     \
+  }                                                                                   \
+  log_trace(os, container)(log_string " is: " UINT64_FORMAT, retval);                 \
+  return true;                                                                        \
+}
+
+#define CONTAINER_READ_NUMBER_CHECKED_MAX(controller, filename, log_string, retval)   \
+{                                                                                     \
+  bool is_ok;                                                                         \
+  is_ok = controller->read_number_handle_max(filename, retval);                       \
+  if (!is_ok) {                                                                       \
+    log_trace(os, container)(log_string " failed");                                   \
+    return false;                                                                     \
+  }                                                                                   \
+  if (retval == value_unlimited) {                                                    \
+    log_trace(os, container)(log_string " is: unlimited");                            \
+  } else {                                                                            \
+    log_trace(os, container)(log_string " is: " UINT64_FORMAT, retval);               \
+  }                                                                                   \
+  return true;                                                                        \
+}
+
+#define CONTAINER_READ_STRING_CHECKED(controller, filename, log_string, retval, buf_size) \
+{                                                                                         \
+  bool is_ok;                                                                             \
+  is_ok = controller->read_string(filename, retval, buf_size);                            \
+  if (!is_ok) {                                                                           \
+    log_trace(os, container)(log_string " failed");                                       \
+    return nullptr;                                                                       \
+  }                                                                                       \
+  log_trace(os, container)(log_string " is: %s", retval);                                 \
+}
+
+#define CONTAINER_READ_NUMERICAL_KEY_VALUE_CHECKED(controller, filename, key, log_string, retval) \
+{                                                                                     \
+  bool is_ok;                                                                         \
+  is_ok = controller->read_numerical_key_value(filename, key, retval);                \
+  if (!is_ok) {                                                                       \
+    log_trace(os, container)(log_string " failed");                                   \
+    return false;                                                                     \
+  }                                                                                   \
+  log_trace(os, container)(log_string " is: " UINT64_FORMAT, retval);                 \
+  return true;                                                                        \
+}
 
 class CgroupController: public CHeapObj<mtInternal> {
+  protected:
+    char* _cgroup_path;
+    char* _mount_point;
   public:
-    virtual char *subsystem_path() = 0;
+    virtual const char* subsystem_path() = 0;
+    virtual bool is_read_only() = 0;
+    const char* cgroup_path() { return _cgroup_path; }
+    const char* mount_point() { return _mount_point; }
+    virtual bool needs_hierarchy_adjustment() { return false; }
+
+    /* Read a numerical value as uint64_t
+     *
+     * returns: false if any error occurred. true otherwise and
+     * the parsed value is set in the provided result reference.
+     */
+    bool read_number(const char* filename, uint64_t& result);
+
+    /* Convenience method to deal with numbers as well as the string 'max'
+     * in interface files. Otherwise same as read_number().
+     *
+     * returns: false if any error occurred. true otherwise and
+     * the parsed value will be set in the provided result reference.
+     * When the value was the string 'max' then 'value_unlimited' is
+     * being set as the value.
+     */
+    bool read_number_handle_max(const char* filename, uint64_t& result);
+
+    /* Read a string of at most buf_size - 1 characters from the interface file.
+     * The provided buffer must be at least buf_size in size so as to account
+     * for the null terminating character. Callers must ensure that the buffer
+     * is appropriately in-scope and of sufficient size.
+     *
+     * returns: false if any error occured. true otherwise and the passed
+     * in buffer will contain the first buf_size - 1 characters of the string
+     * or up to the first new line character ('\n') whichever comes first.
+     */
+    bool read_string(const char* filename, char* buf, size_t buf_size);
+
+    /* Read a tuple value as a number. Tuple is: '<first> <second>'.
+     * Handles 'max' (for unlimited) for any tuple value. This is handy for
+     * parsing interface files like cpu.max which contain such tuples.
+     *
+     * returns: false if any error occurred. true otherwise and the parsed
+     * value of the appropriate tuple entry set in the provided result reference.
+     */
+    bool read_numerical_tuple_value(const char* filename, bool use_first, uint64_t& result);
+
+    /* Read a numerical value from a multi-line interface file. The matched line is
+     * determined by the provided 'key'. The associated numerical value is being set
+     * via the passed in result reference. Example interface file 'memory.stat'
+     *
+     * returns: false if any error occurred. true otherwise and the parsed value is
+     * being set in the provided result reference.
+     */
+    bool read_numerical_key_value(const char* filename, const char* key, uint64_t& result);
+
+  private:
+    static bool limit_from_str(char* limit_str, physical_memory_size_type& value);
 };
 
-PRAGMA_DIAG_PUSH
-PRAGMA_FORMAT_NONLITERAL_IGNORED
-template <typename T> int subsystem_file_line_contents(CgroupController* c,
-                                              const char *filename,
-                                              const char *matchline,
-                                              const char *scan_fmt,
-                                              T returnval) {
-  FILE *fp = NULL;
-  char *p;
-  char file[MAXPATHLEN+1];
-  char buf[MAXPATHLEN+1];
-  char discard[MAXPATHLEN+1];
-  bool found_match = false;
-
-  if (c == NULL) {
-    log_debug(os, container)("subsystem_file_line_contents: CgroupController* is NULL");
-    return OSCONTAINER_ERROR;
-  }
-  if (c->subsystem_path() == NULL) {
-    log_debug(os, container)("subsystem_file_line_contents: subsystem path is NULL");
-    return OSCONTAINER_ERROR;
-  }
-
-  strncpy(file, c->subsystem_path(), MAXPATHLEN);
-  file[MAXPATHLEN-1] = '\0';
-  int filelen = strlen(file);
-  if ((filelen + strlen(filename)) > (MAXPATHLEN-1)) {
-    log_debug(os, container)("File path too long %s, %s", file, filename);
-    return OSCONTAINER_ERROR;
-  }
-  strncat(file, filename, MAXPATHLEN-filelen);
-  log_trace(os, container)("Path to %s is %s", filename, file);
-  fp = fopen(file, "r");
-  if (fp != NULL) {
-    int err = 0;
-    while ((p = fgets(buf, MAXPATHLEN, fp)) != NULL) {
-      found_match = false;
-      if (matchline == NULL) {
-        // single-line file case
-        int matched = sscanf(p, scan_fmt, returnval);
-        found_match = (matched == 1);
-      } else {
-        // multi-line file case
-        if (strstr(p, matchline) != NULL) {
-          // discard matchline string prefix
-          int matched = sscanf(p, scan_fmt, discard, returnval);
-          found_match = (matched == 2);
-        } else {
-          continue; // substring not found
-        }
-      }
-      if (found_match) {
-        fclose(fp);
-        return 0;
-      } else {
-        err = 1;
-        log_debug(os, container)("Type %s not found in file %s", scan_fmt, file);
-      }
-    }
-    if (err == 0) {
-      log_debug(os, container)("Empty file %s", file);
-    }
-  } else {
-    log_debug(os, container)("Open of file %s failed, %s", file, os::strerror(errno));
-  }
-  if (fp != NULL)
-    fclose(fp);
-  return OSCONTAINER_ERROR;
-}
-PRAGMA_DIAG_POP
-
-#define GET_CONTAINER_INFO(return_type, subsystem, filename,              \
-                           logstring, scan_fmt, variable)                 \
-  return_type variable;                                                   \
-{                                                                         \
-  int err;                                                                \
-  err = subsystem_file_line_contents(subsystem,                           \
-                                     filename,                            \
-                                     NULL,                                \
-                                     scan_fmt,                            \
-                                     &variable);                          \
-  if (err != 0)                                                           \
-    return (return_type) OSCONTAINER_ERROR;                               \
-                                                                          \
-  log_trace(os, container)(logstring, variable);                          \
-}
-
-#define GET_CONTAINER_INFO_CPTR(return_type, subsystem, filename,         \
-                               logstring, scan_fmt, variable, bufsize)    \
-  char variable[bufsize];                                                 \
-{                                                                         \
-  int err;                                                                \
-  err = subsystem_file_line_contents(subsystem,                           \
-                                     filename,                            \
-                                     NULL,                                \
-                                     scan_fmt,                            \
-                                     variable);                           \
-  if (err != 0)                                                           \
-    return (return_type) NULL;                                            \
-                                                                          \
-  log_trace(os, container)(logstring, variable);                          \
-}
-
-#define GET_CONTAINER_INFO_LINE(return_type, controller, filename,        \
-                           matchline, logstring, scan_fmt, variable)      \
-  return_type variable;                                                   \
-{                                                                         \
-  int err;                                                                \
-  err = subsystem_file_line_contents(controller,                          \
-                                filename,                                 \
-                                matchline,                                \
-                                scan_fmt,                                 \
-                                &variable);                               \
-  if (err != 0)                                                           \
-    return (return_type) OSCONTAINER_ERROR;                               \
-                                                                          \
-  log_trace(os, container)(logstring, variable);                          \
-}
-
-
+template <typename MetricType>
 class CachedMetric : public CHeapObj<mtInternal>{
   private:
-    volatile jlong _metric;
+    volatile MetricType _metric;
     volatile jlong _next_check_counter;
   public:
     CachedMetric() {
-      _metric = -1;
+      _metric = static_cast<MetricType>(value_unlimited);
       _next_check_counter = min_jlong;
     }
     bool should_check_metric() {
       return os::elapsed_counter() > _next_check_counter;
     }
-    jlong value() { return _metric; }
-    void set_value(jlong value, jlong timeout) {
+    MetricType value() { return _metric; }
+    void set_value(MetricType value, jlong timeout) {
       _metric = value;
       // Metric is unlikely to change, but we want to remain
       // responsive to configuration changes. A very short grace time
@@ -219,39 +206,113 @@ class CachedMetric : public CHeapObj<mtInternal>{
     }
 };
 
+template <class T, typename MetricType>
 class CachingCgroupController : public CHeapObj<mtInternal> {
   private:
-    CgroupController* _controller;
-    CachedMetric* _metrics_cache;
+    T* _controller;
+    CachedMetric<MetricType>* _metrics_cache;
 
   public:
-    CachingCgroupController(CgroupController* cont) {
+    CachingCgroupController(T* cont) {
       _controller = cont;
-      _metrics_cache = new CachedMetric();
+      _metrics_cache = new CachedMetric<MetricType>();
     }
 
-    CachedMetric* metrics_cache() { return _metrics_cache; }
-    CgroupController* controller() { return _controller; }
+    CachedMetric<MetricType>* metrics_cache() { return _metrics_cache; }
+    T* controller() { return _controller; }
+};
+
+// Pure virtual class representing version agnostic CPU controllers
+class CgroupCpuController: public CHeapObj<mtInternal> {
+  public:
+    virtual bool cpu_quota(int& value) = 0;
+    virtual bool cpu_period(int& value) = 0;
+    virtual bool cpu_shares(int& value) = 0;
+    virtual bool needs_hierarchy_adjustment() = 0;
+    virtual bool is_read_only() = 0;
+    virtual const char* subsystem_path() = 0;
+    virtual void set_subsystem_path(const char* cgroup_path) = 0;
+    virtual const char* mount_point() = 0;
+    virtual const char* cgroup_path() = 0;
+};
+
+// Pure virtual class representing version agnostic CPU accounting controllers
+class CgroupCpuacctController: public CHeapObj<mtInternal> {
+  public:
+    virtual bool cpu_usage_in_micros(uint64_t& value) = 0;
+    virtual bool needs_hierarchy_adjustment() = 0;
+    virtual bool is_read_only() = 0;
+    virtual const char* subsystem_path() = 0;
+    virtual void set_subsystem_path(const char* cgroup_path) = 0;
+    virtual const char* mount_point() = 0;
+    virtual const char* cgroup_path() = 0;
+};
+
+// Pure virtual class representing version agnostic memory controllers
+class CgroupMemoryController: public CHeapObj<mtInternal> {
+  public:
+    virtual bool read_memory_limit_in_bytes(physical_memory_size_type upper_bound,
+                                            physical_memory_size_type& value) = 0;
+    virtual bool memory_usage_in_bytes(physical_memory_size_type& value) = 0;
+    virtual bool memory_and_swap_limit_in_bytes(physical_memory_size_type upper_mem_bound,
+                                                physical_memory_size_type upper_swap_bound,
+                                                physical_memory_size_type& value) = 0;
+    virtual bool memory_and_swap_usage_in_bytes(physical_memory_size_type upper_mem_bound,
+                                                physical_memory_size_type upper_swap_bound,
+                                                physical_memory_size_type& value) = 0;
+    virtual bool memory_soft_limit_in_bytes(physical_memory_size_type upper_bound,
+                                            physical_memory_size_type& value) = 0;
+    virtual bool memory_throttle_limit_in_bytes(physical_memory_size_type& value) = 0;
+    virtual bool memory_max_usage_in_bytes(physical_memory_size_type& value) = 0;
+    virtual bool rss_usage_in_bytes(physical_memory_size_type& value) = 0;
+    virtual bool cache_usage_in_bytes(physical_memory_size_type& value) = 0;
+    virtual void print_version_specific_info(outputStream* st, physical_memory_size_type upper_mem_bound) = 0;
+    virtual bool needs_hierarchy_adjustment() = 0;
+    virtual bool is_read_only() = 0;
+    virtual const char* subsystem_path() = 0;
+    virtual void set_subsystem_path(const char* cgroup_path) = 0;
+    virtual const char* mount_point() = 0;
+    virtual const char* cgroup_path() = 0;
 };
 
 class CgroupSubsystem: public CHeapObj<mtInternal> {
   public:
-    jlong memory_limit_in_bytes();
-    int active_processor_count();
+    bool memory_limit_in_bytes(physical_memory_size_type upper_bound, physical_memory_size_type& value);
+    bool active_processor_count(int (*cpu_bound_func)(), double& value);
 
-    virtual int cpu_quota() = 0;
-    virtual int cpu_period() = 0;
-    virtual int cpu_shares() = 0;
-    virtual jlong memory_usage_in_bytes() = 0;
-    virtual jlong memory_and_swap_limit_in_bytes() = 0;
-    virtual jlong memory_soft_limit_in_bytes() = 0;
-    virtual jlong memory_max_usage_in_bytes() = 0;
+    virtual bool pids_max(uint64_t& value) = 0;
+    virtual bool pids_current(uint64_t& value) = 0;
+    virtual bool is_containerized() = 0;
+
     virtual char * cpu_cpuset_cpus() = 0;
     virtual char * cpu_cpuset_memory_nodes() = 0;
-    virtual jlong read_memory_limit_in_bytes() = 0;
     virtual const char * container_type() = 0;
-    virtual CachingCgroupController* memory_controller() = 0;
-    virtual CachingCgroupController* cpu_controller() = 0;
+    virtual CachingCgroupController<CgroupMemoryController, physical_memory_size_type>* memory_controller() = 0;
+    virtual CachingCgroupController<CgroupCpuController, double>* cpu_controller() = 0;
+    virtual CgroupCpuacctController* cpuacct_controller() = 0;
+
+    void adjust_controllers(physical_memory_size_type upper_mem_bound, int upper_cpu_bound);
+
+    bool cpu_quota(int& value);
+    bool cpu_period(int& value);
+    bool cpu_shares(int& value);
+
+    bool cpu_usage_in_micros(uint64_t& value);
+
+    bool memory_usage_in_bytes(physical_memory_size_type& value);
+    bool memory_and_swap_limit_in_bytes(physical_memory_size_type upper_mem_bound,
+                                        physical_memory_size_type upper_swap_bound,
+                                        physical_memory_size_type& value);
+    bool memory_and_swap_usage_in_bytes(physical_memory_size_type upper_mem_bound,
+                                        physical_memory_size_type upper_swap_bound,
+                                        physical_memory_size_type& value);
+    bool memory_soft_limit_in_bytes(physical_memory_size_type upper_bound,
+                                    physical_memory_size_type& value);
+    bool memory_throttle_limit_in_bytes(physical_memory_size_type& value);
+    bool memory_max_usage_in_bytes(physical_memory_size_type& value);
+    bool rss_usage_in_bytes(physical_memory_size_type& value);
+    bool cache_usage_in_bytes(physical_memory_size_type& value);
+    void print_version_specific_info(outputStream* st, physical_memory_size_type upper_mem_bound);
 };
 
 // Utility class for storing info retrieved from /proc/cgroups,
@@ -265,6 +326,7 @@ class CgroupInfo : public StackObj {
     char* _name;
     int _hierarchy_id;
     bool _enabled;
+    bool _read_only;            // whether or not the mount path is mounted read-only
     bool _data_complete;    // indicating cgroup v1 data is complete for this controller
     char* _cgroup_path;     // cgroup controller path from /proc/self/cgroup
     char* _root_mount_path; // root mount path from /proc/self/mountinfo. Unused for cgroup v2
@@ -272,13 +334,14 @@ class CgroupInfo : public StackObj {
 
   public:
     CgroupInfo() {
-      _name = NULL;
+      _name = nullptr;
       _hierarchy_id = -1;
       _enabled = false;
+      _read_only = false;
       _data_complete = false;
-      _cgroup_path = NULL;
-      _root_mount_path = NULL;
-      _mount_path = NULL;
+      _cgroup_path = nullptr;
+      _root_mount_path = nullptr;
+      _mount_path = nullptr;
     }
 
 };
@@ -302,10 +365,17 @@ class CgroupSubsystemFactory: AllStatic {
     }
 #endif
 
+    static void set_controller_paths(CgroupInfo* cg_infos,
+                                     int controller,
+                                     const char* name,
+                                     char* mount_path,
+                                     char* root_path,
+                                     bool read_only);
     // Determine the cgroup type (version 1 or version 2), given
     // relevant paths to files. Sets 'flags' accordingly.
     static bool determine_type(CgroupInfo* cg_infos,
-                               const char* proc_cgroups,
+                               bool cgroups_v2_enabled,
+                               const char* controllers_file,
                                const char* proc_self_cgroup,
                                const char* proc_self_mountinfo,
                                u1* flags);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,48 +21,40 @@
  * questions.
  */
 
-import org.testng.annotations.AfterTest;
-import org.testng.annotations.BeforeTest;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.InetSocketAddress;
 import java.net.InetAddress;
-import java.net.MulticastSocket;
 import java.net.SocketException;
-import java.net.SocketPermission;
 import java.nio.channels.DatagramChannel;
-import java.security.AccessControlException;
-import java.security.Permission;
-import java.security.PermissionCollection;
-import java.security.Permissions;
-import java.security.Policy;
-import java.security.ProtectionDomain;
 
-import static org.testng.Assert.assertThrows;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /*
  * @test
  * @bug 8236105 8240533
  * @summary Check that DatagramSocket throws expected
  *          Exception when sending a DatagramPacket with port 0
- * @run testng SendPortZero
- * @run testng/othervm -Djdk.net.usePlainDatagramSocketImpl SendPortZero
+ * @run junit/othervm ${test.main.class}
  */
 
 public class SendPortZero {
-    private InetAddress loopbackAddr, wildcardAddr;
-    private DatagramSocket datagramSocket, datagramSocketAdaptor;
-    private DatagramPacket loopbackZeroPkt, wildcardZeroPkt, wildcardValidPkt;
+    private static InetAddress loopbackAddr, wildcardAddr;
+    private static DatagramSocket datagramSocket, datagramSocketAdaptor;
+    private static DatagramPacket loopbackZeroPkt, wildcardZeroPkt, wildcardValidPkt;
 
     private static final Class<SocketException> SE = SocketException.class;
-    private static final Class<AccessControlException> ACE =
-            AccessControlException.class;
 
-    @BeforeTest
-    public void setUp() throws IOException {
+    @BeforeAll
+    public static void setUp() throws IOException {
         datagramSocket = new DatagramSocket();
         datagramSocketAdaptor = DatagramChannel.open().socket();
 
@@ -70,7 +62,7 @@ public class SendPortZero {
 
         // Addresses
         loopbackAddr = InetAddress.getLoopbackAddress();
-        //wildcardAddr = new InetSocketAddress(0).getAddress();
+        wildcardAddr = new InetSocketAddress(0).getAddress();
 
         // Packets
         // loopback w/port 0
@@ -78,66 +70,42 @@ public class SendPortZero {
         loopbackZeroPkt.setAddress(loopbackAddr);
         loopbackZeroPkt.setPort(0);
 
-        /*
-        //Commented until JDK-8236852 is fixed
-
         // wildcard w/port 0
         wildcardZeroPkt = new DatagramPacket(buf, 0, buf.length);
         wildcardZeroPkt.setAddress(wildcardAddr);
         wildcardZeroPkt.setPort(0);
 
-        //Commented until JDK-8236807 is fixed
-
         // wildcard addr w/valid port
+        // Not currently tested. See JDK-8236807
         wildcardValidPkt = new DatagramPacket(buf, 0, buf.length);
-        var addr = socket.getAddress();
-        wildcardValidPkt.setAddress(addr);
-        wildcardValidPkt.setPort(socket.getLocalPort());
-      */
+        wildcardValidPkt.setAddress(wildcardAddr);
+        wildcardValidPkt.setPort(datagramSocket.getLocalPort());
     }
 
-    @DataProvider(name = "data")
-    public Object[][] variants() {
+    @AfterAll
+    public static void tearDown() {
+        datagramSocket.close();
+        datagramSocketAdaptor.close();
+    }
+
+    public static Object[][] testCases() {
         return new Object[][]{
                 { datagramSocket,        loopbackZeroPkt },
+                { datagramSocket,        wildcardZeroPkt },
+                // Re-enable when JDK-8236807 fixed
+                //{ datagramSocket,        wildcardValidPkt },
+
                 { datagramSocketAdaptor, loopbackZeroPkt },
+                { datagramSocketAdaptor, wildcardZeroPkt },
+                // Re-enable when JDK-8236807 fixed
+                //{ datagramSocketAdaptor, wildcardValidPkt },
         };
     }
 
-    @Test(dataProvider = "data")
+    @ParameterizedTest(autoCloseArguments = false) // closed in tearDown
+    @MethodSource("testCases")
     public void testSend(DatagramSocket ds, DatagramPacket pkt) {
+        assertFalse(ds.isClosed());
         assertThrows(SE, () -> ds.send(pkt));
-    }
-
-    // Check that 0 port check doesn't override security manager check
-    @Test(dataProvider = "data")
-    public void testSendWithSecurityManager(DatagramSocket ds,
-                                            DatagramPacket pkt) {
-        Policy defaultPolicy = Policy.getPolicy();
-        try {
-            Policy.setPolicy(new NoSendPolicy());
-            System.setSecurityManager(new SecurityManager());
-
-            assertThrows(ACE, () -> ds.send(pkt));
-        } finally {
-            System.setSecurityManager(null);
-            Policy.setPolicy(defaultPolicy);
-        }
-    }
-
-    static class NoSendPolicy extends Policy {
-        final PermissionCollection perms = new Permissions();
-        { perms.add(
-                new SocketPermission("*:0", "connect")); }
-
-        public boolean implies(ProtectionDomain domain, Permission perm) {
-            return !perms.implies(perm);
-        }
-    }
-
-    @AfterTest
-    public void tearDown() {
-        datagramSocket.close();
-        datagramSocketAdaptor.close();
     }
 }

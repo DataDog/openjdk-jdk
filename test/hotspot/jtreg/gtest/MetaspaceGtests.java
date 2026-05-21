@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2020 SAP SE. All rights reserved.
+ * Copyright (c) 2020, 2026, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2023 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,71 +25,29 @@
 
 /*
  * Note: This runs the metaspace-related parts of gtest in configurations which
- *  are not tested explicitly in the standard gtests.
- *
+ *  are not tested explicitly in the standard gtest. Hence, there is no "default-ndebug"
+ *  since that would be equivalent to the normal gtest for release builds.
  */
 
-/* @test id=reclaim-none-debug
+/* @test id=default-debug
  * @bug 8251158
- * @summary Run metaspace-related gtests for reclaim policy none (with verifications)
+ * @summary Run metaspace-related gtests with all default but verifications enabled
+ * @library /test/lib
+ * @modules java.base/jdk.internal.misc
+ *          java.xml
  * @requires vm.debug
- * @library /test/lib
- * @modules java.base/jdk.internal.misc
- *          java.xml
- * @run main/native GTestWrapper --gtest_filter=metaspace* -XX:MetaspaceReclaimPolicy=none -XX:+UnlockDiagnosticVMOptions -XX:VerifyMetaspaceInterval=3
- */
-
-/* @test id=reclaim-none-ndebug
- * @bug 8251158
- * @summary Run metaspace-related gtests for reclaim policy none
- * @library /test/lib
- * @modules java.base/jdk.internal.misc
- *          java.xml
- * @run main/native GTestWrapper --gtest_filter=metaspace* -XX:MetaspaceReclaimPolicy=none
+ * @requires vm.flagless
+ * @run main/native GTestWrapper --gtest_filter=metaspace* -XX:+UnlockDiagnosticVMOptions -XX:VerifyMetaspaceInterval=1
  */
 
 
-
-
-/* @test id=reclaim-aggressive-debug
- * @bug 8251158
- * @summary Run metaspace-related gtests for reclaim policy aggressive (with verifications)
- * @requires vm.debug
+/* @test id=UseCompactObjectHeaders
+ * @summary Run metaspace-related gtests with tiny classpointers
  * @library /test/lib
  * @modules java.base/jdk.internal.misc
  *          java.xml
- * @run main/native GTestWrapper --gtest_filter=metaspace* -XX:MetaspaceReclaimPolicy=aggressive -XX:+UnlockDiagnosticVMOptions -XX:VerifyMetaspaceInterval=3
- */
-
-/* @test id=reclaim-aggressive-ndebug
- * @bug 8251158
- * @summary Run metaspace-related gtests for reclaim policy aggressive
- * @library /test/lib
- * @modules java.base/jdk.internal.misc
- *          java.xml
- * @run main/native GTestWrapper --gtest_filter=metaspace* -XX:MetaspaceReclaimPolicy=aggressive
- */
-
-
-
-
-/* @test id=balanced-with-guards
- * @summary Run metaspace-related gtests with allocation guards enabled
- * @requires vm.debug
- * @library /test/lib
- * @modules java.base/jdk.internal.misc
- *          java.xml
- * @run main/native GTestWrapper --gtest_filter=metaspace* -XX:+UnlockDiagnosticVMOptions -XX:VerifyMetaspaceInterval=3 -XX:+MetaspaceGuardAllocations
- */
-
-
-
-
-/* @test id=balanced-no-ccs
- * @summary Run metaspace-related gtests with compressed class pointers off
  * @requires vm.bits == 64
- * @library /test/lib
- * @modules java.base/jdk.internal.misc
- *          java.xml
- * @run main/native GTestWrapper --gtest_filter=metaspace* -XX:MetaspaceReclaimPolicy=balanced -XX:-UseCompressedClassPointers
+ * @requires vm.flagless
+ * @requires vm.debug
+ * @run main/native GTestWrapper --gtest_filter=metaspace* -XX:+UseCompactObjectHeaders
  */

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 
 package javax.print.attribute.standard;
 
+import java.io.Serial;
 import java.util.Locale;
 
 import javax.print.attribute.Attribute;
@@ -57,6 +58,7 @@ public final class RequestingUserName   extends TextSyntax
     /**
      * Use serialVersionUID from JDK 1.4 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = -2683049894310331454L;
 
     /**
@@ -90,6 +92,7 @@ public final class RequestingUserName   extends TextSyntax
      * @return {@code true} if {@code object} is equivalent to this requesting
      *         user name attribute, {@code false} otherwise
      */
+    @Override
     public boolean equals(Object object) {
         return (super.equals(object) &&
                 object instanceof RequestingUserName);
@@ -105,6 +108,7 @@ public final class RequestingUserName   extends TextSyntax
      * @return printing attribute class (category), an instance of class
      *         {@link Class java.lang.Class}
      */
+    @Override
     public final Class<? extends Attribute> getCategory() {
         return RequestingUserName.class;
     }
@@ -118,6 +122,7 @@ public final class RequestingUserName   extends TextSyntax
      *
      * @return attribute category name
      */
+    @Override
     public final String getName() {
         return "requesting-user-name";
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,7 +29,6 @@
 #import <objc/objc-auto.h>
 
 #include <Security/AuthSession.h>
-#import <JavaNativeFoundation/JavaNativeFoundation.h>
 #import "NSApplicationAWT.h"
 
 #include <sys/time.h>
@@ -226,7 +225,7 @@ SplashInitPlatform(Splash * splash) {
 
     // If we are running SWT we should not start a runLoop
     if (!isSWTRunning()) {
-        [JNFRunLoop performOnMainThreadWaiting:NO withBlock:^() {
+        [ThreadUtilities performOnMainThreadWaiting:NO block:^() {
             [NSApplicationAWT runAWTLoopWithApp:[NSApplicationAWT sharedApplication]];
         }];
     }
@@ -243,7 +242,7 @@ SplashDonePlatform(Splash * splash) {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
 
     pthread_mutex_destroy(&splash->lock);
-    [JNFRunLoop performOnMainThreadWaiting:YES withBlock:^(){
+    [ThreadUtilities performOnMainThreadWaiting:YES block:^(){
         if (splash->window) {
             [splash->window orderOut:nil];
             [splash->window release];
@@ -272,17 +271,21 @@ void
 SplashCreateThread(Splash * splash) {
     pthread_t thr;
     pthread_attr_t attr;
-    int rc;
 
-    pthread_attr_init(&attr);
-    rc = pthread_create(&thr, &attr, SplashScreenThread, (void *) splash);
+    int rslt = pthread_attr_init(&attr);
+    if (rslt != 0) return;
+    rslt = pthread_create(&thr, &attr, SplashScreenThread, (void *) splash);
+    if (rslt != 0) {
+        fprintf(stderr, "Could not create SplashScreen thread, error number:%d\n", rslt);
+    }
+    pthread_attr_destroy(&attr);
 }
 
 void
 SplashRedrawWindow(Splash * splash) {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
 
-    [JNFRunLoop performOnMainThreadWaiting:YES withBlock:^(){
+    [ThreadUtilities performOnMainThreadWaiting:YES block:^(){
         // drop the reference to the old view and image
         [splash->window setContentView: nil];
         SplashUpdateScreenData(splash);
@@ -325,7 +328,7 @@ SplashRedrawWindow(Splash * splash) {
         //         the 'wait cursor'. So that is undoable.
 
         //TODO: only the first image in an animated gif preserves transparency.
-        //      Loos like the splash->screenData contains inappropriate data
+        //      Looks like the splash->screenData contains inappropriate data
         //      for all but the first frame.
 
         [image release];
@@ -341,7 +344,7 @@ SplashRedrawWindow(Splash * splash) {
 void SplashReconfigureNow(Splash * splash) {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
 
-    [JNFRunLoop performOnMainThreadWaiting:YES withBlock:^(){
+    [ThreadUtilities performOnMainThreadWaiting:YES block:^(){
         SplashCenter(splash);
 
         if (!splash->window) {
@@ -430,12 +433,12 @@ SplashScreenThread(void *param) {
         fcntl(splash->controlpipe[0], F_GETFL, 0) | O_NONBLOCK);
     splash->time = SplashTime();
     splash->currentFrame = 0;
-    [JNFRunLoop performOnMainThreadWaiting:YES withBlock:^(){
+    [ThreadUtilities performOnMainThreadWaiting:YES block:^(){
         SplashCenter(splash);
 
         splash->window = (void*) [[NSWindow alloc]
             initWithContentRect: NSMakeRect(splash->x, splash->y, splash->width, splash->height)
-                      styleMask: NSBorderlessWindowMask
+                      styleMask: NSWindowStyleMaskBorderless
                         backing: NSBackingStoreBuffered
                           defer: NO
                          screen: SplashNSScreen()];
@@ -445,7 +448,7 @@ SplashScreenThread(void *param) {
     }];
     fflush(stdout);
     if (splash->window) {
-        [JNFRunLoop performOnMainThreadWaiting:YES withBlock:^(){
+        [ThreadUtilities performOnMainThreadWaiting:YES block:^(){
             [splash->window orderFrontRegardless];
         }];
         SplashRedrawWindow(splash);

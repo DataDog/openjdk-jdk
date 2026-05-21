@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -65,10 +65,9 @@ final class ChangeCipherSpec {
             HandshakeContext hc = (HandshakeContext)context;
             SSLKeyDerivation kd = hc.handshakeKeyDerivation;
 
-            if (!(kd instanceof LegacyTrafficKeyDerivation)) {
+            if (!(kd instanceof LegacyTrafficKeyDerivation tkd)) {
                 throw new UnsupportedOperationException("Not supported.");
             }
-            LegacyTrafficKeyDerivation tkd = (LegacyTrafficKeyDerivation)kd;
             CipherSuite ncs = hc.negotiatedCipherSuite;
             Authenticator writeAuthenticator;
             if (ncs.bulkCipher.cipherType == CipherType.AEAD_CIPHER) {
@@ -78,22 +77,20 @@ final class ChangeCipherSpec {
                 try {
                     writeAuthenticator = Authenticator.valueOf(
                             hc.negotiatedProtocol, ncs.macAlg,
-                            tkd.getTrafficKey(hc.sslConfig.isClientMode ?
+                            tkd.deriveKey(hc.sslConfig.isClientMode ?
                                     "clientMacKey" : "serverMacKey"));
                 } catch (NoSuchAlgorithmException | InvalidKeyException e) {
                     // unlikely
                     throw new SSLException("Algorithm missing:  ", e);
                 }
             }
-
-            SecretKey writeKey =
-                    tkd.getTrafficKey(hc.sslConfig.isClientMode ?
-                                    "clientWriteKey" : "serverWriteKey");
-            SecretKey writeIv =
-                    tkd.getTrafficKey(hc.sslConfig.isClientMode ?
-                                    "clientWriteIv" : "serverWriteIv");
+            SecretKey writeKey = tkd.deriveKey(hc.sslConfig.isClientMode ?
+                    "clientWriteKey" : "serverWriteKey");
+            byte[] writeIv = tkd.deriveData(hc.sslConfig.isClientMode ?
+                    "clientWriteIv" : "serverWriteIv");
             IvParameterSpec iv = (writeIv == null) ? null :
-                    new IvParameterSpec(writeIv.getEncoded());
+                    new IvParameterSpec(writeIv);
+
             SSLWriteCipher writeCipher;
             try {
                 writeCipher = ncs.bulkCipher.createWriteCipher(
@@ -111,7 +108,7 @@ final class ChangeCipherSpec {
                     ") and protocol version (" + hc.negotiatedProtocol + ")");
             }
 
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine("Produced ChangeCipherSpec message");
             }
 
@@ -145,7 +142,7 @@ final class ChangeCipherSpec {
                 throw tc.fatal(Alert.UNEXPECTED_MESSAGE,
                         "Malformed or unexpected ChangeCipherSpec message");
             }
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine("Consuming ChangeCipherSpec message");
             }
 
@@ -164,8 +161,7 @@ final class ChangeCipherSpec {
             }
 
             SSLKeyDerivation kd = hc.handshakeKeyDerivation;
-            if (kd instanceof LegacyTrafficKeyDerivation) {
-                LegacyTrafficKeyDerivation tkd = (LegacyTrafficKeyDerivation)kd;
+            if (kd instanceof LegacyTrafficKeyDerivation tkd) {
                 CipherSuite ncs = hc.negotiatedCipherSuite;
                 Authenticator readAuthenticator;
                 if (ncs.bulkCipher.cipherType == CipherType.AEAD_CIPHER) {
@@ -175,7 +171,7 @@ final class ChangeCipherSpec {
                     try {
                         readAuthenticator = Authenticator.valueOf(
                                 hc.negotiatedProtocol, ncs.macAlg,
-                                tkd.getTrafficKey(hc.sslConfig.isClientMode ?
+                                tkd.deriveKey(hc.sslConfig.isClientMode ?
                                         "serverMacKey" : "clientMacKey"));
                     } catch (NoSuchAlgorithmException | InvalidKeyException e) {
                         // unlikely
@@ -183,14 +179,12 @@ final class ChangeCipherSpec {
                     }
                 }
 
-                SecretKey readKey =
-                        tkd.getTrafficKey(hc.sslConfig.isClientMode ?
-                                        "serverWriteKey" : "clientWriteKey");
-                SecretKey readIv =
-                        tkd.getTrafficKey(hc.sslConfig.isClientMode ?
-                                        "serverWriteIv" : "clientWriteIv");
+                SecretKey readKey = tkd.deriveKey(hc.sslConfig.isClientMode ?
+                        "serverWriteKey" : "clientWriteKey");
+                byte[] readIv = tkd.deriveData(hc.sslConfig.isClientMode ?
+                        "serverWriteIv" : "clientWriteIv");
                 IvParameterSpec iv = (readIv == null) ? null :
-                        new IvParameterSpec(readIv.getEncoded());
+                        new IvParameterSpec(readIv);
                 SSLReadCipher readCipher;
                 try {
                     readCipher = ncs.bulkCipher.createReadCipher(
@@ -238,11 +232,12 @@ final class ChangeCipherSpec {
             tc.consumers.remove(ContentType.CHANGE_CIPHER_SPEC.id);
 
             // parse
-            if (message.remaining() != 1 || message.get() != 1) {
+            if (message.remaining() != 1 || message.get() != 1
+                    || tc.isNegotiated) {
                 throw tc.fatal(Alert.UNEXPECTED_MESSAGE,
                         "Malformed or unexpected ChangeCipherSpec message");
             }
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine("Consuming ChangeCipherSpec message");
             }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,8 +24,9 @@
 #include <stdio.h>
 #include <string.h>
 #include "jvmti.h"
-#include "agent_common.h"
-#include "JVMTITools.h"
+#include "jni_tools.hpp"
+#include "agent_common.hpp"
+#include "JVMTITools.hpp"
 
 extern "C" {
 
@@ -54,7 +55,7 @@ jint  Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
     jvmtiError err;
 
     res = jvm->GetEnv((void **) &jvmti, JVMTI_VERSION_1_1);
-    if (res != JNI_OK || jvmti == NULL) {
+    if (res != JNI_OK || jvmti == nullptr) {
         printf("Wrong result of a valid call to GetEnv!\n");
         return JNI_ERR;
     }
@@ -90,7 +91,7 @@ jint  Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
 
 JNIEXPORT jint JNICALL
 Java_nsk_jvmti_InterruptThread_intrpthrd003_check (JNIEnv *env, jobject oobj,
-        jint ind, jthread thr) {
+        jlong ind, jthread thr) {
 
     intrpthrd_err = jvmti->InterruptThread(thr);
     if (intrpthrd_err == JVMTI_ERROR_MUST_POSSESS_CAPABILITY &&
@@ -103,7 +104,7 @@ Java_nsk_jvmti_InterruptThread_intrpthrd003_check (JNIEnv *env, jobject oobj,
             break;
 
         default:
-            printf("(thr#%d) error expected: JVMTI_ERROR_NONE or JVMTI_ERROR_THREAD_NOT_ALIVE,", ind);
+            printf("(thr#%" LL "d) error expected: JVMTI_ERROR_NONE or JVMTI_ERROR_THREAD_NOT_ALIVE,", ind);
             printf(" got: %s (%d)\n", TranslateError(intrpthrd_err), intrpthrd_err);
             result = STATUS_FAILED;
             break;

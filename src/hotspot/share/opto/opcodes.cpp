@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,6 @@
  *
  */
 
-// no precompiled headers
 
 // ----------------------------------------------------------------------------
 // Build a table of class names as strings.  Used both for debugging printouts
@@ -44,7 +43,7 @@ const char *NodeClassNames[] = {
   "VecX",
   "VecY",
   "VecZ",
-  "RegVMask",
+  "RegVectMask",
   "RegFlags",
   "_last_machine_leaf",
 #include "classes.hpp"

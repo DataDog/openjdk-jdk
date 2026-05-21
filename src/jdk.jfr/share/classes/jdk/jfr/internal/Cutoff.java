@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -49,13 +49,13 @@ public @interface Cutoff {
     /**
      * Settings name {@code "cutoff"} for configuring event cutoffs.
      */
-    public final static String NAME = "cutoff";
-    public final static String INFINITY = "infinity";
+    public static final String NAME = "cutoff";
+    public static final String INFINITY = "infinity";
 
     /**
      * Cutoff, for example {@code "20 ms"}.
      * <p>
-     * String representation of a positive {@code Long} value followed by an empty
+     * String representation of a positive {@code long} value followed by an empty
      * space and one of the following units<br>
      * <br>
      * {@code "ns"} (nanoseconds)<br>

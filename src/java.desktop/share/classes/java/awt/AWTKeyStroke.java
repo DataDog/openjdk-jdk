@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,7 @@ package java.awt;
 
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.io.Serial;
 import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -35,7 +36,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.StringTokenizer;
 
-import sun.awt.AppContext;
 import sun.swing.SwingAccessor;
 
 /**
@@ -64,7 +64,12 @@ import sun.swing.SwingAccessor;
  * @since 1.4
  */
 public class AWTKeyStroke implements Serializable {
-    static final long serialVersionUID = -6430539691155161871L;
+
+    /**
+     * Use serialVersionUID from JDK 1.4 for interoperability.
+     */
+    @Serial
+    private static final long serialVersionUID = -6430539691155161871L;
 
     private static Map<String, Integer> modifierKeywords;
     /**
@@ -74,28 +79,23 @@ public class AWTKeyStroke implements Serializable {
      */
     private static VKCollection vks;
 
-    //A key for the collection of AWTKeyStrokes within AppContext.
-    private static Object APP_CONTEXT_CACHE_KEY = new Object();
-    //A key withing the cache
-    private static AWTKeyStroke APP_CONTEXT_KEYSTROKE_KEY = new AWTKeyStroke();
-
     /**
-     * The character value for a keyboard key.
+     * @serial The character value for a keyboard key.
      */
     private char keyChar = KeyEvent.CHAR_UNDEFINED;
 
     /**
-     * The key code for this {@code AWTKeyStroke}.
+     * @serial The key code for this {@code AWTKeyStroke}.
      */
     private int keyCode = KeyEvent.VK_UNDEFINED;
 
     /**
-     * The bitwise-ored combination of any modifiers.
+     * @serial The bitwise-ored combination of any modifiers.
      */
     private int modifiers;
 
     /**
-     * {@code true} if this {@code AWTKeyStroke} corresponds to a key release;
+     * @serial {@code true} if this {@code AWTKeyStroke} corresponds to a key release;
      * {@code false} otherwise.
      */
     private boolean onKeyRelease;
@@ -175,21 +175,19 @@ public class AWTKeyStroke implements Serializable {
     protected static void registerSubclass(Class<?> subclass) {
     }
 
+    private static Map<AWTKeyStroke, AWTKeyStroke> cache;
+    private static AWTKeyStroke cacheKey;
+
     private static synchronized AWTKeyStroke getCachedStroke
         (char keyChar, int keyCode, int modifiers, boolean onKeyRelease)
     {
-        @SuppressWarnings("unchecked")
-        Map<AWTKeyStroke, AWTKeyStroke> cache = (Map)AppContext.getAppContext().get(APP_CONTEXT_CACHE_KEY);
-        AWTKeyStroke cacheKey = (AWTKeyStroke)AppContext.getAppContext().get(APP_CONTEXT_KEYSTROKE_KEY);
 
         if (cache == null) {
             cache = new HashMap<>();
-            AppContext.getAppContext().put(APP_CONTEXT_CACHE_KEY, cache);
         }
 
         if (cacheKey == null) {
             cacheKey = SwingAccessor.getKeyStrokeAccessor().create();
-            AppContext.getAppContext().put(APP_CONTEXT_KEYSTROKE_KEY, cacheKey);
         }
 
         cacheKey.keyChar = keyChar;
@@ -197,11 +195,16 @@ public class AWTKeyStroke implements Serializable {
         cacheKey.modifiers = mapNewModifiers(mapOldModifiers(modifiers));
         cacheKey.onKeyRelease = onKeyRelease;
 
+        /* If there's no hit on the cache, then store this instance in the cache
+         * and null out the var so it isn't over-written.
+         * But if there's a hit, store it in cacheKey so it can be re-used
+         * next time this method is called.
+         */
         AWTKeyStroke stroke = cache.get(cacheKey);
         if (stroke == null) {
             stroke = cacheKey;
             cache.put(stroke, stroke);
-            AppContext.getAppContext().remove(APP_CONTEXT_KEYSTROKE_KEY);
+            cacheKey = null;
         }
         return stroke;
     }
@@ -539,9 +542,7 @@ public class AWTKeyStroke implements Serializable {
 
             try {
                 keyCode = KeyEvent.class.getField(key).getInt(KeyEvent.class);
-            } catch (NoSuchFieldException nsfe) {
-                throw new IllegalArgumentException(errmsg);
-            } catch (IllegalAccessException iae) {
+            } catch (NoSuchFieldException | IllegalAccessException e) {
                 throw new IllegalArgumentException(errmsg);
             }
             value = Integer.valueOf(keyCode);
@@ -725,6 +726,7 @@ public class AWTKeyStroke implements Serializable {
      * @return a cached instance which is equal to this instance
      * @throws java.io.ObjectStreamException if a serialization problem occurs
      */
+    @Serial
     protected Object readResolve() throws java.io.ObjectStreamException {
         synchronized (AWTKeyStroke.class) {
 

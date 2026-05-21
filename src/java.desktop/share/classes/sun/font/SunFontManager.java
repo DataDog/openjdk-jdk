@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,8 +33,6 @@ import java.io.FileInputStream;
 import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -231,12 +229,6 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
     private static String[] STR_ARRAY = new String[0];
 
     /**
-     * Deprecated, unsupported hack - actually invokes a bug!
-     * Left in for a customer, don't remove.
-     */
-    private boolean usePlatformFontMetrics = false;
-
-    /**
      * Returns the global SunFontManager instance. This is similar to
      * {@link FontManagerFactory#getInstance()} but it returns a
      * SunFontManager instance instead. This is only used in internal classes
@@ -265,28 +257,27 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
     private static int maxSoftRefCnt = 10;
 
     static {
-        AccessController.doPrivileged(new PrivilegedAction<Void>() {
-            public Void run() {
-                FontManagerNativeLibrary.load();
+        initStatic();
+    }
 
-                // JNI throws an exception if a class/method/field is not found,
-                // so there's no need to do anything explicit here.
-                initIDs();
+    private static void initStatic() {
+        FontManagerNativeLibrary.load();
 
-                switch (StrikeCache.nativeAddressSize) {
-                case 8: longAddresses = true; break;
-                case 4: longAddresses = false; break;
-                default: throw new RuntimeException("Unexpected address size");
-                }
+        // JNI throws an exception if a class/method/field is not found,
+        // so there's no need to do anything explicit here.
+        initIDs();
 
-                noType1Font = "true".equals(System.getProperty("sun.java2d.noType1Font"));
-                jreLibDirName = System.getProperty("java.home","") + File.separator + "lib";
-                jreFontDirName = jreLibDirName + File.separator + "fonts";
+        switch (StrikeCache.nativeAddressSize) {
+        case 8: longAddresses = true; break;
+        case 4: longAddresses = false; break;
+        default: throw new RuntimeException("Unexpected address size");
+        }
 
-                maxSoftRefCnt = Integer.getInteger("sun.java2d.font.maxSoftRefs", 10);
-                return null;
-            }
-        });
+        noType1Font = "true".equals(System.getProperty("sun.java2d.noType1Font"));
+        jreLibDirName = System.getProperty("java.home","") + File.separator + "lib";
+        jreFontDirName = jreLibDirName + File.separator + "fonts";
+
+        maxSoftRefCnt = Integer.getInteger("sun.java2d.font.maxSoftRefs", 10);
     }
 
     /**
@@ -306,164 +297,141 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
     private static native void initIDs();
 
     protected SunFontManager() {
-        AccessController.doPrivileged(new PrivilegedAction<Void>() {
-            public Void run() {
-                File badFontFile =
-                    new File(jreFontDirName + File.separator + "badfonts.txt");
-                if (badFontFile.exists()) {
-                    badFonts = new ArrayList<>();
-                    try (FileInputStream fis = new FileInputStream(badFontFile);
-                         BufferedReader br = new BufferedReader(new InputStreamReader(fis))) {
-                        while (true) {
-                            String name = br.readLine();
-                            if (name == null) {
-                                break;
-                            } else {
-                                if (FontUtilities.debugFonts()) {
-                                    FontUtilities.logWarning("read bad font: " + name);
-                                }
-                                badFonts.add(name);
-                            }
-                        }
-                    } catch (IOException e) {
-                    }
-                }
-
-                /* Here we get the fonts in jre/lib/fonts and register
-                 * them so they are always available and preferred over
-                 * other fonts. This needs to be registered before the
-                 * composite fonts as otherwise some native font that
-                 * corresponds may be found as we don't have a way to
-                 * handle two fonts of the same name, so the JRE one
-                 * must be the first one registered. Pass "true" to
-                 * registerFonts method as on-screen these JRE fonts
-                 * always go through the JDK rasteriser.
-                 */
-                if (FontUtilities.isLinux) {
-                    /* Linux font configuration uses these fonts */
-                    registerFontDir(jreFontDirName);
-                }
-                registerFontsInDir(jreFontDirName, true, Font2D.JRE_RANK,
-                                   true, false);
-
-                /* Create the font configuration and get any font path
-                 * that might be specified.
-                 */
-                fontConfig = createFontConfiguration();
-
-                String[] fontInfo = getDefaultPlatformFont();
-                defaultFontName = fontInfo[0];
-                if (defaultFontName == null && FontUtilities.debugFonts()) {
-                    FontUtilities.logWarning("defaultFontName is null");
-                }
-                defaultFontFileName = fontInfo[1];
-
-                String extraFontPath = fontConfig.getExtraFontPath();
-
-                /* In prior releases the debugging font path replaced
-                 * all normally located font directories except for the
-                 * JRE fonts dir. This directory is still always located
-                 * and placed at the head of the path but as an
-                 * augmentation to the previous behaviour the
-                 * changes below allow you to additionally append to
-                 * the font path by starting with append: or prepend by
-                 * starting with a prepend: sign. Eg: to append
-                 * -Dsun.java2d.fontpath=append:/usr/local/myfonts
-                 * and to prepend
-                 * -Dsun.java2d.fontpath=prepend:/usr/local/myfonts Disp
-                 *
-                 * If there is an appendedfontpath it in the font
-                 * configuration it is used instead of searching the
-                 * system for dirs.
-                 * The behaviour of append and prepend is then similar
-                 * to the normal case. ie it goes after what
-                 * you prepend and * before what you append. If the
-                 * sun.java2d.fontpath property is used, but it
-                 * neither the append or prepend syntaxes is used then
-                 * as except for the JRE dir the path is replaced and it
-                 * is up to you to make sure that all the right
-                 * directories are located. This is platform and
-                 * locale-specific so its almost impossible to get
-                 * right, so it should be used with caution.
-                 */
-                boolean prependToPath = false;
-                boolean appendToPath = false;
-                String dbgFontPath = System.getProperty("sun.java2d.fontpath");
-
-                if (dbgFontPath != null) {
-                    if (dbgFontPath.startsWith("prepend:")) {
-                        prependToPath = true;
-                        dbgFontPath =
-                            dbgFontPath.substring("prepend:".length());
-                    } else if (dbgFontPath.startsWith("append:")) {
-                        appendToPath = true;
-                        dbgFontPath =
-                            dbgFontPath.substring("append:".length());
-                    }
-                }
-
-                if (FontUtilities.debugFonts()) {
-                    FontUtilities.logInfo("JRE font directory: " + jreFontDirName);
-                    FontUtilities.logInfo("Extra font path: " + extraFontPath);
-                    FontUtilities.logInfo("Debug font path: " + dbgFontPath);
-                }
-
-                if (dbgFontPath != null) {
-                    /* In debugging mode we register all the paths
-                     * Caution: this is a very expensive call on Solaris:-
-                     */
-                    fontPath = getPlatformFontPath(noType1Font);
-
-                    if (extraFontPath != null) {
-                        fontPath = extraFontPath + File.pathSeparator + fontPath;
-                    }
-                    if (appendToPath) {
-                        fontPath += File.pathSeparator + dbgFontPath;
-                    } else if (prependToPath) {
-                        fontPath = dbgFontPath + File.pathSeparator + fontPath;
+        File badFontFile =
+            new File(jreFontDirName + File.separator + "badfonts.txt");
+        if (badFontFile.exists()) {
+            badFonts = new ArrayList<>();
+            try (FileInputStream fis = new FileInputStream(badFontFile);
+                 BufferedReader br = new BufferedReader(new InputStreamReader(fis))) {
+                while (true) {
+                    String name = br.readLine();
+                    if (name == null) {
+                        break;
                     } else {
-                        fontPath = dbgFontPath;
+                        if (FontUtilities.debugFonts()) {
+                            FontUtilities.logWarning("read bad font: " + name);
+                        }
+                        badFonts.add(name);
                     }
-                    registerFontDirs(fontPath);
-                } else if (extraFontPath != null) {
-                    /* If the font configuration contains an
-                     * "appendedfontpath" entry, it is interpreted as a
-                     * set of locations that should always be registered.
-                     * It may be additional to locations normally found
-                     * for that place, or it may be locations that need
-                     * to have all their paths registered to locate all
-                     * the needed platform names.
-                     * This is typically when the same .TTF file is
-                     * referenced from multiple font.dir files and all
-                     * of these must be read to find all the native
-                     * (XLFD) names for the font, so that X11 font APIs
-                     * can be used for as many code points as possible.
-                     */
-                    registerFontDirs(extraFontPath);
                 }
-
-                initCompositeFonts(fontConfig, null);
-
-                return null;
+            } catch (IOException e) {
             }
-        });
-
-        boolean platformFont = AccessController.doPrivileged(
-            new PrivilegedAction<Boolean>() {
-                    public Boolean run() {
-                        String prop = System.getProperty("java2d.font.usePlatformFont");
-                        String env = System.getenv("JAVA2D_USEPLATFORMFONT");
-                        return "true".equals(prop) || env != null;
-                    }
-            });
-
-        if (platformFont) {
-            usePlatformFontMetrics = true;
-            System.out.println("Enabling platform font metrics for win32. This is an unsupported option.");
-            System.out.println("This yields incorrect composite font metrics as reported by 1.1.x releases.");
-            System.out.println("It is appropriate only for use by applications which do not use any Java 2");
-            System.out.println("functionality. This property will be removed in a later release.");
         }
+
+        /* Here we get the fonts in jre/lib/fonts and register
+         * them so they are always available and preferred over
+         * other fonts. This needs to be registered before the
+         * composite fonts as otherwise some native font that
+         * corresponds may be found as we don't have a way to
+         * handle two fonts of the same name, so the JRE one
+         * must be the first one registered. Pass "true" to
+         * registerFonts method as on-screen these JRE fonts
+         * always go through the JDK rasteriser.
+         */
+        if (FontUtilities.isLinux) {
+            /* Linux font configuration uses these fonts */
+            registerFontDir(jreFontDirName);
+        }
+        registerFontsInDir(jreFontDirName, true, Font2D.JRE_RANK,
+                           true, false);
+
+        /* Create the font configuration and get any font path
+         * that might be specified.
+         */
+        fontConfig = createFontConfiguration();
+
+        String[] fontInfo = getDefaultPlatformFont();
+        defaultFontName = fontInfo[0];
+        if (defaultFontName == null && FontUtilities.debugFonts()) {
+            FontUtilities.logWarning("defaultFontName is null");
+        }
+        defaultFontFileName = fontInfo[1];
+
+        String extraFontPath = fontConfig.getExtraFontPath();
+
+        /* In prior releases the debugging font path replaced
+         * all normally located font directories except for the
+         * JRE fonts dir. This directory is still always located
+         * and placed at the head of the path but as an
+         * augmentation to the previous behaviour the
+         * changes below allow you to additionally append to
+         * the font path by starting with append: or prepend by
+         * starting with a prepend: sign. Eg: to append
+         * -Dsun.java2d.fontpath=append:/usr/local/myfonts
+         * and to prepend
+         * -Dsun.java2d.fontpath=prepend:/usr/local/myfonts Disp
+         *
+         * If there is an appendedfontpath it in the font
+         * configuration it is used instead of searching the
+         * system for dirs.
+         * The behaviour of append and prepend is then similar
+         * to the normal case. ie it goes after what
+         * you prepend and * before what you append. If the
+         * sun.java2d.fontpath property is used, but it
+         * neither the append or prepend syntaxes is used then
+         * as except for the JRE dir the path is replaced and it
+         * is up to you to make sure that all the right
+         * directories are located. This is platform and
+         * locale-specific so its almost impossible to get
+         * right, so it should be used with caution.
+         */
+        boolean prependToPath = false;
+        boolean appendToPath = false;
+        String dbgFontPath = System.getProperty("sun.java2d.fontpath");
+
+        if (dbgFontPath != null) {
+            if (dbgFontPath.startsWith("prepend:")) {
+                prependToPath = true;
+                dbgFontPath =
+                    dbgFontPath.substring("prepend:".length());
+            } else if (dbgFontPath.startsWith("append:")) {
+                appendToPath = true;
+                dbgFontPath =
+                    dbgFontPath.substring("append:".length());
+            }
+        }
+
+        if (FontUtilities.debugFonts()) {
+            FontUtilities.logInfo("JRE font directory: " + jreFontDirName);
+            FontUtilities.logInfo("Extra font path: " + extraFontPath);
+            FontUtilities.logInfo("Debug font path: " + dbgFontPath);
+        }
+
+        if (dbgFontPath != null) {
+            /* In debugging mode we register all the paths
+             * Caution: this is a very expensive call on Solaris:-
+             */
+            fontPath = getPlatformFontPath(noType1Font);
+
+            if (extraFontPath != null) {
+                fontPath = extraFontPath + File.pathSeparator + fontPath;
+            }
+            if (appendToPath) {
+                fontPath += File.pathSeparator + dbgFontPath;
+            } else if (prependToPath) {
+                fontPath = dbgFontPath + File.pathSeparator + fontPath;
+            } else {
+                fontPath = dbgFontPath;
+            }
+            registerFontDirs(fontPath);
+        } else if (extraFontPath != null) {
+            /* If the font configuration contains an
+             * "appendedfontpath" entry, it is interpreted as a
+             * set of locations that should always be registered.
+             * It may be additional to locations normally found
+             * for that place, or it may be locations that need
+             * to have all their paths registered to locate all
+             * the needed platform names.
+             * This is typically when the same .TTF file is
+             * referenced from multiple font.dir files and all
+             * of these must be read to find all the native
+             * (XLFD) names for the font, so that X11 font APIs
+             * can be used for as many code points as possible.
+             */
+            registerFontDirs(extraFontPath);
+        }
+
+        initCompositeFonts(fontConfig, null);
     }
 
     public Font2DHandle getNewComposite(String family, int style,
@@ -1118,34 +1086,30 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
         } else {
             filter = new TTorT1Filter();
         }
-        return AccessController.doPrivileged(new PrivilegedAction<String[]>() {
-            public String[] run() {
-                if (pathDirs.length == 1) {
-                    File dir = new File(pathDirs[0]);
-                    String[] files = dir.list(filter);
-                    if (files == null) {
-                        return new String[0];
-                    }
-                    for (int f=0; f<files.length; f++) {
-                        files[f] = files[f].toLowerCase();
-                    }
-                    return files;
-                } else {
-                    ArrayList<String> fileList = new ArrayList<>();
-                    for (int i = 0; i< pathDirs.length; i++) {
-                        File dir = new File(pathDirs[i]);
-                        String[] files = dir.list(filter);
-                        if (files == null) {
-                            continue;
-                        }
-                        for (int f = 0; f < files.length ; f++) {
-                            fileList.add(files[f].toLowerCase());
-                        }
-                    }
-                    return fileList.toArray(STR_ARRAY);
+        if (pathDirs.length == 1) {
+            File dir = new File(pathDirs[0]);
+            String[] files = dir.list(filter);
+            if (files == null) {
+                return new String[0];
+            }
+            for (int f=0; f<files.length; f++) {
+                files[f] = files[f].toLowerCase();
+            }
+            return files;
+        } else {
+            ArrayList<String> fileList = new ArrayList<>();
+            for (int i = 0; i< pathDirs.length; i++) {
+                File dir = new File(pathDirs[i]);
+                String[] files = dir.list(filter);
+                if (files == null) {
+                    continue;
+                }
+                for (int f = 0; f < files.length ; f++) {
+                    fileList.add(files[f].toLowerCase());
                 }
             }
-        });
+            return fileList.toArray(STR_ARRAY);
+        }
     }
 
     /* This is needed since some windows registry names don't match
@@ -1340,7 +1304,7 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
          */
         HashMap<String,String> fontToFileMap2 = null;
         HashMap<String,String> fontToFamilyNameMap2 = null;
-        HashMap<String,ArrayList<String>> familyToFontListMap2 = null;;
+        HashMap<String,ArrayList<String>> familyToFontListMap2 = null;
 
         for (String pathFile : getFontFilesFromPath(false)) {
             if (!registryFiles.contains(pathFile)) {
@@ -1433,9 +1397,10 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
         public String boldFileName;
         public String italicFileName;
         public String boldItalicFileName;
+        boolean failed;
     }
 
-    static HashMap<String, FamilyDescription> platformFontMap;
+    static volatile HashMap<String, FamilyDescription> platformFontMap;
 
     /**
      * default implementation does nothing.
@@ -1445,8 +1410,10 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
     }
 
     Font2D findFontFromPlatformMap(String lcName, int style) {
+        HashMap<String, FamilyDescription> platformFontMap = SunFontManager.platformFontMap;
         if (platformFontMap == null) {
             platformFontMap = populateHardcodedFileNameMap();
+            SunFontManager.platformFontMap = platformFontMap;
         }
 
         if (platformFontMap == null || platformFontMap.size() == 0) {
@@ -1460,7 +1427,7 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
         }
 
         FamilyDescription fd = platformFontMap.get(firstWord);
-        if (fd == null) {
+        if (fd == null || fd.failed) {
             return null;
         }
         /* Once we've established that its at least the first word,
@@ -1527,7 +1494,7 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
             if (FontUtilities.isLogging()) {
                 FontUtilities.logInfo("Hardcoded file missing looking for " + lcName);
             }
-            platformFontMap.remove(firstWord);
+            fd.failed = true;
             return null;
         }
 
@@ -1535,26 +1502,22 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
         final String[] files = {
             plainFile, boldFile, italicFile, boldItalicFile } ;
 
-        failure = AccessController.doPrivileged(new PrivilegedAction<Boolean>() {
-             public Boolean run() {
-                 for (int i=0; i<files.length; i++) {
-                     if (files[i] == null) {
-                         continue;
-                     }
-                     File f = new File(files[i]);
-                     if (!f.exists()) {
-                         return Boolean.TRUE;
-                     }
-                 }
-                 return Boolean.FALSE;
+         for (int i=0; i<files.length; i++) {
+             if (files[i] == null) {
+                 continue;
              }
-         });
+             File f = new File(files[i]);
+             if (!f.exists()) {
+                 failure = true;
+                 break;
+             }
+         }
 
         if (failure) {
             if (FontUtilities.isLogging()) {
                 FontUtilities.logInfo("Hardcoded file missing looking for " + lcName);
             }
-            platformFontMap.remove(firstWord);
+            fd.failed = true;
             return null;
         }
 
@@ -1697,7 +1660,7 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
 
     /* Used to register any font files that are found by platform APIs
      * that weren't previously found in the standard font locations.
-     * the isAbsolute() check is needed since that's whats stored in the
+     * the isAbsolute() check is needed since that's what's stored in the
      * set, and on windows, the fonts in the system font directory that
      * are in the fontToFileMap are just basenames. We don't want to try
      * to register those again, but we do want to register other registry
@@ -1735,20 +1698,11 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
         } else if (pathDirs.length==1) {
             return pathDirs[0] + File.separator + s;
         } else {
-            String path = AccessController.doPrivileged(
-                 new PrivilegedAction<String>() {
-                     public String run() {
-                         for (int p = 0; p < pathDirs.length; p++) {
-                             File f = new File(pathDirs[p] +File.separator+ s);
-                             if (f.exists()) {
-                                 return f.getAbsolutePath();
-                             }
-                         }
-                         return null;
-                     }
-                });
-            if (path != null) {
-                return path;
+            for (int p = 0; p < pathDirs.length; p++) {
+                f = new File(pathDirs[p] + File.separator + s);
+                if (f.exists()) {
+                    return f.getAbsolutePath();
+                }
             }
         }
         return s; // shouldn't happen, but harmless
@@ -2176,15 +2130,6 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
         }
     }
 
-    /*
-     * Workaround for apps which are dependent on a font metrics bug
-     * in JDK 1.1. This is an unsupported win32 private setting.
-     * Left in for a customer - do not remove.
-     */
-    public boolean usePlatformFontMetrics() {
-        return usePlatformFontMetrics;
-    }
-
     public int getNumFonts() {
         return physicalFonts.size()+maxCompFont;
     }
@@ -2201,7 +2146,7 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
     private int createdFontCount = 0;
 
     public Font2D[] createFont2D(File fontFile, int fontFormat, boolean all,
-                                 boolean isCopy, CreatedFontTracker tracker)
+                                 boolean isCopy)
     throws FontFormatException {
 
         List<Font2D> fList = new ArrayList<>();
@@ -2209,7 +2154,6 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
         String fontFilePath = fontFile.getPath();
         FileFont font2D = null;
         final File fFile = fontFile;
-        final CreatedFontTracker _tracker = tracker;
         boolean weakRefs = false;
         int maxStrikes = 0;
         synchronized (this) {
@@ -2247,20 +2191,12 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
             }
         } catch (FontFormatException e) {
             if (isCopy) {
-                AccessController.doPrivileged(new PrivilegedAction<Void>() {
-                    public Void run() {
-                        if (_tracker != null) {
-                            _tracker.subBytes((int)fFile.length());
-                        }
-                        fFile.delete();
-                        return null;
-                    }
-                });
+                fFile.delete();
             }
             throw(e);
         }
         if (isCopy) {
-            FileFont.setFileToRemove(fList, fontFile, cnt, tracker);
+            FileFont.setFileToRemove(fList, fontFile, cnt);
             synchronized (FontManager.class) {
 
                 if (tmpFontFiles == null) {
@@ -2271,39 +2207,31 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
                 if (fileCloser == null) {
                     final Runnable fileCloserRunnable = new Runnable() {
                         public void run() {
-                            AccessController.doPrivileged(new PrivilegedAction<Void>() {
-                                public Void run() {
-                                    for (int i = 0;i < CHANNELPOOLSIZE; i++) {
-                                        if (fontFileCache[i] != null) {
-                                            try {
-                                                fontFileCache[i].close();
-                                            } catch (Exception e) {
-                                            }
-                                        }
+                            for (int i = 0;i < CHANNELPOOLSIZE; i++) {
+                                if (fontFileCache[i] != null) {
+                                    try {
+                                        fontFileCache[i].close();
+                                    } catch (Exception e) {
                                     }
-                                    if (tmpFontFiles != null) {
-                                        File[] files = new File[tmpFontFiles.size()];
-                                        files = tmpFontFiles.toArray(files);
-                                        for (int f=0; f<files.length;f++) {
-                                            try {
-                                                files[f].delete();
-                                            } catch (Exception e) {
-                                            }
-                                        }
-                                    }
-                                    return null;
                                 }
-                            });
+                            }
+                            if (tmpFontFiles != null) {
+                                File[] files = new File[tmpFontFiles.size()];
+                                files = tmpFontFiles.toArray(files);
+                                for (int f=0; f<files.length;f++) {
+                                    try {
+                                        files[f].delete();
+                                    } catch (Exception e) {
+                                    }
+                                }
+                            }
                         }
                     };
-                    AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-                        ThreadGroup rootTG = ThreadGroupUtils.getRootThreadGroup();
-                        fileCloser = new Thread(rootTG, fileCloserRunnable,
-                                                "FileCloser", 0, false);
-                        fileCloser.setContextClassLoader(null);
-                        Runtime.getRuntime().addShutdownHook(fileCloser);
-                        return null;
-                    });
+                    ThreadGroup rootTG = ThreadGroupUtils.getRootThreadGroup();
+                    fileCloser = new Thread(rootTG, fileCloserRunnable,
+                                            "FileCloser", 0, false);
+                    fileCloser.setContextClassLoader(null);
+                    Runtime.getRuntime().addShutdownHook(fileCloser);
                 }
             }
         }
@@ -2552,30 +2480,12 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
      * SunGraphicsEnvironment it performs the same initialization as is
      * performed normally. There may be some duplication of effort, but
      * that code is already written to be able to perform properly if called
-     * to duplicate work. The main difference is that if we detect we are
-     * running in an applet/browser/Java plugin environment these new fonts
-     * are not placed in the "default" maps but into an AppContext instance.
-     * The font lookup mechanism in java.awt.Font.getFont2D() is also updated
-     * so that look-up for composite fonts will in that case always
-     * do a lookup rather than returning a cached result.
-     * This is inefficient but necessary else singleton java.awt.Font
-     * instances would not retrieve the correct Font2D for the appcontext.
-     * sun.font.FontManager.findFont2D is also updated to that it uses
-     * a name map cache specific to that appcontext.
-     *
-     * Getting an AppContext is expensive, so there is a global variable
-     * that records whether these methods have ever been called and can
-     * avoid the expense for almost all applications. Once the correct
-     * CompositeFont is associated with the Font, everything should work
-     * through existing mechanisms.
-     * A special case is that GraphicsEnvironment.getAllFonts() must
-     * return an AppContext specific list.
+     * to duplicate work.
      *
      * Calling the methods below is "heavyweight" but it is expected that
      * these methods will be called very rarely.
      *
-     * If _usingAlternateComposites is true, we are not in an "applet"
-     * environment and the (single) application has selected
+     * If _usingAlternateComposites is true, the application has selected
      * an alternate composite font behaviour.
      *
      * - Printing: The implementation delegates logical fonts to an AWT
@@ -2849,7 +2759,7 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
      */
     protected abstract String[] getDefaultPlatformFont();
 
-    // Begin: Refactored from SunGraphicsEnviroment.
+    // Begin: Refactored from SunGraphicsEnvironment.
 
     /*
      * helper function for registerFonts
@@ -2960,28 +2870,23 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
             }
             initialiseDeferredFonts();
 
-            AccessController.doPrivileged(new PrivilegedAction<Void>() {
-                public Void run() {
-                    if (fontPath == null) {
-                        fontPath = getPlatformFontPath(noType1Font);
-                        registerFontDirs(fontPath);
-                    }
-                    if (fontPath != null) {
-                        // this will find all fonts including those already
-                        // registered. But we have checks in place to prevent
-                        // double registration.
-                        if (! gotFontsFromPlatform()) {
-                            registerFontsOnPath(fontPath, false,
-                                                Font2D.UNKNOWN_RANK,
-                                                false, true);
-                            loadedAllFontFiles = true;
-                        }
-                    }
-                    registerOtherFontFiles(registeredFontFiles);
-                    discoveredAllFonts = true;
-                    return null;
+            if (fontPath == null) {
+                fontPath = getPlatformFontPath(noType1Font);
+                registerFontDirs(fontPath);
+            }
+            if (fontPath != null) {
+                // this will find all fonts including those already
+                // registered. But we have checks in place to prevent
+                // double registration.
+                if (! gotFontsFromPlatform()) {
+                    registerFontsOnPath(fontPath, false,
+                                        Font2D.UNKNOWN_RANK,
+                                        false, true);
+                    loadedAllFontFiles = true;
                 }
-            });
+            }
+            registerOtherFontFiles(registeredFontFiles);
+            discoveredAllFonts = true;
         }
     }
 
@@ -3076,23 +2981,18 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
                 Thread.dumpStack();
                 FontUtilities.logInfo("loadAllFontFiles() called");
             }
-            AccessController.doPrivileged(new PrivilegedAction<Void>() {
-                public Void run() {
-                    if (fontPath == null) {
-                        fontPath = getPlatformFontPath(noType1Font);
-                    }
-                    if (fontPath != null) {
-                        // this will find all fonts including those already
-                        // registered. But we have checks in place to prevent
-                        // double registration.
-                        registerFontsOnPath(fontPath, false,
-                                            Font2D.UNKNOWN_RANK,
-                                            false, true);
-                    }
-                    loadedAllFontFiles = true;
-                    return null;
-                }
-            });
+            if (fontPath == null) {
+                fontPath = getPlatformFontPath(noType1Font);
+            }
+            if (fontPath != null) {
+                // this will find all fonts including those already
+                // registered. But we have checks in place to prevent
+                // double registration.
+                registerFontsOnPath(fontPath, false,
+                                    Font2D.UNKNOWN_RANK,
+                                    false, true);
+            }
+            loadedAllFontFiles = true;
         }
     }
 
@@ -3337,14 +3237,7 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
                 }
             }
 
-            String[] fontNames = null;
-            if (fontMapNames.size() > 0) {
-                fontNames = new String[fontMapNames.size()];
-                Object [] keyNames = fontMapNames.keySet().toArray();
-                for (int i=0; i < keyNames.length; i++) {
-                    fontNames[i] = (String)keyNames[i];
-                }
-            }
+            String[] fontNames = fontMapNames.keySet().toArray(new String[0]);
             Font[] fonts = new Font[fontNames.length];
             for (int i=0; i < fontNames.length; i++) {
                 fonts[i] = new Font(fontNames[i], Font.PLAIN, 1);
@@ -3413,11 +3306,7 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
         // Add any native font family names here
         addNativeFontFamilyNames(familyNames, requestedLocale);
 
-        String[] retval =  new String[familyNames.size()];
-        Object [] keyNames = familyNames.keySet().toArray();
-        for (int i=0; i < keyNames.length; i++) {
-            retval[i] = familyNames.get(keyNames[i]);
-        }
+        String[] retval = familyNames.values().toArray(new String[0]);
         if (requestedLocale.equals(Locale.getDefault())) {
             lastDefaultLocale = requestedLocale;
             allFamilies = new String[retval.length];
@@ -3430,14 +3319,8 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
     protected void addNativeFontFamilyNames(TreeMap<String, String> familyNames, Locale requestedLocale) { }
 
     public void register1dot0Fonts() {
-        AccessController.doPrivileged(new PrivilegedAction<Void>() {
-            public Void run() {
-                String type1Dir = "/usr/openwin/lib/X11/fonts/Type1";
-                registerFontsInDir(type1Dir, true, Font2D.TYPE1_RANK,
-                                   false, false);
-                return null;
-            }
-        });
+        String type1Dir = "/usr/openwin/lib/X11/fonts/Type1";
+        registerFontsInDir(type1Dir, true, Font2D.TYPE1_RANK, false, false);
     }
 
     /* Really we need only the JRE fonts family names, but there's little
@@ -3470,30 +3353,26 @@ public abstract class SunFontManager implements FontSupport, FontManagerForSGE {
     private static Locale systemLocale = null;
     private static Locale getSystemStartupLocale() {
         if (systemLocale == null) {
-            systemLocale = AccessController.doPrivileged(new PrivilegedAction<Locale>() {
-                public Locale run() {
-                    /* On windows the system locale may be different than the
-                     * user locale. This is an unsupported configuration, but
-                     * in that case we want to return a dummy locale that will
-                     * never cause a match in the usage of this API. This is
-                     * important because Windows documents that the family
-                     * names of fonts are enumerated using the language of
-                     * the system locale. BY returning a dummy locale in that
-                     * case we do not use the platform API which would not
-                     * return us the names we want.
-                     */
-                    String fileEncoding = System.getProperty("file.encoding", "");
-                    String sysEncoding = System.getProperty("sun.jnu.encoding");
-                    if (sysEncoding != null && !sysEncoding.equals(fileEncoding)) {
-                        return Locale.ROOT;
-                    }
-
-                    String language = System.getProperty("user.language", "en");
-                    String country  = System.getProperty("user.country","");
-                    String variant  = System.getProperty("user.variant","");
-                    return new Locale(language, country, variant);
-                }
-            });
+            /* On windows the system locale may be different than the
+             * user locale. This is an unsupported configuration, but
+             * in that case we want to return a dummy locale that will
+             * never cause a match in the usage of this API. This is
+             * important because Windows documents that the family
+             * names of fonts are enumerated using the language of
+             * the system locale. BY returning a dummy locale in that
+             * case we do not use the platform API which would not
+             * return us the names we want.
+             */
+            String fileEncoding = System.getProperty("file.encoding", "");
+            String sysEncoding = System.getProperty("sun.jnu.encoding");
+            if (sysEncoding != null && !sysEncoding.equals(fileEncoding)) {
+                systemLocale = Locale.ROOT;
+            } else {
+                String language = System.getProperty("user.language", "en");
+                String country  = System.getProperty("user.country","");
+                String variant  = System.getProperty("user.variant","");
+                systemLocale = Locale.of(language, country, variant);
+            }
         }
         return systemLocale;
     }

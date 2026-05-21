@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,8 @@
  */
 
 package javax.print.attribute.standard;
+
+import java.io.Serial;
 
 import javax.print.DocFlavor;
 import javax.print.PrintService;
@@ -83,18 +85,19 @@ public final class MediaPrintableArea
       implements DocAttribute, PrintRequestAttribute, PrintJobAttribute {
 
     /**
-     * Printable {@code x}, {@code y}, {@code width} and {@code height}.
+     * @serial Printable {@code x}, {@code y}, {@code width} and {@code height}.
      */
     private int x, y, w, h;
 
     /**
-     * The units in which the values are expressed.
+     * @serial The units in which the values are expressed.
      */
     private int units;
 
     /**
      * Use serialVersionUID from JDK 1.4 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = -1597171464050795793L;
 
     /**
@@ -238,6 +241,7 @@ public final class MediaPrintableArea
      * @return {@code true} if {@code object} is equivalent to this media
      *         margins attribute, {@code false} otherwise
      */
+    @Override
     public boolean equals(Object object) {
         boolean ret = false;
         if (object instanceof MediaPrintableArea) {
@@ -259,6 +263,7 @@ public final class MediaPrintableArea
      * @return printing attribute class (category), an instance of class
      *         {@link Class java.lang.Class}
      */
+    @Override
     public final Class<? extends Attribute> getCategory() {
         return MediaPrintableArea.class;
     }
@@ -274,6 +279,7 @@ public final class MediaPrintableArea
      *
      * @return attribute category name
      */
+    @Override
     public final String getName() {
         return "media-printable-area";
     }
@@ -301,6 +307,7 @@ public final class MediaPrintableArea
     /**
      * Returns a string version of this rectangular size attribute in mm.
      */
+    @Override
     public String toString() {
         return(toString(MM, "mm"));
     }
@@ -308,6 +315,7 @@ public final class MediaPrintableArea
     /**
      * Returns a hash code value for this attribute.
      */
+    @Override
     public int hashCode() {
         return x + 37*y + 43*w + 47*h;
     }

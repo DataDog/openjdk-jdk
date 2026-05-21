@@ -21,19 +21,21 @@
  * under the License.
  */
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
- */
-/*
- * $Id: DOMXMLObject.java 1854026 2019-02-21 09:30:01Z coheigea $
+ * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
  */
 package org.jcp.xml.dsig.internal.dom;
 
-import javax.xml.crypto.*;
-import javax.xml.crypto.dom.DOMCryptoContext;
-import javax.xml.crypto.dsig.*;
-
 import java.security.Provider;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+import javax.xml.crypto.MarshalException;
+import javax.xml.crypto.XMLCryptoContext;
+import javax.xml.crypto.XMLStructure;
+import javax.xml.crypto.dom.DOMCryptoContext;
+import javax.xml.crypto.dsig.XMLObject;
+import javax.xml.crypto.dsig.XMLSignature;
 
 import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
@@ -148,18 +150,22 @@ public final class DOMXMLObject extends DOMStructure implements XMLObject {
         this.objectElem = objElem;
     }
 
+    @Override
     public List<XMLStructure> getContent() {
         return content;
     }
 
+    @Override
     public String getId() {
         return id;
     }
 
+    @Override
     public String getMimeType() {
         return mimeType;
     }
 
+    @Override
     public String getEncoding() {
         return encoding;
     }
@@ -169,7 +175,7 @@ public final class DOMXMLObject extends DOMStructure implements XMLObject {
         throws MarshalException {
         Document ownerDoc = DOMUtils.getOwnerDocument(parent);
 
-        Element objElem = objectElem != null ? objectElem : null;
+        Element objElem = objectElem;
         if (objElem == null) {
             objElem = DOMUtils.createElement(ownerDoc, "Object",
                                              XMLSignature.XMLNS, dsPrefix);
@@ -216,7 +222,7 @@ public final class DOMXMLObject extends DOMStructure implements XMLObject {
                               : mimeType.equals(oxo.getMimeType());
 
         return idsEqual && encodingsEqual && mimeTypesEqual &&
-                equalsContent(oxo.getContent());
+                equalsContent(content, oxo.getContent());
     }
 
     @Override
@@ -236,29 +242,4 @@ public final class DOMXMLObject extends DOMStructure implements XMLObject {
         return result;
     }
 
-    private boolean equalsContent(List<XMLStructure> otherContent) {
-        if (content.size() != otherContent.size()) {
-            return false;
-        }
-        for (int i = 0, osize = otherContent.size(); i < osize; i++) {
-            XMLStructure oxs = otherContent.get(i);
-            XMLStructure xs = content.get(i);
-            if (oxs instanceof javax.xml.crypto.dom.DOMStructure) {
-                if (!(xs instanceof javax.xml.crypto.dom.DOMStructure)) {
-                    return false;
-                }
-                Node onode = ((javax.xml.crypto.dom.DOMStructure)oxs).getNode();
-                Node node = ((javax.xml.crypto.dom.DOMStructure)xs).getNode();
-                if (!DOMUtils.nodesEqual(node, onode)) {
-                    return false;
-                }
-            } else {
-                if (!(xs.equals(oxs))) {
-                    return false;
-                }
-            }
-        }
-
-        return true;
-    }
 }

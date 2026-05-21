@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,6 +35,7 @@ import java.beans.Transient;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.io.Serial;
 
 import javax.accessibility.Accessible;
 import javax.accessibility.AccessibleContext;
@@ -178,9 +179,10 @@ public class ScrollPane extends Container implements Accessible {
      */
     private boolean wheelScrollingEnabled = defaultWheelScroll;
 
-    /*
-     * JDK 1.1 serialVersionUID
+    /**
+     * Use serialVersionUID from JDK 1.1 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = 7956609840827222915L;
 
     /**
@@ -505,7 +507,6 @@ public class ScrollPane extends Container implements Accessible {
         Component c = getComponent(0);
         Point p = getScrollPosition();
         Dimension cs = calculateChildSize();
-        Dimension vs = getViewportSize();
 
         c.reshape(- p.x, - p.y, cs.width, cs.height);
         ScrollPanePeer peer = (ScrollPanePeer)this.peer;
@@ -516,7 +517,7 @@ public class ScrollPane extends Container implements Accessible {
         // update adjustables... the viewport size may have changed
         // with the scrollbars coming or going so the viewport size
         // is updated before the adjustables.
-        vs = getViewportSize();
+        Dimension vs = getViewportSize();
         hAdjustable.setSpan(0, cs.width, vs.width);
         vAdjustable.setSpan(0, cs.height, vs.height);
     }
@@ -683,6 +684,7 @@ public class ScrollPane extends Container implements Accessible {
      * @param  s the {@code ObjectOutputStream} to write
      * @throws IOException if an I/O error occurs
      */
+    @Serial
     private void writeObject(ObjectOutputStream s) throws IOException {
         // 4352819: We only need this degenerate writeObject to make
         // it safe for future versions of this class to write optional
@@ -701,6 +703,7 @@ public class ScrollPane extends Container implements Accessible {
      *         returns {@code true}
      * @see java.awt.GraphicsEnvironment#isHeadless
      */
+    @Serial
     private void readObject(ObjectInputStream s)
         throws ClassNotFoundException, IOException, HeadlessException
     {
@@ -736,8 +739,11 @@ public class ScrollPane extends Container implements Accessible {
     /**
      * Invoked when the value of the adjustable has changed.
      */
-    class PeerFixer implements AdjustmentListener, java.io.Serializable
-    {
+    static class PeerFixer implements AdjustmentListener, java.io.Serializable {
+        /**
+         * Use serialVersionUID from JDK 1.1.1 for interoperability.
+         */
+        @Serial
         private static final long serialVersionUID = 1043664721353696630L;
 
         PeerFixer(ScrollPane scroller) {
@@ -769,7 +775,7 @@ public class ScrollPane extends Container implements Accessible {
             }
         }
 
-        private ScrollPane scroller;
+        private final ScrollPane scroller;
     }
 
 
@@ -803,9 +809,10 @@ public class ScrollPane extends Container implements Accessible {
      */
     protected class AccessibleAWTScrollPane extends AccessibleAWTContainer
     {
-        /*
-         * JDK 1.3 serialVersionUID
+        /**
+         * Use serialVersionUID from JDK 1.3 for interoperability.
          */
+        @Serial
         private static final long serialVersionUID = 6100703663886637L;
 
         /**

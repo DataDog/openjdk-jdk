@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,83 +22,53 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "runtime/deoptimization.hpp"
 #include "runtime/frame.inline.hpp"
+#include "runtime/javaThread.hpp"
 #include "runtime/stubRoutines.hpp"
-#include "runtime/thread.inline.hpp"
 #include "utilities/globalDefinitions.hpp"
 #include "crc32c.h"
+#include "stubGenerator_x86_64.hpp"
+#ifdef COMPILER1
+#include "c1/c1_LIRAssembler.hpp"
+#endif
 
 // Implementation of the platform-specific part of StubRoutines - for
 // a description of how to extend it, see the stubRoutines.hpp file.
 
-address StubRoutines::x86::_verify_mxcsr_entry = NULL;
-address StubRoutines::x86::_key_shuffle_mask_addr = NULL;
-address StubRoutines::x86::_counter_shuffle_mask_addr = NULL;
-address StubRoutines::x86::_ghash_long_swap_mask_addr = NULL;
-address StubRoutines::x86::_ghash_byte_swap_mask_addr = NULL;
-address StubRoutines::x86::_ghash_poly_addr = NULL;
-address StubRoutines::x86::_ghash_shuffmask_addr = NULL;
-address StubRoutines::x86::_upper_word_mask_addr = NULL;
-address StubRoutines::x86::_shuffle_byte_flip_mask_addr = NULL;
-address StubRoutines::x86::_k256_adr = NULL;
-address StubRoutines::x86::_vector_short_to_byte_mask = NULL;
-address StubRoutines::x86::_vector_int_to_byte_mask = NULL;
-address StubRoutines::x86::_vector_int_to_short_mask = NULL;
-address StubRoutines::x86::_vector_all_bits_set = NULL;
-address StubRoutines::x86::_vector_short_shuffle_mask = NULL;
-address StubRoutines::x86::_vector_int_shuffle_mask = NULL;
-address StubRoutines::x86::_vector_long_shuffle_mask = NULL;
-address StubRoutines::x86::_vector_float_sign_mask = NULL;
-address StubRoutines::x86::_vector_float_sign_flip = NULL;
-address StubRoutines::x86::_vector_double_sign_mask = NULL;
-address StubRoutines::x86::_vector_double_sign_flip = NULL;
-address StubRoutines::x86::_vector_byte_perm_mask = NULL;
-address StubRoutines::x86::_vector_long_sign_mask = NULL;
-address StubRoutines::x86::_vector_iota_indices = NULL;
-address StubRoutines::x86::_vector_32_bit_mask = NULL;
-address StubRoutines::x86::_vector_64_bit_mask = NULL;
-#ifdef _LP64
-address StubRoutines::x86::_k256_W_adr = NULL;
-address StubRoutines::x86::_k512_W_addr = NULL;
-address StubRoutines::x86::_pshuffle_byte_flip_mask_addr_sha512 = NULL;
-// Base64 masks
-address StubRoutines::x86::_bswap_mask = NULL;
-address StubRoutines::x86::_base64_charset = NULL;
-address StubRoutines::x86::_gather_mask = NULL;
-address StubRoutines::x86::_right_shift_mask = NULL;
-address StubRoutines::x86::_left_shift_mask = NULL;
-address StubRoutines::x86::_and_mask = NULL;
-address StubRoutines::x86::_url_charset = NULL;
-address StubRoutines::x86::_counter_mask_addr = NULL;
-#endif
-address StubRoutines::x86::_pshuffle_byte_flip_mask_addr = NULL;
+// define fields for arch-specific entries
 
-//tables common for sin and cos
-address StubRoutines::x86::_ONEHALF_adr = NULL;
-address StubRoutines::x86::_P_2_adr = NULL;
-address StubRoutines::x86::_SC_4_adr = NULL;
-address StubRoutines::x86::_Ctable_adr = NULL;
-address StubRoutines::x86::_SC_2_adr = NULL;
-address StubRoutines::x86::_SC_3_adr = NULL;
-address StubRoutines::x86::_SC_1_adr = NULL;
-address StubRoutines::x86::_PI_INV_TABLE_adr = NULL;
-address StubRoutines::x86::_PI_4_adr = NULL;
-address StubRoutines::x86::_PI32INV_adr = NULL;
-address StubRoutines::x86::_SIGN_MASK_adr = NULL;
-address StubRoutines::x86::_P_1_adr = NULL;
-address StubRoutines::x86::_P_3_adr = NULL;
-address StubRoutines::x86::_NEG_ZERO_adr = NULL;
+#define DEFINE_ARCH_ENTRY(arch, blob_name, stub_name, field_name, getter_name) \
+  address StubRoutines:: arch :: STUB_FIELD_NAME(field_name)  = nullptr;
 
-//tables common for sincos and tancot
-address StubRoutines::x86::_L_2il0floatpacket_0_adr = NULL;
-address StubRoutines::x86::_Pi4Inv_adr = NULL;
-address StubRoutines::x86::_Pi4x3_adr = NULL;
-address StubRoutines::x86::_Pi4x4_adr = NULL;
-address StubRoutines::x86::_ones_adr = NULL;
+#define DEFINE_ARCH_ENTRY_INIT(arch, blob_name, stub_name, field_name, getter_name, init_function) \
+  address StubRoutines:: arch :: STUB_FIELD_NAME(field_name)  = CAST_FROM_FN_PTR(address, init_function);
 
-uint64_t StubRoutines::x86::_crc_by128_masks[] =
+#define DEFINE_ARCH_ENTRY_ARRAY(arch, blob_name, stub_name, field_name, getter_name, count) \
+  address StubRoutines:: arch :: STUB_FIELD_NAME(field_name) [count];
+
+STUBGEN_ARCH_ENTRIES_DO(DEFINE_ARCH_ENTRY, DEFINE_ARCH_ENTRY_INIT, DEFINE_ARCH_ENTRY_ARRAY)
+
+#undef DEFINE_ARCH_ENTRY_ARRAY
+#undef DEFINE_ARCH_ENTRY_INIT
+#undef DEFINE_ARCH_ENTRY
+
+address StubRoutines::crc_table_addr() {
+  return (address)StubRoutines::x86::_crc_table;
+}
+address StubRoutines::crc32c_table_addr() {
+  if (StubRoutines::x86::_crc32c_table == nullptr) {
+    bool supports_clmul = VM_Version::supports_clmul();
+    StubRoutines::x86::generate_CRC32C_table(supports_clmul);
+  }
+  return (address)StubRoutines::x86::_crc32c_table;
+}
+
+address StubRoutines::x86::_k256_adr = nullptr;
+address StubRoutines::x86::_k256_W_adr = nullptr;
+address StubRoutines::x86::_k512_W_addr = nullptr;
+
+const uint64_t StubRoutines::x86::_crc_by128_masks[] =
 {
   /* The fields in this structure are arranged so that they can be
    * picked up two at a time with 128-bit loads.
@@ -137,7 +107,7 @@ uint64_t StubRoutines::x86::_crc_by128_masks[] =
 /**
  *  crc_table[] from jdk/src/share/native/java/util/zip/zlib-1.2.5/crc32.h
  */
-juint StubRoutines::x86::_crc_table[] =
+const juint StubRoutines::x86::_crc_table[] =
 {
     0x00000000UL, 0x77073096UL, 0xee0e612cUL, 0x990951baUL, 0x076dc419UL,
     0x706af48fUL, 0xe963a535UL, 0x9e6495a3UL, 0x0edb8832UL, 0x79dcb8a4UL,
@@ -193,8 +163,7 @@ juint StubRoutines::x86::_crc_table[] =
     0x2d02ef8dUL
 };
 
-#ifdef _LP64
-juint StubRoutines::x86::_crc_table_avx512[] =
+const juint StubRoutines::x86::_crc_table_avx512[] =
 {
     0xe95c1271UL, 0x00000000UL, 0xce3371cbUL, 0x00000000UL,
     0xccaa009eUL, 0x00000000UL, 0x751997d0UL, 0x00000001UL,
@@ -211,19 +180,72 @@ juint StubRoutines::x86::_crc_table_avx512[] =
     0x00000000UL, 0x00000000UL, 0x00000000UL, 0x00000000UL
 };
 
-juint StubRoutines::x86::_crc_by128_masks_avx512[] =
+const juint StubRoutines::x86::_crc32c_table_avx512[] =
+{
+    0xb9e02b86UL, 0x00000000UL, 0xdcb17aa4UL, 0x00000000UL,
+    0x493c7d27UL, 0x00000000UL, 0xc1068c50UL, 0x0000000eUL,
+    0x06e38d70UL, 0x00000002UL, 0x6992cea2UL, 0x00000000UL,
+    0x493c7d27UL, 0x00000000UL, 0xdd45aab8UL, 0x00000000UL,
+    0xdea713f0UL, 0x00000000UL, 0x05ec76f0UL, 0x00000001UL,
+    0x47db8317UL, 0x00000000UL, 0x2ad91c30UL, 0x00000000UL,
+    0x0715ce53UL, 0x00000000UL, 0xc49f4f67UL, 0x00000000UL,
+    0x39d3b296UL, 0x00000000UL, 0x083a6eecUL, 0x00000000UL,
+    0x9e4addf8UL, 0x00000000UL, 0x740eef02UL, 0x00000000UL,
+    0xddc0152bUL, 0x00000000UL, 0x1c291d04UL, 0x00000000UL,
+    0xba4fc28eUL, 0x00000000UL, 0x3da6d0cbUL, 0x00000000UL,
+    0x493c7d27UL, 0x00000000UL, 0xc1068c50UL, 0x0000000eUL,
+    0x00000000UL, 0x00000000UL, 0x00000000UL, 0x00000000UL
+};
+
+const juint StubRoutines::x86::_crc_by128_masks_avx512[] =
 {
     0xffffffffUL, 0xffffffffUL, 0x00000000UL, 0x00000000UL,
     0x00000000UL, 0xffffffffUL, 0xffffffffUL, 0xffffffffUL,
     0x80808080UL, 0x80808080UL, 0x80808080UL, 0x80808080UL
 };
 
-juint StubRoutines::x86::_shuf_table_crc32_avx512[] =
+const juint StubRoutines::x86::_shuf_table_crc32_avx512[] =
 {
     0x83828100UL, 0x87868584UL, 0x8b8a8988UL, 0x8f8e8d8cUL,
     0x03020100UL, 0x07060504UL, 0x0b0a0908UL, 0x000e0d0cUL
 };
-#endif // _LP64
+
+const jint StubRoutines::x86::_arrays_hashcode_powers_of_31[] =
+{
+     2111290369,
+    -2010103841,
+      350799937,
+       11316127,
+      693101697,
+     -254736545,
+      961614017,
+       31019807,
+    -2077209343,
+      -67006753,
+     1244764481,
+    -2038056289,
+      211350913,
+     -408824225,
+     -844471871,
+     -997072353,
+     1353309697,
+     -510534177,
+     1507551809,
+     -505558625,
+     -293403007,
+      129082719,
+    -1796951359,
+     -196513505,
+    -1807454463,
+     1742810335,
+      887503681,
+       28629151,
+         923521,
+          29791,
+            961,
+             31,
+              1,
+};
 
 #define D 32
 #define P 0x82F63B78 // Reflection of Castagnoli (0x11EDC6F41)
@@ -234,7 +256,7 @@ uint32_t _crc32c_pow_2k_table[TILL_CYCLE]; // because _crc32c_pow_2k_table[TILL_
 // A. Kadatch and B. Jenkins / Everything we know about CRC but afraid to forget September 3, 2010 8
 // Listing 1: Multiplication of normalized polynomials
 // "a" and "b" occupy D least significant bits.
-uint32_t crc32c_multiply(uint32_t a, uint32_t b) {
+static uint32_t crc32c_multiply(uint32_t a, uint32_t b) {
   uint32_t product = 0;
   uint32_t b_pow_x_table[D + 1]; // b_pow_x_table[k] = (b * x**k) mod P
   b_pow_x_table[0] = b;
@@ -258,7 +280,7 @@ uint32_t crc32c_multiply(uint32_t a, uint32_t b) {
 #undef P
 
 // A. Kadatch and B. Jenkins / Everything we know about CRC but afraid to forget September 3, 2010 9
-void crc32c_init_pow_2k(void) {
+static void crc32c_init_pow_2k(void) {
   // _crc32c_pow_2k_table(0) =
   // x^(2^k) mod P(x) = x mod P(x) = x
   // Since we are operating on a reflected values
@@ -273,7 +295,7 @@ void crc32c_init_pow_2k(void) {
 }
 
 // x^N mod P(x)
-uint32_t crc32c_f_pow_n(uint32_t n) {
+static uint32_t crc32c_f_pow_n(uint32_t n) {
   //            result = 1 (polynomial)
   uint32_t one, result = 0x80000000, i = 0;
 
@@ -288,7 +310,7 @@ uint32_t crc32c_f_pow_n(uint32_t n) {
   return result;
 }
 
-juint *StubRoutines::x86::_crc32c_table;
+juint* StubRoutines::x86::_crc32c_table = nullptr;
 
 void StubRoutines::x86::generate_CRC32C_table(bool is_pclmulqdq_table_supported) {
 
@@ -329,7 +351,7 @@ void StubRoutines::x86::generate_CRC32C_table(bool is_pclmulqdq_table_supported)
   }
 }
 
-ATTRIBUTE_ALIGNED(64) juint StubRoutines::x86::_k256[] =
+ATTRIBUTE_ALIGNED(64) const juint StubRoutines::x86::_k256[] =
 {
     0x428a2f98UL, 0x71374491UL, 0xb5c0fbcfUL, 0xe9b5dba5UL,
     0x3956c25bUL, 0x59f111f1UL, 0x923f82a4UL, 0xab1c5ed5UL,
@@ -349,13 +371,12 @@ ATTRIBUTE_ALIGNED(64) juint StubRoutines::x86::_k256[] =
     0x90befffaUL, 0xa4506cebUL, 0xbef9a3f7UL, 0xc67178f2UL
 };
 
-#ifdef _LP64
 // used in MacroAssembler::sha256_AVX2
 // dynamically built from _k256
 ATTRIBUTE_ALIGNED(64) juint StubRoutines::x86::_k256_W[2*sizeof(StubRoutines::x86::_k256)];
 
 // used in MacroAssembler::sha512_AVX2
-ATTRIBUTE_ALIGNED(64) julong StubRoutines::x86::_k512_W[] =
+ATTRIBUTE_ALIGNED(64) const julong StubRoutines::x86::_k512_W[] =
 {
     0x428a2f98d728ae22ULL, 0x7137449123ef65cdULL,
     0xb5c0fbcfec4d3b2fULL, 0xe9b5dba58189dbbcULL,
@@ -398,4 +419,58 @@ ATTRIBUTE_ALIGNED(64) julong StubRoutines::x86::_k512_W[] =
     0x4cc5d4becb3e42b6ULL, 0x597f299cfc657e2aULL,
     0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL,
 };
+
+ATTRIBUTE_ALIGNED(64)
+address StubRoutines::x86::small_jump_table[STRING_INDEXOF_TABLE_COUNT * STRING_INDEXOF_NUMBER_OF_CASES] = { nullptr, };
+
+ATTRIBUTE_ALIGNED(64)
+address StubRoutines::x86::big_jump_table[STRING_INDEXOF_TABLE_COUNT * STRING_INDEXOF_NUMBER_OF_CASES] = { nullptr, };
+
+#if INCLUDE_CDS
+
+void StubRoutines::init_AOTAddressTable() {
+  ResourceMark rm;
+  GrowableArray<address> external_addresses;
+  // publish static addresses referred to by main x86 generator and
+  // auxiliary x86 generators
+  StubGenerator::init_AOTAddressTable(external_addresses);
+  // publish external data addresses defined in nested x86 class
+  StubRoutines::x86::init_AOTAddressTable(external_addresses);
+#ifdef COMPILER1
+  LIR_Assembler::init_AOTAddressTable(external_addresses);
 #endif
+  AOTCodeCache::publish_external_addresses(external_addresses);
+}
+
+// publish addresses of external data defined in this file which may
+// be referenced from stub or code
+void StubRoutines::x86::init_AOTAddressTable(GrowableArray<address>& external_addresses) {
+#define ADD(addr) external_addresses.append((address)(addr));
+  ADD(&_mxcsr_std);
+  ADD(&_mxcsr_rz);
+  ADD(crc_by128_masks_addr());
+  ADD(crc_by128_masks_addr() + 16);
+  ADD(crc_by128_masks_addr() + 32);
+  // this is added in generic code
+  // ADD(_crc_table);
+  ADD(crc_by128_masks_avx512_addr());
+  ADD(crc_by128_masks_avx512_addr() + 16);
+  ADD(crc_by128_masks_avx512_addr() + 32);
+  ADD(_crc_table_avx512);
+  ADD(_crc32c_table_avx512);
+  ADD(_shuf_table_crc32_avx512);
+  // n.b. call accessor for this one to ensure the table is generated
+  ADD(crc32c_table_addr());
+  ADD(_arrays_hashcode_powers_of_31);
+  ADD(_k256);
+  ADD(_k256_W);
+  ADD(_k512_W);
+  for (int i = 0; i < STRING_INDEXOF_TABLE_COUNT; i++) {
+    address a = (address)StubRoutines::x86::small_jump_table_base(i);
+    ADD(a);
+    a = (address)StubRoutines::x86::big_jump_table_base(i);
+    ADD(a);
+  }
+#undef ADD
+}
+#endif // INCLUDE_CDS

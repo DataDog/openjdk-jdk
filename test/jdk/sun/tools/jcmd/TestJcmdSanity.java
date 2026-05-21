@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,7 +32,7 @@ import java.util.List;
 
 import jdk.test.lib.process.OutputAnalyzer;
 import jdk.test.lib.process.ProcessTools;
-import jdk.test.lib.Utils;
+import jdk.test.lib.Platform;
 
 /*
  * @test
@@ -42,7 +42,7 @@ import jdk.test.lib.Utils;
  *
  * @library /test/lib
  *
- * @run main/othervm -XX:+UsePerfData TestJcmdSanity
+ * @run main/othervm/timeout=480 -XX:+UsePerfData TestJcmdSanity
  */
 public class TestJcmdSanity {
 
@@ -57,6 +57,7 @@ public class TestJcmdSanity {
         testJcmdPid_f();
         testJcmdPidPerfCounterPrint();
         testJcmdPidBigScript();
+        testJcmdPidVMinfo();
     }
 
     /**
@@ -153,7 +154,7 @@ public class TestJcmdSanity {
      */
     private static void matchPerfCounters(OutputAnalyzer output) {
         output.stdoutShouldMatchByLine(PERF_COUNTER_REGEX, null, PERF_COUNTER_REGEX);
-        output.stderrShouldBeEmptyIgnoreVMWarnings();
+        output.stderrShouldBeEmptyIgnoreDeprecatedWarnings();
     }
 
     private static void verifyOutputAgainstFile(OutputAnalyzer output) throws IOException {
@@ -164,4 +165,26 @@ public class TestJcmdSanity {
                 "The ouput should contain all content of " + path.toAbsolutePath());
     }
 
+    /**
+     * Sanity check for VM.info
+     */
+    private static void testJcmdPidVMinfo() throws Exception {
+        OutputAnalyzer output = JcmdBase.jcmd(VM_ARGS, new String[] {"VM.info"});
+        output.shouldHaveExitValue(0);
+        output.shouldContain(Long.toString(ProcessTools.getProcessId()) + ":");
+
+        // Should find the signal handler summary (except on Windows):
+        if (!Platform.isWindows()) {
+          output.shouldContain("Signal Handlers:");
+          // Should not find any of the possible signal handler modification warnings:
+          output.shouldNotContain(" handler modified!"); // e.g. Warning: SIGILL handler modified!
+          output.shouldNotContain("*** Handler was modified!");
+          output.shouldNotContain("*** Expected: "); // e.g. *** Expected: javaSignalHandler in ...
+        }
+
+        // Should find file descriptor counting on Mac and Linux
+        if (Platform.isLinux() || Platform.isOSX()) {
+            output.shouldMatch("Open File Descriptors: \\d+");
+        }
+    }
 }

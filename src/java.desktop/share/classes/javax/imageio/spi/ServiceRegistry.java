@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,10 +25,6 @@
 
 package javax.imageio.spi;
 
-import java.io.File;
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -82,7 +78,7 @@ import java.util.ServiceLoader;
  * proxy for the heavyweight service.
  *
  * <p> An application may customize the contents of a registry as it
- * sees fit, so long as it has the appropriate runtime permission.
+ * sees fit.
  *
  * <p> For information on how to create and deploy service providers,
  * refer to the documentation on {@link java.util.ServiceLoader ServiceLoader}
@@ -104,7 +100,7 @@ public class ServiceRegistry {
      * @param categories an {@code Iterator} containing
      * {@code Class} objects to be used to define categories.
      *
-     * @exception IllegalArgumentException if
+     * @throws IllegalArgumentException if
      * {@code categories} is {@code null}, or if
      * one of the categories is not an allowed service type.
      */
@@ -157,7 +153,7 @@ public class ServiceRegistry {
      * file violates the specified format or if a provider class
      * cannot be found and instantiated.
      *
-     * @exception IllegalArgumentException if
+     * @throws IllegalArgumentException if
      * {@code providerClass} is {@code null}, or if it is
      * not one of the allowed service types.
      */
@@ -196,7 +192,7 @@ public class ServiceRegistry {
      * file violates the specified format or if a provider class
      * cannot be found and instantiated.
      *
-     * @exception IllegalArgumentException if
+     * @throws IllegalArgumentException if
      * {@code providerClass} is {@code null}, or if it is
      * not one of the allowed service types.
      */
@@ -227,10 +223,8 @@ public class ServiceRegistry {
      */
     private Iterator<SubRegistry> getSubRegistries(Object provider) {
         List<SubRegistry> l = new ArrayList<>();
-        Iterator<Class<?>> iter = categoryMap.keySet().iterator();
-        while (iter.hasNext()) {
-            Class<?> c = iter.next();
-            if (c.isAssignableFrom(provider.getClass())) {
+        for (Class<?> c : categoryMap.keySet()) {
+            if (c.isInstance(provider)) {
                 l.add(categoryMap.get(c));
             }
         }
@@ -256,11 +250,11 @@ public class ServiceRegistry {
      * @return true if no provider of the same class was previously
      * registered in the same category category.
      *
-     * @exception IllegalArgumentException if {@code provider} is
+     * @throws IllegalArgumentException if {@code provider} is
      * {@code null}.
-     * @exception IllegalArgumentException if there is no category
+     * @throws IllegalArgumentException if there is no category
      * corresponding to {@code category}.
-     * @exception ClassCastException if provider does not implement
+     * @throws ClassCastException if provider does not implement
      * the {@code Class} defined by {@code category}.
      */
     public <T> boolean registerServiceProvider(T provider,
@@ -272,7 +266,7 @@ public class ServiceRegistry {
         if (reg == null) {
             throw new IllegalArgumentException("category unknown!");
         }
-        if (!category.isAssignableFrom(provider.getClass())) {
+        if (!category.isInstance(provider)) {
             throw new ClassCastException();
         }
 
@@ -289,12 +283,11 @@ public class ServiceRegistry {
      * {@code onRegistration} method will be called once for each
      * category it is registered under.  Its
      * {@code onDeregistration} method will be called each time
-     * it is deregistered from a category or when the registry is
-     * finalized.
+     * it is deregistered from a category.
      *
      * @param provider the service provider object to be registered.
      *
-     * @exception IllegalArgumentException if
+     * @throws IllegalArgumentException if
      * {@code provider} is {@code null}.
      */
     public void registerServiceProvider(Object provider) {
@@ -319,13 +312,12 @@ public class ServiceRegistry {
      * {@code onRegistration} method will be called once for each
      * category it is registered under.  Its
      * {@code onDeregistration} method will be called each time
-     * it is deregistered from a category or when the registry is
-     * finalized.
+     * it is deregistered from a category.
      *
      * @param providers an Iterator containing service provider
      * objects to be registered.
      *
-     * @exception IllegalArgumentException if {@code providers}
+     * @throws IllegalArgumentException if {@code providers}
      * is {@code null} or contains a {@code null} entry.
      */
     public void registerServiceProviders(Iterator<?> providers) {
@@ -359,11 +351,11 @@ public class ServiceRegistry {
      * registered in the same category category,
      * {@code false} otherwise.
      *
-     * @exception IllegalArgumentException if {@code provider} is
+     * @throws IllegalArgumentException if {@code provider} is
      * {@code null}.
-     * @exception IllegalArgumentException if there is no category
+     * @throws IllegalArgumentException if there is no category
      * corresponding to {@code category}.
-     * @exception ClassCastException if provider does not implement
+     * @throws ClassCastException if provider does not implement
      * the class defined by {@code category}.
      */
     public <T> boolean deregisterServiceProvider(T provider,
@@ -375,7 +367,7 @@ public class ServiceRegistry {
         if (reg == null) {
             throw new IllegalArgumentException("category unknown!");
         }
-        if (!category.isAssignableFrom(provider.getClass())) {
+        if (!category.isInstance(provider)) {
             throw new ClassCastException();
         }
         return reg.deregisterServiceProvider(provider);
@@ -387,7 +379,7 @@ public class ServiceRegistry {
      *
      * @param provider the service provider object to be deregistered.
      *
-     * @exception IllegalArgumentException if {@code provider} is
+     * @throws IllegalArgumentException if {@code provider} is
      * {@code null}.
      */
     public void deregisterServiceProvider(Object provider) {
@@ -410,7 +402,7 @@ public class ServiceRegistry {
      * @return {@code true} if the given provider has been
      * registered.
      *
-     * @exception IllegalArgumentException if {@code provider} is
+     * @throws IllegalArgumentException if {@code provider} is
      * {@code null}.
      */
     public boolean contains(Object provider) {
@@ -446,7 +438,7 @@ public class ServiceRegistry {
      * @return an {@code Iterator} containing service provider
      * objects from the given category, possibly in order.
      *
-     * @exception IllegalArgumentException if there is no category
+     * @throws IllegalArgumentException if there is no category
      * corresponding to {@code category}.
      */
     public <T> Iterator<T> getServiceProviders(Class<T> category,
@@ -504,7 +496,7 @@ public class ServiceRegistry {
      * @return an {@code Iterator} containing service provider
      * objects from the given category, possibly in order.
      *
-     * @exception IllegalArgumentException if there is no category
+     * @throws IllegalArgumentException if there is no category
      * corresponding to {@code category}.
      */
     public <T> Iterator<T> getServiceProviders(Class<T> category,
@@ -533,16 +525,14 @@ public class ServiceRegistry {
      * desired {@code Class} type, or {@code null} is none is
      * present.
      *
-     * @exception IllegalArgumentException if {@code providerClass} is
+     * @throws IllegalArgumentException if {@code providerClass} is
      * {@code null}.
      */
     public <T> T getServiceProviderByClass(Class<T> providerClass) {
         if (providerClass == null) {
             throw new IllegalArgumentException("providerClass == null!");
         }
-        Iterator<Class<?>> iter = categoryMap.keySet().iterator();
-        while (iter.hasNext()) {
-            Class<?> c = iter.next();
+        for (Class<?> c : categoryMap.keySet()) {
             if (c.isAssignableFrom(providerClass)) {
                 SubRegistry reg = categoryMap.get(c);
                 T provider = reg.getServiceProviderByClass(providerClass);
@@ -577,9 +567,9 @@ public class ServiceRegistry {
      * @return {@code true} if a previously unset ordering
      * was established.
      *
-     * @exception IllegalArgumentException if either provider is
+     * @throws IllegalArgumentException if either provider is
      * {@code null} or they are the same object.
-     * @exception IllegalArgumentException if there is no category
+     * @throws IllegalArgumentException if there is no category
      * corresponding to {@code category}.
      */
     public <T> boolean setOrdering(Class<T> category,
@@ -623,9 +613,9 @@ public class ServiceRegistry {
      * @return {@code true} if a previously set ordering was
      * disestablished.
      *
-     * @exception IllegalArgumentException if either provider is
+     * @throws IllegalArgumentException if either provider is
      * {@code null} or they are the same object.
-     * @exception IllegalArgumentException if there is no category
+     * @throws IllegalArgumentException if there is no category
      * corresponding to {@code category}.
      */
     public <T> boolean unsetOrdering(Class<T> category,
@@ -654,7 +644,7 @@ public class ServiceRegistry {
      *
      * @param category the category to be emptied.
      *
-     * @exception IllegalArgumentException if there is no category
+     * @throws IllegalArgumentException if there is no category
      * corresponding to {@code category}.
      */
     public void deregisterAll(Class<?> category) {
@@ -668,37 +658,17 @@ public class ServiceRegistry {
     /**
      * Deregisters all currently registered service providers from all
      * categories.
+     * <p>
+     * If an application creates a new {@code ServiceRegistry} instance and registers providers,
+     * and at some point no longer needs the instance, it should call this method to ensure
+     * that all providers which are instances of {@link RegisterableService}
+     * receive a {@link RegisterableService#onDeregistration(ServiceRegistry, Class<?>)} call back,
+     * before allowing the instance to be garbage collected.
      */
     public void deregisterAll() {
-        Iterator<SubRegistry> iter = categoryMap.values().iterator();
-        while (iter.hasNext()) {
-            SubRegistry reg = iter.next();
+        for (SubRegistry reg : categoryMap.values()) {
             reg.clear();
         }
-    }
-
-    /**
-     * Finalizes this object prior to garbage collection.  The
-     * {@code deregisterAll} method is called to deregister all
-     * currently registered service providers.  This method should not
-     * be called from application code.
-     *
-     * @exception Throwable if an error occurs during superclass
-     * finalization.
-     *
-     * @deprecated The {@code finalize} method has been deprecated.
-     *     Subclasses that override {@code finalize} in order to perform cleanup
-     *     should be modified to use alternative cleanup mechanisms and
-     *     to remove the overriding {@code finalize} method.
-     *     When overriding the {@code finalize} method, its implementation must explicitly
-     *     ensure that {@code super.finalize()} is invoked as described in {@link Object#finalize}.
-     *     See the specification for {@link Object#finalize()} for further
-     *     information about migration options.
-     */
-    @Deprecated(since="9")
-    public void finalize() throws Throwable {
-        deregisterAll();
-        super.finalize();
     }
 
     /**
@@ -742,7 +712,6 @@ class SubRegistry {
     // No way to express heterogeneous map, we want
     // Map<Class<T>, T>, where T is ?
     final Map<Class<?>, Object> map = new HashMap<>();
-    final Map<Class<?>, AccessControlContext> accMap = new HashMap<>();
 
     public SubRegistry(ServiceRegistry registry, Class<?> category) {
         this.registry = registry;
@@ -757,7 +726,6 @@ class SubRegistry {
             deregisterServiceProvider(oprovider);
         }
         map.put(provider.getClass(), provider);
-        accMap.put(provider.getClass(), AccessController.getContext());
         poset.add(provider);
         if (provider instanceof RegisterableService) {
             RegisterableService rs = (RegisterableService)provider;
@@ -782,7 +750,6 @@ class SubRegistry {
 
         if (provider == oprovider) {
             map.remove(provider.getClass());
-            accMap.remove(provider.getClass());
             poset.remove(provider);
             if (provider instanceof RegisterableService) {
                 RegisterableService rs = (RegisterableService)provider;
@@ -830,25 +797,13 @@ class SubRegistry {
             Object provider = iter.next();
             iter.remove();
 
-            if (provider instanceof RegisterableService) {
-                RegisterableService rs = (RegisterableService)provider;
-                AccessControlContext acc = accMap.get(provider.getClass());
-                if (acc != null || System.getSecurityManager() == null) {
-                    AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-                    rs.onDeregistration(registry, category);
-                        return null;
-                    }, acc);
-                }
+            if (provider instanceof RegisterableService rs) {
+                rs.onDeregistration(registry, category);
             }
         }
         poset.clear();
-        accMap.clear();
     }
 
-    @SuppressWarnings("deprecation")
-    public synchronized void finalize() {
-        clear();
-    }
 }
 
 

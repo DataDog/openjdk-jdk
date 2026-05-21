@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -84,12 +84,10 @@ readAndSetFilters(JNIEnv *env, PacketInputStream *in, HandlerNode *node,
             }
 
             case JDWP_REQUEST_MODIFIER(LocationOnly): {
-                jbyte tag;
                 jclass clazz;
                 jmethodID method;
                 jlocation location;
-                tag = inStream_readByte(in); /* not currently used */
-                tag = tag; /* To shut up lint */
+                (void)inStream_readByte(in); /* not currently used */
                 if ( (serror = inStream_error(in)) != JDWP_ERROR(NONE) )
                     break;
                 clazz = inStream_readClassRef(env, in);
@@ -206,6 +204,10 @@ readAndSetFilters(JNIEnv *env, PacketInputStream *in, HandlerNode *node,
                         eventFilter_setSourceNameMatchFilter(node, i, sourceNamePattern));
                 break;
             }
+
+            case JDWP_REQUEST_MODIFIER(PlatformThreadsOnly):
+                serror = map2jdwpError(eventFilter_setPlatformThreadsOnlyFilter(node, i));
+                break;
 
             default:
                 serror = JDWP_ERROR(ILLEGAL_ARGUMENT);

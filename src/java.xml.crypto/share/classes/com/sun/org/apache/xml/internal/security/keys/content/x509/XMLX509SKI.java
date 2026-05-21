@@ -112,7 +112,7 @@ public class XMLX509SKI extends SignatureElementProxy implements XMLX509DataCont
         throws XMLSecurityException {
 
         if (cert.getVersion() < 3) {
-            Object exArgs[] = { cert.getVersion() };
+            Object[] exArgs = { cert.getVersion() };
             throw new XMLSecurityException("certificate.noSki.lowVersion", exArgs);
         }
 
@@ -133,7 +133,7 @@ public class XMLX509SKI extends SignatureElementProxy implements XMLX509DataCont
          * OCTET STRING, and the next two bytes are the tag and length of
          * the ski OCTET STRING.
          */
-        byte skidValue[] = new byte[extensionValue.length - 4];
+        byte[] skidValue = new byte[extensionValue.length - 4];
 
         System.arraycopy(extensionValue, 4, skidValue, 0, skidValue.length);
 
@@ -145,6 +145,7 @@ public class XMLX509SKI extends SignatureElementProxy implements XMLX509DataCont
     }
 
     /** {@inheritDoc} */
+    @Override
     public boolean equals(Object obj) {
         if (!(obj instanceof XMLX509SKI)) {
             return false;
@@ -159,12 +160,13 @@ public class XMLX509SKI extends SignatureElementProxy implements XMLX509DataCont
         }
     }
 
+    @Override
     public int hashCode() {
         int result = 17;
         try {
             byte[] bytes = getSKIBytes();
-            for (int i = 0; i < bytes.length; i++) {
-                result = 31 * result + bytes[i];
+            for (byte element : bytes) {
+                result = 31 * result + element;
             }
         } catch (XMLSecurityException e) {
             LOG.debug(e.getMessage(), e);
@@ -174,6 +176,7 @@ public class XMLX509SKI extends SignatureElementProxy implements XMLX509DataCont
     }
 
     /** {@inheritDoc} */
+    @Override
     public String getBaseLocalName() {
         return Constants._TAG_X509SKI;
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -107,13 +107,12 @@ public abstract class CommandLineOptionTest {
         List<String> finalOptions = new ArrayList<>();
         if (addTestVMOptions) {
             Collections.addAll(finalOptions, InputArguments.getVmInputArgs());
-            Collections.addAll(finalOptions, Utils.getTestJavaOpts());
         }
         Collections.addAll(finalOptions, options);
         finalOptions.add("-version");
 
         ProcessBuilder processBuilder
-                = ProcessTools.createJavaProcessBuilder(finalOptions.toArray(
+                = ProcessTools.createLimitedTestJavaProcessBuilder(finalOptions.toArray(
                 new String[finalOptions.size()]));
         OutputAnalyzer outputAnalyzer
                 = new OutputAnalyzer(processBuilder.start());
@@ -122,8 +121,8 @@ public abstract class CommandLineOptionTest {
                 outputAnalyzer.shouldHaveExitValue(exitCode.value);
         } catch (RuntimeException e) {
             String errorMessage = String.format(
-                    "JVM process should have exit value '%d'.%n%s",
-                    exitCode.value, exitErrorMessage);
+                    "JVM process should have exit value '%d', but has '%d'.%n%s",
+                    exitCode.value, outputAnalyzer.getExitValue(), exitErrorMessage);
             throw new AssertionError(errorMessage, e);
         }
 
@@ -199,10 +198,8 @@ public abstract class CommandLineOptionTest {
             String wrongWarningMessage, ExitCode exitCode, String... options)
             throws Throwable {
         List<String> finalOptions = new ArrayList<>();
-        finalOptions.add(CommandLineOptionTest.getVMTypeOption());
-        String extraFlagForEmulated = CommandLineOptionTest.getVMTypeOptionForEmulated();
-        if (extraFlagForEmulated != null) {
-            finalOptions.add(extraFlagForEmulated);
+        if (!Platform.isStatic()) {
+            finalOptions.add(CommandLineOptionTest.getVMTypeOption());
         }
         Collections.addAll(finalOptions, options);
 
@@ -263,7 +260,7 @@ public abstract class CommandLineOptionTest {
         Collections.addAll(vmOpts, additionalVMOpts);
         Collections.addAll(vmOpts, "-XX:+PrintFlagsFinal", "-version");
 
-        ProcessBuilder processBuilder = ProcessTools.createJavaProcessBuilder(
+        ProcessBuilder processBuilder = ProcessTools.createLimitedTestJavaProcessBuilder(
                 vmOpts.toArray(new String[vmOpts.size()]));
 
         OutputAnalyzer outputAnalyzer
@@ -300,9 +297,12 @@ public abstract class CommandLineOptionTest {
                     CommandLineOptionTest.PRINT_FLAGS_FINAL_FORMAT,
                     optionName, expectedValue));
         } catch (RuntimeException e) {
+            String observedValue = outputAnalyzer.firstMatch(String.format(
+                CommandLineOptionTest.PRINT_FLAGS_FINAL_FORMAT,
+                optionName, "\\S"));
             String errorMessage = String.format(
-                    "Option '%s' is expected to have '%s' value%n%s",
-                    optionName, expectedValue,
+                    "Option '%s' is expected to have '%s' value, but is '%s'.%n%s",
+                    optionName, expectedValue, observedValue,
                     optionErrorString);
             throw new AssertionError(errorMessage, e);
         }
@@ -333,7 +333,7 @@ public abstract class CommandLineOptionTest {
         Collections.addAll(vmOpts, additionalVMOpts);
         Collections.addAll(vmOpts, "-version");
 
-        ProcessBuilder processBuilder = ProcessTools.createJavaProcessBuilder(
+        ProcessBuilder processBuilder = ProcessTools.createLimitedTestJavaProcessBuilder(
                 vmOpts.toArray(new String[vmOpts.size()]));
 
         return new OutputAnalyzer(processBuilder.start());
@@ -394,10 +394,8 @@ public abstract class CommandLineOptionTest {
             String expectedValue, String optionErrorString,
             String... additionalVMOpts) throws Throwable {
         List<String> finalOptions = new ArrayList<>();
-        finalOptions.add(CommandLineOptionTest.getVMTypeOption());
-        String extraFlagForEmulated = CommandLineOptionTest.getVMTypeOptionForEmulated();
-        if (extraFlagForEmulated != null) {
-            finalOptions.add(extraFlagForEmulated);
+        if (!Platform.isStatic()) {
+            finalOptions.add(CommandLineOptionTest.getVMTypeOption());
         }
         Collections.addAll(finalOptions, additionalVMOpts);
 
@@ -500,20 +498,10 @@ public abstract class CommandLineOptionTest {
             return "-client";
         } else if (Platform.isMinimal()) {
             return "-minimal";
+        } else if (Platform.isZero()) {
+            return "-zero";
         }
         throw new RuntimeException("Unknown VM mode.");
-    }
-
-    /**
-     * @return addtional VMoptions(Emulated related) required to start a new VM with the same type as current.
-     */
-    private static String getVMTypeOptionForEmulated() {
-        if (Platform.isServer() && !Platform.isEmulatedClient()) {
-            return "-XX:-NeverActAsServerClassMachine";
-        } else if (Platform.isEmulatedClient()) {
-            return "-XX:+NeverActAsServerClassMachine";
-        }
-        return null;
     }
 
     private final BooleanSupplier predicate;

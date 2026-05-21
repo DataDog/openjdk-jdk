@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,7 +46,7 @@ import javadoc.tester.JavadocTester;
 public class TestPrivateClasses extends JavadocTester {
 
     public static void main(String... args) throws Exception {
-        TestPrivateClasses tester = new TestPrivateClasses();
+        var tester = new TestPrivateClasses();
         tester.runTests();
     }
 
@@ -59,12 +59,12 @@ public class TestPrivateClasses extends JavadocTester {
         checkExit(Exit.OK);
 
         checkOutput("pkg/PublicChild.html", true,
-                // Field inheritence from non-public superclass.
+                // Field inheritance from non-public superclass.
                 """
-                    <a href="#fieldInheritedFromParent">fieldInheritedFromParent</a>""",
+                    <a href="#fieldInheritedFromParent" class="member-name-link">fieldInheritedFromParent</a>""",
                 // Method inheritance from non-public superclass.
                 """
-                    <a href="#methodInheritedFromParent(int)">methodInheritedFromParent</a>""",
+                    <a href="#methodInheritedFromParent(int)" class="member-name-link">methodInheritedFromParent</a>""",
                 // private class does not show up in tree
                 """
                     <div class="inheritance" title="Inheritance Tree">java.lang.Object
@@ -73,8 +73,8 @@ public class TestPrivateClasses extends JavadocTester {
                 // Method is documented as though it is declared in the inheriting method.
                 """
                     <div class="member-signature"><span class="modifiers">public</span>&nbsp;<span c\
-                    lass="return-type">void</span>&nbsp;<span class="element-name">methodInheritedFromParent\
-                    </span>&#8203;<span class="parameters">(int&nbsp;p1)</span>
+                    lass="return-type">void</span>&nbsp;<span class="element-name">methodInheritedFr\
+                    omParent</span><wbr><span class="parameters">(int&nbsp;p1)</span>
                                                    throws <span class="exceptions">java.lang.Exception</span></div>""",
                 """
                     <dl class="notes">
@@ -99,13 +99,13 @@ public class TestPrivateClasses extends JavadocTester {
                 // Should not document comments from private inherited interfaces
                 """
                     <td class="col-last"><code><span class="member-name-link"><a href="#methodInterf\
-                    ace(int)">methodInterface</a></span>&#8203;(int&nbsp;p1)</code>
+                    ace(int)">methodInterface</a></span><wbr>(int&nbsp;p1)</code>
                     <div class="block">Comment from interface.</div>
                     </td>""",
                 // and similarly one more
                 """
                     <td class="col-last"><code><span class="member-name-link"><a href="#methodInterf\
-                    ace2(int)">methodInterface2</a></span>&#8203;(int&nbsp;p1)</code>
+                    ace2(int)">methodInterface2</a></span><wbr>(int&nbsp;p1)</code>
                     <div class="block">Comment from interface.</div>
                     </td>"""
         );
@@ -113,10 +113,10 @@ public class TestPrivateClasses extends JavadocTester {
         checkOutput("pkg/PublicInterface.html", true,
                 // Field inheritance from non-public superinterface.
                 """
-                    <a href="#fieldInheritedFromInterface">fieldInheritedFromInterface</a>""",
+                    <a href="#fieldInheritedFromInterface" class="member-name-link">fieldInheritedFromInterface</a>""",
                 // Method inheritance from non-public superinterface.
                 """
-                    <a href="#methodInterface(int)">methodInterface</a>""",
+                    <a href="#methodInterface(int)" class="member-name-link">methodInterface</a>""",
                 //Make sure implemented interfaces from private superclass are inherited
                 """
                     <dl class="notes">
@@ -156,16 +156,16 @@ public class TestPrivateClasses extends JavadocTester {
         checkExit(Exit.OK);
 
         checkOutput("pkg/PublicChild.html", true,
-                // Field inheritence from non-public superclass.
+                // Field inheritance from non-public superclass.
                 """
-                    Fields inherited from class&nbsp;pkg.<a href="PrivateParent.html" title="class in pkg">PrivateParent</a>""",
+                    Fields inherited from class&nbsp;<a href="PrivateParent.html#field-summary" title="class in pkg">PrivateParent</a>""",
                 """
                     <a href="PrivateParent.html#fieldInheritedFromParent">fieldInheritedFromParent</a>""",
-                // Method inheritence from non-public superclass.
+                // Method inheritance from non-public superclass.
                 """
-                    Methods inherited from class&nbsp;pkg.<a href="PrivateParent.html" title="class in pkg">PrivateParent</a>""",
+                    Methods inherited from class&nbsp;<a href="PrivateParent.html#method-summary" title="class in pkg">PrivateParent</a>""",
                 """
-                    <a href="PrivateParent.html#methodInheritedFromParent(int)">methodInheritedFromParent</a>""",
+                    <a href="PrivateParent.html#methodInheritedFromParent(int)" title="methodInheritedFromParent(int)">methodInheritedFromParent</a>""",
                 // Should document that a method overrides method from private class.
                 """
                     <dt>Overrides:</dt>
@@ -187,22 +187,22 @@ public class TestPrivateClasses extends JavadocTester {
                     <dl class="notes">
                     <dt>All Implemented Interfaces:</dt>
                     <dd><code><a href="PrivateInterface.html" title="interface in pkg">PrivateInterf\
-                    ace</a></code>, <code><a href="PublicInterface.html" title="interface in pkg">Pu\
-                    blicInterface</a></code></dd>
+                    ace</a>, <a href="PublicInterface.html" title="interface in pkg">PublicInterface\
+                    </a></code></dd>
                     </dl>""",
                 """
                     <div class="type-signature"><span class="modifiers">public class </span><span cl\
                     ass="element-name type-name-label">PublicChild</span>""");
 
         checkOutput("pkg/PublicInterface.html", true,
-                // Field inheritence from non-public superinterface.
+                // Field inheritance from non-public superinterface.
                 """
-                    Fields inherited from interface&nbsp;pkg.<a href="PrivateInterface.html" title="interface in pkg">PrivateInterface</a>""",
+                    Fields inherited from interface&nbsp;<a href="PrivateInterface.html#field-summary" title="interface in pkg">PrivateInterface</a>""",
                 """
                     <a href="PrivateInterface.html#fieldInheritedFromInterface">fieldInheritedFromInterface</a>""",
                 // Method inheritance from non-public superinterface.
                 """
-                    Methods inherited from interface&nbsp;pkg.<a href="PrivateInterface.html" title="interface in pkg">PrivateInterface</a>""",
+                    Methods inherited from interface&nbsp;<a href="PrivateInterface.html#method-summary" title="interface in pkg">PrivateInterface</a>""",
                 // Extend documented private classes or interfaces
                 "extends",
                 "All Superinterfaces",
@@ -210,21 +210,20 @@ public class TestPrivateClasses extends JavadocTester {
                 """
                     <dl class="notes">
                     <dt>All Known Implementing Classes:</dt>
-                    <dd><code><a href="PrivateParent.html" title="class in pkg">PrivateParent</a></c\
-                    ode>, <code><a href="PublicChild.html" title="class in pkg">PublicChild</a></cod\
-                    e></dd>
+                    <dd><code><a href="PrivateParent.html" title="class in pkg">PrivateParent</a>, <\
+                    a href="PublicChild.html" title="class in pkg">PublicChild</a></code></dd>
                     </dl>""");
 
         checkOutput("pkg/PrivateInterface.html", true,
                 """
-                    <a href="#methodInterface(int)">methodInterface</a>"""
+                    <a href="#methodInterface(int)" class="member-name-link">methodInterface</a>"""
         );
 
         checkOutput("pkg2/C.html", true,
                 //Since private flag is used, we can document that private interface method
                 //with generic parameters has been implemented.
                 """
-                    <span class="descfrm-type-label">Description copied from interface:&nbsp;<code><\
+                    <span class="description-from-type-label">Description copied from interface:&nbsp;<code><\
                     a href="I.html#hello(T)">I</a></code></span>""",
                 """
                     <dt>Specified by:</dt>

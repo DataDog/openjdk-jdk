@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -485,6 +485,9 @@ extern struct _CompositeTypes {
 #define PtrPixelsRow(p, y, scanStride)    PtrAddBytes(p, \
     ((intptr_t) (y)) * (scanStride))
 
+#define PtrPixelsBand(p, y, length, elemSize)    PtrAddBytes(p, \
+    ((intptr_t) (y)) * (length) * (elemSize))
+
 /*
  * The function to call with an array of NativePrimitive structures
  * to register them with the Java GraphicsPrimitiveMgr.
@@ -507,12 +510,8 @@ extern JNIEXPORT void JNICALL
 GrPrim_Sg2dGetCompInfo(JNIEnv *env, jobject sg2d,
                        NativePrimitive *pPrim,
                        CompositeInfo *pCompInfo);
-extern JNIEXPORT jint JNICALL
+extern jint
 GrPrim_CompGetXorColor(JNIEnv *env, jobject comp);
-extern JNIEXPORT void JNICALL
-GrPrim_CompGetXorInfo(JNIEnv *env, CompositeInfo *pCompInfo, jobject comp);
-extern JNIEXPORT void JNICALL
-GrPrim_CompGetAlphaInfo(JNIEnv *env, CompositeInfo *pCompInfo, jobject comp);
 
 extern JNIEXPORT void JNICALL
 GrPrim_Sg2dGetClip(JNIEnv *env, jobject sg2d,
@@ -538,9 +537,9 @@ typedef struct {
     jdouble ty;
 } TransformInfo;
 
-extern JNIEXPORT void JNICALL
+extern void
 Transform_GetInfo(JNIEnv *env, jobject txform, TransformInfo *pTxInfo);
-extern JNIEXPORT void JNICALL
+extern void
 Transform_transform(TransformInfo *pTxInfo, jdouble *pX, jdouble *pY);
 
 void GrPrim_RefineBounds(SurfaceDataBounds *bounds, jint transX, jint transY,
@@ -646,7 +645,7 @@ JNIEXPORT extern jint sunHints_INTVAL_STROKE_PURE;
     REGISTER_PRIMITIVE(DrawGlyphListLCD, SRC, COMP, DST, FUNC)
 
 #ifdef __cplusplus
-};
+}
 #endif
 
 #endif /* GraphicsPrimitiveMgr_h_Included */

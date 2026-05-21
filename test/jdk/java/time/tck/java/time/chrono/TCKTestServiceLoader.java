@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -58,19 +59,18 @@
  */
 package tck.java.time.chrono;
 
-import static org.testng.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.time.LocalDate;
 import java.time.chrono.ChronoLocalDate;
 import java.time.chrono.Chronology;
 
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Test;
 
 /**
  * Tests that a custom Chronology is available via the ServiceLoader.
  * The CopticChronology is configured via META-INF/services/java.time.chrono.Chronology.
  */
-@Test
 public class TCKTestServiceLoader {
 
      @Test
@@ -78,7 +78,8 @@ public class TCKTestServiceLoader {
         Chronology chrono = Chronology.of("Coptic");
         ChronoLocalDate copticDate = chrono.date(1729, 4, 27);
         LocalDate ld = LocalDate.from(copticDate);
-        assertEquals(ld, LocalDate.of(2013, 1, 5), "CopticDate does not match LocalDate");
+        assertEquals(LocalDate.of(2013, 1, 5), ld, "CopticDate does not match LocalDate");
+        assertEquals(false, chrono.isIsoBased());
     }
 
 }

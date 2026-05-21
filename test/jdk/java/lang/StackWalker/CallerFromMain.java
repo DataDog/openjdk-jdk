@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,8 +24,9 @@
 /*
  * @test
  * @bug 8140450
- * @library /test/lib
  * @summary Test if the getCallerClass method returns empty optional
+ * @requires test.thread.factory == null
+ * @library /test/lib
  * @run main CallerFromMain exec
  */
 
@@ -37,7 +38,7 @@ public class CallerFromMain {
     private static final StackWalker sw = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
     public static void main(String[] args) throws Exception {
         if (args.length > 0) {
-            ProcessBuilder pb = ProcessTools.createTestJvm("CallerFromMain");
+            ProcessBuilder pb = ProcessTools.createTestJavaProcessBuilder("CallerFromMain");
             OutputAnalyzer output = ProcessTools.executeProcess(pb);
             System.out.println(output.getOutput());
             output.shouldHaveExitValue(0);

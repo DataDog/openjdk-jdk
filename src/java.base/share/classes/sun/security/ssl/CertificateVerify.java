@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,7 @@ import java.text.MessageFormat;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Map;
+
 import sun.security.ssl.SSLHandshake.HandshakeMessage;
 import sun.security.ssl.X509Authentication.X509Credentials;
 import sun.security.ssl.X509Authentication.X509Possession;
@@ -74,7 +75,7 @@ final class CertificateVerify {
 
             // This happens in client side only.
             ClientHandshakeContext chc = (ClientHandshakeContext)context;
-            byte[] temproary = null;
+            byte[] temporary;
             String algorithm = x509Possession.popPrivateKey.getAlgorithm();
             try {
                 Signature signer =
@@ -82,7 +83,7 @@ final class CertificateVerify {
                 byte[] hashes = chc.handshakeHash.digest(algorithm,
                         chc.handshakeSession.getMasterSecret());
                 signer.update(hashes);
-                temproary = signer.sign();
+                temporary = signer.sign();
             } catch (NoSuchAlgorithmException nsae) {
                 throw chc.conContext.fatal(Alert.INTERNAL_ERROR,
                         "Unsupported signature algorithm (" + algorithm +
@@ -92,7 +93,7 @@ final class CertificateVerify {
                         "Cannot produce CertificateVerify signature", gse);
             }
 
-            this.signature = temproary;
+            this.signature = temporary;
         }
 
         S30CertificateVerifyMessage(HandshakeContext context,
@@ -172,11 +173,12 @@ final class CertificateVerify {
         @Override
         public String toString() {
             MessageFormat messageFormat = new MessageFormat(
-                    "\"CertificateVerify\": '{'\n" +
-                    "  \"signature\": '{'\n" +
-                    "{0}\n" +
-                    "  '}'\n" +
-                    "'}'",
+                    """
+                            "CertificateVerify": '{'
+                              "signature": '{'
+                            {0}
+                              '}'
+                            '}'""",
                     Locale.ENGLISH);
 
             HexDumpEncoder hexEncoder = new HexDumpEncoder();
@@ -194,7 +196,7 @@ final class CertificateVerify {
          */
         private static Signature getSignature(String algorithm,
                 Key key) throws GeneralSecurityException {
-            Signature signer = null;
+            Signature signer;
             switch (algorithm) {
                 case "RSA":
                     signer = Signature.getInstance(JsseJce.SIGNATURE_RAWRSA);
@@ -210,12 +212,10 @@ final class CertificateVerify {
                         + algorithm);
             }
 
-            if (signer != null) {
-                if (key instanceof PublicKey) {
-                    signer.initVerify((PublicKey)(key));
-                } else {
-                    signer.initSign((PrivateKey)key);
-                }
+            if (key instanceof PublicKey) {
+                signer.initVerify((PublicKey)(key));
+            } else {
+                signer.initSign((PrivateKey)key);
             }
 
             return signer;
@@ -248,7 +248,8 @@ final class CertificateVerify {
 
             if (x509Possession == null ||
                     x509Possession.popPrivateKey == null) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                         "No X.509 credentials negotiated for CertificateVerify");
                 }
@@ -258,7 +259,7 @@ final class CertificateVerify {
 
             S30CertificateVerifyMessage cvm =
                     new S30CertificateVerifyMessage(chc, x509Possession);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                         "Produced CertificateVerify handshake message", cvm);
             }
@@ -300,7 +301,7 @@ final class CertificateVerify {
 
             S30CertificateVerifyMessage cvm =
                     new S30CertificateVerifyMessage(shc, message);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                     "Consuming CertificateVerify handshake message", cvm);
             }
@@ -330,14 +331,14 @@ final class CertificateVerify {
 
             // This happens in client side only.
             ClientHandshakeContext chc = (ClientHandshakeContext)context;
-            byte[] temproary = null;
+            byte[] temporary;
             String algorithm = x509Possession.popPrivateKey.getAlgorithm();
             try {
                 Signature signer =
                         getSignature(algorithm, x509Possession.popPrivateKey);
                 byte[] hashes = chc.handshakeHash.digest(algorithm);
                 signer.update(hashes);
-                temproary = signer.sign();
+                temporary = signer.sign();
             } catch (NoSuchAlgorithmException nsae) {
                 throw chc.conContext.fatal(Alert.INTERNAL_ERROR,
                         "Unsupported signature algorithm (" + algorithm +
@@ -347,7 +348,7 @@ final class CertificateVerify {
                     "Cannot produce CertificateVerify signature", gse);
             }
 
-            this.signature = temproary;
+            this.signature = temporary;
         }
 
         T10CertificateVerifyMessage(HandshakeContext context,
@@ -426,11 +427,12 @@ final class CertificateVerify {
         @Override
         public String toString() {
             MessageFormat messageFormat = new MessageFormat(
-                    "\"CertificateVerify\": '{'\n" +
-                    "  \"signature\": '{'\n" +
-                    "{0}\n" +
-                    "  '}'\n" +
-                    "'}'",
+                    """
+                            "CertificateVerify": '{'
+                              "signature": '{'
+                            {0}
+                              '}'
+                            '}'""",
                     Locale.ENGLISH);
 
             HexDumpEncoder hexEncoder = new HexDumpEncoder();
@@ -448,7 +450,7 @@ final class CertificateVerify {
          */
         private static Signature getSignature(String algorithm,
                 Key key) throws GeneralSecurityException {
-            Signature signer = null;
+            Signature signer;
             switch (algorithm) {
                 case "RSA":
                     signer = Signature.getInstance(JsseJce.SIGNATURE_RAWRSA);
@@ -467,12 +469,10 @@ final class CertificateVerify {
                         + algorithm);
             }
 
-            if (signer != null) {
-                if (key instanceof PublicKey) {
-                    signer.initVerify((PublicKey)(key));
-                } else {
-                    signer.initSign((PrivateKey)key);
-                }
+            if (key instanceof PublicKey) {
+                signer.initVerify((PublicKey)(key));
+            } else {
+                signer.initSign((PrivateKey)key);
             }
 
             return signer;
@@ -504,7 +504,8 @@ final class CertificateVerify {
 
             if (x509Possession == null ||
                     x509Possession.popPrivateKey == null) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                         "No X.509 credentials negotiated for CertificateVerify");
                 }
@@ -514,7 +515,7 @@ final class CertificateVerify {
 
             T10CertificateVerifyMessage cvm =
                     new T10CertificateVerifyMessage(chc, x509Possession);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                         "Produced CertificateVerify handshake message", cvm);
             }
@@ -556,7 +557,7 @@ final class CertificateVerify {
 
             T10CertificateVerifyMessage cvm =
                     new T10CertificateVerifyMessage(shc, message);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                         "Consuming CertificateVerify handshake message", cvm);
             }
@@ -591,12 +592,13 @@ final class CertificateVerify {
             ClientHandshakeContext chc = (ClientHandshakeContext)context;
             Map.Entry<SignatureScheme, Signature> schemeAndSigner =
                     SignatureScheme.getSignerOfPreferableAlgorithm(
+                    chc.sslConfig,
                     chc.algorithmConstraints,
                     chc.peerRequestedSignatureSchemes,
                     x509Possession,
                     chc.negotiatedProtocol);
             if (schemeAndSigner == null) {
-                // Unlikely, the credentials generator should have
+                // Unlikely, the credential's generator should have
                 // selected the preferable signature algorithm properly.
                 throw chc.conContext.fatal(Alert.INTERNAL_ERROR,
                     "No supported CertificateVerify signature algorithm for " +
@@ -605,17 +607,17 @@ final class CertificateVerify {
             }
 
             this.signatureScheme = schemeAndSigner.getKey();
-            byte[] temproary = null;
+            byte[] temporary;
             try {
                 Signature signer = schemeAndSigner.getValue();
                 signer.update(chc.handshakeHash.archived());
-                temproary = signer.sign();
+                temporary = signer.sign();
             } catch (SignatureException ikse) {
                 throw chc.conContext.fatal(Alert.HANDSHAKE_FAILURE,
                         "Cannot produce CertificateVerify signature", ikse);
             }
 
-            this.signature = temproary;
+            this.signature = temporary;
         }
 
         T12CertificateVerifyMessage(HandshakeContext handshakeContext,
@@ -708,12 +710,13 @@ final class CertificateVerify {
         @Override
         public String toString() {
             MessageFormat messageFormat = new MessageFormat(
-                    "\"CertificateVerify\": '{'\n" +
-                    "  \"signature algorithm\": {0}\n" +
-                    "  \"signature\": '{'\n" +
-                    "{1}\n" +
-                    "  '}'\n" +
-                    "'}'",
+                    """
+                            "CertificateVerify": '{'
+                              "signature algorithm": {0}
+                              "signature": '{'
+                            {1}
+                              '}'
+                            '}'""",
                     Locale.ENGLISH);
 
             HexDumpEncoder hexEncoder = new HexDumpEncoder();
@@ -753,7 +756,8 @@ final class CertificateVerify {
 
             if (x509Possession == null ||
                     x509Possession.popPrivateKey == null) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                         "No X.509 credentials negotiated for CertificateVerify");
                 }
@@ -763,7 +767,7 @@ final class CertificateVerify {
 
             T12CertificateVerifyMessage cvm =
                     new T12CertificateVerifyMessage(chc, x509Possession);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                         "Produced CertificateVerify handshake message", cvm);
             }
@@ -805,7 +809,7 @@ final class CertificateVerify {
 
             T12CertificateVerifyMessage cvm =
                     new T12CertificateVerifyMessage(shc, message);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                         "Consuming CertificateVerify handshake message", cvm);
             }
@@ -901,17 +905,18 @@ final class CertificateVerify {
 
             Map.Entry<SignatureScheme, Signature> schemeAndSigner =
                     SignatureScheme.getSignerOfPreferableAlgorithm(
+                    context.sslConfig,
                     context.algorithmConstraints,
                     context.peerRequestedSignatureSchemes,
                     x509Possession,
                     context.negotiatedProtocol);
             if (schemeAndSigner == null) {
-                // Unlikely, the credentials generator should have
+                // Unlikely, the credential's generator should have
                 // selected the preferable signature algorithm properly.
                 throw context.conContext.fatal(Alert.INTERNAL_ERROR,
                     "No supported CertificateVerify signature algorithm for " +
                     x509Possession.popPrivateKey.getAlgorithm() +
-                    "  key");
+                    " key");
             }
 
             this.signatureScheme = schemeAndSigner.getKey();
@@ -930,17 +935,17 @@ final class CertificateVerify {
                         serverSignHead.length, hashValue.length);
             }
 
-            byte[] temproary = null;
+            byte[] temporary;
             try {
                 Signature signer = schemeAndSigner.getValue();
                 signer.update(contentCovered);
-                temproary = signer.sign();
+                temporary = signer.sign();
             } catch (SignatureException ikse) {
                 throw context.conContext.fatal(Alert.HANDSHAKE_FAILURE,
                         "Cannot produce CertificateVerify signature", ikse);
             }
 
-            this.signature = temproary;
+            this.signature = temporary;
         }
 
         T13CertificateVerifyMessage(HandshakeContext context,
@@ -1044,12 +1049,13 @@ final class CertificateVerify {
         @Override
         public String toString() {
             MessageFormat messageFormat = new MessageFormat(
-                    "\"CertificateVerify\": '{'\n" +
-                    "  \"signature algorithm\": {0}\n" +
-                    "  \"signature\": '{'\n" +
-                    "{1}\n" +
-                    "  '}'\n" +
-                    "'}'",
+                    """
+                            "CertificateVerify": '{'
+                              "signature algorithm": {0}
+                              "signature": '{'
+                            {1}
+                              '}'
+                            '}'""",
                     Locale.ENGLISH);
 
             HexDumpEncoder hexEncoder = new HexDumpEncoder();
@@ -1089,7 +1095,8 @@ final class CertificateVerify {
 
             if (x509Possession == null ||
                     x509Possession.popPrivateKey == null) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+                if (SSLLogger.isOn() &&
+                        SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                     SSLLogger.fine(
                         "No X.509 credentials negotiated for CertificateVerify");
                 }
@@ -1110,7 +1117,7 @@ final class CertificateVerify {
                 X509Possession x509Possession) throws IOException {
             T13CertificateVerifyMessage cvm =
                     new T13CertificateVerifyMessage(shc, x509Possession);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                     "Produced server CertificateVerify handshake message", cvm);
             }
@@ -1127,7 +1134,7 @@ final class CertificateVerify {
                 X509Possession x509Possession) throws IOException {
             T13CertificateVerifyMessage cvm =
                     new T13CertificateVerifyMessage(chc, x509Possession);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                     "Produced client CertificateVerify handshake message", cvm);
             }
@@ -1160,9 +1167,17 @@ final class CertificateVerify {
             // Clean up this consumer
             hc.handshakeConsumers.remove(SSLHandshake.CERTIFICATE_VERIFY.id);
 
+            // Ensure that the Certificate Verify message has not been sent w/o
+            // a Certificate message preceding
+            if (hc.handshakeConsumers.containsKey(
+                    SSLHandshake.CERTIFICATE.id)) {
+                throw hc.conContext.fatal(Alert.UNEXPECTED_MESSAGE,
+                                  "Unexpected Certificate Verify handshake message");
+            }
+
             T13CertificateVerifyMessage cvm =
                     new T13CertificateVerifyMessage(hc, message);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                         "Consuming CertificateVerify handshake message", cvm);
             }

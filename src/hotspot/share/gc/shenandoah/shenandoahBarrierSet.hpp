@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2013, 2020, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2013, 2021, Red Hat, Inc. All rights reserved.
+ * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,26 +26,32 @@
 #ifndef SHARE_GC_SHENANDOAH_SHENANDOAHBARRIERSET_HPP
 #define SHARE_GC_SHENANDOAH_SHENANDOAHBARRIERSET_HPP
 
-#include "gc/shared/accessBarrierSupport.hpp"
 #include "gc/shared/barrierSet.hpp"
-#include "gc/shenandoah/shenandoahHeap.hpp"
+#include "gc/shared/bufferNode.hpp"
 #include "gc/shenandoah/shenandoahSATBMarkQueueSet.hpp"
 
+class ShenandoahHeap;
 class ShenandoahBarrierSetAssembler;
+class ShenandoahCardTable;
 
 class ShenandoahBarrierSet: public BarrierSet {
 private:
-  ShenandoahHeap* _heap;
+  ShenandoahHeap* const _heap;
+  ShenandoahCardTable* _card_table;
   BufferNode::Allocator _satb_mark_queue_buffer_allocator;
   ShenandoahSATBMarkQueueSet _satb_mark_queue_set;
 
 public:
-  ShenandoahBarrierSet(ShenandoahHeap* heap);
+  ShenandoahBarrierSet(ShenandoahHeap* heap, MemRegion heap_region);
 
   static ShenandoahBarrierSetAssembler* assembler();
 
   inline static ShenandoahBarrierSet* barrier_set() {
     return barrier_set_cast<ShenandoahBarrierSet>(BarrierSet::barrier_set());
+  }
+
+  inline ShenandoahCardTable* card_table() {
+    return _card_table;
   }
 
   static ShenandoahSATBMarkQueueSet& satb_mark_queue_set() {
@@ -53,13 +60,15 @@ public:
 
   static bool need_load_reference_barrier(DecoratorSet decorators, BasicType type);
   static bool need_keep_alive_barrier(DecoratorSet decorators, BasicType type);
+  static bool need_satb_barrier(DecoratorSet decorators, BasicType type);
+  static bool need_card_barrier(DecoratorSet decorators, BasicType type);
 
   static bool is_strong_access(DecoratorSet decorators) {
-    return (decorators & (ON_WEAK_OOP_REF | ON_PHANTOM_OOP_REF | ON_UNKNOWN_OOP_REF)) == 0;
+    return (decorators & (ON_WEAK_OOP_REF | ON_PHANTOM_OOP_REF)) == 0;
   }
 
   static bool is_weak_access(DecoratorSet decorators) {
-    return (decorators & (ON_WEAK_OOP_REF | ON_UNKNOWN_OOP_REF)) != 0;
+    return (decorators & ON_WEAK_OOP_REF) != 0;
   }
 
   static bool is_phantom_access(DecoratorSet decorators) {
@@ -70,54 +79,63 @@ public:
     return (decorators & IN_NATIVE) != 0;
   }
 
-  void print_on(outputStream* st) const;
-
-  bool is_a(BarrierSet::Name bsn);
-
-  bool is_aligned(HeapWord* hw);
+  void print_on(outputStream* st) const override;
 
   template <class T>
   inline void arraycopy_barrier(T* src, T* dst, size_t count);
   inline void clone_barrier(oop src);
   void clone_barrier_runtime(oop src);
 
-  virtual void on_thread_create(Thread* thread);
-  virtual void on_thread_destroy(Thread* thread);
-  virtual void on_thread_attach(Thread* thread);
-  virtual void on_thread_detach(Thread* thread);
+  // Support for optimizing compilers to call the barrier set on slow path allocations
+  // that did not enter a TLAB. Used for e.g. ReduceInitialCardMarks to take any
+  // compensating actions to restore card-marks that might otherwise be incorrectly elided.
+  void on_slowpath_allocation_exit(JavaThread* thread, oop new_obj) override;
+  void on_thread_create(Thread* thread) override;
+  void on_thread_destroy(Thread* thread) override;
+  void on_thread_attach(Thread* thread) override;
+  void on_thread_detach(Thread* thread) override;
 
   static inline oop resolve_forwarded_not_null(oop p);
-  static inline oop resolve_forwarded_not_null_mutator(oop p);
   static inline oop resolve_forwarded(oop p);
 
   template <DecoratorSet decorators, typename T>
   inline void satb_barrier(T* field);
   inline void satb_enqueue(oop value);
-  inline void storeval_barrier(oop obj);
 
-  template <DecoratorSet decorators>
-  inline void keep_alive_if_weak(oop value);
   inline void keep_alive_if_weak(DecoratorSet decorators, oop value);
 
   inline void enqueue(oop obj);
 
   inline oop load_reference_barrier(oop obj);
 
-  template <class T>
+  template <DecoratorSet decorators, class T>
   inline oop load_reference_barrier_mutator(oop obj, T* load_addr);
 
-  template <DecoratorSet decorators, class T>
-  inline oop load_reference_barrier(oop obj, T* load_addr);
+  template <class T>
+  inline oop load_reference_barrier(DecoratorSet decorators, oop obj, T* load_addr);
+
+  template <typename T>
+  inline oop oop_load(DecoratorSet decorators, T* addr);
+
+  template <typename T>
+  inline oop oop_cmpxchg(DecoratorSet decorators, T* addr, oop compare_value, oop new_value);
+
+  template <typename T>
+  inline oop oop_xchg(DecoratorSet decorators, T* addr, oop new_value);
+
+  template <DecoratorSet decorators, typename T>
+  void write_ref_field_post(T* field);
+
+  void write_ref_array(HeapWord* start, size_t count);
 
 private:
-  template <class T>
-  inline void arraycopy_marking(T* src, T* dst, size_t count);
+  template <bool IS_GENERATIONAL, class T>
+  void arraycopy_marking(T* dst, size_t count);
   template <class T>
   inline void arraycopy_evacuation(T* src, size_t count);
   template <class T>
   inline void arraycopy_update(T* src, size_t count);
 
-  inline void clone_marking(oop src);
   inline void clone_evacuation(oop src);
   inline void clone_update(oop src);
 
@@ -130,6 +148,10 @@ public:
   template <DecoratorSet decorators, typename BarrierSetT = ShenandoahBarrierSet>
   class AccessBarrier: public BarrierSet::AccessBarrier<decorators, BarrierSetT> {
     typedef BarrierSet::AccessBarrier<decorators, BarrierSetT> Raw;
+
+  private:
+    template <typename T>
+    static void oop_store_common(T* addr, oop value);
 
   public:
     // Heap oop accesses. These accessors get resolved when
@@ -152,18 +174,18 @@ public:
     static oop oop_atomic_xchg_in_heap_at(oop base, ptrdiff_t offset, oop new_value);
 
     template <typename T>
-    static bool oop_arraycopy_in_heap(arrayOop src_obj, size_t src_offset_in_bytes, T* src_raw,
-                                      arrayOop dst_obj, size_t dst_offset_in_bytes, T* dst_raw,
-                                      size_t length);
+    static OopCopyResult oop_arraycopy_in_heap(arrayOop src_obj, size_t src_offset_in_bytes, T* src_raw,
+                                               arrayOop dst_obj, size_t dst_offset_in_bytes, T* dst_raw,
+                                               size_t length);
 
     // Clone barrier support
     static void clone_in_heap(oop src, oop dst, size_t size);
 
-    // Needed for loads on non-heap weak references
+    // Support for concurrent roots evacuation, updating and weak roots clearing
     template <typename T>
     static oop oop_load_not_in_heap(T* addr);
 
-    // Used for catching bad stores
+    // Support for concurrent roots marking
     template <typename T>
     static void oop_store_not_in_heap(T* addr, oop value);
 
@@ -172,7 +194,6 @@ public:
 
     template <typename T>
     static oop oop_atomic_xchg_not_in_heap(T* addr, oop new_value);
-
   };
 
 };

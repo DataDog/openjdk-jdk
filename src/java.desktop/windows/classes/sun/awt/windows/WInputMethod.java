@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,6 +44,8 @@ import java.util.Map;
 import sun.awt.AWTAccessor;
 import sun.awt.AWTAccessor.ComponentAccessor;
 import sun.awt.im.InputMethodAdapter;
+import sun.java2d.Disposer;
+import sun.java2d.DisposerRecord;
 
 final class WInputMethod extends InputMethodAdapter
 {
@@ -124,6 +126,8 @@ final class WInputMethod extends InputMethodAdapter
     public WInputMethod()
     {
         context = createNativeContext();
+        disposerRecord = new ContextDisposerRecord(context);
+        Disposer.addRecord(this, disposerRecord);
         cmode = getConversionStatus(context);
         open = getOpenStatus(context);
         currentLocale = getNativeLocale();
@@ -132,16 +136,23 @@ final class WInputMethod extends InputMethodAdapter
         }
     }
 
-    @Override
-    @SuppressWarnings("deprecation")
-    protected void finalize() throws Throwable
-    {
-        // Release the resources used by the native input context.
-        if (context!=0) {
-            destroyNativeContext(context);
-            context=0;
+    private final ContextDisposerRecord disposerRecord;
+
+    private static final class ContextDisposerRecord implements DisposerRecord {
+
+        private final int context;
+        private volatile boolean disposed;
+
+        ContextDisposerRecord(int c) {
+            context = c;
         }
-        super.finalize();
+
+        public synchronized void dispose() {
+            if (!disposed) {
+                destroyNativeContext(context);
+            }
+            disposed = true;
+        }
     }
 
     @Override
@@ -151,9 +162,7 @@ final class WInputMethod extends InputMethodAdapter
 
     @Override
     public void dispose() {
-        // Due to a memory management problem in Windows 98, we should retain
-        // the native input context until this object is finalized. So do
-        // nothing here.
+        disposerRecord.dispose();
     }
 
     /**
@@ -303,9 +312,9 @@ final class WInputMethod extends InputMethodAdapter
     public void activate() {
         boolean isAc = haveActiveClient();
 
-        // When the last focussed component peer is different from the
-        // current focussed component or if they are different client
-        // (active or passive), disable native IME for the old focussed
+        // When the last focused component peer is different from the
+        // current focused component or if they are different client
+        // (active or passive), disable native IME for the old focused
         // component and enable for the new one.
         if (lastFocussedComponentPeer != awtFocussedComponentPeer ||
             isLastFocussedActiveClient != isAc) {
@@ -319,6 +328,10 @@ final class WInputMethod extends InputMethodAdapter
             isLastFocussedActiveClient = isAc;
         }
         isActive = true;
+
+        // Sync currentLocale with the Windows keyboard layout which could be changed
+        // while the component was inactive.
+        getLocale();
         if (currentLocale != null) {
             setLocale(currentLocale, true);
         }
@@ -353,13 +366,18 @@ final class WInputMethod extends InputMethodAdapter
         getLocale();
 
         // Delay calling disableNativeIME until activate is called and the newly
-        // focussed component has a different peer as the last focussed component.
+        // focused component has a different peer as the last focused component.
         if (awtFocussedComponentPeer != null) {
             lastFocussedComponentPeer = awtFocussedComponentPeer;
             isLastFocussedActiveClient = haveActiveClient();
         }
         isActive = false;
         hasCompositionString = isCompositionStringAvailable(context);
+
+        // IME is going to be disabled commit the composition string
+        if (hasCompositionString) {
+            endComposition();
+        }
     }
 
     /**
@@ -387,7 +405,7 @@ final class WInputMethod extends InputMethodAdapter
      /**
      * @see sun.awt.im.InputMethodAdapter#stopListening
      * This method is called when the input method is swapped out.
-     * Calling stopListening to give other input method the keybaord input
+     * Calling stopListening to give other input method the keyboard input
      * focus.
      */
     @Override
@@ -424,7 +442,7 @@ final class WInputMethod extends InputMethodAdapter
     public void hideWindows() {
         if (awtFocussedComponentPeer != null) {
             /* Hide the native status window including the Windows language
-               bar if it is on. One typical senario this method
+               bar if it is on. One typical scenario this method
                gets called is when the native input method is
                switched to java input method, for example.
             */
@@ -439,6 +457,7 @@ final class WInputMethod extends InputMethodAdapter
     @Override
     public void removeNotify() {
         endCompositionNative(context, DISCARD_INPUT);
+        disableNativeIME(awtFocussedComponentPeer);
         awtFocussedComponent = null;
         awtFocussedComponentPeer = null;
     }
@@ -531,7 +550,7 @@ final class WInputMethod extends InputMethodAdapter
                                      new Annotation(""), 0, text.length());
             }
 
-            // set Hilight Information
+            // set Highlight Information
             if (attributeBoundary!=null && attributeValue!=null &&
                 attributeValue.length!=0 && attributeBoundary.length==attributeValue.length+1 &&
                 attributeBoundary[0]==0 && attributeBoundary[attributeValue.length]==text.length() )
@@ -583,7 +602,7 @@ final class WInputMethod extends InputMethodAdapter
                                                       commitedTextLength,
                                                       TextHitInfo.leading(caretPos),
                                                       TextHitInfo.leading(visiblePos));
-        WToolkit.postEvent(WToolkit.targetToAppContext(source), event);
+        WToolkit.postEvent(event);
     }
 
     public void inquireCandidatePosition()
@@ -622,8 +641,7 @@ final class WInputMethod extends InputMethodAdapter
                 openCandidateWindow(awtFocussedComponentPeer, x, y);
             }
         };
-        WToolkit.postEvent(WToolkit.targetToAppContext(source),
-                           new InvocationEvent(source, r));
+        WToolkit.postEvent(new InvocationEvent(source, r));
     }
 
     // java.awt.Toolkit#getNativeContainer() is not available
@@ -649,8 +667,8 @@ final class WInputMethod extends InputMethodAdapter
 
     }
 
-    private native int createNativeContext();
-    private native void destroyNativeContext(int context);
+    private static native int createNativeContext();
+    private static native void destroyNativeContext(int context);
     private native void enableNativeIME(WComponentPeer peer, int context, boolean useNativeCompWindow);
     private native void disableNativeIME(WComponentPeer peer);
     private native void handleNativeIMEEvent(WComponentPeer peer, AWTEvent e);

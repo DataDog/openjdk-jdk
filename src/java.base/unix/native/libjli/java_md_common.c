@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,8 @@
 #include <sys/time.h>
 #include "java.h"
 
+#define JAVA_DLL "libjava.so"
+
 /*
  * Find the last occurrence of a string
  */
@@ -45,20 +47,27 @@ static char* findLastPathComponent(char *buffer, const char *comp) {
 /*
  * Removes the trailing file name and any intermediate platform
  * directories, if any, and its enclosing directory.
+ * Second parameter is a hint about the type of a file. JNI_TRUE is for
+ * shared libraries and JNI_FALSE is for executables.
  * Ex: if a buffer contains "/foo/bin/javac" or "/foo/bin/x64/javac", the
  * truncated resulting buffer will contain "/foo".
  */
 static jboolean
-TruncatePath(char *buf)
+TruncatePath(char *buf, jboolean pathisdll)
 {
-    // try bin directory, maybe an executable
-    char *p = findLastPathComponent(buf, "/bin/");
+    /*
+     * If the file is a library, try lib directory first and then bin
+     * directory.
+     * If the file is an executable, try bin directory first and then lib
+     * directory.
+     */
+
+    char *p = findLastPathComponent(buf, pathisdll ? "/lib/" : "/bin/");
     if (p != NULL) {
         *p = '\0';
         return JNI_TRUE;
     }
-    // try lib directory, maybe a library
-    p = findLastPathComponent(buf, "/lib/");
+    p = findLastPathComponent(buf, pathisdll ? "/bin/" : "/lib/");
     if (p != NULL) {
         *p = '\0';
         return JNI_TRUE;
@@ -67,7 +76,7 @@ TruncatePath(char *buf)
 }
 
 /*
- * Retrieves the path to the JRE home by locating the executable file
+ * Retrieves the path to the JDK home by locating the executable file
  * of the current process and then truncating the path to the executable
  */
 jboolean
@@ -80,11 +89,11 @@ GetApplicationHome(char *buf, jint bufsize)
     } else {
         return JNI_FALSE;
     }
-    return TruncatePath(buf);
+    return TruncatePath(buf, JNI_FALSE);
 }
 
 /*
- * Retrieves the path to the JRE home by locating the
+ * Retrieves the path to the JDK home by locating the
  * shared library and then truncating the path to it.
  */
 jboolean
@@ -95,11 +104,52 @@ GetApplicationHomeFromDll(char *buf, jint bufsize)
     if (dladdr((void*)&GetApplicationHomeFromDll, &info) != 0) {
         char *path = realpath(info.dli_fname, buf);
         if (path == buf) {
-            return TruncatePath(buf);
+            return TruncatePath(buf, JNI_TRUE);
         }
     }
     return JNI_FALSE;
 }
+
+#if defined(AIX)
+static jboolean
+LibjavaExists(const char *path)
+{
+    char tmp[PATH_MAX + 1];
+    struct stat statbuf;
+    JLI_Snprintf(tmp, PATH_MAX, "%s/%s", path, JAVA_DLL);
+    if (stat(tmp, &statbuf) == 0) {
+        return JNI_TRUE;
+    }
+    return JNI_FALSE;
+}
+
+/*
+ * Retrieves the path to the JDK home by locating libjava.so in
+ * LIBPATH and then truncating the path to it.
+ */
+jboolean
+GetApplicationHomeFromLibpath(char *buf, jint bufsize)
+{
+    char *env = getenv("LIBPATH");
+    char *tmp;
+    char *save_ptr = NULL;
+    char *envpath = JLI_StringDup(env);
+    for (tmp = strtok_r(envpath, ":", &save_ptr); tmp != NULL; tmp = strtok_r(NULL, ":", &save_ptr)) {
+        if (LibjavaExists(tmp)) {
+            char *path = realpath(tmp, buf);
+            if (path == buf) {
+                JLI_StrCat(buf, "/");
+                if (JNI_TRUE == TruncatePath(buf, JNI_TRUE)) {
+                    JLI_MemFree(envpath);
+                    return JNI_TRUE;
+                }
+            }
+        }
+    }
+    JLI_MemFree(envpath);
+    return JNI_FALSE;
+}
+#endif
 
 /*
  * Return true if the named program exists
@@ -119,11 +169,14 @@ ProgramExists(char *name)
 static char *
 Resolve(char *indir, char *cmd)
 {
-    char name[PATH_MAX + 2], *real;
+    char name[PATH_MAX + 1], *real;
+    int snprintf_result;
 
-    if ((JLI_StrLen(indir) + JLI_StrLen(cmd) + 1)  > PATH_MAX) return 0;
-    JLI_Snprintf(name, sizeof(name), "%s%c%s", indir, FILE_SEPARATOR, cmd);
-    if (!ProgramExists(name)) return 0;
+    snprintf_result = JLI_Snprintf(name, sizeof(name), "%s%c%s", indir, FILE_SEPARATOR, cmd);
+    if ((snprintf_result < 0) || (snprintf_result >= (int)sizeof(name))) {
+      return NULL;
+    }
+    if (!ProgramExists(name)) return NULL;
     real = JLI_MemAlloc(PATH_MAX + 2);
     if (!realpath(name, real))
         JLI_StrCpy(real, name);
@@ -148,8 +201,7 @@ FindExecName(char *program)
         return Resolve("", program+1);
 
     /* relative path? */
-    if (JLI_StrRChr(program, FILE_SEPARATOR) != 0) {
-        char buf[PATH_MAX+2];
+    if (JLI_StrRChr(program, FILE_SEPARATOR) != NULL) {
         return Resolve(getcwd(cwdbuf, sizeof(cwdbuf)), program);
     }
 
@@ -159,10 +211,10 @@ FindExecName(char *program)
     tmp_path = JLI_MemAlloc(JLI_StrLen(path) + 2);
     JLI_StrCpy(tmp_path, path);
 
-    for (f=tmp_path; *f && result==0; ) {
+    for (f = tmp_path; *f && result == NULL; ) {
         char *s = f;
         while (*f && (*f != PATH_SEPARATOR)) ++f;
-        if (*f) *f++ = 0;
+        if (*f) *f++ = '\0';
         if (*s == FILE_SEPARATOR)
             result = Resolve(s, program);
         else {
@@ -172,7 +224,7 @@ FindExecName(char *program)
                     FILE_SEPARATOR, s);
             result = Resolve(dir, program);
         }
-        if (result != 0) break;
+        if (result != NULL) break;
     }
 
     JLI_MemFree(tmp_path);
@@ -191,13 +243,7 @@ JLI_ReportErrorMessage(const char* fmt, ...) {
 JNIEXPORT void JNICALL
 JLI_ReportErrorMessageSys(const char* fmt, ...) {
     va_list vl;
-    char *emsg;
-
-    /*
-     * TODO: its safer to use strerror_r but is not available on
-     * Solaris 8. Until then....
-     */
-    emsg = strerror(errno);
+    char *emsg = strerror(errno);
     if (emsg != NULL) {
         fprintf(stderr, "%s\n", emsg);
     }
@@ -211,29 +257,6 @@ JLI_ReportErrorMessageSys(const char* fmt, ...) {
 JNIEXPORT void JNICALL
 JLI_ReportExceptionDescription(JNIEnv * env) {
   (*env)->ExceptionDescribe(env);
-}
-
-/*
- *      Since using the file system as a registry is a bit risky, perform
- *      additional sanity checks on the identified directory to validate
- *      it as a valid jre/sdk.
- *
- *      Return 0 if the tests fail; otherwise return non-zero (true).
- *
- *      Note that checking for anything more than the existence of an
- *      executable object at bin/java relative to the path being checked
- *      will break the regression tests.
- */
-static int
-CheckSanity(char *path, char *dir)
-{
-    char    buffer[PATH_MAX];
-
-    if (JLI_StrLen(path) + JLI_StrLen(dir) + 11 > PATH_MAX)
-        return (0);     /* Silently reject "impossibly" long paths */
-
-    JLI_Snprintf(buffer, sizeof(buffer), "%s/%s/bin/java", path, dir);
-    return ((access(buffer, X_OK) == 0) ? 1 : 0);
 }
 
 /*

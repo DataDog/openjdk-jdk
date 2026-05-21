@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -53,16 +53,49 @@ import javax.lang.model.util.*;
  * source of information is Java source code, then the elements will be
  * returned in source code order.
  *
- * @author Joseph D. Darcy
- * @author Scott Seligman
- * @author Peter von der Ah&eacute;
+ * @apiNote
+ * The represented class or interface may have a {@linkplain
+ * javax.lang.model.util.Elements#getFileObjectOf(Element) reference
+ * representation} (either source code or executable output). Multiple
+ * classes and interfaces can share the same reference representation
+ * backing construct. For example, multiple classes and interfaces can
+ * be declared in the same source file, including, but not limited
+ * to:
+ * <ul>
+ * <li> a {@linkplain NestingKind#TOP_LEVEL top-level} class or
+ * interface and auxiliary classes and interfaces
+ * <li>a top-level class or interface and {@linkplain
+ * NestingKind#isNested() nested classes and interfaces} within it
+ * </ul>
+ * <p>In the context of annotation processing, a type element can
+ * be:
+ * <ul>
+ * <li>created from the initial inputs to a run of the tool
+ * <li>created from {@linkplain
+ * javax.annotation.processing.Filer#createSourceFile(CharSequence,
+ * Element...) source code} or {@linkplain
+ * javax.annotation.processing.Filer#createClassFile(CharSequence,
+ * Element...) class files} written by a processor
+ * <li>{@linkplain
+ * javax.lang.model.util.Elements#getAllTypeElements(CharSequence)
+ * queried for} in the configured environment
+ * </ul>
+ *
  * @see DeclaredType
+ * @jls 8.1 Class Declarations
+ * @jls 8.5 Member Class and Interface Declarations
+ * @jls 8.9 Enum Classes
+ * @jls 8.10 Record Classes
+ * @jls 9.1 Interface Declarations
+ * @jls 9.5 Member Class and Interface Declarations
+ * @jls 9.6 Annotation Interfaces
+ *
  * @since 1.6
  */
 public interface TypeElement extends Element, Parameterizable, QualifiedNameable {
     /**
      * Returns the type defined by this class or interface element,
-     * returning the <i>prototypical</i> type for an element
+     * returning the <dfn>{@index "prototypical type"}</dfn> for an element
      * representing a generic type.
      *
      * <p>A generic element defines a family of types, not just one.
@@ -72,6 +105,12 @@ public interface TypeElement extends Element, Parameterizable, QualifiedNameable
      * For example,
      * for the generic class element {@code C<N extends Number>},
      * the parameterized type {@code C<N>} is returned.
+     * Otherwise, for a non-generic class or interface, the
+     * prototypical type mirror corresponds to a use of the type.
+     * None of the components of the prototypical type are annotated,
+     * including the prototypical type itself.
+     *
+     * @apiNote
      * The {@link Types} utility interface has more general methods
      * for obtaining the full range of types defined by an element.
      *
@@ -108,6 +147,7 @@ public interface TypeElement extends Element, Parameterizable, QualifiedNameable
      *
      * @jls 8.8.9 Default Constructor
      * @jls 8.9.3 Enum Members
+     * @jls 8.10.3 Record Members
      */
     @Override
     List<? extends Element> getEnclosedElements();
@@ -122,8 +162,8 @@ public interface TypeElement extends Element, Parameterizable, QualifiedNameable
     /**
      * Returns the fully qualified name of this class or interface
      * element.  More precisely, it returns the <i>canonical</i> name.
-     * For local and anonymous classes, which do not have canonical
-     * names, an <a href=Name.html#empty_name>empty name</a> is
+     * For local, and anonymous classes, which do not have canonical
+     * names, an {@linkplain Name##empty_name empty name} is
      * returned.
      *
      * <p>The name of a generic class or interface does not include any reference
@@ -144,8 +184,8 @@ public interface TypeElement extends Element, Parameterizable, QualifiedNameable
     /**
      * Returns the simple name of this class or interface element.
      *
-     * For an anonymous class, an <a href=Name.html#empty_name> empty
-     * name</a> is returned.
+     * For an anonymous class, an {@linkplain Name##empty_name empty
+     * name} is returned.
      *
      * @return the simple name of this class or interface,
      * an empty name for an anonymous class
@@ -199,24 +239,20 @@ public interface TypeElement extends Element, Parameterizable, QualifiedNameable
     }
 
     /**
-     * {@preview Associated with sealed classes, a preview feature of the Java language.
-     *
-     *           This method is associated with <i>sealed classes</i>, a preview
-     *           feature of the Java language. Preview features
-     *           may be removed in a future release, or upgraded to permanent
-     *           features of the Java language.}
      * Returns the permitted classes of this class or interface
      * element in declaration order.
+     * Note that for an interface, permitted subclasses and
+     * subinterfaces can be returned.
      *
      * @implSpec The default implementations of this method returns an
      * empty and unmodifiable list.
      *
      * @return the permitted classes, or an empty list if there are none
      *
-     * @since 15
+     * @since 17
+     * @jls 8.1.6 Permitted Direct Subclasses
+     * @jls 9.1.4 Permitted Direct Subclasses and Subinterfaces
      */
-    @jdk.internal.PreviewFeature(feature=jdk.internal.PreviewFeature.Feature.SEALED_CLASSES,
-                                 essentialAPI=false)
     default List<? extends TypeMirror> getPermittedSubclasses() {
         return List.of();
     }

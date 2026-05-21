@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,6 @@
  */
 
 #import <Cocoa/Cocoa.h>
-#import <JavaNativeFoundation/JavaNativeFoundation.h>
 
 @interface CFileDialog : NSObject <NSOpenSavePanelDelegate> {
     // Should we query back to Java for a file filter?
@@ -42,6 +41,9 @@
     // Starting directory and file
     NSString *fDirectory;
     NSString *fFile;
+
+    @public
+    BOOL inModalLoop;
 
     // File dialog's mode
     jint fMode;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -111,9 +111,10 @@ final class KeyUpdate {
         @Override
         public String toString() {
             MessageFormat messageFormat = new MessageFormat(
-                    "\"KeyUpdate\": '{'\n" +
-                    "  \"request_update\": {0}\n" +
-                    "'}'",
+                    """
+                            "KeyUpdate": '{'
+                              "request_update": {0}
+                            '}'""",
                     Locale.ENGLISH);
 
             Object[] messageFields = {
@@ -131,7 +132,7 @@ final class KeyUpdate {
         final byte id;
         final String name;
 
-        private KeyUpdateRequest(byte id, String name) {
+        KeyUpdateRequest(byte id, String name) {
             this.id = id;
             this.name = name;
         }
@@ -169,7 +170,9 @@ final class KeyUpdate {
         public byte[] produce(ConnectionContext context) throws IOException {
             PostHandshakeContext hc = (PostHandshakeContext)context;
             return handshakeProducer.produce(context,
-                    new KeyUpdateMessage(hc, KeyUpdateRequest.REQUESTED));
+                    new KeyUpdateMessage(hc, hc.conContext.isInboundClosed() ?
+                            KeyUpdateRequest.NOTREQUESTED :
+                            KeyUpdateRequest.REQUESTED));
         }
     }
 
@@ -188,7 +191,7 @@ final class KeyUpdate {
             // The consuming happens in client side only.
             PostHandshakeContext hc = (PostHandshakeContext)context;
             KeyUpdateMessage km = new KeyUpdateMessage(hc, message);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                         "Consuming KeyUpdate post-handshake message", km);
             }
@@ -211,11 +214,11 @@ final class KeyUpdate {
                         Alert.INTERNAL_ERROR, "no key derivation");
             }
 
-            SecretKey nplus1 = skd.deriveKey("TlsUpdateNplus1", null);
+            SecretKey nplus1 = skd.deriveKey("TlsUpdateNplus1");
             SSLKeyDerivation kd = kdg.createKeyDerivation(hc, nplus1);
-            SecretKey key = kd.deriveKey("TlsKey", null);
-            IvParameterSpec ivSpec = new IvParameterSpec(
-                    kd.deriveKey("TlsIv", null).getEncoded());
+            SecretKey key = kd.deriveKey("TlsKey");
+            IvParameterSpec ivSpec =
+                    new IvParameterSpec(kd.deriveData("TlsIv"));
             try {
                 SSLReadCipher rc =
                     hc.negotiatedCipherSuite.bulkCipher.createReadCipher(
@@ -232,7 +235,7 @@ final class KeyUpdate {
 
                 rc.baseSecret = nplus1;
                 hc.conContext.inputRecord.changeReadCiphers(rc);
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl")) {
+                if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.SSL)) {
                     SSLLogger.fine("KeyUpdate: read key updated");
                 }
             } catch (GeneralSecurityException gse) {
@@ -266,8 +269,14 @@ final class KeyUpdate {
                 HandshakeMessage message) throws IOException {
             // The producing happens in server side only.
             PostHandshakeContext hc = (PostHandshakeContext)context;
+            if (hc.sslConfig.isQuic) {
+                // Quic doesn't allow KEY_UPDATE TLS message. It has its own Quic specific
+                // key update mechanism, RFC-9001, section 6:
+                // Endpoints MUST NOT send a TLS KeyUpdate message.
+                return null;
+            }
             KeyUpdateMessage km = (KeyUpdateMessage)message;
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.HANDSHAKE)) {
                 SSLLogger.fine(
                         "Produced KeyUpdate post-handshake message", km);
             }
@@ -290,11 +299,11 @@ final class KeyUpdate {
                         Alert.INTERNAL_ERROR, "no key derivation");
             }
 
-            SecretKey nplus1 = skd.deriveKey("TlsUpdateNplus1", null);
+            SecretKey nplus1 = skd.deriveKey("TlsUpdateNplus1");
             SSLKeyDerivation kd = kdg.createKeyDerivation(hc, nplus1);
-            SecretKey key = kd.deriveKey("TlsKey", null);
-            IvParameterSpec ivSpec = new IvParameterSpec(
-                    kd.deriveKey("TlsIv", null).getEncoded());
+            SecretKey key = kd.deriveKey("TlsKey");
+            IvParameterSpec ivSpec =
+                     new IvParameterSpec(kd.deriveData("TlsIv"));
 
             SSLWriteCipher wc;
             try {
@@ -319,7 +328,7 @@ final class KeyUpdate {
             // changeWriteCiphers() implementation.
             wc.baseSecret = nplus1;
             hc.conContext.outputRecord.changeWriteCiphers(wc, km.status.id);
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl")) {
+            if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.SSL)) {
                 SSLLogger.fine("KeyUpdate: write key updated");
             }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -50,7 +50,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import jdk.internal.loader.Resource;
@@ -84,7 +83,7 @@ public final class ModulePatcher {
                 String mn = e.getKey();
                 List<Path> paths = e.getValue().stream()
                         .map(Paths::get)
-                        .collect(Collectors.toList());
+                        .toList();
                 map.put(mn, paths);
             }
             this.map = map;
@@ -132,14 +131,15 @@ public final class ModulePatcher {
 
                     // exploded directory without following sym links
                     Path top = file;
-                    Files.find(top, Integer.MAX_VALUE,
-                               ((path, attrs) -> attrs.isRegularFile()))
-                            .filter(path -> (!isAutomatic
-                                    || path.toString().endsWith(".class"))
-                                    && !isHidden(path))
+                    try (Stream<Path> stream = Files.find(top, Integer.MAX_VALUE,
+                            ((path, attrs) -> attrs.isRegularFile()))) {
+                        stream.filter(path -> (!isAutomatic
+                                      || path.toString().endsWith(".class"))
+                                      && !isHidden(path))
                             .map(path -> toPackageName(top, path))
                             .filter(Checks::isPackageName)
                             .forEach(packages::add);
+                    }
 
                 }
             }
@@ -152,7 +152,7 @@ public final class ModulePatcher {
         packages.removeAll(descriptor.packages());
         if (!packages.isEmpty()) {
             Builder builder = JLMA.newModuleBuilder(descriptor.name(),
-                                                    /*strict*/ false,
+                                                    /*strict*/ descriptor.isAutomatic(),
                                                     descriptor.modifiers());
             if (!descriptor.isAutomatic()) {
                 descriptor.requires().forEach(builder::requires);
@@ -225,6 +225,7 @@ public final class ModulePatcher {
         private final ModuleReference mref;
         private final URL delegateCodeSourceURL;
         private volatile ModuleReader delegate;
+        private volatile boolean closed;
 
         /**
          * Creates the ModuleReader to reads resources in a patched module.
@@ -292,6 +293,15 @@ public final class ModulePatcher {
         }
 
         /**
+         * Throws an IOException if the ModuleReader is closed.
+         */
+        private void ensureOpen() throws IOException {
+            if (closed) {
+                throw new IOException("ModuleReader is closed");
+            }
+        }
+
+        /**
          * Finds a resources in the patch locations. Returns null if not found
          * or the name is "module-info.class" as that cannot be overridden.
          */
@@ -310,7 +320,7 @@ public final class ModulePatcher {
          * Finds a resource of the given name in the patched module.
          */
         public Resource findResource(String name) throws IOException {
-
+            assert !closed : "module reader is closed";
             // patch locations
             Resource r = findResourceInPatch(name);
             if (r != null)
@@ -354,6 +364,7 @@ public final class ModulePatcher {
 
         @Override
         public Optional<URI> find(String name) throws IOException {
+            ensureOpen();
             Resource r = findResourceInPatch(name);
             if (r != null) {
                 URI uri = URI.create(r.getURL().toString());
@@ -365,6 +376,7 @@ public final class ModulePatcher {
 
         @Override
         public Optional<InputStream> open(String name) throws IOException {
+            ensureOpen();
             Resource r = findResourceInPatch(name);
             if (r != null) {
                 return Optional.of(r.getInputStream());
@@ -375,6 +387,7 @@ public final class ModulePatcher {
 
         @Override
         public Optional<ByteBuffer> read(String name) throws IOException {
+            ensureOpen();
             Resource r = findResourceInPatch(name);
             if (r != null) {
                 ByteBuffer bb = r.getByteBuffer();
@@ -398,6 +411,7 @@ public final class ModulePatcher {
 
         @Override
         public Stream<String> list() throws IOException {
+            ensureOpen();
             Stream<String> s = delegate().list();
             for (ResourceFinder finder : finders) {
                 s = Stream.concat(s, finder.list());
@@ -407,6 +421,10 @@ public final class ModulePatcher {
 
         @Override
         public void close() throws IOException {
+            if (closed) {
+                return;
+            }
+            closed = true;
             closeAll(finders);
             delegate().close();
         }
@@ -454,7 +472,9 @@ public final class ModulePatcher {
                 public URL getURL() {
                     String encodedPath = ParseUtil.encodePath(name, false);
                     try {
-                        return new URL("jar:" + csURL + "!/" + encodedPath);
+                        @SuppressWarnings("deprecation")
+                        var result = new URL("jar:" + csURL + "!/" + encodedPath);
+                        return result;
                     } catch (MalformedURLException e) {
                         return null;
                     }
@@ -465,8 +485,10 @@ public final class ModulePatcher {
                 }
                 @Override
                 public ByteBuffer getByteBuffer() throws IOException {
-                    byte[] bytes = getInputStream().readAllBytes();
-                    return ByteBuffer.wrap(bytes);
+                    try (InputStream in = getInputStream()) {
+                        byte[] bytes = in.readAllBytes();
+                        return ByteBuffer.wrap(bytes);
+                    }
                 }
                 @Override
                 public InputStream getInputStream() throws IOException {

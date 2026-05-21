@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2024, Oracle and/or its affiliates. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -80,6 +80,7 @@ import javax.imageio.*;
 import javax.swing.*;
 
 import static java.awt.RenderingHints.*;
+import static java.nio.charset.StandardCharsets.ISO_8859_1;
 
 /**
  * FontPanel.java
@@ -643,7 +644,7 @@ public final class FontPanel extends JPanel implements AdjustmentListener {
                 break;
               case DRAW_BYTES:
                 try {
-                    byte[] lineBytes = line.getBytes( "ISO-8859-1" );
+                    byte[] lineBytes = line.getBytes(ISO_8859_1);
                     g2.drawBytes( lineBytes, 0, lineBytes.length, 0, 0 );
                 }
                 catch ( Exception e ) {
@@ -739,7 +740,8 @@ public final class FontPanel extends JPanel implements AdjustmentListener {
                 verticalBar.setValues( oldValue, numCharDown, 0, totalNumRows );
             }
             if ( totalNumRows <= numCharDown && drawStart == 0) {
-              verticalBar.setEnabled( false );
+              // the disabled scroll bar looks odd with Nimbus L&F.
+              verticalBar.setEnabled( true );
             }
             else {
               verticalBar.setEnabled( true );
@@ -1112,13 +1114,7 @@ public final class FontPanel extends JPanel implements AdjustmentListener {
             /// Position and set size of zoom window as needed
             zoomWindow.setLocation( canvasLoc.x + zoomAreaX, canvasLoc.y + zoomAreaY );
             if ( !nowZooming ) {
-                if ( zoomWindow.getWarningString() != null )
-                  /// If this is not opened as a "secure" window,
-                  /// it has a banner below the zoom dialog which makes it look really BAD
-                  /// So enlarge it by a bit
-                  zoomWindow.setSize( zoomAreaWidth + 1, zoomAreaHeight + 20 );
-                else
-                  zoomWindow.setSize( zoomAreaWidth + 1, zoomAreaHeight + 1 );
+                zoomWindow.setSize( zoomAreaWidth + 1, zoomAreaHeight + 1 );
             }
 
             /// Prepare zoomed image

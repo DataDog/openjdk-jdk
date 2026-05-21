@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,7 +35,7 @@
 #define UTF_ERROR(m) utfError(__FILE__, __LINE__,  m)
 #define UTF_ASSERT(x) ( (x)==0 ? UTF_ERROR("ASSERT ERROR " #x) : (void)0 )
 
-// Platform independed part
+// Platform independent part
 
 static void utfError(char *file, int line, char *message) {
     (void)fprintf(stderr, "UTF ERROR [\"%s\":%d]: %s\n", file, line, message);
@@ -173,7 +173,7 @@ int JNICALL utf8mToUtf8sLength(jbyte *string, int length) {
 
     newLength = 0;
     for ( i = 0 ; i < length ; i++ ) {
-        unsigned byte1, byte2, byte3, byte4, byte5, byte6;
+        unsigned byte1, byte2, byte4, byte5, byte6;
 
         byte1 = (unsigned char)string[i];
         if ( (byte1 & 0x80) == 0 ) { /* 1byte encoding */
@@ -196,7 +196,7 @@ int JNICALL utf8mToUtf8sLength(jbyte *string, int length) {
                 break; /* Error condition */
             }
             byte2 = (unsigned char)string[++i];
-            byte3 = (unsigned char)string[++i];
+            ++i; // byte3 is not used
             newLength += 3;
             /* Possible process a second 3byte encoding */
             if ( (i+3) < length && byte1 == 0xED && (byte2 & 0xF0) == 0xA0 ) {
@@ -307,7 +307,7 @@ static UINT getCodepage() {
     static UINT intCodePage = -1;
 
     if (intCodePage == -1) {
-        // Firts call, get codepage from the os
+        // First call, get codepage from the os
         langID = LANGIDFROMLCID(GetUserDefaultLCID());
         localeID = MAKELCID(langID, SORT_DEFAULT);
         if (GetLocaleInfo(localeID, LOCALE_IDEFAULTANSICODEPAGE,
@@ -487,7 +487,7 @@ static int iconvConvert(conv_direction drn, char *bytes, size_t len, char *outpu
         }
 
         if (codeset == NULL) {
-           // Not able to intialize process locale from platform one.
+           // Not able to initialize process locale from platform one.
            codeset = (char *) -1;
         }
     }

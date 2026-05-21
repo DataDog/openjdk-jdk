@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,14 +33,12 @@ typedef void (*initializer)(void);
 
 // Per-compiler statistics
 class CompilerStatistics {
-  friend class VMStructs;
-
   class Data {
     friend class VMStructs;
   public:
     elapsedTimer _time;  // time spent compiling
-    int _bytes;          // number of bytecodes compiled, including inlined bytecodes
-    int _count;          // number of compilations
+    uint _bytes;         // number of bytecodes compiled, including inlined bytecodes
+    uint _count;         // number of compilations
     Data() : _bytes(0), _count(0) {}
     void update(elapsedTimer time, int bytes) {
       _time.add(time);
@@ -55,13 +53,13 @@ class CompilerStatistics {
  public:
   Data _standard;  // stats for non-OSR compilations
   Data _osr;       // stats for OSR compilations
-  int _nmethods_size; //
-  int _nmethods_code_size;
+  uint _nmethods_size; //
+  uint _nmethods_code_size;
 
   double total_time() { return _standard._time.seconds() + _osr._time.seconds(); }
 
   double bytes_per_second() {
-    int bytes = _standard._bytes + _osr._bytes;
+    uint bytes = _standard._bytes + _osr._bytes;
     if (bytes == 0) {
       return 0.0;
     }
@@ -100,11 +98,6 @@ class AbstractCompiler : public CHeapObj<mtCompiler> {
   // Name of this compiler
   virtual const char* name() = 0;
 
-  // Missing feature tests
-  virtual bool supports_native()                 { return true; }
-  virtual bool supports_osr   ()                 { return true; }
-  virtual bool can_compile_method(const methodHandle& method)  { return true; }
-
   // Determine if the current compiler provides an intrinsic
   // for method 'method'. An intrinsic is available if:
   //  - the intrinsic is enabled (by using the appropriate command-line flag,
@@ -119,7 +112,7 @@ class AbstractCompiler : public CHeapObj<mtCompiler> {
   // Usually, the compilation context is the caller of the method 'method'.
   // The only case when for a non-recursive method 'method' the compilation context
   // is not the caller of the 'method' (but it is the method itself) is
-  // java.lang.ref.Referene::get.
+  // java.lang.ref.Reference::get.
   // For java.lang.ref.Reference::get, the intrinsic version is used
   // instead of the compiled version so that the value in the referent
   // field can be registered by the G1 pre-barrier code. The intrinsified
@@ -130,17 +123,19 @@ class AbstractCompiler : public CHeapObj<mtCompiler> {
   // GraphBuilder::GraphBuilder() in src/share/vm/c1/c1_GraphBuilder.cpp
   // for more details.
 
-  virtual bool is_intrinsic_available(const methodHandle& method, DirectiveSet* directive) {
+  bool is_intrinsic_available(const methodHandle& method, DirectiveSet* directive) {
+    vmIntrinsics::ID id = method->intrinsic_id();
+    assert(id != vmIntrinsics::_none, "must be a VM intrinsic");
     return is_intrinsic_supported(method) &&
-           !directive->is_intrinsic_disabled(method) &&
-           !vmIntrinsics::is_disabled_by_flags(method);
+           vmIntrinsics::is_intrinsic_available(id) &&
+           !directive->is_intrinsic_disabled(id);
   }
 
   // Determines if an intrinsic is supported by the compiler, that is,
   // the compiler provides the instructions necessary to generate
   // the intrinsic code for method 'method'.
   //
-  // The 'is_intrinsic_supported' method is a white list, that is,
+  // The 'is_intrinsic_supported' method is an allow-list, that is,
   // by default no intrinsics are supported by a compiler except
   // the ones listed in the method. Overriding methods should conform
   // to this behavior.
@@ -149,10 +144,13 @@ class AbstractCompiler : public CHeapObj<mtCompiler> {
   }
 
   // Compiler type queries.
-  const bool is_c1()                             { return _type == compiler_c1; }
-  const bool is_c2()                             { return _type == compiler_c2; }
-  const bool is_jvmci()                          { return _type == compiler_jvmci; }
-  const CompilerType type()                      { return _type; }
+  bool is_c1() const                     { return _type == compiler_c1; }
+  bool is_c2() const                     { return _type == compiler_c2; }
+  bool is_jvmci() const                  { return _type == compiler_jvmci; }
+  CompilerType type() const              { return _type; }
+
+  // Compiler threads are hidden by default.
+  virtual bool is_hidden_from_external_view() const { return true; }
 
   // Customization
   virtual void initialize () = 0;
@@ -170,6 +168,17 @@ class AbstractCompiler : public CHeapObj<mtCompiler> {
     ShouldNotReachHere();
   }
 
+  // Notifies this compiler that the current thread (`current`) is about to stop.
+  // The current thread currently holds the CompileThread_lock.
+  virtual void stopping_compiler_thread(CompilerThread* current) {
+    // Do nothing
+  }
+
+  // Notifies this compiler that queue is empty just prior to waiting on
+  // MethodCompileQueue_lock which is held by the current thread (`thread`).
+  virtual void on_empty_queue(CompileQueue* queue, CompilerThread* thread) {
+    // Do nothing
+  }
 
   // Print compilation timers and statistics
   virtual void print_timers() {

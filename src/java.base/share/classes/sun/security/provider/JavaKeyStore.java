@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,8 @@ import java.security.*;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
 import java.security.cert.CertificateException;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -54,7 +56,7 @@ import sun.security.util.KeyStoreDelegator;
  * @since 1.2
  */
 
-public abstract class JavaKeyStore extends KeyStoreSpi {
+public abstract sealed class JavaKeyStore extends KeyStoreSpi {
 
     // regular JKS
     public static final class JKS extends JavaKeyStore {
@@ -63,7 +65,7 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
         }
     }
 
-    // special JKS that uses case sensitive aliases
+    // special JKS that uses case-sensitive aliases
     public static final class CaseExactJKS extends JavaKeyStore {
         String convertAlias(String alias) {
             return alias;
@@ -100,16 +102,16 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
 
     // Private keys and their supporting certificate chains
     private static class KeyEntry {
-        Date date; // the creation date of this entry
+        Instant date; // the creation date of this entry
         byte[] protectedPrivKey;
         Certificate[] chain;
-    };
+    }
 
     // Trusted certificates
     private static class TrustedCertEntry {
-        Date date; // the creation date of this entry
+        Instant date; // the creation date of this entry
         Certificate cert;
-    };
+    }
 
     /**
      * Private keys and certificates are stored in a hashtable.
@@ -118,7 +120,7 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
     private final Hashtable<String, Object> entries;
 
     JavaKeyStore() {
-        entries = new Hashtable<String, Object>();
+        entries = new Hashtable<>();
     }
 
     // convert an alias to internal form, overridden in subclasses:
@@ -146,7 +148,7 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
     {
         Object entry = entries.get(convertAlias(alias));
 
-        if (entry == null || !(entry instanceof KeyEntry)) {
+        if (!(entry instanceof KeyEntry keyEntry)) {
             return null;
         }
         if (password == null) {
@@ -155,7 +157,7 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
 
         byte[] passwordBytes = convertToBytes(password);
         KeyProtector keyProtector = new KeyProtector(passwordBytes);
-        byte[] encrBytes = ((KeyEntry)entry).protectedPrivKey;
+        byte[] encrBytes = keyEntry.protectedPrivKey;
         EncryptedPrivateKeyInfo encrInfo;
         try {
             encrInfo = new EncryptedPrivateKeyInfo(encrBytes);
@@ -183,11 +185,11 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
     public Certificate[] engineGetCertificateChain(String alias) {
         Object entry = entries.get(convertAlias(alias));
 
-        if (entry != null && entry instanceof KeyEntry) {
-            if (((KeyEntry)entry).chain == null) {
+        if (entry instanceof KeyEntry keyEntry) {
+            if (keyEntry.chain == null) {
                 return null;
             } else {
-                return ((KeyEntry)entry).chain.clone();
+                return keyEntry.chain.clone();
             }
         } else {
             return null;
@@ -236,13 +238,31 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
      * not exist
      */
     public Date engineGetCreationDate(String alias) {
-        Object entry = entries.get(convertAlias(alias));
+        final Instant instant = this.engineGetCreationInstant(alias);
+        return instant == null ? null : Date.from(instant);
+    }
+
+
+
+    /**
+     * Returns the instant that the entry identified by the given alias was
+     * created.
+     *
+     * @param alias the alias name
+     *
+     * @return the instant that the entry identified by the given alias
+     * was created, or {@code null} if the given alias does not exist
+     *
+     * @since 27
+     */
+    public Instant engineGetCreationInstant(String alias) {
+        final Object entry = entries.get(convertAlias(alias));
 
         if (entry != null) {
             if (entry instanceof TrustedCertEntry) {
-                return new Date(((TrustedCertEntry)entry).date.getTime());
+                return ((TrustedCertEntry)entry).date;
             } else {
-                return new Date(((KeyEntry)entry).date.getTime());
+                return((KeyEntry)entry).date;
             }
         } else {
             return null;
@@ -281,10 +301,13 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
         if (!(key instanceof java.security.PrivateKey)) {
             throw new KeyStoreException("Cannot store non-PrivateKeys");
         }
+        if (password == null) {
+            throw new KeyStoreException("password can't be null");
+        }
         try {
             synchronized(entries) {
                 KeyEntry entry = new KeyEntry();
-                entry.date = new Date();
+                entry.date = Instant.now().truncatedTo(ChronoUnit.MILLIS);
 
                 // Protect the encoding of the key
                 passwordBytes = convertToBytes(password);
@@ -347,7 +370,7 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
             }
 
             KeyEntry entry = new KeyEntry();
-            entry.date = new Date();
+            entry.date = Instant.now().truncatedTo(ChronoUnit.MILLIS);
 
             entry.protectedPrivKey = key.clone();
             if ((chain != null) &&
@@ -381,14 +404,14 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
         synchronized(entries) {
 
             Object entry = entries.get(convertAlias(alias));
-            if ((entry != null) && (entry instanceof KeyEntry)) {
+            if (entry instanceof KeyEntry) {
                 throw new KeyStoreException
                     ("Cannot overwrite own certificate");
             }
 
             TrustedCertEntry trustedCertEntry = new TrustedCertEntry();
             trustedCertEntry.cert = cert;
-            trustedCertEntry.date = new Date();
+            trustedCertEntry.date = Instant.now().truncatedTo(ChronoUnit.MILLIS);
             entries.put(convertAlias(alias), trustedCertEntry);
         }
     }
@@ -446,11 +469,7 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
      */
     public boolean engineIsKeyEntry(String alias) {
         Object entry = entries.get(convertAlias(alias));
-        if ((entry != null) && (entry instanceof KeyEntry)) {
-            return true;
-        } else {
-            return false;
-        }
+        return entry instanceof KeyEntry;
     }
 
     /**
@@ -462,11 +481,7 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
      */
     public boolean engineIsCertificateEntry(String alias) {
         Object entry = entries.get(convertAlias(alias));
-        if ((entry != null) && (entry instanceof TrustedCertEntry)) {
-            return true;
-        } else {
-            return false;
-        }
+        return entry instanceof TrustedCertEntry;
     }
 
     /**
@@ -488,9 +503,9 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
     public String engineGetCertificateAlias(Certificate cert) {
         Certificate certElem;
 
-        for (Enumeration<String> e = entries.keys(); e.hasMoreElements(); ) {
-            String alias = e.nextElement();
-            Object entry = entries.get(alias);
+        for (Map.Entry<String, Object> e : entries.entrySet()) {
+            String alias = e.getKey();
+            Object entry = e.getValue();
             if (entry instanceof TrustedCertEntry) {
                 certElem = ((TrustedCertEntry)entry).cert;
             } else if (((KeyEntry)entry).chain != null) {
@@ -551,7 +566,7 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
              *     }
              *
              * ended by a keyed SHA1 hash (bytes only) of
-             *     { password + whitener + preceding body }
+             *     { password + extra data + preceding body }
              */
 
             // password is mandatory when storing
@@ -571,10 +586,9 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
 
             dos.writeInt(entries.size());
 
-            for (Enumeration<String> e = entries.keys(); e.hasMoreElements();) {
-
-                String alias = e.nextElement();
-                Object entry = entries.get(alias);
+            for (Map.Entry<String, Object> e : entries.entrySet()) {
+                String alias = e.getKey();
+                Object entry = e.getValue();
 
                 if (entry instanceof KeyEntry) {
 
@@ -585,7 +599,7 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
                     dos.writeUTF(alias);
 
                     // Write the (entry creation) date
-                    dos.writeLong(((KeyEntry)entry).date.getTime());
+                    dos.writeLong(((KeyEntry)entry).date.toEpochMilli());
 
                     // Write the protected private key
                     dos.writeInt(((KeyEntry)entry).protectedPrivKey.length);
@@ -614,7 +628,9 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
                     dos.writeUTF(alias);
 
                     // Write the (entry creation) date
-                    dos.writeLong(((TrustedCertEntry)entry).date.getTime());
+                    dos.writeLong(
+                            ((TrustedCertEntry)entry).date.toEpochMilli()
+                    );
 
                     // Write the trusted certificate
                     encoded = ((TrustedCertEntry)entry).cert.getEncoded();
@@ -633,6 +649,10 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
 
             dos.write(digest);
             dos.flush();
+
+            if (debug != null) {
+                emitWeakKeyStoreWarning();
+            }
         }
     }
 
@@ -661,8 +681,8 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
             MessageDigest md = null;
             CertificateFactory cf = null;
             Hashtable<String, CertificateFactory> cfs = null;
-            ByteArrayInputStream bais = null;
-            byte[] encoded = null;
+            ByteArrayInputStream bais;
+            byte[] encoded;
             int trustedKeyCount = 0, privateKeyCount = 0;
 
             if (stream == null)
@@ -689,7 +709,7 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
                 cf = CertificateFactory.getInstance("X509");
             } else {
                 // version 2
-                cfs = new Hashtable<String, CertificateFactory>(3);
+                cfs = new Hashtable<>(3);
             }
 
             entries.clear();
@@ -709,7 +729,7 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
                     alias = dis.readUTF();
 
                     // Read the (entry creation) date
-                    entry.date = new Date(dis.readLong());
+                    entry.date = Instant.ofEpochMilli(dis.readLong());
 
                     // Read the private key
                     entry.protectedPrivKey =
@@ -719,7 +739,7 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
                     int numOfCerts = dis.readInt();
                     if (numOfCerts > 0) {
                         List<Certificate> certs = new ArrayList<>(
-                                numOfCerts > 10 ? 10 : numOfCerts);
+                                Math.min(numOfCerts, 10));
                         for (int j = 0; j < numOfCerts; j++) {
                             if (xVersion == 2) {
                                 // read the certificate type, and instantiate a
@@ -758,7 +778,7 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
                     alias = dis.readUTF();
 
                     // Read the (entry creation) date
-                    entry.date = new Date(dis.readLong());
+                    entry.date = Instant.ofEpochMilli(dis.readLong());
 
                     // Read the trusted certificate
                     if (xVersion == 2) {
@@ -796,6 +816,10 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
                     privateKeyCount + ". trusted key count: " + trustedKeyCount);
             }
 
+            if (debug != null) {
+                emitWeakKeyStoreWarning();
+            }
+
             /*
              * If a password has been provided, we check the keyed digest
              * at the end. If this check fails, the store has been tampered
@@ -807,9 +831,9 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
                 if (!MessageDigest.isEqual(computed, actual)) {
                     Throwable t = new UnrecoverableKeyException
                             ("Password verification failed");
-                    throw (IOException) new IOException
+                    throw new IOException
                             ("Keystore was tampered with, or "
-                                    + "password was incorrect").initCause(t);
+                                    + "password was incorrect", t);
                 }
             }
         }
@@ -817,7 +841,7 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
 
     /**
      * To guard against tampering with the keystore, we append a keyed
-     * hash with a bit of whitener.
+     * hash with a bit of extra data.
      */
     private MessageDigest getPreKeyedHash(char[] password)
         throws NoSuchAlgorithmException
@@ -843,5 +867,17 @@ public abstract class JavaKeyStore extends KeyStoreSpi {
             passwdBytes[j++] = (byte)password[i];
         }
         return passwdBytes;
+    }
+
+    private void emitWeakKeyStoreWarning() {
+        String type = this.getClass().getSimpleName().
+                toUpperCase(Locale.ROOT);
+        if (type.equals("JKS")){
+            debug.println("WARNING: JKS uses outdated cryptographic "
+                    + "algorithms and will be removed in a future "
+                    + "release. Migrate to PKCS12 using:");
+            debug.println("keytool -importkeystore -srckeystore <keystore> "
+                    + "-destkeystore <keystore> -deststoretype pkcs12");
+        }
     }
 }

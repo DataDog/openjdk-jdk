@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -112,15 +112,15 @@ import sun.util.calendar.Gregorian;
  * <pre><code>
  *      // Base GMT offset: -8:00
  *      // DST starts:      at 2:00am in standard time
- *      //                  on the first Sunday in April
+ *      //                  on the second Sunday in March
  *      // DST ends:        at 2:00am in daylight time
- *      //                  on the last Sunday in October
+ *      //                  on the first Sunday in November
  *      // Save:            1 hour
  *      SimpleTimeZone(-28800000,
  *                     "America/Los_Angeles",
- *                     Calendar.APRIL, 1, -Calendar.SUNDAY,
+ *                     Calendar.MARCH, 8, -Calendar.SUNDAY,
  *                     7200000,
- *                     Calendar.OCTOBER, -1, Calendar.SUNDAY,
+ *                     Calendar.NOVEMBER, 1, -Calendar.SUNDAY,
  *                     7200000,
  *                     3600000)
  *
@@ -156,6 +156,7 @@ public class SimpleTimeZone extends TimeZone {
      * @param rawOffset  The base time zone offset in milliseconds to GMT.
      * @param ID         The time zone name that is given to this instance.
      */
+    @SuppressWarnings("this-escape")
     public SimpleTimeZone(int rawOffset, String ID)
     {
         this.rawOffset = rawOffset;
@@ -326,6 +327,7 @@ public class SimpleTimeZone extends TimeZone {
      *
      * @since 1.4
      */
+    @SuppressWarnings("this-escape")
     public SimpleTimeZone(int rawOffset, String ID,
                           int startMonth, int startDay, int startDayOfWeek,
                           int startTime, int startTimeMode,
@@ -738,27 +740,22 @@ public class SimpleTimeZone extends TimeZone {
         cdate.setNormalizedYear(year);
         cdate.setMonth(month + 1);
         switch (mode) {
-        case DOM_MODE:
-            cdate.setDayOfMonth(dayOfMonth);
-            break;
-
-        case DOW_IN_MONTH_MODE:
-            cdate.setDayOfMonth(1);
-            if (dayOfMonth < 0) {
-                cdate.setDayOfMonth(cal.getMonthLength(cdate));
+            case DOM_MODE -> cdate.setDayOfMonth(dayOfMonth);
+            case DOW_IN_MONTH_MODE -> {
+                cdate.setDayOfMonth(1);
+                if (dayOfMonth < 0) {
+                    cdate.setDayOfMonth(cal.getMonthLength(cdate));
+                }
+                cdate = (BaseCalendar.Date) cal.getNthDayOfWeek(dayOfMonth, dayOfWeek, cdate);
             }
-            cdate = (BaseCalendar.Date) cal.getNthDayOfWeek(dayOfMonth, dayOfWeek, cdate);
-            break;
-
-        case DOW_GE_DOM_MODE:
-            cdate.setDayOfMonth(dayOfMonth);
-            cdate = (BaseCalendar.Date) cal.getNthDayOfWeek(1, dayOfWeek, cdate);
-            break;
-
-        case DOW_LE_DOM_MODE:
-            cdate.setDayOfMonth(dayOfMonth);
-            cdate = (BaseCalendar.Date) cal.getNthDayOfWeek(-1, dayOfWeek, cdate);
-            break;
+            case DOW_GE_DOM_MODE -> {
+                cdate.setDayOfMonth(dayOfMonth);
+                cdate = (BaseCalendar.Date) cal.getNthDayOfWeek(1, dayOfWeek, cdate);
+            }
+            case DOW_LE_DOM_MODE -> {
+                cdate.setDayOfMonth(dayOfMonth);
+                cdate = (BaseCalendar.Date) cal.getNthDayOfWeek(-1, dayOfWeek, cdate);
+            }
         }
         return cal.getTime(cdate) + timeOfDay;
     }
@@ -844,8 +841,12 @@ public class SimpleTimeZone extends TimeZone {
 
     /**
      * Queries if the given date is in daylight saving time.
+     * @implSpec The default implementation throws a
+     * {@code NullPointerException} if {@code date} is {@code null}
      * @return true if daylight saving time is in effective at the
      * given date; false otherwise.
+     * @throws NullPointerException This method may throw a
+     * {@code NullPointerException} if {@code date} is {@code null}
      */
     public boolean inDaylightTime(Date date)
     {
@@ -862,13 +863,24 @@ public class SimpleTimeZone extends TimeZone {
     }
 
     /**
-     * Generates the hash code for the SimpleDateFormat object.
+     * Generates the hash code for the SimpleTimeZone object.
      * @return the hash code for this object
      */
     public int hashCode()
     {
-        return startMonth ^ startDay ^ startDayOfWeek ^ startTime ^
-            endMonth ^ endDay ^ endDayOfWeek ^ endTime ^ rawOffset;
+        int hash = 31 * getID().hashCode() + rawOffset;
+        hash = 31 * hash + Boolean.hashCode(useDaylight);
+        if (useDaylight) {
+            hash = 31 * hash + startMonth;
+            hash = 31 * hash + startDay;
+            hash = 31 * hash + startDayOfWeek;
+            hash = 31 * hash + startTime;
+            hash = 31 * hash + endMonth;
+            hash = 31 * hash + endDay;
+            hash = 31 * hash + endDayOfWeek;
+            hash = 31 * hash + endTime;
+        }
+        return hash;
     }
 
     /**
@@ -878,19 +890,14 @@ public class SimpleTimeZone extends TimeZone {
      * @return     True if the given {@code obj} is the same as this
      *             {@code SimpleTimeZone} object; false otherwise.
      */
-    public boolean equals(Object obj)
-    {
+    public boolean equals(Object obj) {
         if (this == obj) {
             return true;
         }
-        if (!(obj instanceof SimpleTimeZone)) {
-            return false;
-        }
 
-        SimpleTimeZone that = (SimpleTimeZone) obj;
-
-        return getID().equals(that.getID()) &&
-            hasSameRules(that);
+        return obj instanceof SimpleTimeZone that
+                && getID().equals(that.getID())
+                && hasSameRules(that);
     }
 
     /**
@@ -904,28 +911,26 @@ public class SimpleTimeZone extends TimeZone {
         if (this == other) {
             return true;
         }
-        if (!(other instanceof SimpleTimeZone)) {
-            return false;
-        }
-        SimpleTimeZone that = (SimpleTimeZone) other;
-        return rawOffset == that.rawOffset &&
-            useDaylight == that.useDaylight &&
-            (!useDaylight
-             // Only check rules if using DST
-             || (dstSavings == that.dstSavings &&
-                 startMode == that.startMode &&
-                 startMonth == that.startMonth &&
-                 startDay == that.startDay &&
-                 startDayOfWeek == that.startDayOfWeek &&
-                 startTime == that.startTime &&
-                 startTimeMode == that.startTimeMode &&
-                 endMode == that.endMode &&
-                 endMonth == that.endMonth &&
-                 endDay == that.endDay &&
-                 endDayOfWeek == that.endDayOfWeek &&
-                 endTime == that.endTime &&
-                 endTimeMode == that.endTimeMode &&
-                 startYear == that.startYear));
+        return other instanceof SimpleTimeZone that
+                && rawOffset == that.rawOffset
+                && useDaylight == that.useDaylight
+                && (!useDaylight ||
+                        // Only check rules if using DST
+                        (dstSavings == that.dstSavings
+                        && startMode == that.startMode
+                        && startMonth == that.startMonth
+                        && startDay == that.startDay
+                        && startDayOfWeek == that.startDayOfWeek
+                        && startTime == that.startTime
+                        && startTimeMode == that.startTimeMode
+                        && endMode == that.endMode
+                        && endMonth == that.endMonth
+                        && endDay == that.endDay
+                        && endDayOfWeek == that.endDayOfWeek
+                        && endTime == that.endTime
+                        && endTimeMode == that.endTimeMode
+                        && startYear == that.startYear)
+                    );
     }
 
     /**
@@ -1534,9 +1539,7 @@ public class SimpleTimeZone extends TimeZone {
          * rules anyway.
          */
         switch (startTimeMode) {
-        case UTC_TIME:
-            startTime += rawOffset;
-            break;
+            case UTC_TIME -> startTime += rawOffset;
         }
         while (startTime < 0) {
             startTime += millisPerDay;
@@ -1548,11 +1551,8 @@ public class SimpleTimeZone extends TimeZone {
         }
 
         switch (endTimeMode) {
-        case UTC_TIME:
-            endTime += rawOffset + dstSavings;
-            break;
-        case STANDARD_TIME:
-            endTime += dstSavings;
+            case UTC_TIME -> endTime += rawOffset + dstSavings;
+            case STANDARD_TIME -> endTime += dstSavings;
         }
         while (endTime < 0) {
             endTime += millisPerDay;

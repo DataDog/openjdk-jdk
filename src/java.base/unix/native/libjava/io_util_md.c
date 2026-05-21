@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,11 +27,17 @@
 #include "jvm.h"
 #include "io_util.h"
 #include "io_util_md.h"
+#include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
 
 #if defined(__linux__) || defined(_ALLBSD_SOURCE) || defined(_AIX)
 #include <sys/ioctl.h>
+#endif
+
+#if defined(__linux__)
+#include <linux/fs.h>
+#include <sys/stat.h>
 #endif
 
 #ifdef MACOSX
@@ -69,21 +75,27 @@ jstring newStringPlatform(JNIEnv *env, const char* str)
 FD
 handleOpen(const char *path, int oflag, int mode) {
     FD fd;
-    RESTARTABLE(open64(path, oflag, mode), fd);
-    if (fd != -1) {
-        struct stat64 buf64;
-        int result;
-        RESTARTABLE(fstat64(fd, &buf64), result);
-        if (result != -1) {
-            if (S_ISDIR(buf64.st_mode)) {
-                close(fd);
-                errno = EISDIR;
-                fd = -1;
-            }
-        } else {
+    RESTARTABLE(open(path, oflag, mode), fd);
+    // No further checking is needed if the file is not a
+    // directory or open returned an error
+    if (fd == -1 || ((oflag & O_ACCMODE) != O_RDONLY) != 0) {
+        return fd;
+    }
+
+    // FileInputStream is specified to throw if the
+    // file is a directory
+    struct stat buf;
+    int result;
+    RESTARTABLE(fstat(fd, &buf), result);
+    if (result != -1) {
+        if (S_ISDIR(buf.st_mode)) {
             close(fd);
+            errno = EISDIR;
             fd = -1;
         }
+    } else {
+        close(fd);
+        fd = -1;
     }
     return fd;
 }
@@ -130,7 +142,7 @@ void
 fileDescriptorClose(JNIEnv *env, jobject this)
 {
     FD fd = (*env)->GetIntField(env, this, IO_fd_fdID);
-    if ((*env)->ExceptionOccurred(env)) {
+    if ((*env)->ExceptionCheck(env)) {
         return;
     }
 
@@ -141,11 +153,11 @@ fileDescriptorClose(JNIEnv *env, jobject this)
     /* Set the fd to -1 before closing it so that the timing window
      * of other threads using the wrong fd (closed but recycled fd,
      * that gets re-opened with some other filename) is reduced.
-     * Practically the chance of its occurance is low, however, we are
+     * Practically the chance of its occurrence is low, however, we are
      * taking extra precaution over here.
      */
     (*env)->SetIntField(env, this, IO_fd_fdID, -1);
-    if ((*env)->ExceptionOccurred(env)) {
+    if ((*env)->ExceptionCheck(env)) {
         return;
     }
     /*
@@ -162,8 +174,17 @@ fileDescriptorClose(JNIEnv *env, jobject this)
             dup2(devnull, fd);
             close(devnull);
         }
-    } else if (close(fd) == -1) {
-        JNU_ThrowIOExceptionWithLastError(env, "close failed");
+    } else {
+        int result;
+#if defined(_AIX)
+        /* AIX allows close to be restarted after EINTR */
+        RESTARTABLE(close(fd), result);
+#else
+        result = close(fd);
+#endif
+        if (result == -1 && errno != EINTR) {
+            JNU_ThrowIOExceptionWithLastError(env, "close failed");
+        }
     }
 }
 
@@ -187,13 +208,13 @@ jint
 handleAvailable(FD fd, jlong *pbytes)
 {
     int mode;
-    struct stat64 buf64;
+    struct stat buf;
     jlong size = -1, current = -1;
 
     int result;
-    RESTARTABLE(fstat64(fd, &buf64), result);
+    RESTARTABLE(fstat(fd, &buf), result);
     if (result != -1) {
-        mode = buf64.st_mode;
+        mode = buf.st_mode;
         if (S_ISCHR(mode) || S_ISFIFO(mode) || S_ISSOCK(mode)) {
             int n;
             int result;
@@ -203,18 +224,18 @@ handleAvailable(FD fd, jlong *pbytes)
                 return 1;
             }
         } else if (S_ISREG(mode)) {
-            size = buf64.st_size;
+            size = buf.st_size;
         }
     }
 
-    if ((current = lseek64(fd, 0, SEEK_CUR)) == -1) {
+    if ((current = lseek(fd, 0, SEEK_CUR)) == -1) {
         return 0;
     }
 
     if (size < current) {
-        if ((size = lseek64(fd, 0, SEEK_END)) == -1)
+        if ((size = lseek(fd, 0, SEEK_END)) == -1)
             return 0;
-        else if (lseek64(fd, current, SEEK_SET) == -1)
+        else if (lseek(fd, current, SEEK_SET) == -1)
             return 0;
     }
 
@@ -226,17 +247,37 @@ jint
 handleSetLength(FD fd, jlong length)
 {
     int result;
-    RESTARTABLE(ftruncate64(fd, length), result);
+    RESTARTABLE(ftruncate(fd, length), result);
     return result;
 }
 
 jlong
 handleGetLength(FD fd)
 {
-    struct stat64 sb;
-    if (fstat64(fd, &sb) == 0) {
-        return sb.st_size;
-    } else {
+    struct stat sb;
+    int result;
+    RESTARTABLE(fstat(fd, &sb), result);
+    if (result < 0) {
         return -1;
     }
+#if defined(__linux__) && defined(BLKGETSIZE64)
+    if (S_ISBLK(sb.st_mode)) {
+        uint64_t size;
+        if(ioctl(fd, BLKGETSIZE64, &size) < 0) {
+            return -1;
+        }
+        return (jlong)size;
+    }
+#endif
+    return sb.st_size;
+}
+
+jboolean
+handleIsRegularFile(JNIEnv* env, FD fd)
+{
+    struct stat fbuf;
+    if (fstat(fd, &fbuf) == -1)
+        JNU_ThrowIOExceptionWithLastError(env, "fstat failed");
+
+    return S_ISREG(fbuf.st_mode) ? JNI_TRUE : JNI_FALSE;
 }

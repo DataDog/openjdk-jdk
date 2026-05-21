@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,7 @@
 /*
  * @test
  * @summary Tests <char> element
+ * @run main/othervm TestChar
  * @author Sergey Malenkov
  */
 
@@ -37,7 +38,7 @@ public final class TestChar extends AbstractTest {
             + "</java>";
 
     public static void main(String[] args) {
-        new TestChar().test(true);
+        new TestChar().test();
     }
 
     @Override

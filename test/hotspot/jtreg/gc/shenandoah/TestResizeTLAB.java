@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020, Red Hat, Inc. All rights reserved.
+ * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +24,7 @@
  */
 
 /*
- * @test TestResizeTLAB
+ * @test id=passive
  * @key randomness
  * @summary Test that Shenandoah is able to work with(out) resizeable TLABs
  * @requires vm.gc.Shenandoah
@@ -59,7 +60,7 @@
  */
 
 /*
- * @test TestResizeTLAB
+ * @test id=aggressive
  * @key randomness
  * @summary Test that Shenandoah is able to work with(out) resizeable TLABs
  * @requires vm.gc.Shenandoah
@@ -79,7 +80,7 @@
  */
 
 /*
- * @test TestResizeTLAB
+ * @test id=adaptive
  * @key randomness
  * @summary Test that Shenandoah is able to work with(out) resizeable TLABs
  * @requires vm.gc.Shenandoah
@@ -99,7 +100,27 @@
  */
 
 /*
- * @test TestResizeTLAB
+ * @test id=generational
+ * @key randomness
+ * @summary Test that Shenandoah is able to work with(out) resizeable TLABs
+ * @requires vm.gc.Shenandoah
+ * @library /test/lib
+ *
+ * @run main/othervm -Xmx1g -Xms1g -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions
+ *      -XX:+UseShenandoahGC -XX:ShenandoahGCHeuristics=adaptive -XX:ShenandoahGCMode=generational
+ *      -XX:+ShenandoahVerify
+ *      -XX:+ResizeTLAB
+ *      TestResizeTLAB
+ *
+ * @run main/othervm -Xmx1g -Xms1g -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions
+ *      -XX:+UseShenandoahGC -XX:ShenandoahGCHeuristics=adaptive -XX:ShenandoahGCMode=generational
+ *      -XX:+ShenandoahVerify
+ *      -XX:-ResizeTLAB
+ *      TestResizeTLAB
+ */
+
+/*
+ * @test id=static
  * @key randomness
  * @summary Test that Shenandoah is able to work with(out) resizeable TLABs
  * @requires vm.gc.Shenandoah
@@ -119,7 +140,7 @@
  */
 
 /*
- * @test TestResizeTLAB
+ * @test id=compact
  * @key randomness
  * @summary Test that Shenandoah is able to work with(out) resizeable TLABs
  * @requires vm.gc.Shenandoah
@@ -133,46 +154,6 @@
  *
  * @run main/othervm -Xmx1g -Xms1g -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions
  *      -XX:+UseShenandoahGC -XX:ShenandoahGCHeuristics=compact
- *      -XX:+ShenandoahVerify
- *      -XX:-ResizeTLAB
- *      TestResizeTLAB
- */
-
-/*
- * @test TestResizeTLAB
- * @key randomness
- * @summary Test that Shenandoah is able to work with(out) resizeable TLABs
- * @requires vm.gc.Shenandoah
- * @library /test/lib
- *
- * @run main/othervm -Xmx1g -Xms1g -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions
- *      -XX:+UseShenandoahGC -XX:ShenandoahGCMode=iu -XX:ShenandoahGCHeuristics=aggressive
- *      -XX:+ShenandoahVerify
- *      -XX:+ResizeTLAB
- *      TestResizeTLAB
- *
- * @run main/othervm -Xmx1g -Xms1g -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions
- *      -XX:+UseShenandoahGC -XX:ShenandoahGCMode=iu -XX:ShenandoahGCHeuristics=aggressive
- *      -XX:+ShenandoahVerify
- *      -XX:-ResizeTLAB
- *      TestResizeTLAB
- */
-
-/*
- * @test TestResizeTLAB
- * @key randomness
- * @summary Test that Shenandoah is able to work with(out) resizeable TLABs
- * @requires vm.gc.Shenandoah
- * @library /test/lib
- *
- * @run main/othervm -Xmx1g -Xms1g -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions
- *      -XX:+UseShenandoahGC -XX:ShenandoahGCMode=iu
- *      -XX:+ShenandoahVerify
- *      -XX:+ResizeTLAB
- *      TestResizeTLAB
- *
- * @run main/othervm -Xmx1g -Xms1g -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions
- *      -XX:+UseShenandoahGC -XX:ShenandoahGCMode=iu
  *      -XX:+ShenandoahVerify
  *      -XX:-ResizeTLAB
  *      TestResizeTLAB

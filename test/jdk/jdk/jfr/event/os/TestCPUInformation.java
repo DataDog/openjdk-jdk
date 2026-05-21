@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2013, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -34,7 +32,7 @@ import jdk.test.lib.jfr.Events;
 
 /**
  * @test
- * @key jfr
+ * @requires vm.flagless
  * @requires vm.hasJFR
  * @library /test/lib
  * @run main/othervm jdk.jfr.event.os.TestCPUInformation
@@ -54,8 +52,8 @@ public class TestCPUInformation {
             Events.assertField(event, "hwThreads").atLeast(1);
             Events.assertField(event, "cores").atLeast(1);
             Events.assertField(event, "sockets").atLeast(1);
-            Events.assertField(event, "cpu").containsAny("Intel", "AMD", "Unknown x86", "ARM", "PPC", "PowerPC", "AArch64", "s390");
-            Events.assertField(event, "description").containsAny("Intel", "AMD", "Unknown x86", "ARM", "PPC", "PowerPC", "AArch64", "s390");
+            Events.assertField(event, "cpu").containsAny("Intel", "AMD", "Unknown x86", "ARM", "PPC", "PowerPC", "AArch64", "RISCV64", "s390");
+            Events.assertField(event, "description").containsAny("Intel", "AMD", "Unknown x86", "ARM", "PPC", "PowerPC", "AArch64", "RISCV64", "s390");
         }
     }
 }

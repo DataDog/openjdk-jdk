@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,8 +30,11 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+
+import jdk.internal.access.JavaLangAccess;
 import jdk.internal.access.SharedSecrets;
 import jdk.internal.misc.VM;
+import jdk.internal.vm.annotation.ForceInline;
 import jdk.internal.vm.annotation.IntrinsicCandidate;
 
 /** Common utility routines used by both java.lang and
@@ -52,13 +55,12 @@ public class Reflection {
         fieldFilterMap = Map.of(
             Reflection.class, ALL_MEMBERS,
             AccessibleObject.class, ALL_MEMBERS,
-            Class.class, Set.of("classLoader", "classData"),
+            Class.class, Set.of("classLoader", "classData", "modifiers", "protectionDomain", "primitive"),
             ClassLoader.class, ALL_MEMBERS,
             Constructor.class, ALL_MEMBERS,
             Field.class, ALL_MEMBERS,
             Method.class, ALL_MEMBERS,
-            Module.class, ALL_MEMBERS,
-            System.class, Set.of("security")
+            Module.class, ALL_MEMBERS
         );
         methodFilterMap = Map.of();
     }
@@ -78,8 +80,9 @@ public class Reflection {
         to compatibility reasons; see 4471811. Only the values of the
         low 13 bits (i.e., a mask of 0x1FFF) are guaranteed to be
         valid. */
-    @IntrinsicCandidate
-    public static native int getClassAccessFlags(Class<?> c);
+    public static int getClassAccessFlags(Class<?> c) {
+        return SharedSecrets.getJavaLangAccess().getClassFileAccessFlags(c);
+    }
 
 
     /**
@@ -103,6 +106,21 @@ public class Reflection {
     {
         if (!verifyMemberAccess(currentClass, memberClass, targetClass, modifiers)) {
             throw newIllegalAccessException(currentClass, memberClass, targetClass, modifiers);
+        }
+    }
+
+    @ForceInline
+    public static void ensureNativeAccess(Class<?> currentClass, Class<?> owner, String methodName, boolean jni) {
+        // if there is no caller class, act as if the call came from unnamed module of system class loader
+        Module module = currentClass != null ?
+                currentClass.getModule() :
+                ClassLoader.getSystemClassLoader().getUnnamedModule();
+        class Holder {
+            static final JavaLangAccess JLA = SharedSecrets.getJavaLangAccess();
+        }
+        if (module != null) {
+            // not in init phase
+            Holder.JLA.ensureNativeAccess(module, owner, methodName, currentClass, jni);
         }
     }
 
@@ -370,11 +388,8 @@ public class Reflection {
 
         String msg = currentClass + currentSuffix + " cannot access ";
         if (m2.isExported(memberPackageName, m1)) {
-
             // module access okay so include the modifiers in the message
-            msg += "a member of " + memberClass + memberSuffix +
-                    " with modifiers \"" + Modifier.toString(modifiers) + "\"";
-
+            msg += "a member of " + memberClass + memberSuffix + msgSuffix(modifiers);
         } else {
             // module access failed
             msg += memberClass + memberSuffix+ " because "
@@ -401,11 +416,8 @@ public class Reflection {
 
         String msg = "JNI attached native thread (null caller frame) cannot access ";
         if (m2.isExported(memberPackageName)) {
-
             // module access okay so include the modifiers in the message
-            msg += "a member of " + memberClass + memberSuffix +
-                " with modifiers \"" + Modifier.toString(modifiers) + "\"";
-
+            msg += "a member of " + memberClass + memberSuffix + msgSuffix(modifiers);
         } else {
             // module access failed
             msg += memberClass + memberSuffix+ " because "
@@ -413,6 +425,44 @@ public class Reflection {
         }
 
         return new IllegalAccessException(msg);
+    }
+
+    private static String msgSuffix(int modifiers) {
+        return " with " + accessControlStatus(modifiers) + " access";
+    }
+
+    /**
+     * Returns a display string for the access control modifier status.
+     * In particular, this prints "package-private" status.
+     * Reports upon an illegal modifier input.
+     *
+     * @param modifiers modifier input
+     * @return the display string
+     */
+    public static String accessControlStatus(int modifiers) {
+        modifiers &= (Modifier.PRIVATE | Modifier.PROTECTED | Modifier.PUBLIC);
+        return switch (modifiers) {
+            case 0 -> "package-private";
+            case Modifier.PUBLIC -> "public";
+            case Modifier.PRIVATE -> "private";
+            case Modifier.PROTECTED -> "protected";
+            default -> "(illegal modifiers 0x%x)".formatted(modifiers);
+        };
+    }
+
+    /**
+     * Adds the public/protected/private access control modifiers to a display buffer.
+     *
+     * @param sb the buffer
+     * @param modifiers the modifiers
+     */
+    public static void appendAccessControlModifiers(StringBuilder sb, int modifiers) {
+        if (Modifier.isPublic(modifiers))
+            sb.append("public ");
+        if (Modifier.isProtected(modifiers))
+            sb.append("protected ");
+        if (Modifier.isPrivate(modifiers))
+            sb.append("private ");
     }
 
     /**

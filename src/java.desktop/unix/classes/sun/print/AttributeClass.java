@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,12 +22,15 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+
 package sun.print;
 
-import java.util.Objects;
 import java.io.ByteArrayInputStream;
+import java.util.Objects;
 
-public class AttributeClass {
+import static java.nio.charset.StandardCharsets.UTF_8;
+
+public final class AttributeClass {
     private String myName;
     private int myType;
     private int nameLen;
@@ -172,6 +175,30 @@ public class AttributeClass {
     }
 
     /**
+     * Returns 3 int values.
+     * xres, yres, resolution as either dpi or dpcm
+     * The resolution is just a single byte of data.
+     */
+    public int[] getIntResolutionValue() {
+        int[] res = {0, 0, 0};
+        byte[] bufArray = (byte[])myValue;
+        if (bufArray != null) {
+            int nBytes = 4; // 32-bit signed integer
+            for (int j=0; j<2; j++) { // 2 set of integers
+                byte[] intBytes = new byte[nBytes];
+                // REMIND: # bytes should be 8
+                for (int i=0; i< nBytes; i++) {
+                    //+ 1 because the 1st byte is length
+                    intBytes[i] = bufArray[i+(4*j)+1];
+                }
+                res[j] = convertToInt(intBytes);
+            }
+            res[2] = (int)bufArray[9];
+        }
+        return res;
+    }
+
+    /**
      * Returns String value.
      */
     public String getStringValue() {
@@ -187,10 +214,7 @@ public class AttributeClass {
 
             byte[] strBytes = new byte[valLength];
             bufStream.read(strBytes, 0, valLength);
-            try {
-                strVal = new String(strBytes, "UTF-8");
-            } catch (java.io.UnsupportedEncodingException uee) {
-            }
+            strVal = new String(strBytes, UTF_8);
         }
         return strVal;
     }
@@ -219,10 +243,7 @@ public class AttributeClass {
                 int valLength = bufStream.read();
                 byte[] bufBytes = new byte[valLength];
                 bufStream.read(bufBytes, 0, valLength);
-                try {
-                    valueArray[i] = new String(bufBytes, "UTF-8");
-                } catch (java.io.UnsupportedEncodingException uee) {
-                }
+                valueArray[i] = new String(bufBytes, UTF_8);
             }
             return valueArray;
         }
@@ -269,6 +290,7 @@ public class AttributeClass {
         return Objects.hash(myType, myName, myValue);
     }
 
+    @Override
     public String toString() {
         return myName;
     }

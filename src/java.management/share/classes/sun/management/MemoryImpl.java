@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -58,12 +58,17 @@ class MemoryImpl extends NotificationEmitterSupport
         this.jvm = vm;
     }
 
+    @SuppressWarnings("deprecation")
     public int getObjectPendingFinalizationCount() {
         return jdk.internal.misc.VM.getFinalRefCount();
     }
 
     public void gc() {
         Runtime.getRuntime().gc();
+    }
+
+    public long getTotalGcCpuTime() {
+        return jvm.getTotalGcCpuTime();
     }
 
     // Need to make a VM call to get coherent value
@@ -80,8 +85,6 @@ class MemoryImpl extends NotificationEmitterSupport
     }
 
     public void setVerbose(boolean value) {
-        Util.checkControlAccess();
-
         setVerboseGC(value);
     }
 
@@ -104,13 +107,13 @@ class MemoryImpl extends NotificationEmitterSupport
     private native MemoryUsage getMemoryUsage0(boolean heap);
     private native void setVerboseGC(boolean value);
 
-    private final static String notifName =
+    private static final String notifName =
         "javax.management.Notification";
-    private final static String[] notifTypes = {
+    private static final String[] notifTypes = {
         MemoryNotificationInfo.MEMORY_THRESHOLD_EXCEEDED,
         MemoryNotificationInfo.MEMORY_COLLECTION_THRESHOLD_EXCEEDED
     };
-    private final static String[] notifMsgs  = {
+    private static final String[] notifMsgs  = {
         "Memory usage exceeds usage threshold",
         "Memory usage exceeds collection usage threshold"
     };

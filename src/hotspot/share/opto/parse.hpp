@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -40,12 +40,11 @@ class SwitchRange;
 
 
 //------------------------------InlineTree-------------------------------------
-class InlineTree : public ResourceObj {
-  friend class VMStructs;
-
+class InlineTree : public AnyObj {
   Compile*    C;                  // cache
   JVMState*   _caller_jvms;       // state of caller
   ciMethod*   _method;            // method being called by the caller_jvms
+  bool        _late_inline;       // method is inlined incrementally
   InlineTree* _caller_tree;
   uint        _count_inline_bcs;  // Accumulated count of inlined bytecodes
   const int   _max_inline_level;  // the maximum inline level for this sub-tree (may be adjusted)
@@ -71,27 +70,25 @@ protected:
                             int caller_bci,
                             JVMState* jvms,
                             ciCallProfile& profile,
-                            WarmCallInfo* wci_result,
                             bool& should_delay);
   bool        should_inline(ciMethod* callee_method,
                             ciMethod* caller_method,
-                            int caller_bci,
-                            ciCallProfile& profile,
-                            WarmCallInfo* wci_result);
+                            JVMState* caller_jvms,
+                            bool& should_delay,
+                            ciCallProfile& profile);
   bool        should_not_inline(ciMethod* callee_method,
                                 ciMethod* caller_method,
-                                JVMState* jvms,
-                                WarmCallInfo* wci_result);
+                                int caller_bci,
+                                bool& should_delay,
+                                ciCallProfile& profile);
   bool        is_not_reached(ciMethod* callee_method,
                              ciMethod* caller_method,
                              int caller_bci,
                              ciCallProfile& profile);
-  void        print_inlining(ciMethod* callee_method, int caller_bci,
-                             ciMethod* caller_method, bool success) const;
+  void print_inlining(ciMethod* callee_method, JVMState* jvm, bool success) const;
 
   InlineTree* caller_tree()       const { return _caller_tree;  }
   InlineTree* callee_at(int bci, ciMethod* m) const;
-  int         inline_level()      const { return stack_depth(); }
   int         stack_depth()       const { return _caller_jvms ? _caller_jvms->depth() : 0; }
   const char* msg()               const { return _msg; }
   void        set_msg(const char* msg)  { _msg = msg; }
@@ -112,13 +109,18 @@ public:
   // and may be accessed by find_subtree_from_root.
   // The call_method is the dest_method for a special or static invocation.
   // The call_method is an optimized virtual method candidate otherwise.
-  WarmCallInfo* ok_to_inline(ciMethod *call_method, JVMState* caller_jvms, ciCallProfile& profile, WarmCallInfo* wci, bool& should_delay);
+  bool ok_to_inline(ciMethod *call_method, JVMState* caller_jvms, ciCallProfile& profile, bool& should_delay);
+
+  void set_late_inline() {
+    _late_inline = true;
+  }
 
   // Information about inlined method
   JVMState*   caller_jvms()       const { return _caller_jvms; }
   ciMethod   *method()            const { return _method; }
   int         caller_bci()        const { return _caller_jvms ? _caller_jvms->bci() : InvocationEntryBci; }
   uint        count_inline_bcs()  const { return _count_inline_bcs; }
+  int         inline_level()      const { return stack_depth(); }
 
 #ifndef PRODUCT
 private:
@@ -136,7 +138,7 @@ public:
   // Count number of nodes in this subtree
   int         count() const;
   // Dump inlining replay data to the stream.
-  void dump_replay_data(outputStream* out);
+  void dump_replay_data(outputStream* out, int depth_adjust = 0);
 };
 
 
@@ -183,14 +185,14 @@ class Parse : public GraphKit {
     void set_start_map(SafePointNode* m)   { assert(!is_merged(), ""); _start_map = m; }
 
     // True after any predecessor flows control into this block
-    bool is_merged() const                 { return _start_map != NULL; }
+    bool is_merged() const                 { return _start_map != nullptr; }
 
 #ifdef ASSERT
     // True after backedge predecessor flows control into this block
     bool has_merged_backedge() const       { return _has_merged_backedge; }
     void mark_merged_backedge(Block* pred) {
       assert(is_SEL_head(), "should be loop head");
-      if (pred != NULL && is_SEL_backedge(pred)) {
+      if (pred != nullptr && is_SEL_backedge(pred)) {
         assert(is_parsed(), "block should be parsed before merging backedges");
         _has_merged_backedge = true;
       }
@@ -217,6 +219,29 @@ class Parse : public GraphKit {
     int start_sp() const                   { return flow()->stack_size(); }
 
     bool is_loop_head() const              { return flow()->is_loop_head(); }
+    bool is_in_irreducible_loop() const {
+      return flow()->is_in_irreducible_loop();
+    }
+    bool is_irreducible_loop_entry() const {
+      return flow()->is_irreducible_loop_head() || flow()->is_irreducible_loop_secondary_entry();
+    }
+    void copy_irreducible_status_to(RegionNode* region, const JVMState* jvms) {
+      assert(!is_irreducible_loop_entry() || is_in_irreducible_loop(), "entry is part of irreducible loop");
+      if (is_in_irreducible_loop()) {
+        // The block is in an irreducible loop of this method, so it is possible that this
+        // region becomes an irreducible loop entry. (no guarantee)
+        region->set_loop_status(RegionNode::LoopStatus::MaybeIrreducibleEntry);
+      } else if (jvms->caller() != nullptr) {
+        // The block is not in an irreducible loop of this method, hence it cannot ever
+        // be the entry of an irreducible loop. But it may be inside an irreducible loop
+        // of a caller of this inlined method. (limited guarantee)
+        assert(region->loop_status() == RegionNode::LoopStatus::NeverIrreducibleEntry, "status not changed");
+      } else {
+        // The block is not in an irreducible loop of this method, and there is no outer
+        // method. This region will never be in an irreducible loop (strong guarantee)
+        region->set_loop_status(RegionNode::LoopStatus::Reducible);
+      }
+    }
     bool is_SEL_head() const               { return flow()->is_single_entry_loop_head(); }
     bool is_SEL_backedge(Block* pred) const{ return is_SEL_head() && pred->rpo() >= rpo(); }
     bool is_invariant_local(uint i) const  {
@@ -257,13 +282,13 @@ class Parse : public GraphKit {
     // path number ("pnum").
     int add_new_path();
 
-    // Initialize me by recording the parser's map.  My own map must be NULL.
+    // Initialize me by recording the parser's map.  My own map must be null.
     void record_state(Parse* outer);
   };
 
 #ifndef PRODUCT
   // BytecodeParseHistogram collects number of bytecodes parsed, nodes constructed, and transformations.
-  class BytecodeParseHistogram : public ResourceObj {
+  class BytecodeParseHistogram : public ArenaObj {
    private:
     enum BPHType {
       BPH_transforms,
@@ -330,7 +355,8 @@ class Parse : public GraphKit {
   bool          _wrote_volatile;     // Did we write a volatile field?
   bool          _wrote_stable;       // Did we write a @Stable field?
   bool          _wrote_fields;       // Did we write any field?
-  Node*         _alloc_with_final;   // An allocation node with final field
+  Node*         _alloc_with_final_or_stable; // An allocation node with final or @Stable field
+  Node*         _stress_rf_hook; // StressReachabilityFences support
 
   // Variables which track Java semantics during bytecode parsing:
 
@@ -375,10 +401,10 @@ class Parse : public GraphKit {
   void      set_wrote_stable(bool z)  { _wrote_stable = z; }
   bool         wrote_fields() const   { return _wrote_fields; }
   void     set_wrote_fields(bool z)   { _wrote_fields = z; }
-  Node*    alloc_with_final() const   { return _alloc_with_final; }
-  void set_alloc_with_final(Node* n)  {
-    assert((_alloc_with_final == NULL) || (_alloc_with_final == n), "different init objects?");
-    _alloc_with_final = n;
+  Node*    alloc_with_final_or_stable() const   { return _alloc_with_final_or_stable; }
+  void set_alloc_with_final_or_stable(Node* n)  {
+    assert((_alloc_with_final_or_stable == nullptr) || (_alloc_with_final_or_stable == n), "different init objects?");
+    _alloc_with_final_or_stable = n;
   }
 
   Block*             block()    const { return _block; }
@@ -388,14 +414,17 @@ class Parse : public GraphKit {
   void set_block(Block* b)            { _block = b; }
 
   // Derived accessors:
-  bool is_normal_parse() const  { return _entry_bci == InvocationEntryBci; }
-  bool is_osr_parse() const     { return _entry_bci != InvocationEntryBci; }
+  bool is_osr_parse() const {
+    assert(_entry_bci != UnknownBci, "uninitialized _entry_bci");
+    return _entry_bci != InvocationEntryBci;
+  }
+  bool is_normal_parse() const  { return !is_osr_parse(); }
   int osr_bci() const           { assert(is_osr_parse(),""); return _entry_bci; }
 
   void set_parse_bci(int bci);
 
   // Must this parse be aborted?
-  bool failing()                { return C->failing(); }
+  bool failing() const { return C->failing_internal(); } // might have cascading effects, not stressing bailouts for now.
 
   Block* rpo_at(int rpo) {
     assert(0 <= rpo && rpo < _block_count, "oob");
@@ -404,7 +433,7 @@ class Parse : public GraphKit {
   Block* start_block() {
     return rpo_at(flow()->start_block()->rpo());
   }
-  // Can return NULL if the flow pass did not complete a block.
+  // Can return null if the flow pass did not complete a block.
   Block* successor_for_bci(int bci) {
     return block()->successor_for_bci(bci);
   }
@@ -414,7 +443,7 @@ class Parse : public GraphKit {
   SafePointNode* create_entry_map();
 
   // OSR helpers
-  Node *fetch_interpreter_state(int index, BasicType bt, Node *local_addrs, Node *local_addrs_base);
+  Node *fetch_interpreter_state(int index, BasicType bt, Node* local_addrs);
   Node* check_interpreter_type(Node* l, const Type* type, SafePointNode* &bad_type_exit);
   void  load_interpreter_state(Node* osr_buf);
 
@@ -446,8 +475,8 @@ class Parse : public GraphKit {
   void merge(          int target_bci);
   // Same as plain merge, except that it allocates a new path number.
   void merge_new_path( int target_bci);
-  // Merge the current mapping into an exception handler.
-  void merge_exception(int target_bci);
+  // Push the exception oop and merge the current mapping into an exception handler.
+  void push_and_merge_exception(int target_bci, Node* ex_oop);
   // Helper: Merge the current mapping into the given basic block
   void merge_common(Block* target, int pnum);
   // Helper functions for merging individual cells.
@@ -470,8 +499,6 @@ class Parse : public GraphKit {
 
   void clinit_deopt();
 
-  void rtm_deopt();
-
   // Pass current map to exits
   void return_current(Node* value);
 
@@ -483,7 +510,7 @@ class Parse : public GraphKit {
 
   // Insert a compiler safepoint into the graph, if there is a back-branch.
   void maybe_add_safepoint(int target_bci) {
-    if (UseLoopSafepoints && target_bci <= bci()) {
+    if (target_bci <= bci()) {
       add_safepoint();
     }
   }
@@ -501,11 +528,8 @@ class Parse : public GraphKit {
   void  do_instanceof();
 
   // Helper functions for shifting & arithmetic
-  void modf();
-  void modd();
+  Node* floating_point_mod(Node* a, Node* b, BasicType type);
   void l2f();
-
-  void do_irem();
 
   // implementation of _get* and _put* bytecodes
   void do_getstatic() { do_field_access(true,  false); }
@@ -535,19 +559,16 @@ class Parse : public GraphKit {
   float   branch_prediction(float &cnt, BoolTest::mask btest, int target_bci, Node* test);
   bool    seems_never_taken(float prob) const;
   bool    path_is_suitable_for_uncommon_trap(float prob) const;
-  bool    seems_stable_comparison() const;
 
   void    do_ifnull(BoolTest::mask btest, Node* c);
   void    do_if(BoolTest::mask btest, Node* c);
   int     repush_if_args();
-  void    adjust_map_after_if(BoolTest::mask btest, Node* c, float prob,
-                              Block* path, Block* other_path);
+  void    adjust_map_after_if(BoolTest::mask btest, Node* c, float prob, Block* path);
   void    sharpen_type_after_if(BoolTest::mask btest,
                                 Node* con, const Type* tcon,
                                 Node* val, const Type* tval);
   void    maybe_add_predicate_after_if(Block* path);
   IfNode* jump_if_fork_int(Node* a, Node* b, BoolTest::mask mask, float prob, float cnt);
-  Node*   jump_if_join(Node* iffalse, Node* iftrue);
   void    jump_if_true_fork(IfNode *ifNode, int dest_bci_if_true, bool unc);
   void    jump_if_false_fork(IfNode *ifNode, int dest_bci_if_false, bool unc);
   void    jump_if_always_fork(int dest_bci_if_true, bool unc);
@@ -558,8 +579,6 @@ class Parse : public GraphKit {
   void    jump_switch_ranges(Node* a, SwitchRange* lo, SwitchRange* hi, int depth = 0);
   bool    create_jump_tables(Node* a, SwitchRange* lo, SwitchRange* hi);
   void    linear_search_switch_ranges(Node* key_val, SwitchRange*& lo, SwitchRange*& hi);
-
-  void decrement_age();
 
   // helper function for call statistics
   void count_compiled_calls(bool at_method_entry, bool is_inline) PRODUCT_RETURN;
@@ -590,6 +609,11 @@ class Parse : public GraphKit {
   // Use speculative type to optimize CmpP node
   Node* optimize_cmp_with_klass(Node* c);
 
+  // Stress unstable if traps
+  void stress_trap(IfNode* orig_iff, Node* counter, Node* incr_store);
+  // Increment counter used by StressUnstableIfTraps
+  void increment_trap_stress_counter(Node*& counter, Node*& incr_store);
+
  public:
 #ifndef PRODUCT
   // Handle PrintOpto, etc.
@@ -599,6 +623,43 @@ class Parse : public GraphKit {
   void dump();
   void dump_bci(int bci);
 #endif
+};
+
+// Specialized uncommon_trap of unstable_if. C2 uses next_bci of path to update the live locals of it.
+class UnstableIfTrap {
+  CallStaticJavaNode* const _unc;
+  bool _modified;            // modified locals based on next_bci()
+  int _next_bci;
+
+public:
+  UnstableIfTrap(CallStaticJavaNode* call, Parse::Block* path): _unc(call), _modified(false) {
+    assert(_unc != nullptr && Deoptimization::trap_request_reason(_unc->uncommon_trap_request()) == Deoptimization::Reason_unstable_if,
+          "invalid uncommon_trap call!");
+    _next_bci = path != nullptr ? path->start() : -1;
+  }
+
+  // The starting point of the pruned block, where control goes when
+  // deoptimization does happen.
+  int next_bci() const {
+    return _next_bci;
+  }
+
+  bool modified() const {
+    return _modified;
+  }
+
+  void set_modified() {
+    _modified = true;
+  }
+
+  CallStaticJavaNode* uncommon_trap() const {
+    return _unc;
+  }
+
+  inline void* operator new(size_t x) throw() {
+    Compile* C = Compile::current();
+    return C->comp_arena()->AmallocWords(x);
+  }
 };
 
 #endif // SHARE_OPTO_PARSE_HPP

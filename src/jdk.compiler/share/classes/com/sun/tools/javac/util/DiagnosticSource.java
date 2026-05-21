@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,7 +31,6 @@ import java.nio.CharBuffer;
 import javax.tools.JavaFileObject;
 
 import com.sun.tools.javac.file.JavacFileManager;
-import com.sun.tools.javac.tree.EndPosTable;
 
 import static com.sun.tools.javac.util.LayoutCharacters.*;
 
@@ -127,16 +126,6 @@ public class DiagnosticSource {
         }
     }
 
-    public EndPosTable getEndPosTable() {
-        return endPosTable;
-    }
-
-    public void setEndPosTable(EndPosTable t) {
-        if (endPosTable != null && endPosTable != t)
-            throw new IllegalStateException("endPosTable already set");
-        endPosTable = t;
-    }
-
     /** Find the line in the buffer that contains the current position
      * @param pos      Character offset into the buffer
      */
@@ -183,10 +172,9 @@ public class DiagnosticSource {
     protected char[] initBuf(JavaFileObject fileObject) throws IOException {
         char[] buf;
         CharSequence cs = fileObject.getCharContent(true);
-        if (cs instanceof CharBuffer) {
-            CharBuffer cb = (CharBuffer) cs;
-            buf = JavacFileManager.toArray(cb);
-            bufLen = cb.limit();
+        if (cs instanceof CharBuffer charBuffer) {
+            buf = JavacFileManager.toArray(charBuffer);
+            bufLen = charBuffer.limit();
         } else {
             buf = cs.toString().toCharArray();
             bufLen = buf.length;
@@ -197,8 +185,6 @@ public class DiagnosticSource {
 
     /** The underlying file object. */
     protected JavaFileObject fileObject;
-
-    protected EndPosTable endPosTable;
 
     /** A soft reference to the content of the file object. */
     protected SoftReference<char[]> refBuf;

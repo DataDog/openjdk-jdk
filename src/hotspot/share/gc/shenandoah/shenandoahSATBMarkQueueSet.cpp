@@ -22,14 +22,13 @@
  *
  */
 
-#include "precompiled.hpp"
 
 #include "gc/shenandoah/shenandoahHeap.inline.hpp"
 #include "gc/shenandoah/shenandoahSATBMarkQueueSet.hpp"
 #include "gc/shenandoah/shenandoahThreadLocalData.hpp"
 
 ShenandoahSATBMarkQueueSet::ShenandoahSATBMarkQueueSet(BufferNode::Allocator* allocator) :
-  SATBMarkQueueSet(allocator)
+  SATBMarkQueueSet(allocator), _filter_out_young(false)
 {}
 
 SATBMarkQueue& ShenandoahSATBMarkQueueSet::satb_queue_for_thread(Thread* const t) const {
@@ -40,31 +39,33 @@ class ShenandoahSATBMarkQueueFilterFn {
   ShenandoahHeap* const _heap;
 
 public:
-  ShenandoahSATBMarkQueueFilterFn(ShenandoahHeap* heap) : _heap(heap) {}
+  explicit ShenandoahSATBMarkQueueFilterFn(ShenandoahHeap* heap) : _heap(heap) {}
 
-  // Return true if entry should be filtered out (removed), false if
-  // it should be retained.
+  // Return true if entry should be filtered out (removed), false if it should be retained.
   bool operator()(const void* entry) const {
     return !_heap->requires_marking(entry);
   }
 };
 
-void ShenandoahSATBMarkQueueSet::filter(SATBMarkQueue* queue) {
-  ShenandoahHeap* heap = ShenandoahHeap::heap();
-  apply_filter(ShenandoahSATBMarkQueueFilterFn(heap), queue);
-}
+class ShenandoahSATBOldMarkQueueFilterFn {
+  ShenandoahHeap* const _heap;
 
-void ShenandoahSATBMarkQueue::handle_completed_buffer() {
-  SATBMarkQueue::handle_completed_buffer();
-  if (!is_empty()) {
-    Thread* t = Thread::current();
-    if (ShenandoahThreadLocalData::is_force_satb_flush(t)) {
-      // Non-empty buffer is compacted, and we decided not to enqueue it.
-      // We still want to know about leftover work in that buffer eventually.
-      // This avoid dealing with these leftovers during the final-mark, after
-      // the buffers are drained completely. See JDK-8205353 for more discussion.
-      ShenandoahThreadLocalData::set_force_satb_flush(t, false);
-      enqueue_completed_buffer();
-    }
+public:
+  explicit ShenandoahSATBOldMarkQueueFilterFn(ShenandoahHeap* heap) : _heap(heap) {}
+
+  // Return true if entry should be filtered out (removed), false if it should be retained.
+  bool operator()(const void* entry) const {
+    assert(_heap->is_concurrent_old_mark_in_progress(), "Should only use this when old marking is in progress");
+    assert(!_heap->is_concurrent_young_mark_in_progress(), "Should only use this when young marking is not in progress");
+    return !_heap->requires_marking(entry) || !_heap->is_in_old(entry);
+  }
+};
+
+void ShenandoahSATBMarkQueueSet::filter(SATBMarkQueue& queue) {
+  ShenandoahHeap* heap = ShenandoahHeap::heap();
+  if (_filter_out_young) {
+    apply_filter(ShenandoahSATBOldMarkQueueFilterFn(heap), queue);
+  } else {
+    apply_filter(ShenandoahSATBMarkQueueFilterFn(heap), queue);
   }
 }

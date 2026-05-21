@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,77 +29,71 @@ import java.awt.EventQueue;
 import java.awt.Graphics;
 import java.awt.Image;
 import java.awt.Toolkit;
-
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.FlavorMap;
 import java.awt.datatransfer.FlavorTable;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
-
+import java.awt.image.BufferedImage;
+import java.awt.image.ColorModel;
+import java.awt.image.ImageObserver;
+import java.awt.image.RenderedImage;
+import java.awt.image.WritableRaster;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Reader;
 import java.io.SequenceInputStream;
 import java.io.StringReader;
-
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Modifier;
 import java.net.URI;
 import java.net.URISyntaxException;
-
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetEncoder;
 import java.nio.charset.IllegalCharsetNameException;
-import java.nio.charset.StandardCharsets;
 import java.nio.charset.UnsupportedCharsetException;
-
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Modifier;
-
-import java.security.AccessController;
-import java.security.PrivilegedAction;
-import java.security.PrivilegedActionException;
-import java.security.PrivilegedExceptionAction;
-import java.security.ProtectionDomain;
-
-import java.util.*;
-
-import sun.datatransfer.DataFlavorUtil;
-
-import sun.awt.AppContext;
-import sun.awt.ComponentFactory;
-import sun.awt.SunToolkit;
-
-import java.awt.image.BufferedImage;
-import java.awt.image.ImageObserver;
-import java.awt.image.RenderedImage;
-import java.awt.image.WritableRaster;
-import java.awt.image.ColorModel;
+import java.util.AbstractMap;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.SortedMap;
+import java.util.Stack;
+import java.util.TreeMap;
+import java.util.stream.Stream;
 
 import javax.imageio.ImageIO;
-import javax.imageio.ImageReader;
 import javax.imageio.ImageReadParam;
-import javax.imageio.ImageWriter;
+import javax.imageio.ImageReader;
 import javax.imageio.ImageTypeSpecifier;
-
+import javax.imageio.ImageWriter;
 import javax.imageio.spi.ImageWriterSpi;
-
 import javax.imageio.stream.ImageInputStream;
 import javax.imageio.stream.ImageOutputStream;
 
+import sun.awt.ComponentFactory;
+import sun.awt.SunToolkit;
 import sun.awt.image.ImageRepresentation;
 import sun.awt.image.ToolkitImage;
+import sun.datatransfer.DataFlavorUtil;
 
-import java.io.FilePermission;
-import java.util.stream.Stream;
-
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 /**
  * Provides a set of functions to be shared among the DataFlavor class and
@@ -159,9 +153,9 @@ public abstract class DataTransferer {
             Collections.synchronizedMap(new HashMap<>());
 
     /**
-     * The key used to store pending data conversion requests for an AppContext.
+     * The Runnable for pending data conversion requests.
      */
-    private static final String DATA_CONVERTER_KEY = "DATA_CONVERTER_KEY";
+    private static volatile Runnable dataConverterInstance;
 
     static {
         DataFlavor tJavaTextEncodingFlavor = null;
@@ -245,7 +239,7 @@ public abstract class DataTransferer {
             nativeEOLNs.put(format, eoln);
         }
         if (terminators != null && terminators.length() != 0) {
-            Integer iTerminators = Integer.valueOf(terminators);
+            int iTerminators = Integer.parseInt(terminators);
             if (iTerminators > 0) {
                 nativeTerminators.put(format, iTerminators);
             }
@@ -550,7 +544,7 @@ public abstract class DataTransferer {
             try {
                 byte[] charsetNameBytes = (byte[])localeTransferable
                         .getTransferData(javaTextEncodingFlavor);
-                charset = new String(charsetNameBytes, StandardCharsets.UTF_8);
+                charset = new String(charsetNameBytes, UTF_8);
             } catch (UnsupportedFlavorException cannotHappen) {
             }
         } else {
@@ -641,7 +635,7 @@ public abstract class DataTransferer {
 
         // In other words: we are doing char alignment here basing on suggestion
         // that count of zero-'terminators' is a number of bytes in one symbol
-        // for selected charset (clipboard format). It is not complitly true for
+        // for selected charset (clipboard format). It is not completely true for
         // multibyte coding like UTF-8, but helps understand the procedure.
         // "abcde\0" -> "abcde"
 
@@ -759,7 +753,7 @@ search:
             (String.class.equals(flavor.getRepresentationClass()) &&
              DataFlavorUtil.isFlavorCharsetTextType(flavor) && isTextFormat(format))) {
 
-            String str = removeSuspectedData(flavor, contents, (String)obj);
+            String str = (String)obj;
 
             return translateTransferableString(
                 str,
@@ -872,9 +866,7 @@ search:
 
             final List<?> list = (List<?>)obj;
 
-            final ProtectionDomain userProtectionDomain = getUserProtectionDomain(contents);
-
-            final ArrayList<String> fileList = castToFiles(list, userProtectionDomain);
+            final ArrayList<String> fileList = castToFiles(list);
 
             try (ByteArrayOutputStream bos = convertFileListToBytes(fileList)) {
                 theByteArray = bos.toByteArray();
@@ -899,8 +891,7 @@ search:
                 targetCharset = "UTF-8";
             }
             final List<?> list = (List<?>)obj;
-            final ProtectionDomain userProtectionDomain = getUserProtectionDomain(contents);
-            final ArrayList<String> fileList = castToFiles(list, userProtectionDomain);
+            final ArrayList<String> fileList = castToFiles(list);
             final ArrayList<String> uriList = new ArrayList<>(fileList.size());
             for (String fileObject : fileList) {
                 final URI uri = new File(fileObject).toURI();
@@ -944,10 +935,9 @@ search:
                 }
 
                 if (DataFlavorUtil.isFlavorCharsetTextType(flavor) && isTextFormat(format)) {
-                    byte[] bytes = bos.toByteArray();
                     String sourceEncoding = DataFlavorUtil.getTextCharset(flavor);
                     return translateTransferableString(
-                               new String(bytes, sourceEncoding),
+                               bos.toString(sourceEncoding),
                                format);
                 }
                 theByteArray = bos.toByteArray();
@@ -983,87 +973,16 @@ search:
 
     protected abstract ByteArrayOutputStream convertFileListToBytes(ArrayList<String> fileList) throws IOException;
 
-    private String removeSuspectedData(DataFlavor flavor, final Transferable contents, final String str)
-            throws IOException
-    {
-        if (null == System.getSecurityManager()
-            || !flavor.isMimeTypeEqual("text/uri-list"))
+    private ArrayList<String> castToFiles(final List<?> files) throws IOException {
+        ArrayList<String> fileList = new ArrayList<>();
+        for (Object fileObject : files)
         {
-            return str;
-        }
-
-        final ProtectionDomain userProtectionDomain = getUserProtectionDomain(contents);
-
-        try {
-            return AccessController.doPrivileged((PrivilegedExceptionAction<String>) () -> {
-
-                StringBuilder allowedFiles = new StringBuilder(str.length());
-                String [] uriArray = str.split("(\\s)+");
-
-                for (String fileName : uriArray)
-                {
-                    File file = new File(fileName);
-                    if (file.exists() &&
-                        !(isFileInWebstartedCache(file) ||
-                        isForbiddenToRead(file, userProtectionDomain)))
-                    {
-                        if (0 != allowedFiles.length())
-                        {
-                            allowedFiles.append("\\r\\n");
-                        }
-
-                        allowedFiles.append(fileName);
-                    }
-                }
-
-                return allowedFiles.toString();
-            });
-        } catch (PrivilegedActionException pae) {
-            throw new IOException(pae.getMessage(), pae);
-        }
-    }
-
-    private static ProtectionDomain getUserProtectionDomain(Transferable contents) {
-        return contents.getClass().getProtectionDomain();
-    }
-
-    private boolean isForbiddenToRead (File file, ProtectionDomain protectionDomain)
-    {
-        if (null == protectionDomain) {
-            return false;
-        }
-        try {
-            FilePermission filePermission =
-                    new FilePermission(file.getCanonicalPath(), "read, delete");
-            if (protectionDomain.implies(filePermission)) {
-                return false;
+            File file = castToFile(fileObject);
+            if (file != null) {
+                fileList.add(file.getCanonicalPath());
             }
-        } catch (IOException e) {}
-
-        return true;
-    }
-
-    private ArrayList<String> castToFiles(final List<?> files,
-                                          final ProtectionDomain userProtectionDomain) throws IOException {
-        try {
-            return AccessController.doPrivileged((PrivilegedExceptionAction<ArrayList<String>>) () -> {
-                ArrayList<String> fileList = new ArrayList<>();
-                for (Object fileObject : files)
-                {
-                    File file = castToFile(fileObject);
-                    if (file != null &&
-                        (null == System.getSecurityManager() ||
-                        !(isFileInWebstartedCache(file) ||
-                        isForbiddenToRead(file, userProtectionDomain))))
-                    {
-                        fileList.add(file.getCanonicalPath());
-                    }
-                }
-                return fileList;
-            });
-        } catch (PrivilegedActionException pae) {
-            throw new IOException(pae.getMessage());
         }
+        return fileList;
     }
 
     // It is important do not use user's successors
@@ -1079,43 +998,6 @@ search:
         }
         return new File(filePath);
     }
-
-    private static final String[] DEPLOYMENT_CACHE_PROPERTIES = {
-        "deployment.system.cachedir",
-        "deployment.user.cachedir",
-        "deployment.javaws.cachedir",
-        "deployment.javapi.cachedir"
-    };
-
-    private static final ArrayList <File> deploymentCacheDirectoryList = new ArrayList<>();
-
-    private static boolean isFileInWebstartedCache(File f) {
-
-        if (deploymentCacheDirectoryList.isEmpty()) {
-            for (String cacheDirectoryProperty : DEPLOYMENT_CACHE_PROPERTIES) {
-                String cacheDirectoryPath = System.getProperty(cacheDirectoryProperty);
-                if (cacheDirectoryPath != null) {
-                    try {
-                        File cacheDirectory = (new File(cacheDirectoryPath)).getCanonicalFile();
-                        if (cacheDirectory != null) {
-                            deploymentCacheDirectoryList.add(cacheDirectory);
-                        }
-                    } catch (IOException ioe) {}
-                }
-            }
-        }
-
-        for (File deploymentCacheDirectory : deploymentCacheDirectoryList) {
-            for (File dir = f; dir != null; dir = dir.getParentFile()) {
-                if (dir.equals(deploymentCacheDirectory)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
 
     public Object translateBytes(byte[] bytes, DataFlavor flavor,
                                  long format, Transferable localeTransferable)
@@ -1426,15 +1308,7 @@ search:
         if (clazz.equals(dfrc)) {
             return arg; // simple case
         } else {
-            Constructor<?>[] constructors;
-
-            try {
-                constructors = AccessController.doPrivileged(
-                        (PrivilegedAction<Constructor<?>[]>) dfrc::getConstructors);
-            } catch (SecurityException se) {
-                throw new IOException(se.getMessage());
-            }
-
+            Constructor<?>[] constructors = dfrc.getConstructors();
             Constructor<?> constructor = Stream.of(constructors)
                     .filter(c -> Modifier.isPublic(c.getModifiers()))
                     .filter(c -> {
@@ -1894,13 +1768,9 @@ search:
                 }
             };
 
-            final AppContext appContext = SunToolkit.targetToAppContext(source);
-
             getToolkitThreadBlockedHandler().lock();
 
-            if (appContext != null) {
-                appContext.put(DATA_CONVERTER_KEY, dataConverter);
-            }
+            dataConverterInstance = dataConverter;
 
             SunToolkit.executeOnEventHandlerThread(source, dataConverter);
 
@@ -1908,9 +1778,7 @@ search:
                 getToolkitThreadBlockedHandler().enter();
             }
 
-            if (appContext != null) {
-                appContext.remove(DATA_CONVERTER_KEY);
-            }
+            dataConverterInstance = null;
 
             ret = stack.pop();
         } finally {
@@ -1927,14 +1795,12 @@ search:
 
     public void processDataConversionRequests() {
         if (EventQueue.isDispatchThread()) {
-            AppContext appContext = AppContext.getAppContext();
             getToolkitThreadBlockedHandler().lock();
             try {
-                Runnable dataConverter =
-                    (Runnable)appContext.get(DATA_CONVERTER_KEY);
+                Runnable dataConverter = dataConverterInstance;
                 if (dataConverter != null) {
                     dataConverter.run();
-                    appContext.remove(DATA_CONVERTER_KEY);
+                    dataConverterInstance = null;
                 }
             } finally {
                 getToolkitThreadBlockedHandler().unlock();
@@ -1954,8 +1820,8 @@ search:
         Set<Long> keySet = map.keySet();
         long[] retval = new long[keySet.size()];
         int i = 0;
-        for (Iterator<Long> iter = keySet.iterator(); iter.hasNext(); i++) {
-            retval[i] = iter.next();
+        for (long key : keySet) {
+            retval[i++] = key;
         }
         return retval;
     }
@@ -1978,16 +1844,7 @@ search:
     protected static byte[] inputStreamToByteArray(InputStream str)
         throws IOException
     {
-        try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-            int len = 0;
-            byte[] buf = new byte[8192];
-
-            while ((len = str.read(buf)) != -1) {
-                baos.write(buf, 0, len);
-            }
-
-            return baos.toByteArray();
-        }
+        return str.readAllBytes();
     }
 
     /**

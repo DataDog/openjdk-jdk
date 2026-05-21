@@ -143,6 +143,16 @@ namespace tstrings {
     // conversion to the active code page
     std::string toACP(const std::wstring& utf16str);
 
+    // conversion from windows-encoding string (WIDECHAR or ACP) to utf8/utf16
+    std::string winStringToUtf8(const std::wstring& winStr);
+    std::string winStringToUtf8(const std::string& winStr);
+    std::wstring winStringToUtf16(const std::wstring& winStr);
+    std::wstring winStringToUtf16(const std::string& winStr);
+
+    // conversion from utf8/utf16 to windows-encoding string (WIDECHAR or ACP)
+    tstring toWinString(const std::wstring& utf16);
+    tstring toWinString(const std::string& utf8);
+
     // conversion to Utf8
     std::string toUtf8(const std::wstring& utf16str);
 
@@ -151,6 +161,10 @@ namespace tstrings {
 
     inline std::wstring fromUtf8(const std::string& utf8str) {
         return toUtf16(utf8str);
+    }
+
+    inline tstring fromUtf16(const std::wstring& utf16str) {
+        return utf16str;
     }
 
 #else
@@ -342,6 +356,11 @@ namespace tstrings {
             data << fromUtf8(msg);
         }
 
+        any& operator << (const std::string& msg) {
+            data << fromUtf8(msg);
+            return *this;
+        }
+
 #ifdef TSTRINGS_WITH_WCHAR
         any(std::wstring::const_pointer msg) {
             data << msg;
@@ -351,22 +370,22 @@ namespace tstrings {
             data << msg;
         }
 
-        any& operator << (const std::wstring& v) {
-            data << v;
+        any& operator << (const std::wstring& msg) {
+            data << msg;
             return *this;
         }
 
         // need this specialization instead std::wstring::pointer,
         // otherwise LPWSTR is handled as abstract pointer (void*)
-        any& operator << (LPWSTR v) {
-            data << (v ? v : L"NULL");
+        any& operator << (LPWSTR msg) {
+            data << (msg ? msg : L"NULL");
             return *this;
         }
 
         // need this specialization instead std::wstring::const_pointer,
         // otherwise LPCWSTR is handled as abstract pointer (const void*)
-        any& operator << (LPCWSTR v) {
-            data << (v ? v : L"NULL");
+        any& operator << (LPCWSTR msg) {
+            data << (msg ? msg : L"NULL");
             return *this;
         }
 

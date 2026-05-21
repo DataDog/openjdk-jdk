@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -35,7 +33,7 @@ import static java.util.stream.IntStream.range;
 import static jdk.test.lib.Asserts.assertEquals;
 import static jdk.test.lib.Asserts.assertTrue;
 import static jdk.test.lib.jfr.Events.fromRecording;
-import static sun.hotspot.WhiteBox.getWhiteBox;
+import static jdk.test.whitebox.WhiteBox.getWhiteBox;
 
 import java.io.IOException;
 import java.lang.ref.WeakReference;
@@ -49,16 +47,16 @@ import gc.testlibrary.g1.MixedGCProvoker;
 import jdk.jfr.Recording;
 import jdk.test.lib.Asserts;
 import jdk.test.lib.jfr.EventNames;
-import sun.hotspot.WhiteBox;
+import jdk.test.whitebox.WhiteBox;
 
 /**
  * @test
- * @key jfr
+ * @requires vm.flagless
  * @requires vm.hasJFR
  * @requires vm.gc == "G1" | vm.gc == null
  * @library /test/lib /test/jdk /test/hotspot/jtreg
- * @build sun.hotspot.WhiteBox
- * @run driver ClassFileInstaller sun.hotspot.WhiteBox
+ * @build jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  * @run main/othervm -XX:+UnlockExperimentalVMOptions -XX:+AlwaysTenure
  *      -Xms20M -Xmx20M -Xlog:gc=debug,gc+heap*=debug,gc+ergo*=debug,gc+start=debug
  *      -XX:G1MixedGCLiveThresholdPercent=100 -XX:G1HeapWastePercent=0 -XX:G1HeapRegionSize=1m
@@ -99,25 +97,39 @@ public class TestG1ParallelPhases {
             "CLDGRoots",
             "CMRefRoots",
             "MergeER",
-            "MergeHCC",
             "MergeRS",
-            "MergeLB",
             "ScanHR",
             "CodeRoots",
             "ObjCopy",
             "Termination",
-            "StringDedupQueueFixup",
-            "StringDedupTableFixup",
-            "RedirtyCards",
-            "ParFreeCSet",
+            "RecalculateUsed",
+            "ResizeTLABs",
+            "FreeCSet",
+            "UpdateDerivedPointers",
+            "EagerlyReclaimHumongousObjects",
+            "ResetPartialArrayStateManager",
+            "ClearPendingCards",
+            "MergePSS",
             "NonYoungFreeCSet",
             "YoungFreeCSet",
-            "RebuildFreeList"
+            "RebuildFreeList",
+            "SampleCandidates",
+            "ResetMarkingState",
+            "NoteStartOfMark",
+            "RetireTLABs"
         );
 
         // Some GC phases may or may not occur depending on environment. Filter them out
         // since we can not reliably guarantee that they occur (or not).
         Set<String> optPhases = of(
+            // Does not always occur
+            "SweepRT",
+            // The following phases only occur on evacuation failure.
+            "RestoreEvacuationFailedRegions",
+            "RemoveSelfForwards",
+            "RestorePreservedMarks",
+            "ProcessEvacuationFailedRegions",
+            // Generally optional phases.
             "OptScanHR",
             "OptMergeRS",
             "OptCodeRoots",

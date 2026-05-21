@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,14 +22,11 @@
  *
  */
 
-#include "precompiled.hpp"
-#include "classfile/classLoaderDataGraph.hpp"
 #include "gc/g1/g1CollectedHeap.hpp"
 #include "gc/g1/g1FullCollector.hpp"
 #include "gc/g1/g1FullGCMarker.hpp"
 #include "gc/g1/g1FullGCMarkTask.hpp"
 #include "gc/g1/g1FullGCOopClosures.inline.hpp"
-#include "gc/g1/g1FullGCReferenceProcessorExecutor.hpp"
 #include "gc/shared/gcTraceTime.inline.hpp"
 #include "gc/shared/referenceProcessor.hpp"
 #include "memory/iterator.inline.hpp"
@@ -37,16 +34,14 @@
 G1FullGCMarkTask::G1FullGCMarkTask(G1FullCollector* collector) :
     G1FullGCTask("G1 Parallel Marking Task", collector),
     _root_processor(G1CollectedHeap::heap(), collector->workers()),
-    _terminator(collector->workers(), collector->array_queue_set()) {
-  // Need cleared claim bits for the roots processing
-  ClassLoaderDataGraph::clear_claimed_marks();
+    _terminator(collector->workers(), collector->marking_task_queues()) {
 }
 
 void G1FullGCMarkTask::work(uint worker_id) {
   Ticks start = Ticks::now();
   ResourceMark rm;
   G1FullGCMarker* marker = collector()->marker(worker_id);
-  MarkingCodeBlobClosure code_closure(marker->mark_closure(), !CodeBlobToOopClosure::FixRelocations);
+  MarkingNMethodClosure code_closure(marker->mark_closure());
 
   if (ClassUnloading) {
     _root_processor.process_strong_roots(marker->mark_closure(),
@@ -59,10 +54,9 @@ void G1FullGCMarkTask::work(uint worker_id) {
   }
 
   // Mark stack is populated, now process and drain it.
-  marker->complete_marking(collector()->oop_queue_set(), collector()->array_queue_set(), &_terminator);
+  marker->complete_marking(collector()->marking_task_queues(), &_terminator);
 
   // This is the point where the entire marking should have completed.
-  assert(marker->oop_stack()->is_empty(), "Marking should have completed");
-  assert(marker->objarray_stack()->is_empty(), "Array marking should have completed");
+  assert(marker->task_queue()->is_empty(), "Marking should have completed");
   log_task("Marking task", worker_id, start);
 }

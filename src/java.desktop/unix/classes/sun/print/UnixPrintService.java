@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -74,13 +74,12 @@ import javax.print.attribute.standard.Sides;
 import javax.print.event.PrintServiceAttributeListener;
 
 
-public class UnixPrintService implements PrintService, AttributeUpdater,
+public final class UnixPrintService implements PrintService, AttributeUpdater,
                                          SunPrinterJobService {
 
     /* define doc flavors for text types in the default encoding of
      * this platform since we can always read those.
      */
-    private static String encoding = "ISO8859_1";
     private static DocFlavor textByteFlavor;
 
     private static DocFlavor[] supportedDocFlavors = null;
@@ -146,10 +145,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
       "| grep -E '^[ 0-9a-zA-Z_-]*@' | awk '{print $4}'"
     };
 
-    static {
-        encoding = java.security.AccessController.doPrivileged(
-            new sun.security.action.GetPropertyAction("file.encoding"));
-    }
+    private static String encoding = System.getProperty("file.encoding");
 
     /* let's try to support a few of these */
     private static final Class<?>[] serviceAttrCats = {
@@ -211,6 +207,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
         isInvalid = true;
     }
 
+    @Override
     public String getName() {
         return printer;
     }
@@ -419,11 +416,8 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
         return false;
     }
 
+    @Override
     public DocPrintJob createPrintJob() {
-      SecurityManager security = System.getSecurityManager();
-      if (security != null) {
-        security.checkPrintJobAccess();
-      }
         return new UnixPrintJob(this);
     }
 
@@ -435,6 +429,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
         }
     }
 
+    @Override
     public PrintServiceAttributeSet getUpdatedAttributes() {
         PrintServiceAttributeSet currSet = getDynamicAttributes();
         if (lastSet == null) {
@@ -464,6 +459,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
         }
     }
 
+    @Override
     public void addPrintServiceAttributeListener(
                                  PrintServiceAttributeListener listener) {
         synchronized (this) {
@@ -477,6 +473,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
         }
     }
 
+    @Override
     public void removePrintServiceAttributeListener(
                                   PrintServiceAttributeListener listener) {
         synchronized (this) {
@@ -491,6 +488,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
         }
     }
 
+    @Override
     @SuppressWarnings("unchecked")
     public <T extends PrintServiceAttribute>
         T getAttribute(Class<T> category)
@@ -517,6 +515,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
         }
     }
 
+    @Override
     public PrintServiceAttributeSet getAttributes() {
         PrintServiceAttributeSet attrs = new HashPrintServiceAttributeSet();
         attrs.add(getPrinterName());
@@ -553,6 +552,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
         }
     }
 
+    @Override
     public DocFlavor[] getSupportedDocFlavors() {
         if (supportedDocFlavors == null) {
             initSupportedDocFlavors();
@@ -564,6 +564,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
         return flavors;
     }
 
+    @Override
     public boolean isDocFlavorSupported(DocFlavor flavor) {
         if (supportedDocFlavors == null) {
             initSupportedDocFlavors();
@@ -576,6 +577,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
         return false;
     }
 
+    @Override
     public Class<?>[] getSupportedAttributeCategories() {
         ArrayList<Class<?>> categList = new ArrayList<>(otherAttrCats.length);
         for (Class<?> c : otherAttrCats) {
@@ -588,6 +590,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
         return categList.toArray(new Class<?>[categList.size()]);
     }
 
+    @Override
     public boolean
         isAttributeCategorySupported(Class<? extends Attribute> category)
     {
@@ -610,6 +613,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
     /* return defaults for all attributes for which there is a default
      * value
      */
+    @Override
     public Object
         getDefaultAttributeValue(Class<? extends Attribute> category)
     {
@@ -630,15 +634,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
         } else if (category == Chromaticity.class) {
             return Chromaticity.COLOR;
         } else if (category == Destination.class) {
-            try {
-                return new Destination((new File("out.ps")).toURI());
-            } catch (SecurityException se) {
-                try {
-                    return new Destination(new URI("file:out.ps"));
-                } catch (URISyntaxException e) {
-                    return null;
-                }
-            }
+            return new Destination((new File("out.ps")).toURI());
         } else if (category == Fidelity.class) {
             return Fidelity.FIDELITY_FALSE;
         } else if (category == JobName.class) {
@@ -675,11 +671,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
         } else if (category == PageRanges.class) {
             return new PageRanges(1, Integer.MAX_VALUE);
         } else if (category == RequestingUserName.class) {
-            String userName = "";
-            try {
-              userName = System.getProperty("user.name", "");
-            } catch (SecurityException se) {
-            }
+            String userName = System.getProperty("user.name", "");
             return new RequestingUserName(userName, null);
         } else if (category == SheetCollate.class) {
             return SheetCollate.UNCOLLATED;
@@ -701,6 +693,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
         }
     }
 
+    @Override
     public Object
         getSupportedAttributeValues(Class<? extends Attribute> category,
                                     DocFlavor flavor,
@@ -736,15 +729,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
                 return null;
             }
         } else if (category == Destination.class) {
-            try {
                 return new Destination((new File("out.ps")).toURI());
-            } catch (SecurityException se) {
-                try {
-                    return new Destination(new URI("file:out.ps"));
-                } catch (URISyntaxException e) {
-                    return null;
-                }
-            }
         } else if (category == JobName.class) {
             return new JobName("Java Printing", null);
         } else if (category == JobSheets.class) {
@@ -753,11 +738,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
             arr[1] = JobSheets.STANDARD;
             return arr;
         } else if (category == RequestingUserName.class) {
-            String userName = "";
-            try {
-              userName = System.getProperty("user.name", "");
-            } catch (SecurityException se) {
-            }
+            String userName = System.getProperty("user.name", "");
             return new RequestingUserName(userName, null);
         } else if (category == OrientationRequested.class) {
             if (flavor == null || isServiceFormattedFlavor(flavor)) {
@@ -917,6 +898,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
             flavor.equals(DocFlavor.URL.PNG);
     }
 
+    @Override
     public boolean isAttributeValueSupported(Attribute attr,
                                              DocFlavor flavor,
                                              AttributeSet attributes) {
@@ -1008,6 +990,7 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
         return true;
     }
 
+    @Override
     public AttributeSet getUnsupportedAttributes(DocFlavor flavor,
                                                  AttributeSet attributes) {
 
@@ -1042,24 +1025,29 @@ public class UnixPrintService implements PrintService, AttributeUpdater,
         }
     }
 
+    @Override
     public ServiceUIFactory getServiceUIFactory() {
         return null;
     }
 
+    @Override
     public String toString() {
         return "Unix Printer : " + getName();
     }
 
+    @Override
     public boolean equals(Object obj) {
         return  (obj == this ||
                  (obj instanceof UnixPrintService &&
                   ((UnixPrintService)obj).getName().equals(getName())));
     }
 
+    @Override
     public int hashCode() {
         return this.getClass().hashCode()+getName().hashCode();
     }
 
+    @Override
     public boolean usesClass(Class<?> c) {
         return (c == sun.print.PSPrinterJob.class);
     }

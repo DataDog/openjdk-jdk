@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,8 +25,9 @@
 #ifndef SHARE_RUNTIME_FLAGS_JVMFLAG_HPP
 #define SHARE_RUNTIME_FLAGS_JVMFLAG_HPP
 
-#include "utilities/globalDefinitions.hpp"
+#include "cppstdlib/type_traits.hpp"
 #include "utilities/enumIterator.hpp"
+#include "utilities/globalDefinitions.hpp"
 #include "utilities/macros.hpp"
 #include "utilities/vmEnums.hpp"
 
@@ -62,14 +63,13 @@ public:
     KIND_MANAGEABLE         = 1 << 5,
     KIND_DIAGNOSTIC         = 1 << 6,
     KIND_EXPERIMENTAL       = 1 << 7,
-    KIND_NOT_PRODUCT        = 1 << 8,
-    KIND_DEVELOP            = 1 << 9,
-    KIND_PLATFORM_DEPENDENT = 1 << 10,
-    KIND_C1                 = 1 << 11,
-    KIND_C2                 = 1 << 12,
-    KIND_ARCH               = 1 << 13,
-    KIND_LP64_PRODUCT       = 1 << 14,
-    KIND_JVMCI              = 1 << 15,
+    KIND_DEVELOP            = 1 << 8,
+    KIND_PLATFORM_DEPENDENT = 1 << 9,
+    KIND_C1                 = 1 << 10,
+    KIND_C2                 = 1 << 11,
+    KIND_ARCH               = 1 << 12,
+    KIND_LP64_PRODUCT       = 1 << 13,
+    KIND_JVMCI              = 1 << 14,
 
     // Note the difference:
     // f->get_origin() == COMMAND_LINE
@@ -113,8 +113,7 @@ public:
     NONE = 0,
     DIAGNOSTIC_FLAG_BUT_LOCKED,
     EXPERIMENTAL_FLAG_BUT_LOCKED,
-    DEVELOPER_FLAG_BUT_PRODUCT_BUILD,
-    NOTPRODUCT_FLAG_BUT_PRODUCT_BUILD
+    DEVELOPER_FLAG_BUT_PRODUCT_BUILD
   };
 
 #define JVM_FLAG_NON_STRING_TYPES_DO(f) \
@@ -193,8 +192,7 @@ public:
 
 #define JVM_FLAG_TYPE_ACCESSOR(t)                                                                 \
   bool is_##t() const                      { return _type == TYPE_##t;}                           \
-  t get_##t() const                        { assert(is_##t(), "sanity"); return *((t*) _addr); }  \
-  void set_##t(t value)                    { assert(is_##t(), "sanity"); *((t*) _addr) = value; }
+  t get_##t() const                        { assert(is_##t(), "sanity"); return *((t*) _addr); }
 
   JVM_FLAG_NON_STRING_TYPES_DO(JVM_FLAG_TYPE_ACCESSOR)
 
@@ -224,23 +222,15 @@ public:
   int type() const { return _type; }
   const char* name() const { return _name; }
 
-  void assert_type(int type_enum) const {
-    if (type_enum == JVMFlag::TYPE_ccstr) {
-      assert(is_ccstr(), "type check"); // ccstr or ccstrlist
-    } else {
-      assert(_type == type_enum, "type check");
-    }
-  }
-
   // Do not use JVMFlag::read() or JVMFlag::write() directly unless you know
   // what you're doing. Use FLAG_SET_XXX macros or JVMFlagAccess instead.
-  template <typename T, int type_enum> T read() const {
-    assert_type(type_enum);
+  template <typename T> T read() const {
+    assert_compatible_type<T>(_type);
     return *static_cast<T*>(_addr);
   }
 
-  template <typename T, int type_enum> void write(T value) {
-    assert_type(type_enum);
+  template <typename T> void write(T value) {
+    assert_compatible_type<T>(_type);
     *static_cast<T*>(_addr) = value;
   }
 
@@ -256,7 +246,6 @@ public:
   bool is_manageable() const      { return (_flags & KIND_MANAGEABLE) != 0;                   }
   bool is_diagnostic() const      { return (_flags & KIND_DIAGNOSTIC) != 0;                   }
   bool is_experimental() const    { return (_flags & KIND_EXPERIMENTAL) != 0;                 }
-  bool is_notproduct() const      { return (_flags & KIND_NOT_PRODUCT) != 0;                  }
   bool is_develop() const         { return (_flags & KIND_DEVELOP) != 0;                      }
 
   bool is_constant_in_binary() const;
@@ -288,7 +277,37 @@ public:
   void print_origin(outputStream* st, unsigned int width) const;
   void print_as_flag(outputStream* st) const;
 
-  static const char* flag_error_str(JVMFlag::Error error);
+private:
+  // type checking - the following functions make sure you access *_addr as
+  // the correct type <T>
+
+  static void assert_valid_type_enum(int type_enum) {
+    assert(0 <= type_enum && type_enum < NUM_FLAG_TYPES, "sanity");
+  }
+
+  // The following computation is not universal, but should be correct
+  // for the limited number of types that can be stored inside a JVMFlag.
+  template <typename T>
+  static constexpr int type_signature() {
+    return int(sizeof(T)) |
+           (((std::is_integral<T>::value) ? 1 : 0) << 8) |
+           (((std::is_signed<T>::value)   ? 1 : 0) << 9) |
+           (((std::is_pointer<T>::value)  ? 1 : 0) << 10);
+  }
+
+  static const int type_signatures[];
+
+public:
+  template <typename T>
+  static void assert_compatible_type(int type_enum) {
+    assert(is_compatible_type<T>(type_enum), "must be");
+  }
+
+  template <typename T>
+  static bool is_compatible_type(int type_enum) {
+    assert_valid_type_enum(type_enum);
+    return type_signatures[type_enum] == type_signature<T>();
+  }
 
 public:
   static void printSetFlags(outputStream* out);

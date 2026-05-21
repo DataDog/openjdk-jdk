@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,23 +27,16 @@ package sun.rmi.transport.tcp;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.lang.ref.Reference;
-import java.lang.ref.SoftReference;
 import java.net.Socket;
 import java.rmi.ConnectIOException;
 import java.rmi.RemoteException;
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.ListIterator;
-import java.util.WeakHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import sun.rmi.runtime.Log;
-import sun.rmi.runtime.NewThreadAction;
 import sun.rmi.runtime.RuntimeUtil;
 import sun.rmi.transport.Channel;
 import sun.rmi.transport.Connection;
@@ -70,35 +63,21 @@ public class TCPChannel implements Channel {
     /** connection acceptor (should be in TCPTransport) */
     private ConnectionAcceptor acceptor;
 
-    /** most recently authorized AccessControlContext */
-    private AccessControlContext okContext;
-
-    /** cache of authorized AccessControlContexts */
-    private WeakHashMap<AccessControlContext,
-                        Reference<AccessControlContext>> authcache;
-
-    /** the SecurityManager which authorized okContext and authcache */
-    private SecurityManager cacheSecurityManager = null;
-
     /** client-side connection idle usage timeout */
     private static final long idleTimeout =             // default 15 seconds
-        AccessController.doPrivileged((PrivilegedAction<Long>) () ->
-            Long.getLong("sun.rmi.transport.connectionTimeout", 15000));
+        Long.getLong("sun.rmi.transport.connectionTimeout", 15000);
 
     /** client-side connection handshake read timeout */
     private static final int handshakeTimeout =         // default 1 minute
-        AccessController.doPrivileged((PrivilegedAction<Integer>) () ->
-            Integer.getInteger("sun.rmi.transport.tcp.handshakeTimeout", 60000));
+        Integer.getInteger("sun.rmi.transport.tcp.handshakeTimeout", 60000);
 
     /** client-side connection response read timeout (after handshake) */
     private static final int responseTimeout =          // default infinity
-        AccessController.doPrivileged((PrivilegedAction<Integer>) () ->
-            Integer.getInteger("sun.rmi.transport.tcp.responseTimeout", 0));
+        Integer.getInteger("sun.rmi.transport.tcp.responseTimeout", 0);
 
     /** thread pool for scheduling delayed tasks */
     private static final ScheduledExecutorService scheduler =
-        AccessController.doPrivileged(
-            new RuntimeUtil.GetInstanceAction()).getScheduler();
+        RuntimeUtil.getInstance().getScheduler();
 
     /**
      * Create channel for endpoint.
@@ -113,40 +92,6 @@ public class TCPChannel implements Channel {
      */
     public Endpoint getEndpoint() {
         return ep;
-    }
-
-    /**
-     * Checks if the current caller has sufficient privilege to make
-     * a connection to the remote endpoint.
-     * @exception SecurityException if caller is not allowed to use this
-     * Channel.
-     */
-    private void checkConnectPermission() throws SecurityException {
-        SecurityManager security = System.getSecurityManager();
-        if (security == null)
-            return;
-
-        if (security != cacheSecurityManager) {
-            // The security manager changed: flush the cache
-            okContext = null;
-            authcache = new WeakHashMap<AccessControlContext,
-                                        Reference<AccessControlContext>>();
-            cacheSecurityManager = security;
-        }
-
-        AccessControlContext ctx = AccessController.getContext();
-
-        // If ctx is the same context as last time, or if it
-        // appears in the cache, bypass the checkConnect.
-        if (okContext == null ||
-            !(okContext.equals(ctx) || authcache.containsKey(ctx)))
-        {
-            security.checkConnect(ep.getHost(), ep.getPort());
-            authcache.put(ctx, new SoftReference<AccessControlContext>(ctx));
-            // A WeakHashMap is transformed into a SoftHashSet by making
-            // each value softly refer to its own key (Peter's idea).
-        }
-        okContext = ctx;
     }
 
     /**
@@ -167,10 +112,6 @@ public class TCPChannel implements Channel {
                 int elementPos = freeList.size()-1;
 
                 if (elementPos >= 0) {
-                    // If there is a security manager, make sure
-                    // the caller is allowed to connect to the
-                    // requested endpoint.
-                    checkConnectPermission();
                     conn = freeList.get(elementPos);
                     freeList.remove(elementPos);
                 }
@@ -210,6 +151,19 @@ public class TCPChannel implements Channel {
         conn = new TCPConnection(this, sock);
 
         try {
+            /*
+             * Set socket read timeout to configured value for JRMP
+             * connection handshake; this also serves to guard against
+             * non-JRMP servers that do not respond (see 4322806).
+             */
+            int originalSoTimeout = 0;
+            try {
+                originalSoTimeout = sock.getSoTimeout();
+                sock.setSoTimeout(handshakeTimeout);
+            } catch (Exception e) {
+                // if we fail to set this, ignore and proceed anyway
+            }
+
             DataOutputStream out =
                 new DataOutputStream(conn.getOutputStream());
             writeTransportHeader(out);
@@ -220,19 +174,6 @@ public class TCPChannel implements Channel {
             } else {
                 out.writeByte(TransportConstants.StreamProtocol);
                 out.flush();
-
-                /*
-                 * Set socket read timeout to configured value for JRMP
-                 * connection handshake; this also serves to guard against
-                 * non-JRMP servers that do not respond (see 4322806).
-                 */
-                int originalSoTimeout = 0;
-                try {
-                    originalSoTimeout = sock.getSoTimeout();
-                    sock.setSoTimeout(handshakeTimeout);
-                } catch (Exception e) {
-                    // if we fail to set this, ignore and proceed anyway
-                }
 
                 DataInputStream in =
                     new DataInputStream(conn.getInputStream());
@@ -459,10 +400,9 @@ class ConnectionAcceptor implements Runnable {
      * Start a new thread to accept connections.
      */
     public void startNewAcceptor() {
-        Thread t = AccessController.doPrivileged(
-            new NewThreadAction(ConnectionAcceptor.this,
-                                "TCPChannel Accept-" + ++ threadNum,
-                                true));
+        Thread t = RuntimeUtil.newSystemThread(ConnectionAcceptor.this,
+                                               "TCPChannel Accept-" + ++ threadNum,
+                                               true);
         t.start();
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,7 @@ import java.security.ProviderException;
 import java.util.Arrays;
 import java.util.Objects;
 
+import jdk.internal.util.Preconditions;
 import jdk.internal.vm.annotation.IntrinsicCandidate;
 
 /**
@@ -60,7 +61,7 @@ abstract class DigestBase extends MessageDigestSpi implements Cloneable {
     private final int digestLength;
 
     // size of the input to the compression function in bytes
-    private final int blockSize;
+    protected final int blockSize;
     // buffer to store partial blocks, blockSize bytes large
     // Subclasses should not access this array directly except possibly in their
     // implDigest() method. See MD5.java as an example.
@@ -105,9 +106,7 @@ abstract class DigestBase extends MessageDigestSpi implements Cloneable {
         if (len == 0) {
             return;
         }
-        if ((ofs < 0) || (len < 0) || (ofs > b.length - len)) {
-            throw new ArrayIndexOutOfBoundsException();
-        }
+        Preconditions.checkFromIndexSize(ofs, len, b.length, Preconditions.AIOOBE_FORMATTER);
         if (bytesProcessed < 0) {
             engineReset();
         }
@@ -159,10 +158,7 @@ abstract class DigestBase extends MessageDigestSpi implements Cloneable {
         }
 
         Objects.requireNonNull(b);
-
-        if (ofs < 0 || ofs >= b.length) {
-            throw new ArrayIndexOutOfBoundsException(ofs);
-        }
+        Preconditions.checkIndex(ofs, b.length, Preconditions.AIOOBE_FORMATTER);
 
         int endIndex = (limit / blockSize) * blockSize  + blockSize - 1;
         if (endIndex >= b.length) {
@@ -188,8 +184,7 @@ abstract class DigestBase extends MessageDigestSpi implements Cloneable {
         try {
             engineDigest(b, 0, b.length);
         } catch (DigestException e) {
-            throw (ProviderException)
-                new ProviderException("Internal error").initCause(e);
+            throw new ProviderException("Internal error", e);
         }
         return b;
     }
@@ -246,5 +241,22 @@ abstract class DigestBase extends MessageDigestSpi implements Cloneable {
         // byte bit counter in SHA-384/512
         padding = new byte[136];
         padding[0] = (byte)0x80;
+    }
+
+    /**
+     * Digest block-length bytes in a single operation.
+     * Subclasses are expected to override this method. It is intended
+     * for fixed-length short input where input includes padding bytes.
+     * @param input byte array to be digested
+     * @param inLen the length of the input
+     * @param output the output buffer
+     * @param outOffset the offset into output buffer where digest should be written
+     * @param outLen the length of the output buffer
+     * @throws UnsupportedOperationException if a subclass does not override this method
+     */
+    void implDigestFixedLengthPreprocessed (
+            byte[] input, int inLen, byte[] output, int outOffset, int outLen)
+            throws UnsupportedOperationException {
+        throw new UnsupportedOperationException("should not be here");
     }
 }

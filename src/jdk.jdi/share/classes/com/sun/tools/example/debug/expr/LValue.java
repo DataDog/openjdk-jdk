@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -73,11 +73,11 @@ abstract class LValue {
             setValue0(value);
         } catch (InvalidTypeException exc) {
             throw new ParseException(
-                "Attempt to set value of incorrect type" +
+                "Attempt to set value of incorrect type: " +
                 exc);
         } catch (ClassNotLoadedException exc) {
             throw new ParseException(
-                "Attempt to set value before " + exc.className() + " was loaded" +
+                "Attempt to set value before " + exc.className() + " was loaded: " +
                 exc);
         }
     }
@@ -181,7 +181,7 @@ abstract class LValue {
         /*
          * TO DO: Note that this currently fails to find superclass
          * or implemented interface fields. This is due to a temporary
-         * limititation of RefType.fieldByName. Once that method is
+         * limitation of RefType.fieldByName. Once that method is
          * fixed, superclass fields will be found.
          */
         Field field = refType.fieldByName(name);
@@ -597,7 +597,7 @@ abstract class LValue {
         /*
          * Since one can code "int myLen = myArray.length;",
          * one might expect that these JDI calls would get a Value
-         * object for the length of an array in the debugee:
+         * object for the length of an array in the debuggee:
          *    Field xxx = ArrayType.fieldByName("length")
          *    Value lenVal= ArrayReference.getValue(xxx)
          *

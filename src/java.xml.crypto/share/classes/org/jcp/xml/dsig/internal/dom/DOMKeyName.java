@@ -21,10 +21,7 @@
  * under the License.
  */
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
- */
-/*
- * $Id: DOMKeyName.java 1854026 2019-02-21 09:30:01Z coheigea $
+ * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
  */
 package org.jcp.xml.dsig.internal.dom;
 
@@ -67,6 +64,7 @@ public final class DOMKeyName extends DOMStructure implements KeyName {
         name = knElem.getFirstChild().getNodeValue();
     }
 
+    @Override
     public String getName() {
         return name;
     }

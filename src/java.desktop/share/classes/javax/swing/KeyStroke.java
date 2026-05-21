@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,10 +22,13 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+
 package javax.swing;
 
 import java.awt.AWTKeyStroke;
 import java.awt.event.KeyEvent;
+import java.io.Serial;
+
 import sun.swing.SwingAccessor;
 
 /**
@@ -63,12 +66,12 @@ import sun.swing.SwingAccessor;
  * @author David Mendenhall
  * @since 1.2
  */
-@SuppressWarnings("serial") // Same-version serialization only
 public class KeyStroke extends AWTKeyStroke {
 
     /**
-     * Serial Version ID.
+     * Use serialVersionUID from JDK 1.4 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = -9060180771037902530L;
 
     static {

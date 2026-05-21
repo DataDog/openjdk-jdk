@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -50,7 +50,7 @@ import java.security.SecureRandom;
 public class MessageEncoder {
 
     private static final Logger debug =
-            Utils.getWebSocketLogger("[Output]"::toString, Utils.DEBUG_WS);
+            Utils.getWebSocketLogger("[Output]"::toString);
 
     private final SecureRandom maskingKeySource = new SecureRandom();
     private final Frame.HeaderWriter headerWriter = new Frame.HeaderWriter();
@@ -81,6 +81,15 @@ public class MessageEncoder {
     /* Was the previous frame TEXT or a CONTINUATION thereof? */
     private boolean previousText;
     private boolean closed;
+    private final boolean server;
+
+    MessageEncoder() {
+        this(false);
+    }
+
+    MessageEncoder(boolean isServer) {
+        this.server = isServer;
+    }
 
     /*
      * How many bytes of the current message have been already encoded.
@@ -248,7 +257,7 @@ public class MessageEncoder {
 
     private int maskAvailable(ByteBuffer src, ByteBuffer dst) {
         int r0 = dst.remaining();
-        payloadMasker.transferMasking(src, dst);
+        payloadMasker.applyMask(src, dst);
         int masked = r0 - dst.remaining();
         return src.hasRemaining() ? -masked : masked;
     }
@@ -369,13 +378,21 @@ public class MessageEncoder {
                       opcode, fin, payloadLen);
         }
         headerBuffer.clear();
-        int mask = maskingKeySource.nextInt();
-        headerWriter.fin(fin)
+        // for server setting mask to 0 disables masking (xor)
+        int mask = this.server ? 0 : maskingKeySource.nextInt();
+        if (mask == 0) {
+            headerWriter.fin(fin)
+                    .opcode(opcode)
+                    .payloadLen(payloadLen)
+                    .write(headerBuffer);
+        } else {
+            headerWriter.fin(fin)
                     .opcode(opcode)
                     .payloadLen(payloadLen)
                     .mask(mask)
                     .write(headerBuffer);
+        }
         headerBuffer.flip();
-        payloadMasker.mask(mask);
+        payloadMasker.setMask(mask);
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1994, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,15 +34,19 @@ import java.util.Objects;
 import java.util.Optional;
 
 import jdk.internal.misc.CDS;
+import jdk.internal.util.DecimalDigits;
+import jdk.internal.vm.annotation.AOTSafeClassInitializer;
+import jdk.internal.vm.annotation.ForceInline;
 import jdk.internal.vm.annotation.IntrinsicCandidate;
+import jdk.internal.vm.annotation.Stable;
 
+import static java.lang.Character.digit;
 import static java.lang.String.COMPACT_STRINGS;
-import static java.lang.String.LATIN1;
-import static java.lang.String.UTF16;
 
 /**
- * The {@code Long} class wraps a value of the primitive type {@code
- * long} in an object. An object of type {@code Long} contains a
+ * The {@code Long} class is the {@linkplain
+ * java.lang##wrapperClass wrapper class} for values of the primitive
+ * type {@code long}. An object of type {@code Long} contains a
  * single field whose type is {@code long}.
  *
  * <p> In addition, this class provides several methods for converting
@@ -59,13 +63,10 @@ import static java.lang.String.UTF16;
  * <p>Implementation note: The implementations of the "bit twiddling"
  * methods (such as {@link #highestOneBit(long) highestOneBit} and
  * {@link #numberOfTrailingZeros(long) numberOfTrailingZeros}) are
- * based on material from Henry S. Warren, Jr.'s <i>Hacker's
- * Delight</i>, (Addison Wesley, 2002).
+ * based on material from Henry S. Warren, Jr.'s <cite>Hacker's
+ * Delight</cite>, (Addison Wesley, 2002) and <cite>Hacker's
+ * Delight, Second Edition</cite>, (Pearson Education, 2013).
  *
- * @author  Lee Boynton
- * @author  Arthur van Hoff
- * @author  Josh Bloch
- * @author  Joseph D. Darcy
  * @since   1.0
  */
 @jdk.internal.ValueBased
@@ -89,8 +90,7 @@ public final class Long extends Number
      *
      * @since   1.1
      */
-    @SuppressWarnings("unchecked")
-    public static final Class<Long>     TYPE = (Class<Long>) Class.getPrimitiveClass("long");
+    public static final Class<Long> TYPE = Class.getPrimitiveClass("long");
 
     /**
      * Returns a string representation of the first argument in the
@@ -152,10 +152,10 @@ public final class Long extends Number
             }
 
             while (i <= -radix) {
-                buf[charPos--] = (byte)Integer.digits[(int)(-(i % radix))];
+                buf[charPos--] = Integer.digits[(int)(-(i % radix))];
                 i = i / radix;
             }
-            buf[charPos] = (byte)Integer.digits[(int)(-i)];
+            buf[charPos] = Integer.digits[(int)(-i)];
 
             if (negative) {
                 buf[--charPos] = '-';
@@ -213,38 +213,27 @@ public final class Long extends Number
         if (i >= 0)
             return toString(i, radix);
         else {
-            switch (radix) {
-            case 2:
-                return toBinaryString(i);
-
-            case 4:
-                return toUnsignedString0(i, 2);
-
-            case 8:
-                return toOctalString(i);
-
-            case 10:
-                /*
-                 * We can get the effect of an unsigned division by 10
-                 * on a long value by first shifting right, yielding a
-                 * positive value, and then dividing by 5.  This
-                 * allows the last digit and preceding digits to be
-                 * isolated more quickly than by an initial conversion
-                 * to BigInteger.
-                 */
-                long quot = (i >>> 1) / 5;
-                long rem = i - quot * 10;
-                return toString(quot) + rem;
-
-            case 16:
-                return toHexString(i);
-
-            case 32:
-                return toUnsignedString0(i, 5);
-
-            default:
-                return toUnsignedBigInteger(i).toString(radix);
-            }
+            return switch (radix) {
+                case 2  -> toBinaryString(i);
+                case 4  -> toUnsignedString0(i, 2);
+                case 8  -> toOctalString(i);
+                case 10 -> {
+                    /*
+                     * We can get the effect of an unsigned division by 10
+                     * on a long value by first shifting right, yielding a
+                     * positive value, and then dividing by 5.  This
+                     * allows the last digit and preceding digits to be
+                     * isolated more quickly than by an initial conversion
+                     * to BigInteger.
+                     */
+                    long quot = (i >>> 1) / 5;
+                    long rem = i - quot * 10;
+                    yield toString(quot) + rem;
+                }
+                case 16 -> toHexString(i);
+                case 32 -> toUnsignedString0(i, 5);
+                default -> toUnsignedBigInteger(i).toString(radix);
+            };
         }
     }
 
@@ -300,10 +289,18 @@ public final class Long extends Number
      *  {@code Long.toHexString(n).toUpperCase()}
      * </blockquote>
      *
+     * @apiNote
+     * The {@link java.util.HexFormat} class provides formatting and parsing
+     * of byte arrays and primitives to return a string or adding to an {@link Appendable}.
+     * {@code HexFormat} formats and parses uppercase or lowercase hexadecimal characters,
+     * with leading zeros and for byte arrays includes for each byte
+     * a delimiter, prefix, and suffix.
+     *
      * @param   i   a {@code long} to be converted to a string.
      * @return  the string representation of the unsigned {@code long}
      *          value represented by the argument in hexadecimal
      *          (base&nbsp;16).
+     * @see java.util.HexFormat
      * @see #parseUnsignedLong(String, int)
      * @see #toUnsignedString(long, int)
      * @since   1.0.2
@@ -393,15 +390,9 @@ public final class Long extends Number
         // assert shift > 0 && shift <=5 : "Illegal shift value";
         int mag = Long.SIZE - Long.numberOfLeadingZeros(val);
         int chars = Math.max(((mag + (shift - 1)) / shift), 1);
-        if (COMPACT_STRINGS) {
-            byte[] buf = new byte[chars];
-            formatUnsignedLong0(val, shift, buf, 0, chars);
-            return new String(buf, LATIN1);
-        } else {
-            byte[] buf = new byte[chars * 2];
-            formatUnsignedLong0UTF16(val, shift, buf, 0, chars);
-            return new String(buf, UTF16);
-        }
+        byte[] buf = new byte[chars];
+        formatUnsignedLong0(val, shift, buf, 0, chars);
+        return String.newStringWithLatin1Bytes(buf);
     }
 
     /**
@@ -420,63 +411,9 @@ public final class Long extends Number
         int radix = 1 << shift;
         int mask = radix - 1;
         do {
-            buf[--charPos] = (byte)Integer.digits[((int) val) & mask];
+            buf[--charPos] = Integer.digits[((int) val) & mask];
             val >>>= shift;
         } while (charPos > offset);
-    }
-
-    /**
-     * Format a long (treated as unsigned) into a byte buffer (UTF16 version). If
-     * {@code len} exceeds the formatted ASCII representation of {@code val},
-     * {@code buf} will be padded with leading zeroes.
-     *
-     * @param val the unsigned long to format
-     * @param shift the log2 of the base to format in (4 for hex, 3 for octal, 1 for binary)
-     * @param buf the byte buffer to write to
-     * @param offset the offset in the destination buffer to start at
-     * @param len the number of characters to write
-     */
-    private static void formatUnsignedLong0UTF16(long val, int shift, byte[] buf, int offset, int len) {
-        int charPos = offset + len;
-        int radix = 1 << shift;
-        int mask = radix - 1;
-        do {
-            StringUTF16.putChar(buf, --charPos, Integer.digits[((int) val) & mask]);
-            val >>>= shift;
-        } while (charPos > offset);
-    }
-
-    static String fastUUID(long lsb, long msb) {
-        if (COMPACT_STRINGS) {
-            byte[] buf = new byte[36];
-            formatUnsignedLong0(lsb,        4, buf, 24, 12);
-            formatUnsignedLong0(lsb >>> 48, 4, buf, 19, 4);
-            formatUnsignedLong0(msb,        4, buf, 14, 4);
-            formatUnsignedLong0(msb >>> 16, 4, buf, 9,  4);
-            formatUnsignedLong0(msb >>> 32, 4, buf, 0,  8);
-
-            buf[23] = '-';
-            buf[18] = '-';
-            buf[13] = '-';
-            buf[8]  = '-';
-
-            return new String(buf, LATIN1);
-        } else {
-            byte[] buf = new byte[72];
-
-            formatUnsignedLong0UTF16(lsb,        4, buf, 24, 12);
-            formatUnsignedLong0UTF16(lsb >>> 48, 4, buf, 19, 4);
-            formatUnsignedLong0UTF16(msb,        4, buf, 14, 4);
-            formatUnsignedLong0UTF16(msb >>> 16, 4, buf, 9,  4);
-            formatUnsignedLong0UTF16(msb >>> 32, 4, buf, 0,  8);
-
-            StringUTF16.putChar(buf, 23, '-');
-            StringUTF16.putChar(buf, 18, '-');
-            StringUTF16.putChar(buf, 13, '-');
-            StringUTF16.putChar(buf,  8, '-');
-
-            return new String(buf, UTF16);
-        }
     }
 
     /**
@@ -490,16 +427,10 @@ public final class Long extends Number
      * @return  a string representation of the argument in base&nbsp;10.
      */
     public static String toString(long i) {
-        int size = stringSize(i);
-        if (COMPACT_STRINGS) {
-            byte[] buf = new byte[size];
-            getChars(i, size, buf);
-            return new String(buf, LATIN1);
-        } else {
-            byte[] buf = new byte[size * 2];
-            StringUTF16.getChars(i, size, buf);
-            return new String(buf, UTF16);
-        }
+        int size = DecimalDigits.stringSize(i);
+        byte[] buf = new byte[size];
+        DecimalDigits.uncheckedGetCharsLatin1(i, size, buf);
+        return String.newStringWithLatin1Bytes(buf);
     }
 
     /**
@@ -518,95 +449,6 @@ public final class Long extends Number
      */
     public static String toUnsignedString(long i) {
         return toUnsignedString(i, 10);
-    }
-
-    /**
-     * Places characters representing the long i into the
-     * character array buf. The characters are placed into
-     * the buffer backwards starting with the least significant
-     * digit at the specified index (exclusive), and working
-     * backwards from there.
-     *
-     * @implNote This method converts positive inputs into negative
-     * values, to cover the Long.MIN_VALUE case. Converting otherwise
-     * (negative to positive) will expose -Long.MIN_VALUE that overflows
-     * long.
-     *
-     * @param i     value to convert
-     * @param index next index, after the least significant digit
-     * @param buf   target buffer, Latin1-encoded
-     * @return index of the most significant digit or minus sign, if present
-     */
-    static int getChars(long i, int index, byte[] buf) {
-        long q;
-        int r;
-        int charPos = index;
-
-        boolean negative = (i < 0);
-        if (!negative) {
-            i = -i;
-        }
-
-        // Get 2 digits/iteration using longs until quotient fits into an int
-        while (i <= Integer.MIN_VALUE) {
-            q = i / 100;
-            r = (int)((q * 100) - i);
-            i = q;
-            buf[--charPos] = Integer.DigitOnes[r];
-            buf[--charPos] = Integer.DigitTens[r];
-        }
-
-        // Get 2 digits/iteration using ints
-        int q2;
-        int i2 = (int)i;
-        while (i2 <= -100) {
-            q2 = i2 / 100;
-            r  = (q2 * 100) - i2;
-            i2 = q2;
-            buf[--charPos] = Integer.DigitOnes[r];
-            buf[--charPos] = Integer.DigitTens[r];
-        }
-
-        // We know there are at most two digits left at this point.
-        q2 = i2 / 10;
-        r  = (q2 * 10) - i2;
-        buf[--charPos] = (byte)('0' + r);
-
-        // Whatever left is the remaining digit.
-        if (q2 < 0) {
-            buf[--charPos] = (byte)('0' - q2);
-        }
-
-        if (negative) {
-            buf[--charPos] = (byte)'-';
-        }
-        return charPos;
-    }
-
-    /**
-     * Returns the string representation size for a given long value.
-     *
-     * @param x long value
-     * @return string size
-     *
-     * @implNote There are other ways to compute this: e.g. binary search,
-     * but values are biased heavily towards zero, and therefore linear search
-     * wins. The iteration results are also routinely inlined in the generated
-     * code after loop unrolling.
-     */
-    static int stringSize(long x) {
-        int d = 1;
-        if (x >= 0) {
-            d = 0;
-            x = -x;
-        }
-        long p = -10;
-        for (int i = 1; i < 19; i++) {
-            if (x > p)
-                return i + d;
-            p = 10 * p;
-        }
-        return 19 + d;
     }
 
     /**
@@ -671,58 +513,47 @@ public final class Long extends Number
      *             parsable {@code long}.
      */
     public static long parseLong(String s, int radix)
-              throws NumberFormatException
-    {
+                throws NumberFormatException {
         if (s == null) {
-            throw new NumberFormatException("null");
+            throw new NumberFormatException("Cannot parse null string");
         }
 
         if (radix < Character.MIN_RADIX) {
-            throw new NumberFormatException("radix " + radix +
-                                            " less than Character.MIN_RADIX");
+            throw new NumberFormatException(String.format(
+                "radix %s less than Character.MIN_RADIX", radix));
         }
+
         if (radix > Character.MAX_RADIX) {
-            throw new NumberFormatException("radix " + radix +
-                                            " greater than Character.MAX_RADIX");
+            throw new NumberFormatException(String.format(
+                "radix %s greater than Character.MAX_RADIX", radix));
         }
 
-        boolean negative = false;
-        int i = 0, len = s.length();
-        long limit = -Long.MAX_VALUE;
-
-        if (len > 0) {
-            char firstChar = s.charAt(0);
-            if (firstChar < '0') { // Possible leading "+" or "-"
-                if (firstChar == '-') {
-                    negative = true;
-                    limit = Long.MIN_VALUE;
-                } else if (firstChar != '+') {
-                    throw NumberFormatException.forInputString(s, radix);
-                }
-
-                if (len == 1) { // Cannot have lone "+" or "-"
-                    throw NumberFormatException.forInputString(s, radix);
-                }
-                i++;
-            }
+        int len = s.length();
+        if (len == 0) {
+            throw NumberFormatException.forInputString("", radix);
+        }
+        int digit = ~0xFF;
+        int i = 0;
+        char firstChar = s.charAt(i++);
+        if (firstChar != '-' && firstChar != '+') {
+            digit = digit(firstChar, radix);
+        }
+        if (digit >= 0 || digit == ~0xFF && len > 1) {
+            long limit = firstChar != '-' ? MIN_VALUE + 1 : MIN_VALUE;
             long multmin = limit / radix;
-            long result = 0;
-            while (i < len) {
-                // Accumulating negatively avoids surprises near MAX_VALUE
-                int digit = Character.digit(s.charAt(i++),radix);
-                if (digit < 0 || result < multmin) {
-                    throw NumberFormatException.forInputString(s, radix);
-                }
-                result *= radix;
-                if (result < limit + digit) {
-                    throw NumberFormatException.forInputString(s, radix);
-                }
-                result -= digit;
+            long result = -(digit & 0xFF);
+            boolean inRange = true;
+            /* Accumulating negatively avoids surprises near MAX_VALUE */
+            while (i < len && (digit = digit(s.charAt(i++), radix)) >= 0
+                    && (inRange = result > multmin
+                        || result == multmin && digit <= (int) (radix * multmin - limit))) {
+                result = radix * result - digit;
             }
-            return negative ? result : -result;
-        } else {
-            throw NumberFormatException.forInputString(s, radix);
+            if (inRange && i == len && digit >= 0) {
+                return firstChar != '-' ? -result : result;
+            }
         }
+        throw NumberFormatException.forInputString(s, radix);
     }
 
     /**
@@ -755,60 +586,50 @@ public final class Long extends Number
     public static long parseLong(CharSequence s, int beginIndex, int endIndex, int radix)
                 throws NumberFormatException {
         Objects.requireNonNull(s);
+        Objects.checkFromToIndex(beginIndex, endIndex, s.length());
 
-        if (beginIndex < 0 || beginIndex > endIndex || endIndex > s.length()) {
-            throw new IndexOutOfBoundsException();
-        }
         if (radix < Character.MIN_RADIX) {
-            throw new NumberFormatException("radix " + radix +
-                    " less than Character.MIN_RADIX");
+            throw new NumberFormatException(String.format(
+                "radix %s less than Character.MIN_RADIX", radix));
         }
+
         if (radix > Character.MAX_RADIX) {
-            throw new NumberFormatException("radix " + radix +
-                    " greater than Character.MAX_RADIX");
+            throw new NumberFormatException(String.format(
+                "radix %s greater than Character.MAX_RADIX", radix));
         }
 
-        boolean negative = false;
+        /*
+         * While s can be concurrently modified, it is ensured that each
+         * of its characters is read at most once, from lower to higher indices.
+         * This is obtained by reading them using the pattern s.charAt(i++),
+         * and by not updating i anywhere else.
+         */
+        if (beginIndex == endIndex) {
+            throw NumberFormatException.forInputString("", radix);
+        }
+        int digit = ~0xFF;  // ~0xFF means firstChar char is sign
         int i = beginIndex;
-        long limit = -Long.MAX_VALUE;
-
-        if (i < endIndex) {
-            char firstChar = s.charAt(i);
-            if (firstChar < '0') { // Possible leading "+" or "-"
-                if (firstChar == '-') {
-                    negative = true;
-                    limit = Long.MIN_VALUE;
-                } else if (firstChar != '+') {
-                    throw NumberFormatException.forCharSequence(s, beginIndex,
-                            endIndex, i);
-                }
-                i++;
-            }
-            if (i >= endIndex) { // Cannot have lone "+", "-" or ""
-                throw NumberFormatException.forCharSequence(s, beginIndex,
-                        endIndex, i);
-            }
-            long multmin = limit / radix;
-            long result = 0;
-            while (i < endIndex) {
-                // Accumulating negatively avoids surprises near MAX_VALUE
-                int digit = Character.digit(s.charAt(i), radix);
-                if (digit < 0 || result < multmin) {
-                    throw NumberFormatException.forCharSequence(s, beginIndex,
-                            endIndex, i);
-                }
-                result *= radix;
-                if (result < limit + digit) {
-                    throw NumberFormatException.forCharSequence(s, beginIndex,
-                            endIndex, i);
-                }
-                i++;
-                result -= digit;
-            }
-            return negative ? result : -result;
-        } else {
-            throw new NumberFormatException("");
+        char firstChar = s.charAt(i++);
+        if (firstChar != '-' && firstChar != '+') {
+            digit = digit(firstChar, radix);
         }
+        if (digit >= 0 || digit == ~0xFF && endIndex - beginIndex > 1) {
+            long limit = firstChar != '-' ? MIN_VALUE + 1 : MIN_VALUE;
+            long multmin = limit / radix;
+            long result = -(digit & 0xFF);
+            boolean inRange = true;
+            /* Accumulating negatively avoids surprises near MAX_VALUE */
+            while (i < endIndex && (digit = digit(s.charAt(i++), radix)) >= 0
+                    && (inRange = result > multmin
+                        || result == multmin && digit <= (int) (radix * multmin - limit))) {
+                result = radix * result - digit;
+            }
+            if (inRange && i == endIndex && digit >= 0) {
+                return firstChar != '-' ? -result : result;
+            }
+        }
+        throw NumberFormatException.forCharSequence(s, beginIndex,
+            endIndex, i - (digit < -1 ? 0 : 1));
     }
 
     /**
@@ -885,90 +706,51 @@ public final class Long extends Number
     public static long parseUnsignedLong(String s, int radix)
                 throws NumberFormatException {
         if (s == null)  {
-            throw new NumberFormatException("null");
+            throw new NumberFormatException("Cannot parse null string");
+        }
+
+        if (radix < Character.MIN_RADIX) {
+            throw new NumberFormatException(String.format(
+                "radix %s less than Character.MIN_RADIX", radix));
+        }
+
+        if (radix > Character.MAX_RADIX) {
+            throw new NumberFormatException(String.format(
+                "radix %s greater than Character.MAX_RADIX", radix));
         }
 
         int len = s.length();
-        if (len > 0) {
-            char firstChar = s.charAt(0);
-            if (firstChar == '-') {
-                throw new
-                    NumberFormatException(String.format("Illegal leading minus sign " +
-                                                       "on unsigned string %s.", s));
-            } else {
-                if (len <= 12 || // Long.MAX_VALUE in Character.MAX_RADIX is 13 digits
-                    (radix == 10 && len <= 18) ) { // Long.MAX_VALUE in base 10 is 19 digits
-                    return parseLong(s, radix);
-                }
-
-                // No need for range checks on len due to testing above.
-                long first = parseLong(s, 0, len - 1, radix);
-                int second = Character.digit(s.charAt(len - 1), radix);
-                if (second < 0) {
-                    throw new NumberFormatException("Bad digit at end of " + s);
-                }
-                long result = first * radix + second;
-
-                /*
-                 * Test leftmost bits of multiprecision extension of first*radix
-                 * for overflow. The number of bits needed is defined by
-                 * GUARD_BIT = ceil(log2(Character.MAX_RADIX)) + 1 = 7. Then
-                 * int guard = radix*(int)(first >>> (64 - GUARD_BIT)) and
-                 * overflow is tested by splitting guard in the ranges
-                 * guard < 92, 92 <= guard < 128, and 128 <= guard, where
-                 * 92 = 128 - Character.MAX_RADIX. Note that guard cannot take
-                 * on a value which does not include a prime factor in the legal
-                 * radix range.
-                 */
-                int guard = radix * (int) (first >>> 57);
-                if (guard >= 128 ||
-                    (result >= 0 && guard >= 128 - Character.MAX_RADIX)) {
-                    /*
-                     * For purposes of exposition, the programmatic statements
-                     * below should be taken to be multi-precision, i.e., not
-                     * subject to overflow.
-                     *
-                     * A) Condition guard >= 128:
-                     * If guard >= 128 then first*radix >= 2^7 * 2^57 = 2^64
-                     * hence always overflow.
-                     *
-                     * B) Condition guard < 92:
-                     * Define left7 = first >>> 57.
-                     * Given first = (left7 * 2^57) + (first & (2^57 - 1)) then
-                     * result <= (radix*left7)*2^57 + radix*(2^57 - 1) + second.
-                     * Thus if radix*left7 < 92, radix <= 36, and second < 36,
-                     * then result < 92*2^57 + 36*(2^57 - 1) + 36 = 2^64 hence
-                     * never overflow.
-                     *
-                     * C) Condition 92 <= guard < 128:
-                     * first*radix + second >= radix*left7*2^57 + second
-                     * so that first*radix + second >= 92*2^57 + 0 > 2^63
-                     *
-                     * D) Condition guard < 128:
-                     * radix*first <= (radix*left7) * 2^57 + radix*(2^57 - 1)
-                     * so
-                     * radix*first + second <= (radix*left7) * 2^57 + radix*(2^57 - 1) + 36
-                     * thus
-                     * radix*first + second < 128 * 2^57 + 36*2^57 - radix + 36
-                     * whence
-                     * radix*first + second < 2^64 + 2^6*2^57 = 2^64 + 2^63
-                     *
-                     * E) Conditions C, D, and result >= 0:
-                     * C and D combined imply the mathematical result
-                     * 2^63 < first*radix + second < 2^64 + 2^63. The lower
-                     * bound is therefore negative as a signed long, but the
-                     * upper bound is too small to overflow again after the
-                     * signed long overflows to positive above 2^64 - 1. Hence
-                     * result >= 0 implies overflow given C and D.
-                     */
-                    throw new NumberFormatException(String.format("String value %s exceeds " +
-                                                                  "range of unsigned long.", s));
-                }
-                return result;
-            }
-        } else {
+        if (len == 0) {
             throw NumberFormatException.forInputString(s, radix);
         }
+        int i = 0;
+        char firstChar = s.charAt(i++);
+        if (firstChar == '-') {
+            throw new NumberFormatException(String.format(
+                "Illegal leading minus sign on unsigned string %s.", s));
+        }
+        int digit = ~0xFF;
+        if (firstChar != '+') {
+            digit = digit(firstChar, radix);
+        }
+        if (digit >= 0 || digit == ~0xFF && len > 1) {
+            long multmax = divideUnsigned(-1L, radix);  // -1L is max unsigned long
+            long result = digit & 0xFF;
+            boolean inRange = true;
+            while (i < len && (digit = digit(s.charAt(i++), radix)) >= 0
+                    && (inRange = compareUnsigned(result, multmax) < 0
+                        || result == multmax && digit < (int) (-radix * multmax))) {
+                result = radix * result + digit;
+            }
+            if (inRange && i == len && digit >= 0) {
+                return result;
+            }
+        }
+        if (digit < 0) {
+            throw NumberFormatException.forInputString(s, radix);
+        }
+        throw new NumberFormatException(String.format(
+            "String value %s exceeds range of unsigned long.", s));
     }
 
     /**
@@ -1001,92 +783,56 @@ public final class Long extends Number
     public static long parseUnsignedLong(CharSequence s, int beginIndex, int endIndex, int radix)
                 throws NumberFormatException {
         Objects.requireNonNull(s);
+        Objects.checkFromToIndex(beginIndex, endIndex, s.length());
 
-        if (beginIndex < 0 || beginIndex > endIndex || endIndex > s.length()) {
-            throw new IndexOutOfBoundsException();
+        if (radix < Character.MIN_RADIX) {
+            throw new NumberFormatException(String.format(
+                "radix %s less than Character.MIN_RADIX", radix));
         }
-        int start = beginIndex, len = endIndex - beginIndex;
 
-        if (len > 0) {
-            char firstChar = s.charAt(start);
-            if (firstChar == '-') {
-                throw new NumberFormatException(String.format("Illegal leading minus sign " +
-                        "on unsigned string %s.", s.subSequence(start, start + len)));
-            } else {
-                if (len <= 12 || // Long.MAX_VALUE in Character.MAX_RADIX is 13 digits
-                    (radix == 10 && len <= 18) ) { // Long.MAX_VALUE in base 10 is 19 digits
-                    return parseLong(s, start, start + len, radix);
-                }
+        if (radix > Character.MAX_RADIX) {
+            throw new NumberFormatException(String.format(
+                "radix %s greater than Character.MAX_RADIX", radix));
+        }
 
-                // No need for range checks on end due to testing above.
-                long first = parseLong(s, start, start + len - 1, radix);
-                int second = Character.digit(s.charAt(start + len - 1), radix);
-                if (second < 0) {
-                    throw new NumberFormatException("Bad digit at end of " +
-                            s.subSequence(start, start + len));
-                }
-                long result = first * radix + second;
-
-                /*
-                 * Test leftmost bits of multiprecision extension of first*radix
-                 * for overflow. The number of bits needed is defined by
-                 * GUARD_BIT = ceil(log2(Character.MAX_RADIX)) + 1 = 7. Then
-                 * int guard = radix*(int)(first >>> (64 - GUARD_BIT)) and
-                 * overflow is tested by splitting guard in the ranges
-                 * guard < 92, 92 <= guard < 128, and 128 <= guard, where
-                 * 92 = 128 - Character.MAX_RADIX. Note that guard cannot take
-                 * on a value which does not include a prime factor in the legal
-                 * radix range.
-                 */
-                int guard = radix * (int) (first >>> 57);
-                if (guard >= 128 ||
-                        (result >= 0 && guard >= 128 - Character.MAX_RADIX)) {
-                    /*
-                     * For purposes of exposition, the programmatic statements
-                     * below should be taken to be multi-precision, i.e., not
-                     * subject to overflow.
-                     *
-                     * A) Condition guard >= 128:
-                     * If guard >= 128 then first*radix >= 2^7 * 2^57 = 2^64
-                     * hence always overflow.
-                     *
-                     * B) Condition guard < 92:
-                     * Define left7 = first >>> 57.
-                     * Given first = (left7 * 2^57) + (first & (2^57 - 1)) then
-                     * result <= (radix*left7)*2^57 + radix*(2^57 - 1) + second.
-                     * Thus if radix*left7 < 92, radix <= 36, and second < 36,
-                     * then result < 92*2^57 + 36*(2^57 - 1) + 36 = 2^64 hence
-                     * never overflow.
-                     *
-                     * C) Condition 92 <= guard < 128:
-                     * first*radix + second >= radix*left7*2^57 + second
-                     * so that first*radix + second >= 92*2^57 + 0 > 2^63
-                     *
-                     * D) Condition guard < 128:
-                     * radix*first <= (radix*left7) * 2^57 + radix*(2^57 - 1)
-                     * so
-                     * radix*first + second <= (radix*left7) * 2^57 + radix*(2^57 - 1) + 36
-                     * thus
-                     * radix*first + second < 128 * 2^57 + 36*2^57 - radix + 36
-                     * whence
-                     * radix*first + second < 2^64 + 2^6*2^57 = 2^64 + 2^63
-                     *
-                     * E) Conditions C, D, and result >= 0:
-                     * C and D combined imply the mathematical result
-                     * 2^63 < first*radix + second < 2^64 + 2^63. The lower
-                     * bound is therefore negative as a signed long, but the
-                     * upper bound is too small to overflow again after the
-                     * signed long overflows to positive above 2^64 - 1. Hence
-                     * result >= 0 implies overflow given C and D.
-                     */
-                    throw new NumberFormatException(String.format("String value %s exceeds " +
-                            "range of unsigned long.", s.subSequence(start, start + len)));
-                }
-                return result;
-            }
-        } else {
+        /*
+         * While s can be concurrently modified, it is ensured that each
+         * of its characters is read at most once, from lower to higher indices.
+         * This is obtained by reading them using the pattern s.charAt(i++),
+         * and by not updating i anywhere else.
+         */
+        if (beginIndex == endIndex) {
             throw NumberFormatException.forInputString("", radix);
         }
+        int i = beginIndex;
+        char firstChar = s.charAt(i++);
+        if (firstChar == '-') {
+            throw new NumberFormatException(
+                "Illegal leading minus sign on unsigned string " + s + ".");
+        }
+        int digit = ~0xFF;
+        if (firstChar != '+') {
+            digit = digit(firstChar, radix);
+        }
+        if (digit >= 0 || digit == ~0xFF && endIndex - beginIndex > 1) {
+            long multmax = divideUnsigned(-1L, radix);  // -1L is max unsigned long
+            long result = digit & 0xFF;
+            boolean inRange = true;
+            while (i < endIndex && (digit = digit(s.charAt(i++), radix)) >= 0
+                    && (inRange = compareUnsigned(result, multmax) < 0
+                        || result == multmax && digit < (int) (-radix * multmax))) {
+                result = radix * result + digit;
+            }
+            if (inRange && i == endIndex && digit >= 0) {
+                return result;
+            }
+        }
+        if (digit < 0) {
+            throw NumberFormatException.forCharSequence(s, beginIndex,
+                endIndex, i - (digit < -1 ? 0 : 1));
+        }
+        throw new NumberFormatException(String.format(
+            "String value %s exceeds range of unsigned long.", s));
     }
 
     /**
@@ -1124,7 +870,7 @@ public final class Long extends Number
      * to the value of:
      *
      * <blockquote>
-     *  {@code new Long(Long.parseLong(s, radix))}
+     *  {@code Long.valueOf(Long.parseLong(s, radix))}
      * </blockquote>
      *
      * @param      s       the string to be parsed
@@ -1152,7 +898,7 @@ public final class Long extends Number
      * equal to the value of:
      *
      * <blockquote>
-     *  {@code new Long(Long.parseLong(s))}
+     *  {@code Long.valueOf(Long.parseLong(s))}
      * </blockquote>
      *
      * @param      s   the string to be parsed.
@@ -1166,9 +912,11 @@ public final class Long extends Number
         return Long.valueOf(parseLong(s, 10));
     }
 
-    private static class LongCache {
+    @AOTSafeClassInitializer
+    private static final class LongCache {
         private LongCache() {}
 
+        @Stable
         static final Long[] cache;
         static Long[] archivedCache;
 
@@ -1177,7 +925,7 @@ public final class Long extends Number
 
             // Load and use the archived cache if it exists
             CDS.initializeFromArchive(LongCache.class);
-            if (archivedCache == null || archivedCache.length != size) {
+            if (archivedCache == null) {
                 Long[] c = new Long[size];
                 long value = -128;
                 for(int i = 0; i < size; i++) {
@@ -1186,6 +934,7 @@ public final class Long extends Number
                 archivedCache = c;
             }
             cache = archivedCache;
+            assert cache.length == size;
         }
     }
 
@@ -1261,7 +1010,7 @@ public final class Long extends Number
         int radix = 10;
         int index = 0;
         boolean negative = false;
-        Long result;
+        long result;
 
         if (nm.isEmpty())
             throw new NumberFormatException("Zero length string");
@@ -1291,15 +1040,15 @@ public final class Long extends Number
             throw new NumberFormatException("Sign character in wrong position");
 
         try {
-            result = Long.valueOf(nm.substring(index), radix);
-            result = negative ? Long.valueOf(-result.longValue()) : result;
+            result = parseLong(nm, index, nm.length(), radix);
+            result = negative ? -result : result;
         } catch (NumberFormatException e) {
             // If number is Long.MIN_VALUE, we'll end up here. The next line
             // handles this case, and causes any genuine format error to be
             // rethrown.
             String constant = negative ? ("-" + nm.substring(index))
                                        : nm.substring(index);
-            result = Long.valueOf(constant, radix);
+            result = parseLong(constant, radix);
         }
         return result;
     }
@@ -1323,7 +1072,7 @@ public final class Long extends Number
      * {@link #valueOf(long)} is generally a better choice, as it is
      * likely to yield significantly better space and time performance.
      */
-    @Deprecated(since="9", forRemoval = true)
+    @Deprecated(since="9")
     public Long(long value) {
         this.value = value;
     }
@@ -1346,7 +1095,7 @@ public final class Long extends Number
      * {@code long} primitive, or use {@link #valueOf(String)}
      * to convert a string to a {@code Long} object.
      */
-    @Deprecated(since="9", forRemoval = true)
+    @Deprecated(since="9")
     public Long(String s) throws NumberFormatException {
         this.value = parseLong(s, 10);
     }
@@ -1459,8 +1208,8 @@ public final class Long extends Number
      *          {@code false} otherwise.
      */
     public boolean equals(Object obj) {
-        if (obj instanceof Long) {
-            return value == ((Long)obj).longValue();
+        if (obj instanceof Long ell) {
+            return value == ell.longValue();
         }
         return false;
     }
@@ -1490,8 +1239,6 @@ public final class Long extends Number
      *
      * @param   nm   property name.
      * @return  the {@code Long} value of the property.
-     * @throws  SecurityException for the same reasons as
-     *          {@link System#getProperty(String) System.getProperty}
      * @see     java.lang.System#getProperty(java.lang.String)
      * @see     java.lang.System#getProperty(java.lang.String, java.lang.String)
      */
@@ -1519,14 +1266,14 @@ public final class Long extends Number
      * to the value of:
      *
      * <blockquote>
-     *  {@code getLong(nm, new Long(val))}
+     *  {@code getLong(nm, Long.valueOf(val))}
      * </blockquote>
      *
      * but in practice it may be implemented in a manner such as:
      *
      * <blockquote><pre>
      * Long result = getLong(nm, null);
-     * return (result == null) ? new Long(val) : result;
+     * return (result == null) ? Long.valueOf(val) : result;
      * </pre></blockquote>
      *
      * to avoid the unnecessary allocation of a {@code Long} object when
@@ -1535,8 +1282,6 @@ public final class Long extends Number
      * @param   nm    property name.
      * @param   val   default value.
      * @return  the {@code Long} value of the property.
-     * @throws  SecurityException for the same reasons as
-     *          {@link System#getProperty(String) System.getProperty}
      * @see     java.lang.System#getProperty(java.lang.String)
      * @see     java.lang.System#getProperty(java.lang.String, java.lang.String)
      */
@@ -1584,17 +1329,11 @@ public final class Long extends Number
      * @param   nm   property name.
      * @param   val   default value.
      * @return  the {@code Long} value of the property.
-     * @throws  SecurityException for the same reasons as
-     *          {@link System#getProperty(String) System.getProperty}
      * @see     System#getProperty(java.lang.String)
      * @see     System#getProperty(java.lang.String, java.lang.String)
      */
     public static Long getLong(String nm, Long val) {
-        String v = null;
-        try {
-            v = System.getProperty(nm);
-        } catch (IllegalArgumentException | NullPointerException e) {
-        }
+        String v = nm != null && !nm.isEmpty() ? System.getProperty(nm) : null;
         if (v != null) {
             try {
                 return Long.decode(v);
@@ -1651,6 +1390,7 @@ public final class Long extends Number
      *         unsigned values
      * @since 1.8
      */
+    @IntrinsicCandidate
     public static int compareUnsigned(long x, long y) {
         return compare(x + MIN_VALUE, y + MIN_VALUE);
     }
@@ -1671,9 +1411,11 @@ public final class Long extends Number
      * @param divisor the value doing the dividing
      * @return the unsigned quotient of the first argument divided by
      * the second argument
+     * @throws ArithmeticException if the divisor is zero
      * @see #remainderUnsigned
      * @since 1.8
      */
+    @IntrinsicCandidate
     public static long divideUnsigned(long dividend, long divisor) {
         /* See Hacker's Delight (2nd ed), section 9.3 */
         if (divisor >= 0) {
@@ -1693,9 +1435,11 @@ public final class Long extends Number
      * @param divisor the value doing the dividing
      * @return the unsigned remainder of the first argument divided by
      * the second argument
+     * @throws ArithmeticException if the divisor is zero
      * @see #divideUnsigned
      * @since 1.8
      */
+    @IntrinsicCandidate
     public static long remainderUnsigned(long dividend, long divisor) {
         /* See Hacker's Delight (2nd ed), section 9.3 */
         if (divisor >= 0) {
@@ -1908,6 +1652,7 @@ public final class Long extends Number
      *     specified {@code long} value.
      * @since 1.5
      */
+    @IntrinsicCandidate
     public static long reverse(long i) {
         // HD, Figure 7-1
         i = (i & 0x5555555555555555L) << 1 | (i >>> 1) & 0x5555555555555555L;
@@ -1915,6 +1660,236 @@ public final class Long extends Number
         i = (i & 0x0f0f0f0f0f0f0f0fL) << 4 | (i >>> 4) & 0x0f0f0f0f0f0f0f0fL;
 
         return reverseBytes(i);
+    }
+
+    /**
+     * Returns the value obtained by compressing the bits of the
+     * specified {@code long} value, {@code i}, in accordance with
+     * the specified bit mask.
+     * <p>
+     * For each one-bit value {@code mb} of the mask, from least
+     * significant to most significant, the bit value of {@code i} at
+     * the same bit location as {@code mb} is assigned to the compressed
+     * value contiguously starting from the least significant bit location.
+     * All the upper remaining bits of the compressed value are set
+     * to zero.
+     *
+     * @apiNote
+     * Consider the simple case of compressing the digits of a hexadecimal
+     * value:
+     * {@snippet lang="java" :
+     * // Compressing drink to food
+     * compress(0xCAFEBABEL, 0xFF00FFF0L) == 0xCABABL
+     * }
+     * Starting from the least significant hexadecimal digit at position 0
+     * from the right, the mask {@code 0xFF00FFF0} selects hexadecimal digits
+     * at positions 1, 2, 3, 6 and 7 of {@code 0xCAFEBABE}. The selected digits
+     * occur in the resulting compressed value contiguously from digit position
+     * 0 in the same order.
+     * <p>
+     * The following identities all return {@code true} and are helpful to
+     * understand the behaviour of {@code compress}:
+     * {@snippet lang="java" :
+     * // Returns 1 if the bit at position n is one
+     * compress(x, 1L << n) == (x >> n & 1)
+     *
+     * // Logical shift right
+     * compress(x, -1L << n) == x >>> n
+     *
+     * // Any bits not covered by the mask are ignored
+     * compress(x, m) == compress(x & m, m)
+     *
+     * // Compressing a value by itself
+     * compress(m, m) == (m == -1 || m == 0) ? m : (1L << bitCount(m)) - 1
+     *
+     * // Expanding then compressing with the same mask
+     * compress(expand(x, m), m) == x & compress(m, m)
+     * }
+     * <p>
+     * The Sheep And Goats (SAG) operation (see Hacker's Delight, Second Edition, section 7.7)
+     * can be implemented as follows:
+     * {@snippet lang="java" :
+     * long compressLeft(long i, long mask) {
+     *     // This implementation follows the description in Hacker's Delight which
+     *     // is informative. A more optimal implementation is:
+     *     //   Long.compress(i, mask) << -Long.bitCount(mask)
+     *     return Long.reverse(
+     *         Long.compress(Long.reverse(i), Long.reverse(mask)));
+     * }
+     *
+     * long sag(long i, long mask) {
+     *     return compressLeft(i, mask) | Long.compress(i, ~mask);
+     * }
+     *
+     * // Separate the sheep from the goats
+     * sag(0x00000000_CAFEBABEL, 0xFFFFFFFF_FF00FFF0L) == 0x00000000_CABABFEEL
+     * }
+     *
+     * @param i the value whose bits are to be compressed
+     * @param mask the bit mask
+     * @return the compressed value
+     * @see #expand
+     * @since 19
+     */
+    @IntrinsicCandidate
+    public static long compress(long i, long mask) {
+        // See Hacker's Delight (2nd ed) section 7.4 Compress, or Generalized Extract
+
+        i = i & mask; // Clear irrelevant bits
+        long maskCount = ~mask << 1; // Count 0's to right
+
+        for (int j = 0; j < 6; j++) {
+            // Parallel prefix
+            // Mask prefix identifies bits of the mask that have an odd number of 0's to the right
+            long maskPrefix = parallelSuffix(maskCount);
+            // Bits to move
+            long maskMove = maskPrefix & mask;
+            // Compress mask
+            mask = (mask ^ maskMove) | (maskMove >>> (1 << j));
+            // Bits of i to be moved
+            long t = i & maskMove;
+            // Compress i
+            i = (i ^ t) | (t >>> (1 << j));
+            // Adjust the mask count by identifying bits that have 0 to the right
+            maskCount = maskCount & ~maskPrefix;
+        }
+        return i;
+    }
+
+    /**
+     * Returns the value obtained by expanding the bits of the
+     * specified {@code long} value, {@code i}, in accordance with
+     * the specified bit mask.
+     * <p>
+     * For each one-bit value {@code mb} of the mask, from least
+     * significant to most significant, the next contiguous bit value
+     * of {@code i} starting at the least significant bit is assigned
+     * to the expanded value at the same bit location as {@code mb}.
+     * All other remaining bits of the expanded value are set to zero.
+     *
+     * @apiNote
+     * Consider the simple case of expanding the digits of a hexadecimal
+     * value:
+     * {@snippet lang="java" :
+     * expand(0x0000CABABL, 0xFF00FFF0L) == 0xCA00BAB0L
+     * }
+     * Starting from the least significant hexadecimal digit at position 0
+     * from the right, the mask {@code 0xFF00FFF0} selects the first five
+     * hexadecimal digits of {@code 0x0000CABAB}. The selected digits occur
+     * in the resulting expanded value in order at positions 1, 2, 3, 6, and 7.
+     * <p>
+     * The following identities all return {@code true} and are helpful to
+     * understand the behaviour of {@code expand}:
+     * {@snippet lang="java" :
+     * // Logically shift right the bit at position 0
+     * expand(x, 1L << n) == (x & 1) << n
+     *
+     * // Logically shift right
+     * expand(x, -1L << n) == x << n
+     *
+     * // Expanding all bits returns the mask
+     * expand(-1L, m) == m
+     *
+     * // Any bits not covered by the mask are ignored
+     * expand(x, m) == expand(x, m) & m
+     *
+     * // Compressing then expanding with the same mask
+     * expand(compress(x, m), m) == x & m
+     * }
+     * <p>
+     * The select operation for determining the position of the one-bit with
+     * index {@code n} in a {@code long} value can be implemented as follows:
+     * {@snippet lang="java" :
+     * long select(long i, long n) {
+     *     // the one-bit in i (the mask) with index n
+     *     long nthBit = Long.expand(1L << n, i);
+     *     // the bit position of the one-bit with index n
+     *     return Long.numberOfTrailingZeros(nthBit);
+     * }
+     *
+     * // The one-bit with index 0 is at bit position 1
+     * select(0b10101010_10101010, 0) == 1
+     * // The one-bit with index 3 is at bit position 7
+     * select(0b10101010_10101010, 3) == 7
+     * }
+     *
+     * @param i the value whose bits are to be expanded
+     * @param mask the bit mask
+     * @return the expanded value
+     * @see #compress
+     * @since 19
+     */
+    @IntrinsicCandidate
+    public static long expand(long i, long mask) {
+        // Save original mask
+        long originalMask = mask;
+        // Count 0's to right
+        long maskCount = ~mask << 1;
+        long maskPrefix = parallelSuffix(maskCount);
+        // Bits to move
+        long maskMove1 = maskPrefix & mask;
+        // Compress mask
+        mask = (mask ^ maskMove1) | (maskMove1 >>> (1 << 0));
+        maskCount = maskCount & ~maskPrefix;
+
+        maskPrefix = parallelSuffix(maskCount);
+        // Bits to move
+        long maskMove2 = maskPrefix & mask;
+        // Compress mask
+        mask = (mask ^ maskMove2) | (maskMove2 >>> (1 << 1));
+        maskCount = maskCount & ~maskPrefix;
+
+        maskPrefix = parallelSuffix(maskCount);
+        // Bits to move
+        long maskMove3 = maskPrefix & mask;
+        // Compress mask
+        mask = (mask ^ maskMove3) | (maskMove3 >>> (1 << 2));
+        maskCount = maskCount & ~maskPrefix;
+
+        maskPrefix = parallelSuffix(maskCount);
+        // Bits to move
+        long maskMove4 = maskPrefix & mask;
+        // Compress mask
+        mask = (mask ^ maskMove4) | (maskMove4 >>> (1 << 3));
+        maskCount = maskCount & ~maskPrefix;
+
+        maskPrefix = parallelSuffix(maskCount);
+        // Bits to move
+        long maskMove5 = maskPrefix & mask;
+        // Compress mask
+        mask = (mask ^ maskMove5) | (maskMove5 >>> (1 << 4));
+        maskCount = maskCount & ~maskPrefix;
+
+        maskPrefix = parallelSuffix(maskCount);
+        // Bits to move
+        long maskMove6 = maskPrefix & mask;
+
+        long t = i << (1 << 5);
+        i = (i & ~maskMove6) | (t & maskMove6);
+        t = i << (1 << 4);
+        i = (i & ~maskMove5) | (t & maskMove5);
+        t = i << (1 << 3);
+        i = (i & ~maskMove4) | (t & maskMove4);
+        t = i << (1 << 2);
+        i = (i & ~maskMove3) | (t & maskMove3);
+        t = i << (1 << 1);
+        i = (i & ~maskMove2) | (t & maskMove2);
+        t = i << (1 << 0);
+        i = (i & ~maskMove1) | (t & maskMove1);
+
+        // Clear irrelevant bits
+        return i & originalMask;
+    }
+
+    @ForceInline
+    private static long parallelSuffix(long maskCount) {
+        long maskPrefix = maskCount ^ (maskCount << 1);
+        maskPrefix = maskPrefix ^ (maskPrefix << 2);
+        maskPrefix = maskPrefix ^ (maskPrefix << 4);
+        maskPrefix = maskPrefix ^ (maskPrefix << 8);
+        maskPrefix = maskPrefix ^ (maskPrefix << 16);
+        maskPrefix = maskPrefix ^ (maskPrefix << 32);
+        return maskPrefix;
     }
 
     /**

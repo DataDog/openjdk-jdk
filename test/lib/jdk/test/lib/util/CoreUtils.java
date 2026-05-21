@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -101,18 +101,23 @@ public class CoreUtils {
      * @param crashOutputString {@code String} to search in for the core file path
      * @return Location of core file if found in the output, otherwise {@code null}.
      */
-    public static String getCoreFileLocation(String crashOutputString) throws IOException {
+    public static String getCoreFileLocation(String crashOutputString, long pid) throws IOException {
         unzipCores(new File("."));
 
         // Find the core file
         String coreFileLocation = parseCoreFileLocationFromOutput(crashOutputString);
         if (coreFileLocation != null) {
-            System.out.println("Found core file: " + coreFileLocation);
-            Asserts.assertGT(new File(coreFileLocation).length(), 0L, "Unexpected core size");
+            long coreFileSize = new File(coreFileLocation).length();
+            System.out.println("Found core file " + coreFileLocation +
+                               ", size = " + coreFileSize / 1024 / 1024 + "mb");
+            Asserts.assertGT(coreFileSize, 0L, "Unexpected core size");
 
             // Make sure the core file is moved into the cwd if not already there.
+            // Core/minidump usually created in current directory (Linux and Windows).
             Path corePath = Paths.get(coreFileLocation);
-            if (corePath.getParent() != null) {
+            File parent = new File(coreFileLocation).getParentFile();
+            File cwdParent = new File(".").getAbsoluteFile().getParentFile();
+            if (parent != null && !parent.equals(cwdParent)) {
                 Path coreFileName = corePath.getFileName();
                 System.out.println("Moving core file to cwd: " +  coreFileName);
                 long startTime = System.currentTimeMillis();
@@ -122,9 +127,12 @@ public class CoreUtils {
             }
 
             return coreFileLocation; // success!
+        } else {
+            System.out.println("Core file not found. Trying to find a reason why...");
         }
 
-        // See if we can figure out the likely reason the core file was not found.
+        // See if we can figure out the likely reason the core file was not found. Recover from
+        // failure if possible.
         // Throw SkippedException if appropriate.
         if (Platform.isOSX()) {
             File coresDir = new File("/cores");
@@ -135,12 +143,17 @@ public class CoreUtils {
             if (!coresDir.canWrite()) {
                 throw new SkippedException("Directory \"" + coresDir + "\" is not writable");
             }
-            if (Platform.isSignedOSX()) {
+            if (Platform.isHardenedOSX()) {
                 if (Platform.getOsVersionMajor() > 10 ||
                     (Platform.getOsVersionMajor() == 10 && Platform.getOsVersionMinor() >= 15))
                 {
-                    // We can't generate cores files with signed binaries on OSX 10.15 and later.
-                    throw new SkippedException("Cannot produce core file with signed binary on OSX 10.15 and later");
+                    // We can't generate cores files with hardened binaries on OSX 10.15 and later.
+                    throw new SkippedException("Cannot produce core file with hardened binary on OSX 10.15 and later");
+                }
+            } else {
+                // codesign has to add entitlements using the plist. If this is not present we might not generate a core file.
+                if (!Platform.hasOSXPlistEntries()) {
+                    throw new SkippedException("Cannot produce core file with binary having no plist entitlement entries");
                 }
             }
         } else if (Platform.isLinux()) {
@@ -152,6 +165,30 @@ public class CoreUtils {
                     line = line.trim();
                     System.out.println(line);
                     if (line.startsWith("|")) {
+                        if (line.split("\s", 2)[0].endsWith("systemd-coredump")) {
+                            // A systemd linux system. Try to retrieve core
+                            // file. It can take a few seconds for the system to
+                            // process the just produced core file so we may need to
+                            // retry a few times.
+                            System.out.println("Running systemd-coredump: trying coredumpctl command");
+                            String core = "core";
+                            try {
+                                for (int i = 0; i < 10; i++) {
+                                    Thread.sleep(5000);
+                                    OutputAnalyzer out = ProcessTools.executeProcess("coredumpctl", "dump",  "-1",  "-o", core, String.valueOf(pid));
+                                    if (!out.getOutput().contains("output may be incomplete")) {
+                                        break;
+                                    }
+                                }
+                            } catch(Throwable t) {
+                            }
+                            final File coreFile = new File(core);
+                            if (coreFile.exists()) {
+                                Asserts.assertGT(coreFile.length(), 0L, "Unexpected core size");
+                                System.out.println("coredumpctl succeeded");
+                                return core;
+                            }
+                        }
                         System.out.println(
                             "\nThis system uses a crash report tool ($cat /proc/sys/kernel/core_pattern).\n" +
                             "Core files might not be generated. Please reset /proc/sys/kernel/core_pattern\n" +
@@ -166,6 +203,7 @@ public class CoreUtils {
 
     private static final String CORE_PATTERN_FILE_NAME = "/proc/sys/kernel/core_pattern";
     private static final String LOCATION_STRING = "location: ";
+    private static final String ALT_LOCATION_STRING = "alternatively, falling back to";
 
     private static String parseCoreFileLocationFromOutput(String crashOutputString) {
         System.out.println("crashOutputString = [" + crashOutputString + "]");
@@ -183,12 +221,25 @@ public class CoreUtils {
 
         // Find the core file name in the output.
         String coreWithPid;
-        if (stringWithLocation.contains("or ") && !Platform.isWindows()) {
-            Matcher m = Pattern.compile("or.* ([^ ]+[^\\)])\\)?").matcher(stringWithLocation);
+        if (Platform.isLinux() && stringWithLocation.contains(ALT_LOCATION_STRING)) {
+            /*
+             * If hotspot detects that /proc/sys/kernel/core_pattern starts with a "|",
+             * it generates a messages something like the following:
+             * # Core dump will be written. Default location: Determined by the following:
+             *   "/var/bin/core.sh %p" (alternatively, falling back to
+             *   /ws/jdk/build/linux-x64/test-support/jtreg_open_test_hotspot_jtreg_serviceability_sa_ClhsdbFindPC_java/scratch/2/core.10353)
+             * We try to detect this and glean this alternative path from the message. The
+             * hope here is that either this is where the core file actually ends up, or that
+             * the script referenced by the core_pattern is just zipping the core file, in
+             * which case a call to unzipCores() will have already unzipped the core file
+             * into this path.
+             */
+            Matcher m = Pattern.compile(ALT_LOCATION_STRING + ".* ([^ ]+[^\\)])\\)?").matcher(stringWithLocation);
             if (!m.find()) {
                 throw new RuntimeException("Couldn't find path to core inside location string");
             }
             coreWithPid = m.group(1);
+            System.out.println("getCoreFileLocation found alt coreWithPid = " + coreWithPid);
         } else {
             coreWithPid = stringWithLocation.trim();
         }
@@ -230,6 +281,16 @@ public class CoreUtils {
             } catch (IOException e) {
                 throw new SkippedException("Not able to unzip file: " + gzCore.getAbsolutePath(), e);
             }
+        }
+    }
+
+    public static String getAlwaysPretouchArg(boolean withCore) {
+        // macosx-aarch64 has an issue where sometimes the java heap will not be dumped to the
+        // core file. Using -XX:+AlwaysPreTouch fixes the problem.
+        if (withCore && Platform.isOSX() && Platform.isAArch64()) {
+            return "-XX:+AlwaysPreTouch";
+        } else {
+            return "-XX:-AlwaysPreTouch";
         }
     }
 

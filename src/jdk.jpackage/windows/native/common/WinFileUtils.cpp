@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,8 +35,7 @@
 #include "Log.h"
 
 
-// Needed by FileUtils::isDirectoryNotEmpty
-#pragma comment(lib, "shlwapi")
+// Needed by FileUtils::isDirectoryNotEmpty - shlwapi
 
 
 namespace FileUtils {
@@ -656,6 +655,36 @@ void FileWriter::finalize() {
 
     // cancel file deletion
     cleaner.cancel();
+}
+
+tstring stripExeSuffix(const tstring& path) {
+    // for windows - there is a ".exe" suffix to remove
+    // allow for ".*" (last dot beyond the last slash)
+    const tstring::size_type pos = path.rfind(_T("."));
+    const tstring::size_type spos = path.rfind(_T("\\/"));
+    if (pos == tstring::npos || (spos > pos && spos != tstring::npos)) {
+        return path;
+    }
+    return path.substr(0, pos);
+}
+
+tstring toShortPath(const tstring& path) {
+    const DWORD len = GetShortPathName(path.c_str(), nullptr, 0);
+    if (0 == len) {
+        JP_THROW(SysError(tstrings::any() << "GetShortPathName("
+                << path << ") failed", GetShortPathName));
+    }
+
+    std::vector<TCHAR> buf;
+    buf.resize(len);
+    const DWORD copied = GetShortPathName(path.c_str(), buf.data(),
+                                            static_cast<DWORD>(buf.size()));
+    if (copied != buf.size() - 1) {
+        JP_THROW(SysError(tstrings::any() << "GetShortPathName("
+                << path << ") failed", GetShortPathName));
+    }
+
+    return tstring(buf.data(), buf.size() - 1);
 }
 
 } //  namespace FileUtils

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,12 +33,12 @@ import java.lang.module.ModuleFinder;
 import java.lang.module.ModuleReference;
 import java.lang.module.ResolvedModule;
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -140,15 +140,8 @@ public final class ModuleBootstrap {
      */
     private static boolean canUseArchivedBootLayer() {
         return getProperty("jdk.module.upgrade.path") == null &&
-               getProperty("jdk.module.path") == null &&
                getProperty("jdk.module.patch.0") == null &&       // --patch-module
-               getProperty("jdk.module.main") == null &&          // --module
-               getProperty("jdk.module.addmods.0") == null  &&    // --add-modules
-               getProperty("jdk.module.limitmods") == null &&     // --limit-modules
-               getProperty("jdk.module.addreads.0") == null &&    // --add-reads
-               getProperty("jdk.module.addexports.0") == null &&  // --add-exports
-               getProperty("jdk.module.addopens.0") == null &&    // --add-opens
-               getProperty("jdk.module.illegalAccess") == null;   // --illegal-access
+               getProperty("jdk.module.limitmods") == null;       // --limit-modules
     }
 
     /**
@@ -189,7 +182,6 @@ public final class ModuleBootstrap {
         String mainModule = System.getProperty("jdk.module.main");
         Set<String> addModules = addModules();
         Set<String> limitModules = limitModules();
-        String illegalAccess = getAndRemoveProperty("jdk.module.illegalAccess");
 
         PrintStream traceOutput = null;
         String trace = getAndRemoveProperty("jdk.module.showModuleResolution");
@@ -207,34 +199,35 @@ public final class ModuleBootstrap {
         SystemModules systemModules = null;
         ModuleFinder systemModuleFinder;
 
-        boolean haveModulePath = (appModulePath != null || upgradeModulePath != null);
+        boolean haveUpgradeModulePath = (upgradeModulePath != null);
+        boolean haveModulePath = (appModulePath != null || haveUpgradeModulePath);
         boolean needResolution = true;
-        boolean canArchive = false;
-        boolean hasSplitPackages;
-        boolean hasIncubatorModules;
+        boolean mayContainSplitPackages = true;
+        boolean mayContainIncubatorModules = true;
 
-        // If the java heap was archived at CDS dump time and the environment
-        // at dump time matches the current environment then use the archived
+        // If the java heap was archived at CDS dump time, and the environment
+        // at dump time matches the current environment, then use the archived
         // system modules and finder.
-        ArchivedModuleGraph archivedModuleGraph = ArchivedModuleGraph.get(mainModule);
+        ArchivedModuleGraph archivedModuleGraph = ArchivedModuleGraph.get(mainModule, addModules);
         if (archivedModuleGraph != null
                 && !haveModulePath
-                && addModules.isEmpty()
                 && limitModules.isEmpty()
-                && !isPatched
-                && illegalAccess == null) {
+                && !isPatched) {
             systemModuleFinder = archivedModuleGraph.finder();
-            hasSplitPackages = archivedModuleGraph.hasSplitPackages();
-            hasIncubatorModules = archivedModuleGraph.hasIncubatorModules();
+            mayContainSplitPackages = archivedModuleGraph.hasSplitPackages();
+            mayContainIncubatorModules = archivedModuleGraph.hasIncubatorModules();
             needResolution = (traceOutput != null);
         } else {
             if (!haveModulePath && addModules.isEmpty() && limitModules.isEmpty()) {
                 systemModules = SystemModuleFinders.systemModules(mainModule);
-                if (systemModules != null && !isPatched) {
-                    needResolution = (traceOutput != null);
-                    canArchive = true;
+                if (systemModules != null && !isPatched && traceOutput == null) {
+                    // use pre-generated configuration
+                    needResolution = false;
+                    mayContainSplitPackages = systemModules.hasSplitPackages();
+                    mayContainIncubatorModules = systemModules.hasIncubatorModules();
                 }
             }
+
             if (systemModules == null) {
                 // all system modules are observable
                 systemModules = SystemModuleFinders.allSystemModules();
@@ -248,8 +241,6 @@ public final class ModuleBootstrap {
                 systemModuleFinder = SystemModuleFinders.ofSystem();
             }
 
-            hasSplitPackages = systemModules.hasSplitPackages();
-            hasIncubatorModules = systemModules.hasIncubatorModules();
             // not using the archived module graph - avoid accidental use
             archivedModuleGraph = null;
         }
@@ -268,7 +259,9 @@ public final class ModuleBootstrap {
         if (baseUri == null)
             throw new InternalError(JAVA_BASE + " does not have a location");
         BootLoader.loadModule(base);
-        Modules.defineModule(null, base.descriptor(), baseUri);
+
+        Module baseModule = Modules.defineModule(null, base.descriptor(), baseUri);
+        JLA.addEnableNativeAccess(baseModule);
 
         // Step 2a: Scan all modules when --validate-modules specified
 
@@ -396,7 +389,7 @@ public final class ModuleBootstrap {
         if (isPatched) {
             patcher.patchedModules()
                     .stream()
-                    .filter(mn -> !cf.findModule(mn).isPresent())
+                    .filter(mn -> cf.findModule(mn).isEmpty())
                     .forEach(mn -> warnUnknownModule(PATCH_MODULE, mn));
         }
 
@@ -428,14 +421,14 @@ public final class ModuleBootstrap {
                     if (upgradeModulePath != null
                             && upgradeModulePath.find(name).isPresent())
                         fail(name + ": cannot be loaded from upgrade module path");
-                    if (!systemModuleFinder.find(name).isPresent())
+                    if (systemModuleFinder.find(name).isEmpty())
                         fail(name + ": cannot be loaded from application module path");
                 }
             }
         }
 
         // check for split packages in the modules mapped to the built-in loaders
-        if (hasSplitPackages || isPatched || haveModulePath) {
+        if (mayContainSplitPackages) {
             checkSplitPackages(cf, clf);
         }
 
@@ -451,43 +444,49 @@ public final class ModuleBootstrap {
         // Step 7: Miscellaneous
 
         // check incubating status
-        if (hasIncubatorModules || haveModulePath) {
+        if (mayContainIncubatorModules) {
             checkIncubatingStatus(cf);
         }
 
-        // --add-reads, --add-exports/--add-opens, and --illegal-access
+        // --add-reads, --add-exports/--add-opens
         addExtraReads(bootLayer);
-        boolean extraExportsOrOpens = addExtraExportsAndOpens(bootLayer);
+        addExtraExportsAndOpens(bootLayer);
 
-        if (illegalAccess != null) {
-            assert systemModules != null;
-            addIllegalAccess(illegalAccess,
-                             systemModules,
-                             upgradeModulePath,
-                             bootLayer,
-                             extraExportsOrOpens);
-        }
+        // enable native access to modules specified to --enable-native-access
+        addEnableNativeAccess(bootLayer);
+
+        // allow final mutation by modules specified to --enable-final-field-mutation
+        addEnableFinalFieldMutation(bootLayer);
 
         Counters.add("jdk.module.boot.7.adjustModulesTime");
+
+        // Step 8: CDS dump phase
+
+        if (CDS.isDumpingStaticArchive()
+                && !haveUpgradeModulePath
+                && allJrtOrModularJar(cf)) {
+            assert !isPatched;
+
+            // Archive module graph and maybe boot layer
+            boolean hasSplitPackages = containsSplitPackages(cf);
+            boolean hasIncubatorModules = containsIncubatorModule(cf);
+            ArchivedModuleGraph.archive(hasSplitPackages,
+                                        hasIncubatorModules,
+                                        systemModuleFinder,
+                                        cf,
+                                        clf,
+                                        mainModule,
+                                        addModules);
+            if (!hasSplitPackages && !hasIncubatorModules) {
+                ArchivedBootLayer.archive(bootLayer);
+            }
+        }
 
         // save module finders for later use
         if (savedModuleFinder != null) {
             unlimitedFinder = new SafeModuleFinder(savedModuleFinder);
             if (savedModuleFinder != finder)
                 limitedFinder = new SafeModuleFinder(finder);
-        }
-
-        // Archive module graph and boot layer can be archived at CDS dump time.
-        // Only allow the unnamed module case for now.
-        if (canArchive && (mainModule == null)) {
-            ArchivedModuleGraph.archive(hasSplitPackages,
-                                        hasIncubatorModules,
-                                        systemModuleFinder,
-                                        cf,
-                                        clf);
-            if (!hasSplitPackages && !hasIncubatorModules) {
-                ArchivedBootLayer.archive(bootLayer);
-            }
         }
 
         return bootLayer;
@@ -514,8 +513,49 @@ public final class ModuleBootstrap {
     }
 
     /**
-     * Checks for split packages between modules defined to the built-in class
-     * loaders.
+     * Returns true if all modules in the configuration are in the run-time image or
+     * modular JAR files.
+     */
+    private static boolean allJrtOrModularJar(Configuration cf) {
+        for (ResolvedModule module : cf.modules()) {
+            URI uri = module.reference().location().orElseThrow();
+            if (!uri.getScheme().equalsIgnoreCase("jrt") && !isJarFile(uri)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Returns true if the given URI locates a jar file on the file system.
+     */
+    private static boolean isJarFile(URI uri) {
+        if ("file".equalsIgnoreCase(uri.getScheme())) {
+            Path path = Path.of(uri);
+            return path.toString().endsWith(".jar") && Files.isRegularFile(path);
+        } else {
+            return false;
+        }
+    }
+
+    /**
+     * Returns true if the configuration contains modules with overlapping packages.
+     */
+    private static boolean containsSplitPackages(Configuration cf) {
+        var allPackages = new HashSet<String>();
+        for (ResolvedModule module: cf.modules()) {
+            Set<String> packages = module.reference().descriptor().packages();
+            int expectedCount = allPackages.size() + packages.size();
+            allPackages.addAll(packages);
+            if (expectedCount > allPackages.size()) {
+                return true; // overlapping packages.
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Checks for split packages between modules defined to the built-in class loaders.
      */
     private static void checkSplitPackages(Configuration cf,
                                            Function<String, ClassLoader> clf) {
@@ -665,7 +705,7 @@ public final class ModuleBootstrap {
             // the key is $MODULE
             String mn = e.getKey();
             Optional<Module> om = bootLayer.findModule(mn);
-            if (!om.isPresent()) {
+            if (om.isEmpty()) {
                 warnUnknownModule(ADD_READS, mn);
                 continue;
             }
@@ -691,27 +731,20 @@ public final class ModuleBootstrap {
      * Process the --add-exports and --add-opens options to export/open
      * additional packages specified on the command-line.
      */
-    private static boolean addExtraExportsAndOpens(ModuleLayer bootLayer) {
-        boolean extraExportsOrOpens = false;
-
+    private static void addExtraExportsAndOpens(ModuleLayer bootLayer) {
         // --add-exports
         String prefix = "jdk.module.addexports.";
         Map<String, List<String>> extraExports = decode(prefix);
         if (!extraExports.isEmpty()) {
             addExtraExportsOrOpens(bootLayer, extraExports, false);
-            extraExportsOrOpens = true;
         }
-
 
         // --add-opens
         prefix = "jdk.module.addopens.";
         Map<String, List<String>> extraOpens = decode(prefix);
         if (!extraOpens.isEmpty()) {
             addExtraExportsOrOpens(bootLayer, extraOpens, true);
-            extraExportsOrOpens = true;
         }
-
-        return extraExportsOrOpens;
     }
 
     private static void addExtraExportsOrOpens(ModuleLayer bootLayer,
@@ -735,7 +768,7 @@ public final class ModuleBootstrap {
             // The exporting module is in the boot layer
             Module m;
             Optional<Module> om = bootLayer.findModule(mn);
-            if (!om.isPresent()) {
+            if (om.isEmpty()) {
                 warnUnknownModule(option, mn);
                 continue;
             }
@@ -779,94 +812,177 @@ public final class ModuleBootstrap {
         }
     }
 
+    private static final Set<String> USER_NATIVE_ACCESS_MODULES;
+    private static final Set<String> JDK_NATIVE_ACCESS_MODULES;
+    private static final IllegalNativeAccess ILLEGAL_NATIVE_ACCESS;
+    private static final IllegalFinalFieldMutation ILLEGAL_FINAL_FIELD_MUTATION;
+
+    public enum IllegalNativeAccess {
+        ALLOW,
+        WARN,
+        DENY
+    }
+
+    public enum IllegalFinalFieldMutation {
+        ALLOW,
+        WARN,
+        DEBUG,
+        DENY
+    }
+
+    static {
+        ILLEGAL_NATIVE_ACCESS = decodeIllegalNativeAccess();
+        USER_NATIVE_ACCESS_MODULES = decodeEnableNativeAccess();
+        JDK_NATIVE_ACCESS_MODULES = ModuleLoaderMap.nativeAccessModules();
+        ILLEGAL_FINAL_FIELD_MUTATION = decodeIllegalFinalFieldMutation();
+    }
+
+    public static IllegalNativeAccess illegalNativeAccess() {
+        return ILLEGAL_NATIVE_ACCESS;
+    }
+
+    public static IllegalFinalFieldMutation illegalFinalFieldMutation() {
+        return ILLEGAL_FINAL_FIELD_MUTATION;
+    }
+
     /**
-     * Process the --illegal-access option to open packages of system modules
-     * in the boot layer to code in unnamed modules.
+     * Grants native access to modules selected using the --enable-native-access
+     * command line option, and also to JDK modules that need the access.
+     * <p>
+     * In case of being in "source" launcher mode, warnings about unknown modules are
+     * deferred to the source launcher logic in the jdk.compiler module, as those
+     * modules might be not compiled, yet.
      */
-    private static void addIllegalAccess(String illegalAccess,
-                                         SystemModules systemModules,
-                                         ModuleFinder upgradeModulePath,
-                                         ModuleLayer bootLayer,
-                                         boolean extraExportsOrOpens) {
+    private static void addEnableNativeAccess(ModuleLayer layer) {
+        String launcherMode = getAndRemoveProperty("sun.java.launcher.mode");
+        boolean shouldWarn = !"source".equals(launcherMode);
+        addEnableNativeAccess(layer, USER_NATIVE_ACCESS_MODULES, shouldWarn);
+        addEnableNativeAccess(layer, JDK_NATIVE_ACCESS_MODULES, false);
+    }
 
-        if (illegalAccess.equals("deny"))
-            return;  // nothing to do
-
-        IllegalAccessLogger.Mode mode = switch (illegalAccess) {
-            case "permit" -> IllegalAccessLogger.Mode.ONESHOT;
-            case "warn"   -> IllegalAccessLogger.Mode.WARN;
-            case "debug"  -> IllegalAccessLogger.Mode.DEBUG;
-            default -> {
-                fail("Value specified to --illegal-access not recognized:"
-                        + " '" + illegalAccess + "'");
-                yield null;
+    /**
+     * Grants native access for the given modules in the given layer.
+     * Warns optionally about modules that were specified, but not present in the layer.
+     */
+    private static void addEnableNativeAccess(ModuleLayer layer,
+                                              Set<String> moduleNames,
+                                              boolean shouldWarn) {
+        for (String name : moduleNames) {
+            if (name.equals("ALL-UNNAMED")) {
+                JLA.addEnableNativeAccessToAllUnnamed();
+            } else if (!JLA.addEnableNativeAccess(layer, name) && shouldWarn) {
+                warnUnknownModule(ENABLE_NATIVE_ACCESS, name);
             }
-        };
-
-        var builder = new IllegalAccessLogger.Builder(mode, System.err);
-        Map<String, Set<String>> concealedPackagesToOpen = systemModules.concealedPackagesToOpen();
-        Map<String, Set<String>> exportedPackagesToOpen = systemModules.exportedPackagesToOpen();
-        if (concealedPackagesToOpen.isEmpty() && exportedPackagesToOpen.isEmpty()) {
-            // need to generate (exploded build)
-            IllegalAccessMaps maps = IllegalAccessMaps.generate(limitedFinder());
-            concealedPackagesToOpen = maps.concealedPackagesToOpen();
-            exportedPackagesToOpen = maps.exportedPackagesToOpen();
         }
+    }
 
-        // open specific packages in the system modules
-        Set<String> emptySet = Set.of();
-        for (Module m : bootLayer.modules()) {
-            ModuleDescriptor descriptor = m.getDescriptor();
-            String name = m.getName();
-
-            // skip open modules
-            if (descriptor.isOpen()) {
-                continue;
-            }
-
-            // skip modules loaded from the upgrade module path
-            if (upgradeModulePath != null
-                && upgradeModulePath.find(name).isPresent()) {
-                continue;
-            }
-
-            Set<String> concealedPackages = concealedPackagesToOpen.getOrDefault(name, emptySet);
-            Set<String> exportedPackages = exportedPackagesToOpen.getOrDefault(name, emptySet);
-
-            // refresh the set of concealed and exported packages if needed
-            if (extraExportsOrOpens) {
-                concealedPackages = new HashSet<>(concealedPackages);
-                exportedPackages = new HashSet<>(exportedPackages);
-                Iterator<String> iterator = concealedPackages.iterator();
-                while (iterator.hasNext()) {
-                    String pn = iterator.next();
-                    if (m.isExported(pn, BootLoader.getUnnamedModule())) {
-                        // concealed package is exported to ALL-UNNAMED
-                        iterator.remove();
-                        exportedPackages.add(pn);
-                    }
-                }
-                iterator = exportedPackages.iterator();
-                while (iterator.hasNext()) {
-                    String pn = iterator.next();
-                    if (m.isOpen(pn, BootLoader.getUnnamedModule())) {
-                        // exported package is opened to ALL-UNNAMED
-                        iterator.remove();
-                    }
-                }
-            }
-
-            // log reflective access to all types in concealed packages
-            builder.logAccessToConcealedPackages(m, concealedPackages);
-
-            // log reflective access to non-public members/types in exported packages
-            builder.logAccessToExportedPackages(m, exportedPackages);
-
-            // open the packages to unnamed modules
-            JLA.addOpensToAllUnnamed(m, concealedPackages, exportedPackages);
+    /**
+     * Returns the set of module names specified by --enable-native-access options.
+     */
+    private static Set<String> decodeEnableNativeAccess() {
+        String prefix = "jdk.module.enable.native.access.";
+        int index = 0;
+        // the system property is removed after decoding
+        String value = getAndRemoveProperty(prefix + index);
+        Set<String> modules = new HashSet<>();
+        if (value == null) {
+            return modules;
         }
+        while (value != null) {
+            for (String s : value.split(",")) {
+                if (!s.isEmpty())
+                    modules.add(s);
+            }
+            index++;
+            value = getAndRemoveProperty(prefix + index);
+        }
+        return modules;
+    }
 
-        builder.complete();
+    /**
+     * Process the --illegal-native-access option (and its default).
+     */
+    private static IllegalNativeAccess decodeIllegalNativeAccess() {
+        String value = getAndRemoveProperty("jdk.module.illegal.native.access");
+        // don't use a switch: bootstrapping issues!
+        if (value == null) {
+            return IllegalNativeAccess.WARN; // default
+        } else if (value.equals("deny")) {
+            return IllegalNativeAccess.DENY;
+        } else if (value.equals("allow")) {
+            return IllegalNativeAccess.ALLOW;
+        } else if (value.equals("warn")) {
+            return IllegalNativeAccess.WARN;
+        } else {
+            fail("Value specified to --illegal-native-access not recognized:"
+                    + " '" + value + "'");
+            return null;
+        }
+    }
+
+    /**
+     * Process the --illegal-final-field-mutation option.
+     */
+    private static IllegalFinalFieldMutation decodeIllegalFinalFieldMutation() {
+        String value = getAndRemoveProperty("jdk.module.illegal.final.field.mutation");
+        if (value == null) {
+            return IllegalFinalFieldMutation.WARN; // default
+        } else if (value.equals("allow")) {
+            return IllegalFinalFieldMutation.ALLOW;
+        } else if (value.equals("warn")) {
+            return IllegalFinalFieldMutation.WARN;
+        } else if (value.equals("debug")) {
+            return IllegalFinalFieldMutation.DEBUG;
+        } else if (value.equals("deny")) {
+            return IllegalFinalFieldMutation.DENY;
+        } else {
+            fail("Value specified to --illegal-final-field-mutation not recognized:"
+                    + " '" + value + "'");
+            return null;
+        }
+    }
+
+    /**
+     * Process the modules specified to --enable-final-field-mutation and grant the
+     * capability to mutate finals to specified named modules or all unnamed modules.
+     */
+    private static void addEnableFinalFieldMutation(ModuleLayer bootLayer) {
+        for (String name : decodeEnableFinalFieldMutation()) {
+            if (name.equals("ALL-UNNAMED")) {
+                JLA.addEnableFinalMutationToAllUnnamed();
+            } else {
+                Module m = bootLayer.findModule(name).orElse(null);
+                if (m != null) {
+                    JLA.tryEnableFinalMutation(m);
+                } else {
+                    warnUnknownModule("--enable-final-field-mutation", name);
+                }
+            }
+        }
+    }
+
+    /**
+     * Returns the set of module names specified by --enable-final-field-mutation options.
+     */
+    private static Set<String> decodeEnableFinalFieldMutation() {
+        String prefix = "jdk.module.enable.final.field.mutation.";
+        int index = 0;
+        // the system property is removed after decoding
+        String value = getAndRemoveProperty(prefix + index);
+        Set<String> modules = new HashSet<>();
+        if (value == null) {
+            return modules;
+        }
+        while (value != null) {
+            for (String s : value.split(",")) {
+                if (!s.isEmpty()) {
+                    modules.add(s);
+                }
+            }
+            index++;
+            value = getAndRemoveProperty(prefix + index);
+        }
+        return modules;
     }
 
     /**
@@ -947,6 +1063,18 @@ public final class ModuleBootstrap {
     }
 
     /**
+     * Returns true if the configuration contains an incubator module.
+     */
+    private static boolean containsIncubatorModule(Configuration cf) {
+        for (ResolvedModule module : cf.modules()) {
+            if (ModuleResolution.hasIncubatingWarning(module.reference())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Checks incubating status of modules in the configuration
      */
     private static void checkIncubatingStatus(Configuration cf) {
@@ -992,7 +1120,7 @@ public final class ModuleBootstrap {
     private static final String ADD_OPENS    = "--add-opens";
     private static final String ADD_READS    = "--add-reads";
     private static final String PATCH_MODULE = "--patch-module";
-
+    private static final String ENABLE_NATIVE_ACCESS = "--enable-native-access";
 
     /*
      * Returns the command-line option name corresponds to the specified

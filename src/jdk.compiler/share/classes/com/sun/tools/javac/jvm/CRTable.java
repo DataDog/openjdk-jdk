@@ -32,7 +32,6 @@ import com.sun.tools.javac.tree.*;
 import com.sun.tools.javac.util.*;
 import com.sun.tools.javac.util.List;
 import com.sun.tools.javac.tree.JCTree.*;
-import com.sun.tools.javac.tree.EndPosTable;
 import com.sun.tools.javac.tree.JCTree.JCSwitchExpression;
 
 /** This class contains the CharacterRangeTable for some method
@@ -57,10 +56,6 @@ implements CRTFlags {
      */
     private Map<Object,SourceRange> positions = new HashMap<>();
 
-    /** The object for ending positions stored in the parser.
-     */
-    private EndPosTable endPosTable;
-
     /** The tree of the method this table is intended for.
      *  We should traverse this tree to get source ranges.
      */
@@ -68,9 +63,8 @@ implements CRTFlags {
 
     /** Constructor
      */
-    public CRTable(JCTree.JCMethodDecl tree, EndPosTable endPosTable) {
+    public CRTable(JCTree.JCMethodDecl tree) {
         this.methodTree = tree;
-        this.endPosTable = endPosTable;
     }
 
     /** Create a new CRTEntry and add it to the entries.
@@ -322,8 +316,28 @@ implements CRTFlags {
 
         public void visitCase(JCCase tree) {
             SourceRange sr = new SourceRange(startPos(tree), endPos(tree));
-            sr.mergeWith(csp(tree.pats));
+            sr.mergeWith(csp(tree.labels));
+            sr.mergeWith(csp(tree.guard));
             sr.mergeWith(csp(tree.stats));
+            result = sr;
+        }
+
+        @Override
+        public void visitDefaultCaseLabel(JCTree.JCDefaultCaseLabel that) {
+            result = null;
+        }
+
+        @Override
+        public void visitConstantCaseLabel(JCConstantCaseLabel tree) {
+            SourceRange sr = new SourceRange(startPos(tree), endPos(tree));
+            sr.mergeWith(csp(tree.expr));
+            result = sr;
+        }
+
+        @Override
+        public void visitPatternCaseLabel(JCPatternCaseLabel tree) {
+            SourceRange sr = new SourceRange(startPos(tree), endPos(tree));
+            sr.mergeWith(csp(tree.pat));
             result = sr;
         }
 
@@ -379,6 +393,7 @@ implements CRTFlags {
 
         public void visitYield(JCYield tree) {
             SourceRange sr = new SourceRange(startPos(tree), endPos(tree));
+            sr.mergeWith(csp(tree.value));
             result = sr;
         }
 
@@ -563,7 +578,7 @@ implements CRTFlags {
          */
         public int endPos(JCTree tree) {
             if (tree == null) return Position.NOPOS;
-            return TreeInfo.getEndPos(tree, endPosTable);
+            return TreeInfo.getEndPos(tree);
         }
     }
 

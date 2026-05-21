@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,11 +23,11 @@
 
 /*
  * @test
- * @bug 8246353
+ * @bug 8246353 8273257
  * @summary Test sealed class in jshell
  * @modules jdk.jshell
  * @build KullaTesting TestingInputStream ExpectedDiagnostic
- * @run testng SealedClassesTest
+ * @run junit SealedClassesTest
  */
 
 import javax.lang.model.SourceVersion;
@@ -35,14 +35,13 @@ import javax.lang.model.SourceVersion;
 import jdk.jshell.TypeDeclSnippet;
 import jdk.jshell.Snippet.Status;
 
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.Test;
 
 import static jdk.jshell.Snippet.Status.VALID;
+import org.junit.jupiter.api.Test;
 
-@Test
 public class SealedClassesTest extends KullaTesting {
 
+    @Test
     public void testSealed() {
         TypeDeclSnippet base = classKey(
                 assertEval("sealed class B permits I {}",
@@ -53,6 +52,18 @@ public class SealedClassesTest extends KullaTesting {
         assertEval("new I()");
     }
 
+    @Test
+    public void testInterface() {
+        TypeDeclSnippet base = classKey(
+                assertEval("sealed interface I permits C {}",
+                           ste(MAIN_SNIPPET, Status.NONEXISTENT, Status.RECOVERABLE_NOT_DEFINED, false, null)));
+        assertEval("final class C implements I {}",
+                   added(VALID),
+                   ste(base, Status.RECOVERABLE_NOT_DEFINED, Status.VALID, true, null));
+        assertEval("new C()");
+    }
+
+    @Test
     public void testNonSealed() {
         TypeDeclSnippet base = classKey(
                 assertEval("sealed class B permits I {}",
@@ -64,9 +75,15 @@ public class SealedClassesTest extends KullaTesting {
         assertEval("new I2()");
     }
 
-    @BeforeMethod
-    public void setUp() {
-        setUp(b -> b.compilerOptions("--enable-preview", "-source", String.valueOf(SourceVersion.latest().ordinal()))
-                    .remoteVMOptions("--enable-preview"));
+    @Test
+    public void testNonSealedInterface() {
+        TypeDeclSnippet base = classKey(
+                assertEval("sealed interface B permits C {}",
+                           ste(MAIN_SNIPPET, Status.NONEXISTENT, Status.RECOVERABLE_NOT_DEFINED, false, null)));
+        assertEval("non-sealed class C implements B {}",
+                   added(VALID),
+                   ste(base, Status.RECOVERABLE_NOT_DEFINED, Status.VALID, true, null));
+        assertEval("class C2 extends C {}");
+        assertEval("new C2()");
     }
 }

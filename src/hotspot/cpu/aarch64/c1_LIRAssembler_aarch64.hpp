@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2014, Red Hat Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -33,8 +33,6 @@ friend class ArrayCopyStub;
 
   int array_element_size(BasicType type) const;
 
-  void arith_fpu_implementation(LIR_Code code, int left_index, int right_index, int dest_index, bool pop_fpu_stack);
-
   // helper functions which checks for overflow and sets bailout if it
   // occurs.  Always returns a valid embeddable pointer but in the
   // bailout case the pointer won't be to unique storage.
@@ -52,15 +50,18 @@ friend class ArrayCopyStub;
   Address stack_slot_address(int index, uint shift, Register tmp, int adjust = 0);
 
   // Record the type of the receiver in ReceiverTypeData
-  void type_profile_helper(Register mdo,
-                           ciMethodData *md, ciProfileData *data,
-                           Register recv, Label* update_done);
+  void type_profile_helper(Register mdo, ciMethodData *md,
+                           ciProfileData *data, Register recv);
   void add_debug_info_for_branch(address adr, CodeEmitInfo* info);
 
   void casw(Register addr, Register newval, Register cmpval);
   void casl(Register addr, Register newval, Register cmpval);
 
-  void poll_for_safepoint(relocInfo::relocType rtype, CodeEmitInfo* info = NULL);
+  void mem2reg(LIR_Opr src, LIR_Opr dest, BasicType type,
+               LIR_PatchCode patch_code,
+               CodeEmitInfo* info, bool wide, bool is_volatile);
+  void load_unordered(LIR_Address *from_addr, LIR_Opr dest, BasicType type, bool wide, CodeEmitInfo* info);
+  void load_volatile(LIR_Address *from_addr, LIR_Opr dest, BasicType type, CodeEmitInfo* info);
 
   static const int max_tableswitches = 20;
   struct tableswitch switches[max_tableswitches];
@@ -71,12 +72,11 @@ friend class ArrayCopyStub;
   void deoptimize_trap(CodeEmitInfo *info);
 
   enum {
-    // call stub: CompiledStaticCall::to_interp_stub_size() +
-    //            CompiledStaticCall::to_trampoline_stub_size()
+    // call stub: CompiledDirectCall::to_interp_stub_size() +
+    //            CompiledDirectCall::to_trampoline_stub_size()
     _call_stub_size = 13 * NativeInstruction::instruction_size,
-    _call_aot_stub_size = 0,
     _exception_handler_size = DEBUG_ONLY(1*K) NOT_DEBUG(175),
-    _deopt_handler_size = 7 * NativeInstruction::instruction_size
+    _deopt_handler_size = 4 * NativeInstruction::instruction_size
   };
 
 public:

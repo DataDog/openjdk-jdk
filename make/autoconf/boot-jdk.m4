@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -23,11 +23,11 @@
 # questions.
 #
 
-########################################################################
+################################################################################
 # This file handles detection of the Boot JDK. The Boot JDK detection
 # process has been developed as a response to solve a complex real-world
 # problem. Initially, it was simple, but it has grown as platform after
-# platform, idiosyncracy after idiosyncracy has been supported.
+# platform, idiosyncrasy after idiosyncrasy has been supported.
 #
 # The basic idea is this:
 # 1) You need an acceptable *) JDK to use as a Boot JDK
@@ -49,7 +49,7 @@
 # JDK, and if one is found, check if it is acceptable. If not, we print
 # our reasons for rejecting it (useful when debugging non-working
 # configure situations) and continue checking the next one.
-########################################################################
+################################################################################
 
 # Execute the check given as argument, and verify the result
 # If the Boot JDK was previously found, do nothing
@@ -126,16 +126,18 @@ AC_DEFUN([BOOTJDK_DO_CHECK],
 AC_DEFUN([BOOTJDK_CHECK_ARGUMENTS],
 [
   if test "x$with_boot_jdk" != x; then
-    if test -d "$with_boot_jdk"; then
-      BOOT_JDK=$with_boot_jdk
+    BOOT_JDK_ARG="$with_boot_jdk"
+    UTIL_FIXUP_PATH(BOOT_JDK_ARG)
+    if test -d "$BOOT_JDK_ARG"; then
+      BOOT_JDK=$BOOT_JDK_ARG
       BOOT_JDK_FOUND=maybe
-    elif test -f "$with_boot_jdk"; then
-      case "$with_boot_jdk" in
+    elif test -f "$BOOT_JDK_ARG"; then
+      case "$BOOT_JDK_ARG" in
         *.tar.gz )
             BOOT_JDK_SUPPORT_DIR=$CONFIGURESUPPORT_OUTPUTDIR/boot-jdk
             $RM -rf $BOOT_JDK_SUPPORT_DIR
             $MKDIR -p $BOOT_JDK_SUPPORT_DIR
-            $GUNZIP -c $with_boot_jdk | $TAR xf - -C $BOOT_JDK_SUPPORT_DIR
+            $GUNZIP -c $BOOT_JDK_ARG | $TAR xf - -C $BOOT_JDK_SUPPORT_DIR
 
             # Try to find javac to determine BOOT_JDK path
             BOOT_JDK_JAVAC_PATH=`$FIND $BOOT_JDK_SUPPORT_DIR | $GREP "/bin/javac"`
@@ -178,11 +180,13 @@ AC_DEFUN([BOOTJDK_CHECK_JAVA_HOME],
 # Test: Is there a java or javac in the PATH, which is a symlink to the JDK?
 AC_DEFUN([BOOTJDK_CHECK_JAVA_IN_PATH_IS_SYMLINK],
 [
-  UTIL_LOOKUP_PROGS(JAVAC_CHECK, javac, , NOFIXPATH)
-  UTIL_LOOKUP_PROGS(JAVA_CHECK, java, , NOFIXPATH)
-  BINARY="$JAVAC_CHECK"
-  if test "x$JAVAC_CHECK" = x; then
-    BINARY="$JAVA_CHECK"
+  UTIL_LOOKUP_PROGS(JAVAC_CHECK, javac)
+  UTIL_GET_EXECUTABLE(JAVAC_CHECK) # Will setup JAVAC_CHECK_EXECUTABLE
+  UTIL_LOOKUP_PROGS(JAVA_CHECK, java)
+  UTIL_GET_EXECUTABLE(JAVA_CHECK) # Will setup JAVA_CHECK_EXECUTABLE
+  BINARY="$JAVAC_CHECK_EXECUTABLE"
+  if test "x$JAVAC_CHECK_EXECUTABLE" = x; then
+    BINARY="$JAVA_CHECK_EXECUTABLE"
   fi
   if test "x$BINARY" != x; then
     # So there is a java(c) binary, it might be part of a JDK.
@@ -298,7 +302,29 @@ AC_DEFUN([BOOTJDK_CHECK_TOOL_IN_BOOTJDK],
     ])
 ])
 
-###############################################################################
+# Setup CLASSPATH environment variable
+AC_DEFUN([BOOTJDK_SETUP_CLASSPATH],
+[
+  AC_ARG_WITH([classpath], [AS_HELP_STRING([--with-classpath],
+      [Optional classpath to set as CLASSPATH to all Java invocations @<:@none@:>@])])
+
+  if test "x$CLASSPATH" != x; then
+    AC_MSG_WARN([CLASSPATH is set in the environment. This will be ignored. Use --with-classpath instead.])
+  fi
+
+  CLASSPATH=
+
+  if test "x$with_classpath" != x && test "x$with_classpath" != xyes &&
+      test "x$with_classpath" != xno ; then
+    CLASSPATH="$with_classpath"
+    AC_MSG_CHECKING([for classpath to use for all Java invocations])
+    AC_MSG_RESULT([$CLASSPATH])
+  fi
+
+  AC_SUBST(CLASSPATH)
+])
+
+################################################################################
 #
 # We need a Boot JDK to bootstrap the build.
 #
@@ -357,13 +383,21 @@ AC_DEFUN_ONCE([BOOTJDK_SETUP_BOOT_JDK],
 
   # Finally, set some other options...
 
+  # Determine if the boot jdk jar supports the --date option
+  if $JAR --help 2>&1 | $GREP -q -e "--date=TIMESTAMP"; then
+    BOOT_JDK_JAR_SUPPORTS_DATE=true
+  else
+    BOOT_JDK_JAR_SUPPORTS_DATE=false
+  fi
+  AC_MSG_CHECKING([if Boot JDK jar supports --date=TIMESTAMP])
+  AC_MSG_RESULT([$BOOT_JDK_JAR_SUPPORTS_DATE])
+  AC_SUBST(BOOT_JDK_JAR_SUPPORTS_DATE)
+
   # When compiling code to be executed by the Boot JDK, force compatibility with the
   # oldest supported bootjdk.
-  OLDEST_BOOT_JDK=`$ECHO $DEFAULT_ACCEPTABLE_BOOT_VERSIONS \
+  OLDEST_BOOT_JDK_VERSION=`$ECHO $DEFAULT_ACCEPTABLE_BOOT_VERSIONS \
       | $TR " " "\n" | $SORT -n | $HEAD -n1`
-  # -Xlint:-options is added to avoid "warning: [options] system modules path not set in conjunction with -source"
-  BOOT_JDK_SOURCETARGET="-source $OLDEST_BOOT_JDK -target $OLDEST_BOOT_JDK -Xlint:-options"
-  AC_SUBST(BOOT_JDK_SOURCETARGET)
+  AC_SUBST(OLDEST_BOOT_JDK_VERSION)
 
   # Check if the boot jdk is 32 or 64 bit
   if $JAVA -version 2>&1 | $GREP -q "64-Bit"; then
@@ -374,26 +408,7 @@ AC_DEFUN_ONCE([BOOTJDK_SETUP_BOOT_JDK],
   AC_MSG_CHECKING([if Boot JDK is 32 or 64 bits])
   AC_MSG_RESULT([$BOOT_JDK_BITS])
 
-  # Try to enable CDS
-  AC_MSG_CHECKING([for local Boot JDK Class Data Sharing (CDS)])
-  BOOT_JDK_CDS_ARCHIVE=$CONFIGURESUPPORT_OUTPUTDIR/classes.jsa
-  UTIL_ADD_JVM_ARG_IF_OK([-XX:+UnlockDiagnosticVMOptions -XX:-VerifySharedSpaces -XX:SharedArchiveFile=$BOOT_JDK_CDS_ARCHIVE],boot_jdk_cds_args,[$JAVA])
-
-  if test "x$boot_jdk_cds_args" != x; then
-    # Try creating a CDS archive
-    $JAVA $boot_jdk_cds_args -Xshare:dump > /dev/null 2>&1
-    if test $? -eq 0; then
-      BOOTJDK_USE_LOCAL_CDS=true
-      AC_MSG_RESULT([yes, created])
-    else
-      # Generation failed, don't use CDS.
-      BOOTJDK_USE_LOCAL_CDS=false
-      AC_MSG_RESULT([no, creation failed])
-    fi
-  else
-    BOOTJDK_USE_LOCAL_CDS=false
-    AC_MSG_RESULT([no, -XX:SharedArchiveFile not supported])
-  fi
+  BOOTJDK_SETUP_CLASSPATH
 ])
 
 AC_DEFUN_ONCE([BOOTJDK_SETUP_BOOT_JDK_ARGUMENTS],
@@ -408,13 +423,8 @@ AC_DEFUN_ONCE([BOOTJDK_SETUP_BOOT_JDK_ARGUMENTS],
   # Force en-US environment
   UTIL_ADD_JVM_ARG_IF_OK([-Duser.language=en -Duser.country=US],boot_jdk_jvmargs,[$JAVA])
 
-  if test "x$BOOTJDK_USE_LOCAL_CDS" = xtrue; then
-    # Use our own CDS archive
-    UTIL_ADD_JVM_ARG_IF_OK([$boot_jdk_cds_args -Xshare:auto],boot_jdk_jvmargs,[$JAVA])
-  else
-    # Otherwise optimistically use the system-wide one, if one is present
-    UTIL_ADD_JVM_ARG_IF_OK([-Xshare:auto],boot_jdk_jvmargs,[$JAVA])
-  fi
+  UTIL_ADD_JVM_ARG_IF_OK([-Xlog:all=off:stdout],boot_jdk_jvmargs,[$JAVA])
+  UTIL_ADD_JVM_ARG_IF_OK([-Xlog:all=warning:stderr],boot_jdk_jvmargs,[$JAVA])
 
   # Finally append user provided options to allow them to override.
   UTIL_ADD_JVM_ARG_IF_OK([$USER_BOOT_JDK_OPTIONS],boot_jdk_jvmargs,[$JAVA])
@@ -434,7 +444,7 @@ AC_DEFUN_ONCE([BOOTJDK_SETUP_BOOT_JDK_ARGUMENTS],
   # Maximum amount of heap memory.
   JVM_HEAP_LIMIT_32="768"
   # Running a 64 bit JVM allows for and requires a bigger heap
-  JVM_HEAP_LIMIT_64="1600"
+  JVM_HEAP_LIMIT_64="2048"
   JVM_HEAP_LIMIT_GLOBAL=`expr $MEMORY_SIZE / 2`
   if test "$JVM_HEAP_LIMIT_GLOBAL" -lt "$JVM_HEAP_LIMIT_32"; then
     JVM_HEAP_LIMIT_32=$JVM_HEAP_LIMIT_GLOBAL
@@ -471,8 +481,6 @@ AC_DEFUN_ONCE([BOOTJDK_SETUP_BOOT_JDK_ARGUMENTS],
 
   AC_MSG_CHECKING([flags for boot jdk java command for small workloads])
 
-  # Use serial gc for small short lived tools if possible
-  UTIL_ADD_JVM_ARG_IF_OK([-XX:+UseSerialGC],boot_jdk_jvmargs_small,[$JAVA])
   UTIL_ADD_JVM_ARG_IF_OK([-Xms32M],boot_jdk_jvmargs_small,[$JAVA])
   UTIL_ADD_JVM_ARG_IF_OK([-Xmx512M],boot_jdk_jvmargs_small,[$JAVA])
   UTIL_ADD_JVM_ARG_IF_OK([-XX:TieredStopAtLevel=1],boot_jdk_jvmargs_small,[$JAVA])
@@ -482,10 +490,8 @@ AC_DEFUN_ONCE([BOOTJDK_SETUP_BOOT_JDK_ARGUMENTS],
   JAVA_FLAGS_SMALL=$boot_jdk_jvmargs_small
   AC_SUBST(JAVA_FLAGS_SMALL)
 
-  # Don't presuppose SerialGC is present in the buildjdk. Also, we cannot test
-  # the buildjdk, but on the other hand we know what it will support.
-  BUILDJDK_JAVA_FLAGS_SMALL="-Xms32M -Xmx512M -XX:TieredStopAtLevel=1"
-  AC_SUBST(BUILDJDK_JAVA_FLAGS_SMALL)
+  BUILD_JAVA_FLAGS_SMALL="-Xms32M -Xmx512M -XX:TieredStopAtLevel=1"
+  AC_SUBST(BUILD_JAVA_FLAGS_SMALL)
 
   JAVA_TOOL_FLAGS_SMALL=""
   for f in $JAVA_FLAGS_SMALL; do
@@ -561,48 +567,48 @@ AC_DEFUN([BOOTJDK_SETUP_BUILD_JDK],
   AC_ARG_WITH(build-jdk, [AS_HELP_STRING([--with-build-jdk],
       [path to JDK of same version as is being built@<:@the newly built JDK@:>@])])
 
-  CREATE_BUILDJDK=false
-  EXTERNAL_BUILDJDK=false
-  BUILD_JDK_FOUND="no"
+  EXTERNAL_BUILDJDK_PATH=""
   if test "x$with_build_jdk" != "x"; then
+    BUILD_JDK_FOUND=no
     BOOTJDK_CHECK_BUILD_JDK([
-       if test "x$with_build_jdk" != x; then
-         BUILD_JDK=$with_build_jdk
-         BUILD_JDK_FOUND=maybe
-         AC_MSG_NOTICE([Found potential Build JDK using configure arguments])
-       fi])
-    EXTERNAL_BUILDJDK=true
-  else
-    if test "x$COMPILE_TYPE" = "xcross"; then
-      BUILD_JDK="\$(BUILDJDK_OUTPUTDIR)/jdk"
-      BUILD_JDK_FOUND=yes
-      CREATE_BUILDJDK=true
+      if test "x$with_build_jdk" != x; then
+        BUILD_JDK=$with_build_jdk
+        BUILD_JDK_FOUND=maybe
+        AC_MSG_NOTICE([Found potential Build JDK using configure arguments])
+      fi
+    ])
+    if test "x$BUILD_JDK_FOUND" != "xyes"; then
       AC_MSG_CHECKING([for Build JDK])
-      AC_MSG_RESULT([yes, will build it for the host platform])
-    else
-      BUILD_JDK="\$(JDK_OUTPUTDIR)"
-      BUILD_JDK_FOUND=yes
-      AC_MSG_CHECKING([for Build JDK])
-      AC_MSG_RESULT([yes, will use output dir])
+      AC_MSG_RESULT([no])
+      AC_MSG_ERROR([Could not find a suitable Build JDK])
     fi
+    EXTERNAL_BUILDJDK_PATH="$BUILD_JDK"
   fi
 
-  # Since these tools do not yet exist, we cannot use UTIL_FIXUP_EXECUTABLE to
-  # detect the need of fixpath
-  JMOD="$BUILD_JDK/bin/jmod"
-  UTIL_ADD_FIXPATH(JMOD)
-  JLINK="$BUILD_JDK/bin/jlink"
-  UTIL_ADD_FIXPATH(JLINK)
-  AC_SUBST(JMOD)
-  AC_SUBST(JLINK)
+  AC_SUBST(EXTERNAL_BUILDJDK_PATH)
+])
 
-  if test "x$BUILD_JDK_FOUND" != "xyes"; then
-    AC_MSG_CHECKING([for Build JDK])
-    AC_MSG_RESULT([no])
-    AC_MSG_ERROR([Could not find a suitable Build JDK])
+# The docs-reference JDK is used to run javadoc for the docs-reference targets.
+# If not set, the reference docs will be built using the interim javadoc.
+AC_DEFUN([BOOTJDK_SETUP_DOCS_REFERENCE_JDK],
+[
+  AC_ARG_WITH(docs-reference-jdk, [AS_HELP_STRING([--with-docs-reference-jdk],
+      [path to JDK to use for building the reference documentation])])
+
+  AC_MSG_CHECKING([for docs-reference JDK])
+  if test "x$with_docs_reference_jdk" != "x"; then
+    DOCS_REFERENCE_JDK="$with_docs_reference_jdk"
+    AC_MSG_RESULT([$DOCS_REFERENCE_JDK])
+    DOCS_REFERENCE_JAVADOC="$DOCS_REFERENCE_JDK/bin/javadoc"
+    if test ! -x "$DOCS_REFERENCE_JAVADOC"; then
+      AC_MSG_ERROR([docs-reference JDK found at $DOCS_REFERENCE_JDK did not contain bin/javadoc])
+    fi
+    UTIL_FIXUP_EXECUTABLE(DOCS_REFERENCE_JAVADOC)
+  else
+    AC_MSG_RESULT([no, using interim javadoc for the docs-reference targets])
+    # By leaving this empty, Docs.gmk will revert to the default interim javadoc
+    DOCS_REFERENCE_JAVADOC=
   fi
 
-  AC_SUBST(CREATE_BUILDJDK)
-  AC_SUBST(BUILD_JDK)
-  AC_SUBST(EXTERNAL_BUILDJDK)
+  AC_SUBST(DOCS_REFERENCE_JAVADOC)
 ])

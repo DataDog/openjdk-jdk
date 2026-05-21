@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,18 +25,16 @@
 
 package com.sun.imageio.plugins.gif;
 
-import java.io.UnsupportedEncodingException;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import javax.imageio.ImageTypeSpecifier;
+
 import javax.imageio.metadata.IIOInvalidTreeException;
-import javax.imageio.metadata.IIOMetadata;
-import javax.imageio.metadata.IIOMetadataNode;
-import javax.imageio.metadata.IIOMetadataFormat;
 import javax.imageio.metadata.IIOMetadataFormatImpl;
+import javax.imageio.metadata.IIOMetadataNode;
+
 import org.w3c.dom.Node;
+
+import static java.nio.charset.StandardCharsets.ISO_8859_1;
 
 class GIFWritableImageMetadata extends GIFImageMetadata {
 
@@ -51,10 +49,12 @@ class GIFWritableImageMetadata extends GIFImageMetadata {
               null, null);
     }
 
+    @Override
     public boolean isReadOnly() {
         return false;
     }
 
+    @Override
     public void reset() {
         // Fields from Image Descriptor
         imageLeftPosition = 0;
@@ -95,13 +95,10 @@ class GIFWritableImageMetadata extends GIFImageMetadata {
     }
 
     private byte[] fromISO8859(String data) {
-        try {
-            return data.getBytes("ISO-8859-1");
-        } catch (UnsupportedEncodingException e) {
-            return "".getBytes();
-        }
+        return data.getBytes(ISO_8859_1);
     }
 
+    @Override
     protected void mergeNativeTree(Node root) throws IIOInvalidTreeException {
         Node node = root;
         if (!node.getNodeName().equals(nativeMetadataFormatName)) {
@@ -254,8 +251,7 @@ class GIFWritableImageMetadata extends GIFImageMetadata {
 
                 Object applicationExtensionData =
                     applicationExtension.getUserObject();
-                if (applicationExtensionData == null ||
-                    !(applicationExtensionData instanceof byte[])) {
+                if (!(applicationExtensionData instanceof byte[])) {
                     fatal(applicationExtension,
                           "Bad user object in ApplicationExtension!");
                 }
@@ -299,6 +295,7 @@ class GIFWritableImageMetadata extends GIFImageMetadata {
         }
     }
 
+    @Override
     protected void mergeStandardTree(Node root)
       throws IIOInvalidTreeException {
         Node node = root;
@@ -396,6 +393,7 @@ class GIFWritableImageMetadata extends GIFImageMetadata {
         }
     }
 
+    @Override
     public void setFromTree(String formatName, Node root)
         throws IIOInvalidTreeException
     {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,11 +35,12 @@ import java.lang.module.ModuleDescriptor.Exports;
 import java.lang.module.ModuleDescriptor.Opens;
 import java.lang.module.ModuleDescriptor.Version;
 import java.lang.module.ResolvedModule;
+import java.lang.reflect.AccessFlag;
 import java.lang.reflect.AnnotatedElement;
+import java.lang.reflect.Field;
 import java.net.URI;
 import java.net.URL;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
+import java.security.CodeSource;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -51,26 +52,25 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.lang.classfile.AccessFlags;
+import java.lang.classfile.Attribute;
+import java.lang.classfile.ClassFile;
+import java.lang.classfile.attribute.RuntimeVisibleAnnotationsAttribute;
 
 import jdk.internal.loader.BuiltinClassLoader;
 import jdk.internal.loader.BootLoader;
 import jdk.internal.loader.ClassLoaders;
 import jdk.internal.misc.CDS;
+import jdk.internal.misc.Unsafe;
 import jdk.internal.misc.VM;
-import jdk.internal.module.IllegalAccessLogger;
+import jdk.internal.module.ModuleBootstrap;
 import jdk.internal.module.ModuleLoaderMap;
 import jdk.internal.module.ServicesCatalog;
 import jdk.internal.module.Resources;
-import jdk.internal.org.objectweb.asm.AnnotationVisitor;
-import jdk.internal.org.objectweb.asm.Attribute;
-import jdk.internal.org.objectweb.asm.ClassReader;
-import jdk.internal.org.objectweb.asm.ClassVisitor;
-import jdk.internal.org.objectweb.asm.ClassWriter;
-import jdk.internal.org.objectweb.asm.ModuleVisitor;
-import jdk.internal.org.objectweb.asm.Opcodes;
 import jdk.internal.reflect.CallerSensitive;
 import jdk.internal.reflect.Reflection;
-import sun.security.util.SecurityConstants;
+import jdk.internal.vm.annotation.AOTSafeClassInitializer;
+import jdk.internal.vm.annotation.Stable;
 
 /**
  * Represents a run-time module, either {@link #isNamed() named} or unnamed.
@@ -96,6 +96,7 @@ import sun.security.util.SecurityConstants;
  *
  * @since 9
  * @see Class#getModule()
+ * @jls 7.7 Module Declarations
  */
 
 public final class Module implements AnnotatedElement {
@@ -110,6 +111,15 @@ public final class Module implements AnnotatedElement {
     // the module descriptor
     private final ModuleDescriptor descriptor;
 
+    // true, if this module allows restricted native access
+    // Accessing this variable is made through Unsafe in order to use the
+    // memory semantics that preserves ordering and visibility across threads.
+    @Stable
+    private boolean enableNativeAccess;
+
+    // true if this module is allowed to mutate final instance fields
+    @Stable
+    private boolean enableFinalMutation;
 
     /**
      * Creates a new named Module. The resulting Module will be defined to the
@@ -169,6 +179,7 @@ public final class Module implements AnnotatedElement {
      * @return {@code true} if this is a named module
      *
      * @see ClassLoader#getUnnamedModule()
+     * @jls 7.7.5 Unnamed Modules
      */
     public boolean isNamed() {
         return name != null;
@@ -187,21 +198,9 @@ public final class Module implements AnnotatedElement {
     /**
      * Returns the {@code ClassLoader} for this module.
      *
-     * <p> If there is a security manager then its {@code checkPermission}
-     * method if first called with a {@code RuntimePermission("getClassLoader")}
-     * permission to check that the caller is allowed to get access to the
-     * class loader. </p>
-     *
      * @return The class loader for this module
-     *
-     * @throws SecurityException
-     *         If denied by the security manager
      */
     public ClassLoader getClassLoader() {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null) {
-            sm.checkPermission(SecurityConstants.GET_CLASSLOADER_PERMISSION);
-        }
         return loader;
     }
 
@@ -244,6 +243,145 @@ public final class Module implements AnnotatedElement {
         return null;
     }
 
+    /**
+     * Update this module to allow access to restricted methods.
+     */
+    Module implAddEnableNativeAccess() {
+        EnableNativeAccess.trySetEnableNativeAccess(this);
+        return this;
+    }
+
+    /**
+     * Returns {@code true} if this module can access
+     * <a href="{@docRoot}/java.base/java/lang/doc-files/RestrictedMethods.html#restricted"><em>restricted</em></a> methods.
+     *
+     * @return {@code true} if this module can access <em>restricted</em> methods.
+     * @since 22
+     */
+    public boolean isNativeAccessEnabled() {
+        Module target = moduleForNativeAccess();
+        return EnableNativeAccess.isNativeAccessEnabled(target);
+    }
+
+    /**
+     * This class is used to be able to bootstrap without using Unsafe
+     * in the outer Module class as that would create a circular initializer dependency.
+     */
+    private static final class EnableNativeAccess {
+        private EnableNativeAccess() {}
+
+        private static final Unsafe UNSAFE = Unsafe.getUnsafe();
+        private static final long FIELD_OFFSET = UNSAFE.objectFieldOffset(Module.class, "enableNativeAccess");
+
+        private static boolean isNativeAccessEnabled(Module target) {
+            return UNSAFE.getBooleanVolatile(target, FIELD_OFFSET);
+        }
+
+        // Atomically sets enableNativeAccess if not already set
+        // returning if the value was updated
+        private static boolean trySetEnableNativeAccess(Module target) {
+            return UNSAFE.compareAndSetBoolean(target, FIELD_OFFSET, false, true);
+        }
+    }
+
+    // Returns the Module object that holds the enableNativeAccess
+    // flag for this module.
+    private Module moduleForNativeAccess() {
+        return isNamed() ? this : ALL_UNNAMED_MODULE;
+    }
+
+    // This is invoked from Reflection.ensureNativeAccess
+    void ensureNativeAccess(Class<?> owner, String methodName, Class<?> currentClass, boolean jni) {
+        // The target module whose enableNativeAccess flag is ensured
+        Module target = moduleForNativeAccess();
+        ModuleBootstrap.IllegalNativeAccess illegalNativeAccess = ModuleBootstrap.illegalNativeAccess();
+        if (illegalNativeAccess != ModuleBootstrap.IllegalNativeAccess.ALLOW &&
+                !EnableNativeAccess.isNativeAccessEnabled(target)) {
+            String mod = isNamed() ? "module " + getName() : "an unnamed module";
+            if (currentClass != null) {
+                // try to extract location of the current class (e.g. jar or folder)
+                CodeSource cs = currentClass.getProtectionDomain().getCodeSource();
+                if (cs != null) {
+                    URL url = cs.getLocation();
+                    if (url != null) {
+                        mod += " (" + url + ")";
+                    }
+                }
+            }
+            if (illegalNativeAccess == ModuleBootstrap.IllegalNativeAccess.DENY) {
+                throw new IllegalCallerException("Illegal native access from " + mod);
+            } else if (EnableNativeAccess.trySetEnableNativeAccess(target)) {
+                // warn and set flag, so that only one warning is reported per module
+                String cls = owner.getName();
+                String mtd = cls + "::" + methodName;
+                String modflag = isNamed() ? getName() : "ALL-UNNAMED";
+                String caller = currentClass != null ? currentClass.getName() : "code";
+                if (jni) {
+                    VM.initialErr().printf("""
+                            WARNING: A native method in %s has been bound
+                            WARNING: %s is declared in %s
+                            WARNING: Use --enable-native-access=%s to avoid a warning for native methods declared in this module
+                            WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+                            %n""", cls, mtd, mod, modflag);
+                } else {
+                    VM.initialErr().printf("""
+                            WARNING: A restricted method in %s has been called
+                            WARNING: %s has been called by %s in %s
+                            WARNING: Use --enable-native-access=%s to avoid a warning for callers in this module
+                            WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+                            %n""", cls, mtd, caller, mod, modflag);
+                }
+            }
+        }
+    }
+
+    /**
+     * Enable code in all unnamed modules to access restricted methods.
+     */
+    static void addEnableNativeAccessToAllUnnamed() {
+        EnableNativeAccess.trySetEnableNativeAccess(ALL_UNNAMED_MODULE);
+    }
+
+    /**
+     * This class exists to avoid using Unsafe during early initialization of Module.
+     */
+    private static final class EnableFinalMutation {
+        private static final Unsafe UNSAFE = Unsafe.getUnsafe();
+        private static final long ENABLE_FINAL_MUTATION_OFFSET =
+                UNSAFE.objectFieldOffset(Module.class, "enableFinalMutation");
+
+        private static boolean isEnableFinalMutation(Module module) {
+            return UNSAFE.getBooleanVolatile(module, ENABLE_FINAL_MUTATION_OFFSET);
+        }
+
+        private static boolean tryEnableFinalMutation(Module module) {
+            return UNSAFE.compareAndSetBoolean(module, ENABLE_FINAL_MUTATION_OFFSET, false, true);
+        }
+    }
+
+    /**
+     * Enable code in all unnamed modules to mutate final instance fields.
+     */
+    static void addEnableFinalMutationToAllUnnamed() {
+        EnableFinalMutation.tryEnableFinalMutation(ALL_UNNAMED_MODULE);
+    }
+
+    /**
+     * Enable code in this named module to mutate final instance fields.
+     */
+    boolean tryEnableFinalMutation() {
+        Module m = isNamed() ? this : ALL_UNNAMED_MODULE;
+        return EnableFinalMutation.tryEnableFinalMutation(m);
+    }
+
+    /**
+     * Return true if code in this module is allowed to mutate final instance fields.
+     */
+    boolean isFinalMutationEnabled() {
+        Module m = isNamed() ? this : ALL_UNNAMED_MODULE;
+        return EnableFinalMutation.isEnableFinalMutation(m);
+    }
+
     // --
 
     // special Module to mean "all unnamed modules"
@@ -254,6 +392,7 @@ public final class Module implements AnnotatedElement {
     private static final Module EVERYONE_MODULE;
     private static final Set<Module> EVERYONE_SET;
 
+    @AOTSafeClassInitializer
     private static class ArchivedData {
         private static ArchivedData archivedData;
         private final Module allUnnamedModule;
@@ -510,6 +649,14 @@ public final class Module implements AnnotatedElement {
      *
      * <p> This method does not check if the given module reads this module. </p>
      *
+     * @apiNote A package {@code p} opened to module {@code M} allows code in
+     * {@code M} do {@linkplain java.lang.reflect.AccessibleObject#setAccessible(boolean)
+     * deep reflection} on all types in the package.
+     * Further, if {@code M} reads this module, it can obtain a
+     * {@link java.lang.invoke.MethodHandles.Lookup Lookup} object that is allowed to
+     * {@link java.lang.invoke.MethodHandles.Lookup#defineClass(byte[]) define classes}
+     * in package {@code p}.
+     *
      * @param  pn
      *         The package name
      * @param  other
@@ -563,6 +710,14 @@ public final class Module implements AnnotatedElement {
      *
      * <p> This method does not check if the given module reads this module. </p>
      *
+     * @apiNote A package {@code p} opened to module {@code M} allows code in
+     * {@code M} do {@linkplain java.lang.reflect.AccessibleObject#setAccessible(boolean)
+     * deep reflection} on all types in the package.
+     * Further, if {@code M} reads this module, it can obtain a
+     * {@link java.lang.invoke.MethodHandles.Lookup Lookup} object that is allowed to
+     * {@link java.lang.invoke.MethodHandles.Lookup#defineClass(byte[]) define classes}
+     * in package {@code p}.
+     *
      * @param  pn
      *         The package name
      *
@@ -570,12 +725,13 @@ public final class Module implements AnnotatedElement {
      *         unconditionally
      *
      * @see ModuleDescriptor#opens()
+     * @see java.lang.reflect.AccessibleObject#setAccessible(boolean)
+     * @see java.lang.invoke.MethodHandles#privateLookupIn
      */
     public boolean isOpen(String pn) {
         Objects.requireNonNull(pn);
         return implIsExportedOrOpen(pn, EVERYONE_MODULE, /*open*/true);
     }
-
 
     /**
      * Returns {@code true} if this module exports or opens the given package
@@ -595,12 +751,12 @@ public final class Module implements AnnotatedElement {
         if (descriptor.isOpen() || descriptor.isAutomatic())
             return descriptor.packages().contains(pn);
 
-        // exported/opened via module declaration/descriptor
-        if (isStaticallyExportedOrOpen(pn, other, open))
+        // exported/opened via module declaration/descriptor or CLI options
+        if (isExplicitlyExportedOrOpened(pn, other, open))
             return true;
 
         // exported via addExports/addOpens
-        if (isReflectivelyExportedOrOpen(pn, other, open))
+        if (isReflectivelyExportedOrOpened(pn, other, open))
             return true;
 
         // not exported or open to other
@@ -608,10 +764,52 @@ public final class Module implements AnnotatedElement {
     }
 
     /**
-     * Returns {@code true} if this module exports or opens a package to
-     * the given module via its module declaration or CLI options.
+     * Returns {@code true} if this module statically exports a package to the given module.
+     * If the package is exported to the given module via {@code addExports} then this method
+     * returns {@code false}.
      */
-    private boolean isStaticallyExportedOrOpen(String pn, Module other, boolean open) {
+    boolean isStaticallyExported(String pn, Module other) {
+        return isStaticallyExportedOrOpened(pn, other, false);
+    }
+
+    /**
+     * Returns {@code true} if this module statically opens a package to the given module.
+     * If the package is opened to the given module via {@code addOpens} then this method
+     * returns {@code false}.
+     */
+    boolean isStaticallyOpened(String pn, Module other) {
+        return isStaticallyExportedOrOpened(pn, other, true);
+    }
+
+    /**
+     * Returns {@code true} if this module exports or opens a package to the
+     * given module via its module declaration or CLI options.
+     */
+    private boolean isStaticallyExportedOrOpened(String pn, Module other, boolean open) {
+        // all packages in unnamed modules are exported and open
+        if (!isNamed())
+            return true;
+
+        // all packages are exported/open to self
+        if (other == this && descriptor.packages().contains(pn))
+            return true;
+
+        // all packages in open and automatic modules are exported/open
+        if (descriptor.isOpen() || descriptor.isAutomatic())
+            return descriptor.packages().contains(pn);
+
+        // exported/opened via module descriptor
+        if (isExplicitlyExportedOrOpened(pn, other, open))
+            return true;
+
+        return false;
+    }
+
+    /**
+     * Returns {@code true} if this module exports or opens a package to the
+     * given module via its module declaration or CLI options.
+     */
+    private boolean isExplicitlyExportedOrOpened(String pn, Module other, boolean open) {
         // test if package is open to everyone or <other>
         Map<String, Set<Module>> openPackages = this.openPackages;
         if (openPackages != null && allows(openPackages.get(pn), other)) {
@@ -652,7 +850,7 @@ public final class Module implements AnnotatedElement {
      * Returns {@code true} if this module reflectively exports or opens the
      * given package to the given module.
      */
-    private boolean isReflectivelyExportedOrOpen(String pn, Module other, boolean open) {
+    private boolean isReflectivelyExportedOrOpened(String pn, Module other, boolean open) {
         // exported or open to all modules
         Map<String, Boolean> exports = ReflectionData.exports.get(this, EVERYONE_MODULE);
         if (exports != null) {
@@ -697,7 +895,7 @@ public final class Module implements AnnotatedElement {
      * given package to the given module.
      */
     boolean isReflectivelyExported(String pn, Module other) {
-        return isReflectivelyExportedOrOpen(pn, other, false);
+        return isReflectivelyExportedOrOpened(pn, other, false);
     }
 
     /**
@@ -705,13 +903,18 @@ public final class Module implements AnnotatedElement {
      * given package to the given module.
      */
     boolean isReflectivelyOpened(String pn, Module other) {
-        return isReflectivelyExportedOrOpen(pn, other, true);
+        return isReflectivelyExportedOrOpened(pn, other, true);
     }
-
 
     /**
      * If the caller's module is this module then update this module to export
      * the given package to the given module.
+     *
+     * <p> Exporting a package with this method does not allow the given module to
+     * {@linkplain Field#set(Object, Object) reflectively set} or {@linkplain
+     * java.lang.invoke.MethodHandles.Lookup#unreflectSetter(Field) obtain a method
+     * handle with write access} to a public final field declared in a public class
+     * in the package.
      *
      * <p> This method has no effect if the package is already exported (or
      * <em>open</em>) to the given module. </p>
@@ -750,20 +953,26 @@ public final class Module implements AnnotatedElement {
             if (caller != this) {
                 throw new IllegalCallerException(caller + " != " + this);
             }
-            implAddExportsOrOpens(pn, other, /*open*/false, /*syncVM*/true);
+            implAddExports(pn, other);
         }
 
         return this;
     }
 
     /**
-     * If this module has <em>opened</em> a package to at least the caller
-     * module then update this module to open the package to the given module.
-     * Opening a package with this method allows all types in the package,
+     * If this module has <em>opened</em> the given package to at least the caller
+     * module, then update this module to also open the package to the given module.
+     *
+     * <p> Opening a package with this method allows all types in the package,
      * and all their members, not just public types and their public members,
-     * to be reflected on by the given module when using APIs that support
-     * private access or a way to bypass or suppress default Java language
+     * to be reflected on by the given module when using APIs that either support
+     * private access or provide a way to bypass or suppress Java language
      * access control checks.
+     *
+     * <p> Opening a package with this method does not allow the given module to
+     * {@linkplain Field#set(Object, Object) reflectively set} or {@linkplain
+     * java.lang.invoke.MethodHandles.Lookup#unreflectSetter(Field) obtain a method
+     * handle with write access} to a final field declared in a class in the package.
      *
      * <p> This method has no effect if the package is already <em>open</em>
      * to the given module. </p>
@@ -803,7 +1012,7 @@ public final class Module implements AnnotatedElement {
             Module caller = getCallerModule(Reflection.getCallerClass());
             if (caller != this && (caller == null || !isOpen(pn, caller)))
                 throw new IllegalCallerException(pn + " is not open to " + caller);
-            implAddExportsOrOpens(pn, other, /*open*/true, /*syncVM*/true);
+            implAddOpens(pn, other);
         }
 
         return this;
@@ -813,28 +1022,29 @@ public final class Module implements AnnotatedElement {
     /**
      * Updates this module to export a package unconditionally.
      *
-     * @apiNote This method is for JDK tests only.
+     * @apiNote Used by Proxy and other dynamic modules.
      */
     void implAddExports(String pn) {
-        implAddExportsOrOpens(pn, Module.EVERYONE_MODULE, false, true);
+        implAddExportsOrOpens(pn, Module.EVERYONE_MODULE, false, true, true);
     }
 
     /**
      * Updates this module to export a package to another module.
      *
-     * @apiNote Used by Instrumentation::redefineModule and --add-exports
+     * @apiNote Used by addExports, Instrumentation::redefineModule, and --add-exports
      */
     void implAddExports(String pn, Module other) {
-        implAddExportsOrOpens(pn, other, false, true);
+        implAddExportsOrOpens(pn, other, false, VM.isBooted(), true);
     }
 
     /**
      * Updates this module to export a package to all unnamed modules.
      *
-     * @apiNote Used by the --add-exports command line option.
+     * @apiNote Used by the --add-exports command line option and the launcher when
+     * an executable JAR file has the "Add-Exports" attribute in its main manifest.
      */
     void implAddExportsToAllUnnamed(String pn) {
-        implAddExportsOrOpens(pn, Module.ALL_UNNAMED_MODULE, false, true);
+        implAddExportsOrOpens(pn, Module.ALL_UNNAMED_MODULE, false, false, true);
     }
 
     /**
@@ -844,7 +1054,7 @@ public final class Module implements AnnotatedElement {
      * @apiNote This method is for VM white-box testing.
      */
     void implAddExportsNoSync(String pn) {
-        implAddExportsOrOpens(pn.replace('/', '.'), Module.EVERYONE_MODULE, false, false);
+        implAddExportsOrOpens(pn.replace('/', '.'), Module.EVERYONE_MODULE, false, true, false);
     }
 
     /**
@@ -854,7 +1064,7 @@ public final class Module implements AnnotatedElement {
      * @apiNote This method is for VM white-box testing.
      */
     void implAddExportsNoSync(String pn, Module other) {
-        implAddExportsOrOpens(pn.replace('/', '.'), other, false, false);
+        implAddExportsOrOpens(pn.replace('/', '.'), other, false, true, false);
     }
 
     /**
@@ -863,35 +1073,40 @@ public final class Module implements AnnotatedElement {
      * @apiNote This method is for JDK tests only.
      */
     void implAddOpens(String pn) {
-        implAddExportsOrOpens(pn, Module.EVERYONE_MODULE, true, true);
+        implAddExportsOrOpens(pn, Module.EVERYONE_MODULE, true, true, true);
     }
 
     /**
      * Updates this module to open a package to another module.
      *
-     * @apiNote Used by Instrumentation::redefineModule and --add-opens
+     * @apiNote Used by addOpens, Instrumentation::redefineModule, and --add-opens
      */
     void implAddOpens(String pn, Module other) {
-        implAddExportsOrOpens(pn, other, true, true);
+        implAddExportsOrOpens(pn, other, true, VM.isBooted(), true);
     }
 
     /**
      * Updates this module to open a package to all unnamed modules.
      *
-     * @apiNote Used by the --add-opens command line option.
+     * @apiNote Used by the --add-opens command line option and the launcher when
+     * an executable JAR file has the "Add-Opens" attribute in its main manifest.
      */
     void implAddOpensToAllUnnamed(String pn) {
-        implAddExportsOrOpens(pn, Module.ALL_UNNAMED_MODULE, true, true);
+        implAddExportsOrOpens(pn, Module.ALL_UNNAMED_MODULE, true, false, true);
     }
 
     /**
      * Updates a module to export or open a module to another module.
-     *
-     * If {@code syncVM} is {@code true} then the VM is notified.
+     * @param pn package name
+     * @param other the module to export/open the package to
+     * @param open true to open, false to export
+     * @param reflectively true if exported/opened reflectively
+     * @param syncVM true to update the VM
      */
     private void implAddExportsOrOpens(String pn,
                                        Module other,
                                        boolean open,
+                                       boolean reflectively,
                                        boolean syncVM) {
         Objects.requireNonNull(other);
         Objects.requireNonNull(pn);
@@ -901,27 +1116,8 @@ public final class Module implements AnnotatedElement {
             return;
 
         // check if the package is already exported/open to other
-        if (implIsExportedOrOpen(pn, other, open)) {
-
-            // if the package is exported/open for illegal access then we need
-            // to record that it has also been exported/opened reflectively so
-            // that the IllegalAccessLogger doesn't emit a warning.
-            boolean needToAdd = false;
-            if (!other.isNamed()) {
-                IllegalAccessLogger l = IllegalAccessLogger.illegalAccessLogger();
-                if (l != null) {
-                    if (open) {
-                        needToAdd = l.isOpenForIllegalAccess(this, pn);
-                    } else {
-                        needToAdd = l.isExportedForIllegalAccess(this, pn);
-                    }
-                }
-            }
-            if (!needToAdd) {
-                // nothing to do
-                return;
-            }
-        }
+        if (implIsExportedOrOpen(pn, other, open))
+            return;
 
         // can only export a package in the module
         if (!descriptor.packages().contains(pn)) {
@@ -940,50 +1136,38 @@ public final class Module implements AnnotatedElement {
             }
         }
 
-        // add package name to exports if absent
-        Map<String, Boolean> map = ReflectionData.exports
-            .computeIfAbsent(this, other,
-                             (m1, m2) -> new ConcurrentHashMap<>());
-        if (open) {
-            map.put(pn, Boolean.TRUE);  // may need to promote from FALSE to TRUE
-        } else {
-            map.putIfAbsent(pn, Boolean.FALSE);
-        }
-    }
-
-    /**
-     * Updates a module to open all packages in the given sets to all unnamed
-     * modules.
-     *
-     * @apiNote Used during startup to open packages for illegal access.
-     */
-    void implAddOpensToAllUnnamed(Set<String> concealedPkgs, Set<String> exportedPkgs) {
-        if (jdk.internal.misc.VM.isModuleSystemInited()) {
-            throw new IllegalStateException("Module system already initialized");
-        }
-
-        // replace this module's openPackages map with a new map that opens
-        // the packages to all unnamed modules.
-        Map<String, Set<Module>> openPackages = this.openPackages;
-        if (openPackages == null) {
-            openPackages = new HashMap<>((4 * (concealedPkgs.size() + exportedPkgs.size()) / 3) + 1);
-        } else {
-            openPackages = new HashMap<>(openPackages);
-        }
-        implAddOpensToAllUnnamed(concealedPkgs, openPackages);
-        implAddOpensToAllUnnamed(exportedPkgs, openPackages);
-        this.openPackages = openPackages;
-    }
-
-    private void implAddOpensToAllUnnamed(Set<String> pkgs, Map<String, Set<Module>> openPackages) {
-        for (String pn : pkgs) {
-            Set<Module> prev = openPackages.putIfAbsent(pn, ALL_UNNAMED_MODULE_SET);
-            if (prev != null) {
-                prev.add(ALL_UNNAMED_MODULE);
+        if (reflectively) {
+            // add package name to ReflectionData.exports if absent
+            Map<String, Boolean> map = ReflectionData.exports
+                .computeIfAbsent(this, other,
+                                 (m1, m2) -> new ConcurrentHashMap<>());
+            if (open) {
+                map.put(pn, Boolean.TRUE);  // may need to promote from FALSE to TRUE
+            } else {
+                map.putIfAbsent(pn, Boolean.FALSE);
             }
-
-            // update VM to export the package
-            addExportsToAllUnnamed0(this, pn);
+        } else {
+            // export/open packages during startup (--add-exports and --add-opens)
+            Map<String, Set<Module>> packageToTargets = (open) ? openPackages : exportedPackages;
+            if (packageToTargets != null) {
+                // copy existing map
+                packageToTargets = new HashMap<>(packageToTargets);
+                packageToTargets.compute(pn, (_, values) -> {
+                    var targets = new HashSet<Module>();
+                    if (values != null) {
+                        targets.addAll(values);
+                    }
+                    targets.add(other);
+                    return targets;
+                });
+            } else {
+                packageToTargets = Map.of(pn, Set.of(other));
+            }
+            if (open) {
+                this.openPackages = packageToTargets;
+            } else {
+                this.exportedPackages = packageToTargets;
+            }
         }
     }
 
@@ -1119,8 +1303,7 @@ public final class Module implements AnnotatedElement {
         boolean isBootLayer = (ModuleLayer.boot() == null);
 
         int numModules = cf.modules().size();
-        int cap = (int)(numModules / 0.75f + 1.0f);
-        Map<String, Module> nameToModule = new HashMap<>(cap);
+        Map<String, Module> nameToModule = HashMap.newHashMap(numModules);
 
         // to avoid repeated lookups and reduce iteration overhead, we create
         // arrays holding correlated information about each module.
@@ -1469,8 +1652,7 @@ public final class Module implements AnnotatedElement {
             clazz = this.moduleInfoClass;
             if (clazz == null) {
                 if (isNamed()) {
-                    PrivilegedAction<Class<?>> pa = this::loadModuleInfoClass;
-                    clazz = AccessController.doPrivileged(pa);
+                    clazz = loadModuleInfoClass();
                 }
                 if (clazz == null) {
                     class DummyModuleInfo { }
@@ -1497,47 +1679,17 @@ public final class Module implements AnnotatedElement {
      */
     private Class<?> loadModuleInfoClass(InputStream in) throws IOException {
         final String MODULE_INFO = "module-info";
-
-        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS
-                                         + ClassWriter.COMPUTE_FRAMES);
-
-        ClassVisitor cv = new ClassVisitor(Opcodes.ASM7, cw) {
-            @Override
-            public void visit(int version,
-                              int access,
-                              String name,
-                              String signature,
-                              String superName,
-                              String[] interfaces) {
-                cw.visit(version,
-                        Opcodes.ACC_INTERFACE
-                            + Opcodes.ACC_ABSTRACT
-                            + Opcodes.ACC_SYNTHETIC,
-                        MODULE_INFO,
-                        null,
-                        "java/lang/Object",
-                        null);
-            }
-            @Override
-            public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
+        var cc = ClassFile.of(ClassFile.ConstantPoolSharingOption.NEW_POOL);
+        byte[] bytes = cc.transformClass(cc.parse(in.readAllBytes()), (clb, cle) -> {
+            switch (cle) {
+                case AccessFlags af -> clb.withFlags(AccessFlag.INTERFACE,
+                        AccessFlag.ABSTRACT, AccessFlag.SYNTHETIC);
                 // keep annotations
-                return super.visitAnnotation(desc, visible);
-            }
-            @Override
-            public void visitAttribute(Attribute attr) {
+                case RuntimeVisibleAnnotationsAttribute a -> clb.with(a);
                 // drop non-annotation attributes
-            }
-            @Override
-            public ModuleVisitor visitModule(String name, int flags, String version) {
-                // drop Module attribute
-                return null;
-            }
-        };
-
-        ClassReader cr = new ClassReader(in);
-        cr.accept(cv, 0);
-        byte[] bytes = cw.toByteArray();
-
+                case Attribute<?> a -> {}
+                default -> clb.with(cle);
+            }});
         ClassLoader cl = new ClassLoader(loader) {
             @Override
             protected Class<?> findClass(String cn)throws ClassNotFoundException {
@@ -1614,9 +1766,8 @@ public final class Module implements AnnotatedElement {
      * with the name "{@code META-INF/MANIFEST.MF}" is never encapsulated
      * because "{@code META-INF}" is not a legal package name. </p>
      *
-     * <p> This method returns {@code null} if the resource is not in this
-     * module, the resource is encapsulated and cannot be located by the caller,
-     * or access to the resource is denied by the security manager. </p>
+     * <p> This method returns {@code null} if the resource is not in this module
+     * or the resource is encapsulated and cannot be located by the caller. </p>
      *
      * @param  name
      *         The resource name
@@ -1639,11 +1790,11 @@ public final class Module implements AnnotatedElement {
             if (caller != this && caller != Object.class.getModule()) {
                 String pn = Resources.toPackageName(name);
                 if (getPackages().contains(pn)) {
-                    if (caller == null && !isOpen(pn)) {
-                        // no caller, package not open
-                        return null;
-                    }
-                    if (!isOpen(pn, caller)) {
+                    if (caller == null) {
+                        if (!isOpen(pn)) {
+                            return null;
+                        }
+                    } else if (!isOpen(pn, caller)) {
                         // package not open to caller
                         return null;
                     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,44 +27,86 @@ package sun.print;
 
 import java.awt.GraphicsEnvironment;
 import java.awt.Toolkit;
-import javax.print.attribute.*;
-import javax.print.attribute.standard.*;
-import javax.print.DocFlavor;
-import javax.print.DocPrintJob;
-import javax.print.PrintService;
-import javax.print.ServiceUIFactory;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Date;
-import java.util.Arrays;
-import java.security.AccessController;
-import java.security.PrivilegedActionException;
-import java.security.PrivilegedExceptionAction;
-import javax.print.event.PrintServiceAttributeListener;
-
+import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.File;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLConnection;
-import java.net.HttpURLConnection;
-import java.io.File;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.io.DataInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.ByteArrayInputStream;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.nio.charset.Charset;
-
-import java.util.Iterator;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
 
+import javax.print.DocFlavor;
+import javax.print.DocPrintJob;
+import javax.print.PrintService;
+import javax.print.ServiceUIFactory;
+import javax.print.attribute.Attribute;
+import javax.print.attribute.AttributeSet;
+import javax.print.attribute.AttributeSetUtilities;
+import javax.print.attribute.EnumSyntax;
+import javax.print.attribute.HashAttributeSet;
+import javax.print.attribute.HashPrintServiceAttributeSet;
+import javax.print.attribute.PrintRequestAttribute;
+import javax.print.attribute.PrintServiceAttribute;
+import javax.print.attribute.PrintServiceAttributeSet;
+import javax.print.attribute.Size2DSyntax;
+import javax.print.attribute.standard.Chromaticity;
+import javax.print.attribute.standard.ColorSupported;
+import javax.print.attribute.standard.Copies;
+import javax.print.attribute.standard.CopiesSupported;
+import javax.print.attribute.standard.Destination;
+import javax.print.attribute.standard.DialogOwner;
+import javax.print.attribute.standard.DialogTypeSelection;
+import javax.print.attribute.standard.Fidelity;
+import javax.print.attribute.standard.Finishings;
+import javax.print.attribute.standard.JobName;
+import javax.print.attribute.standard.JobSheets;
+import javax.print.attribute.standard.Media;
+import javax.print.attribute.standard.MediaPrintableArea;
+import javax.print.attribute.standard.MediaSize;
+import javax.print.attribute.standard.MediaSizeName;
+import javax.print.attribute.standard.MediaTray;
+import javax.print.attribute.standard.NumberUp;
+import javax.print.attribute.standard.OrientationRequested;
+import javax.print.attribute.standard.OutputBin;
+import javax.print.attribute.standard.PDLOverrideSupported;
+import javax.print.attribute.standard.PageRanges;
+import javax.print.attribute.standard.PagesPerMinute;
+import javax.print.attribute.standard.PagesPerMinuteColor;
+import javax.print.attribute.standard.PrinterInfo;
+import javax.print.attribute.standard.PrinterIsAcceptingJobs;
+import javax.print.attribute.standard.PrinterLocation;
+import javax.print.attribute.standard.PrinterMakeAndModel;
+import javax.print.attribute.standard.PrinterMessageFromOperator;
+import javax.print.attribute.standard.PrinterMoreInfo;
+import javax.print.attribute.standard.PrinterMoreInfoManufacturer;
+import javax.print.attribute.standard.PrinterName;
+import javax.print.attribute.standard.PrinterResolution;
+import javax.print.attribute.standard.PrinterState;
+import javax.print.attribute.standard.PrinterStateReasons;
+import javax.print.attribute.standard.PrinterURI;
+import javax.print.attribute.standard.QueuedJobCount;
+import javax.print.attribute.standard.RequestingUserName;
+import javax.print.attribute.standard.SheetCollate;
+import javax.print.attribute.standard.Sides;
+import javax.print.event.PrintServiceAttributeListener;
 
-public class IPPPrintService implements PrintService, SunPrinterJobService {
+import static java.nio.charset.StandardCharsets.ISO_8859_1;
+import static java.nio.charset.StandardCharsets.UTF_8;
+
+public final class IPPPrintService implements PrintService, SunPrinterJobService {
 
     public static final boolean debugPrint;
     private static final String debugPrefix = "IPPPrintService>> ";
@@ -77,8 +119,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
     private static final String FORCE_PIPE_PROP = "sun.print.ippdebug";
 
     static {
-        String debugStr = java.security.AccessController.doPrivileged(
-                  new sun.security.action.GetPropertyAction(FORCE_PIPE_PROP));
+        String debugStr = System.getProperty(FORCE_PIPE_PROP);
 
         debugPrint = "true".equalsIgnoreCase(debugStr);
     }
@@ -96,10 +137,11 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
     private DocFlavor[] supportedDocFlavors;
     private Class<?>[] supportedCats;
     private MediaTray[] mediaTrays;
+    private OutputBin[] outputBins;
     private MediaSizeName[] mediaSizeNames;
     private CustomMediaSizeName[] customMediaSizeNames;
     private int defaultMediaIndex;
-    private int[] rawResolutions = null;
+    private int[] ppdResolutions = null;
     private PrinterResolution[] printerResolutions = null;
     private boolean isCupsPrinter;
     private boolean init;
@@ -163,12 +205,12 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
         OrientationRequested.PORTRAIT,
         new PageRanges(1),
         //PresentationDirection,
-                 // CUPS does not supply printer-resolution attribute
-        //new PrinterResolution(300, 300, PrinterResolution.DPI),
+        new PrinterResolution(300, 300, PrinterResolution.DPI),
         //PrintQuality.NORMAL,
         new RequestingUserName("", Locale.getDefault()),
         //SheetCollate.UNCOLLATED, //CUPS has no sheet collate?
         Sides.ONE_SIDED,
+        OutputBin.TOP,
     };
 
 
@@ -324,11 +366,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
         if ((name == null) || (url == null)){
             throw new IllegalArgumentException("null uri or printer name");
         }
-        try {
-            printer = java.net.URLDecoder.decode(name, "UTF-8");
-        } catch (java.io.UnsupportedEncodingException e) {
-            printer = name;
-        }
+        printer = java.net.URLDecoder.decode(name, UTF_8);
         supportedDocFlavors = null;
         supportedCats = null;
         mediaSizeNames = null;
@@ -358,11 +396,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
         if ((name == null) || (uriStr == null)){
             throw new IllegalArgumentException("null uri or printer name");
         }
-        try {
-            printer = java.net.URLDecoder.decode(name, "UTF-8");
-        } catch (java.io.UnsupportedEncodingException e) {
-            printer = name;
-        }
+        printer = java.net.URLDecoder.decode(name, UTF_8);
         supportedDocFlavors = null;
         supportedCats = null;
         mediaSizeNames = null;
@@ -373,7 +407,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
         defaultMediaIndex = -1;
         try {
             myURL =
-                new URL(uriStr.replaceFirst("ipp", "http"));
+                newURL(uriStr.replaceFirst("ipp", "http"));
         } catch (Exception e) {
             IPPPrintService.debug_println(debugPrefix+
                                           " IPPPrintService, myURL="+
@@ -406,6 +440,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
             if ((urlConnection = getIPPConnection(myURL)) == null) {
                 mediaSizeNames = new MediaSizeName[0];
                 mediaTrays = new MediaTray[0];
+                outputBins = new OutputBin[0];
                 debug_println(debugPrefix+"initAttributes, NULL urlConnection ");
                 init = true;
                 return;
@@ -422,12 +457,19 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
                 // IPP currently does not support it but PPD does.
 
                 try {
-                    cps = new CUPSPrinter(printer);
-                    mediaSizeNames = cps.getMediaSizeNames();
-                    mediaTrays = cps.getMediaTrays();
-                    customMediaSizeNames = cps.getCustomMediaSizeNames();
-                    defaultMediaIndex = cps.getDefaultMediaIndex();
-                    rawResolutions = cps.getRawResolutions();
+                    if (cps == null) {
+                        cps = new CUPSPrinter(printer);
+                        mediaSizeNames = cps.getMediaSizeNames();
+                        mediaTrays = cps.getMediaTrays();
+                        outputBins = PrintServiceLookupProvider.isMac()
+                                ? cps.getOutputBins()
+                                : getSupportedOutputBins();
+                        customMediaSizeNames = cps.getCustomMediaSizeNames();
+                        defaultMediaIndex = cps.getDefaultMediaIndex();
+                        if (ppdResolutions == null) {
+                            ppdResolutions = cps.getRawResolutions();
+                        }
+                    }
                     urlConnection.disconnect();
                     init = true;
                     return;
@@ -457,6 +499,11 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
                 mediaTrays = new MediaTray[trayList.size()];
                 mediaTrays = trayList.toArray(mediaTrays);
             }
+
+            if (outputBins == null) {
+                outputBins = getSupportedOutputBins();
+            }
+
             urlConnection.disconnect();
 
             init = true;
@@ -464,16 +511,14 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
     }
 
 
+    @Override
     public DocPrintJob createPrintJob() {
-        SecurityManager security = System.getSecurityManager();
-        if (security != null) {
-            security.checkPrintJobAccess();
-        }
         // REMIND: create IPPPrintJob
         return new UnixPrintJob(this);
     }
 
 
+    @Override
     public synchronized Object
         getSupportedAttributeValues(Class<? extends Attribute> category,
                                     DocFlavor flavor,
@@ -530,8 +575,15 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
                 flavor.equals(DocFlavor.SERVICE_FORMATTED.PAGEABLE) ||
                 flavor.equals(DocFlavor.SERVICE_FORMATTED.PRINTABLE) ||
                 !isIPPSupportedImages(flavor.getMimeType())) {
-                Chromaticity[]arr = new Chromaticity[1];
-                arr[0] = Chromaticity.COLOR;
+                Chromaticity[] arr;
+                if (PrintServiceLookupProvider.isMac()) {
+                    arr = new Chromaticity[2];
+                    arr[0] = Chromaticity.COLOR;
+                    arr[1] = Chromaticity.MONOCHROME;
+                } else {
+                    arr = new Chromaticity[1];
+                    arr[0] = Chromaticity.COLOR;
+                }
                 return (arr);
             } else {
                 return null;
@@ -540,15 +592,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
             if (flavor == null ||
                 flavor.equals(DocFlavor.SERVICE_FORMATTED.PAGEABLE) ||
                 flavor.equals(DocFlavor.SERVICE_FORMATTED.PRINTABLE)) {
-                try {
                     return new Destination((new File("out.ps")).toURI());
-                } catch (SecurityException se) {
-                    try {
-                        return new Destination(new URI("file:out.ps"));
-                    } catch (URISyntaxException e) {
-                        return null;
-                    }
-                }
             }
             return null;
         } else if (category == Fidelity.class) {
@@ -569,6 +613,9 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
                         Finishings[] fAll = (Finishings[])
                             (new ExtFinishing(100)).getAll();
                         for (int j=0; j<fAll.length; j++) {
+                            if (fAll[j] == null) {
+                                continue;
+                            }
                             if (finArray[i] == fAll[j].getValue()) {
                                 finSup[i] = fAll[j];
                                 break;
@@ -634,8 +681,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
 
             int match = -1;
             Media media = (Media)attributes.get(Media.class);
-            if (media != null && media instanceof MediaSizeName) {
-                MediaSizeName msn = (MediaSizeName)media;
+            if (media instanceof MediaSizeName msn) {
 
                 // case when no supported mediasizenames are reported
                 // check given media against the default
@@ -748,11 +794,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
                 return null;
             }
         } else if (category == RequestingUserName.class) {
-            String userName = "";
-            try {
-              userName = System.getProperty("user.name", "");
-            } catch (SecurityException se) {
-            }
+            String userName = System.getProperty("user.name", "");
             return new RequestingUserName(userName, null);
         } else if (category == Sides.class) {
             // The printer takes care of Sides so if short-edge
@@ -780,14 +822,9 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
                 }
             }
         } else if (category == PrinterResolution.class) {
-            PrinterResolution[] supportedRes = getPrintResolutions();
-            if (supportedRes == null) {
-                return null;
-            }
-            PrinterResolution []arr =
-                new PrinterResolution[supportedRes.length];
-            System.arraycopy(supportedRes, 0, arr, 0, supportedRes.length);
-            return arr;
+            return getPrintResolutions();
+        } else if (category == OutputBin.class) {
+            return Arrays.copyOf(outputBins, outputBins.length);
         }
 
         return null;
@@ -795,7 +832,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
 
     //This class is for getting all pre-defined Finishings
     @SuppressWarnings("serial") // JDK implementation class
-    private class ExtFinishing extends Finishings {
+    private static final class ExtFinishing extends Finishings {
         ExtFinishing(int value) {
             super(100); // 100 to avoid any conflicts with predefined values.
         }
@@ -807,6 +844,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
     }
 
 
+    @Override
     public AttributeSet getUnsupportedAttributes(DocFlavor flavor,
                                                  AttributeSet attributes) {
         if (flavor != null && !isDocFlavorSupported(flavor)) {
@@ -841,6 +879,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
     }
 
 
+    @Override
     public synchronized DocFlavor[] getSupportedDocFlavors() {
 
         if (supportedDocFlavors != null) {
@@ -890,7 +929,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
                                 gifImagesAdded = true;
                             } else if (mimeType.equals("image/jpeg")) {
                                 jpgImagesAdded = true;
-                            } else if (mimeType.indexOf("postscript") != -1) {
+                            } else if (mimeType.contains("postscript")) {
                                 psSupported = true;
                             }
                             break;
@@ -937,6 +976,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
     }
 
 
+    @Override
     public boolean isDocFlavorSupported(DocFlavor flavor) {
         if (supportedDocFlavors == null) {
             getSupportedDocFlavors();
@@ -974,15 +1014,15 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
      * Returns the matching standard Media using string comparison of names.
      */
     private Media getIPPMedia(String mediaName) {
-        CustomMediaSizeName sampleSize = new CustomMediaSizeName("sample", "",
-                                                                 0, 0);
+        CustomMediaSizeName sampleSize =
+                CustomMediaSizeName.create("sample", "", 0, 0);
         Media[] sizes = sampleSize.getSuperEnumTable();
         for (int i=0; i<sizes.length; i++) {
             if (mediaName.equals(""+sizes[i])) {
                 return sizes[i];
             }
         }
-        CustomMediaTray sampleTray = new CustomMediaTray("sample", "");
+        CustomMediaTray sampleTray = CustomMediaTray.create("sample", "");
         Media[] trays = sampleTray.getSuperEnumTable();
         for (int i=0; i<trays.length; i++) {
             if (mediaName.equals(""+trays[i])) {
@@ -1014,7 +1054,27 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
         return new Media[0];
     }
 
+    private OutputBin[] getSupportedOutputBins() {
+        if ((getAttMap != null) && getAttMap.containsKey("output-bin-supported")) {
 
+            AttributeClass attribClass = getAttMap.get("output-bin-supported");
+
+            if (attribClass != null) {
+                String[] values = attribClass.getArrayOfStringValues();
+                if (values == null || values.length == 0) {
+                    return null;
+                }
+                OutputBin[] outputBinNames = new OutputBin[values.length];
+                for (int i = 0; i < values.length; i++) {
+                    outputBinNames[i] = CustomOutputBin.createOutputBin(values[i], values[i]);
+                }
+                return outputBinNames;
+            }
+        }
+        return null;
+    }
+
+    @Override
     public synchronized Class<?>[] getSupportedAttributeCategories() {
         if (supportedCats != null) {
             Class<?> [] copyCats = new Class<?>[supportedCats.length];
@@ -1031,6 +1091,11 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
                 (PrintRequestAttribute)printReqAttribDefault[i];
             if (getAttMap != null &&
                 getAttMap.containsKey(pra.getName()+"-supported")) {
+
+                if (pra == OutputBin.TOP && (outputBins == null || outputBins.length == 0)) {
+                    continue;
+                }
+
                 catList.add(pra.getCategory());
             }
         }
@@ -1066,8 +1131,6 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
             catList.add(Chromaticity.class);
         }
 
-        // CUPS does not report printer resolution via IPP but it
-        // may be gleaned from the PPD.
         PrinterResolution[] supportedRes = getPrintResolutions();
         if (supportedRes != null && (supportedRes.length > 0)) {
             catList.add(PrinterResolution.class);
@@ -1086,6 +1149,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
     }
 
 
+    @Override
     public boolean
         isAttributeCategorySupported(Class<? extends Attribute> category)
     {
@@ -1109,6 +1173,11 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
             return true;
         }
 
+        if (category == OutputBin.class
+                && (outputBins == null || outputBins.length == 0)) {
+            return false;
+        }
+
         for (int i=0;i<supportedCats.length;i++) {
             if (category == supportedCats[i]) {
                 return true;
@@ -1118,6 +1187,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
         return false;
     }
 
+    @Override
     @SuppressWarnings("unchecked")
     public synchronized <T extends PrintServiceAttribute>
         T getAttribute(Class<T> category)
@@ -1186,11 +1256,19 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
         }
     }
 
-
+    @Override
     public synchronized PrintServiceAttributeSet getAttributes() {
-        // update getAttMap by sending again get-attributes IPP request
-        init = false;
-        initAttributes();
+        if (!init) {
+            // get all attributes for the first time.
+            initAttributes();
+        } else {
+            // only need service attributes updated.
+            // update getAttMap by sending again get-attributes IPP request
+            if ((urlConnection = getIPPConnection(myURL)) != null) {
+                opGetAttributes();
+                urlConnection.disconnect();
+            }
+        }
 
         HashPrintServiceAttributeSet attrs =
             new HashPrintServiceAttributeSet();
@@ -1299,6 +1377,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
     }
 
 
+    @Override
     public boolean isAttributeValueSupported(Attribute attr,
                                              DocFlavor flavor,
                                              AttributeSet attributes) {
@@ -1329,7 +1408,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
                 flavor.equals(DocFlavor.SERVICE_FORMATTED.PAGEABLE) ||
                 flavor.equals(DocFlavor.SERVICE_FORMATTED.PRINTABLE) ||
                 !isIPPSupportedImages(flavor.getMimeType())) {
-                return attr == Chromaticity.COLOR;
+                return PrintServiceLookupProvider.isMac() || attr == Chromaticity.COLOR;
             } else {
                 return false;
             }
@@ -1431,11 +1510,24 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
                DialogTypeSelection dst = (DialogTypeSelection)attr;
                return attr == DialogTypeSelection.COMMON;
             }
+        } else if (attr.getCategory() == OutputBin.class) {
+            if (attr instanceof CustomOutputBin) {
+                return true;
+            }
+            String name = attr.toString();
+            for (OutputBin outputBin : outputBins) {
+                String choice = ((CustomOutputBin) outputBin).getChoiceName();
+                if (name.equalsIgnoreCase(choice) || name.replaceAll("-", "").equalsIgnoreCase(choice)) {
+                    return true;
+                }
+            }
+            return false;
         }
         return true;
     }
 
 
+    @Override
     public synchronized Object
         getDefaultAttributeValue(Class<? extends Attribute> category)
     {
@@ -1474,15 +1566,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
         } else if (category == Chromaticity.class) {
             return Chromaticity.COLOR;
         } else if (category == Destination.class) {
-            try {
-                return new Destination((new File("out.ps")).toURI());
-            } catch (SecurityException se) {
-                try {
-                    return new Destination(new URI("file:out.ps"));
-                } catch (URISyntaxException e) {
-                    return null;
-                }
-            }
+            return new Destination((new File("out.ps")).toURI());
         } else if (category == Fidelity.class) {
             return Fidelity.FIDELITY_FALSE;
         } else if (category == Finishings.class) {
@@ -1518,7 +1602,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
                     return mediaSizeNames[defaultMediaIndex];
                 } else {
                     for (int i=0; i< mediaSizeNames.length; i++) {
-                        if (mediaSizeNames[i].toString().indexOf(name) != -1) {
+                        if (mediaSizeNames[i].toString().contains(name)) {
                             defaultMediaIndex = i;
                             return mediaSizeNames[defaultMediaIndex];
                         }
@@ -1574,11 +1658,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
                 return new PageRanges(1, Integer.MAX_VALUE);
             }
         } else if (category == RequestingUserName.class) {
-            String userName = "";
-            try {
-              userName = System.getProperty("user.name", "");
-            } catch (SecurityException se) {
-            }
+            String userName = System.getProperty("user.name", "");
             return new RequestingUserName(userName, null);
         } else if (category == SheetCollate.class) {
             return SheetCollate.UNCOLLATED;
@@ -1595,35 +1675,51 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
         } else if (category == PrinterResolution.class) {
              PrinterResolution[] supportedRes = getPrintResolutions();
              if ((supportedRes != null) && (supportedRes.length > 0)) {
-                return supportedRes[0];
-             } else {
-                 return new PrinterResolution(300, 300, PrinterResolution.DPI);
+                 return supportedRes[0];
              }
+        } else if (category == OutputBin.class) {
+            if (attribClass != null) {
+                return CustomOutputBin.createOutputBin(attribClass.getStringValue(), attribClass.getStringValue());
+            }
         }
 
         return null;
     }
 
+    /* Called only from contexts that have called initAttributes().
+     * Try IPP first, and if that produces nothing, fall back to the PPD
+    */
     private PrinterResolution[] getPrintResolutions() {
+        int[] rawResolutions = null;
         if (printerResolutions == null) {
-            if (rawResolutions == null) {
-              printerResolutions = new PrinterResolution[0];
-            } else {
-                int numRes = rawResolutions.length / 2;
-                PrinterResolution[] pres = new PrinterResolution[numRes];
-                for (int i=0; i < numRes; i++) {
-                    pres[i] =  new PrinterResolution(rawResolutions[i*2],
-                                                     rawResolutions[i*2+1],
-                                                     PrinterResolution.DPI);
-                }
-                printerResolutions = pres;
+            AttributeClass attribClass = (getAttMap != null) ?
+                getAttMap.get("printer-resolution-supported")
+                : null;
+            if (attribClass != null) {
+                rawResolutions = attribClass.getIntResolutionValue();
             }
+            if (rawResolutions == null) {
+                rawResolutions = ppdResolutions;
+            }
+            if (rawResolutions == null) {
+               rawResolutions = new int[] { 300, 300, 3 } ;
+            }
+            int numRes = rawResolutions.length / 3;
+            PrinterResolution[] pres = new PrinterResolution[numRes];
+            for (int i = 0; i < numRes; i++) {
+                int units = (rawResolutions[i*3+2] == 4) ? PrinterResolution.DPCM : PrinterResolution.DPI;
+                pres[i] = new PrinterResolution(rawResolutions[i*3],
+                                                rawResolutions[i*3+1],
+                                                units);
+            }
+            printerResolutions = pres;
         }
-        return printerResolutions;
+        return printerResolutions.clone();
     }
 
     private boolean isSupportedResolution(PrinterResolution res) {
-        PrinterResolution[] supportedRes = getPrintResolutions();
+        PrinterResolution[] supportedRes =
+            (PrinterResolution[])getSupportedAttributeValues(PrinterResolution.class, null, null);
         if (supportedRes != null) {
             for (int i=0; i<supportedRes.length; i++) {
                 if (res.equals(supportedRes[i])) {
@@ -1634,6 +1730,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
         return false;
     }
 
+    @Override
     public ServiceUIFactory getServiceUIFactory() {
         return null;
     }
@@ -1646,6 +1743,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
         }
     }
 
+    @Override
     public void addPrintServiceAttributeListener(
                                  PrintServiceAttributeListener listener) {
         synchronized (this) {
@@ -1659,6 +1757,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
         }
     }
 
+    @Override
     public void removePrintServiceAttributeListener(
                                   PrintServiceAttributeListener listener) {
         synchronized (this) {
@@ -1677,6 +1776,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
         return printer;
     }
 
+    @Override
     public String getName() {
         /*
          * Mac is using printer-info IPP attribute for its human-readable printer
@@ -1695,6 +1795,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
     }
 
 
+    @Override
     public boolean usesClass(Class<?> c) {
         return (c == sun.print.PSPrinterJob.class);
     }
@@ -1726,13 +1827,12 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
             if (isCupsPrinter) {
                 try {
                     urlConnection = getIPPConnection(
-                                             new URL(myURL+".ppd"));
+                                             newURL(myURL+".ppd"));
 
                    InputStream is = urlConnection.getInputStream();
                    if (is != null) {
-                       BufferedReader d =
-                           new BufferedReader(new InputStreamReader(is,
-                                                          Charset.forName("ISO-8859-1")));
+                       BufferedReader d = new BufferedReader(
+                               new InputStreamReader(is, ISO_8859_1));
                        String lineStr;
                        while ((lineStr = d.readLine()) != null) {
                            if (lineStr.startsWith("*cupsFilter:")) {
@@ -1769,17 +1869,12 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
                                    AttributeClass.TAG_URI,
                                    ""+myURI)};
 
-            OutputStream os = java.security.AccessController.
-                doPrivileged(new java.security.PrivilegedAction<OutputStream>() {
-                    public OutputStream run() {
-                        try {
-                            return urlConnection.getOutputStream();
-                        } catch (Exception e) {
-                        }
-                        return null;
-                    }
-                });
 
+            OutputStream os = null;
+            try {
+                os = urlConnection.getOutputStream();
+            } catch (Exception e) {
+            }
             if (os == null) {
                 return;
             }
@@ -1823,13 +1918,7 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
     public static boolean writeIPPRequest(OutputStream os,
                                            String operCode,
                                            AttributeClass[] attCl) {
-        OutputStreamWriter osw;
-        try {
-            osw = new OutputStreamWriter(os, "UTF-8");
-        } catch (java.io.UnsupportedEncodingException exc) {
-            debug_println(debugPrefix+"writeIPPRequest, UTF-8 not supported? Exception: "+exc);
-            return false;
-        }
+        OutputStreamWriter osw = new OutputStreamWriter(os, UTF_8);
         debug_println(debugPrefix+"writeIPPRequest, op code= "+operCode);
         char[] opCode =  new char[2];
         opCode[0] =  (char)Byte.parseByte(operCode.substring(0,2), 16);
@@ -2033,17 +2122,25 @@ public class IPPPrintService implements PrintService, SunPrinterJobService {
         return (s.length() == 2) ? s :  "0"+s;
     }
 
+    @Override
     public String toString() {
         return "IPP Printer : " + getName();
     }
 
+    @Override
     public boolean equals(Object obj) {
         return  (obj == this ||
                  (obj instanceof IPPPrintService &&
                   ((IPPPrintService)obj).getName().equals(getName())));
     }
 
+    @Override
     public int hashCode() {
         return this.getClass().hashCode()+getName().hashCode();
+    }
+
+    @SuppressWarnings("deprecation")
+    private static URL newURL(String spec) throws MalformedURLException {
+        return new URL(spec);
     }
 }

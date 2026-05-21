@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,10 +28,6 @@ package sun.awt.image;
 import java.lang.ref.WeakReference;
 import java.awt.Image;
 import java.awt.image.ImageObserver;
-
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 
 public abstract class ImageWatched {
     public static Link endlink = new Link();
@@ -89,26 +85,16 @@ public abstract class ImageWatched {
         }
     }
 
-    static class AccWeakReference<T> extends WeakReference<T> {
-
-         private final AccessControlContext acc;
-
-         AccWeakReference(T ref) {
-             super(ref);
-             acc = AccessController.getContext();
-         }
-    }
-
     /*
      * Standard Link implementation to manage a Weak Reference
      * to an ImageObserver.
      */
     public static class WeakLink extends Link {
-        private final AccWeakReference<ImageObserver> myref;
+        private final WeakReference<ImageObserver> myref;
         private Link next;
 
         public WeakLink(ImageObserver obs, Link next) {
-            myref = new AccWeakReference<ImageObserver>(obs);
+            myref = new WeakReference<ImageObserver>(obs);
             this.next = next;
         }
 
@@ -134,19 +120,6 @@ public abstract class ImageWatched {
             return this;
         }
 
-        private static boolean update(ImageObserver iw, AccessControlContext acc,
-                                      Image img, int info,
-                                      int x, int y, int w, int h) {
-
-            if (acc != null || System.getSecurityManager() != null) {
-                return AccessController.doPrivileged(
-                       (PrivilegedAction<Boolean>) () -> {
-                            return iw.imageUpdate(img, info, x, y, w, h);
-                      }, acc);
-            }
-            return false;
-        }
-
         public boolean newInfo(Image img, int info,
                                int x, int y, int w, int h)
         {
@@ -156,7 +129,7 @@ public abstract class ImageWatched {
             if (myiw == null) {
                 // My referent is null so we must prune in a second pass.
                 ret = true;
-            } else if (update(myiw, myref.acc, img, info, x, y, w, h) == false) {
+            } else if (myiw.imageUpdate(img, info, x, y, w, h) == false) {
                 // My referent has lost interest so clear it and ask
                 // for a pruning pass to remove it later.
                 myref.clear();

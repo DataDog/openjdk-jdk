@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -48,29 +48,15 @@ import sun.security.util.SecurityConstants;
  * signify a wildcard match. For example: "java.*" and "*" signify a wildcard
  * match, while "*java" and "a*b" do not.
  * <P>
- * The actions to be granted are passed to the constructor in a string containing
+ * The actions are passed to the constructor in a string containing
  * a list of one or more comma-separated keywords. The possible keywords are
- * "read" and "write". Their meaning is defined as follows:
- *
- * <DL>
- *    <DT> read
- *    <DD> read permission. Allows {@code System.getProperty} to
- *         be called.
- *    <DT> write
- *    <DD> write permission. Allows {@code System.setProperty} to
- *         be called.
- * </DL>
+ * "read" and "write".
  * <P>
  * The actions string is converted to lowercase before processing.
- * <P>
- * Care should be taken before granting code permission to access
- * certain system properties.  For example, granting permission to
- * access the "java.home" system property gives potentially malevolent
- * code sensitive information about the system environment (the Java
- * installation directory).  Also, granting permission to access
- * the "user.name" and "user.home" system properties gives potentially
- * malevolent code sensitive information about the user environment
- * (the user's account name and home directory).
+ *
+ * @deprecated
+ * This permission cannot be used for controlling access to resources
+ * as the Security Manager is no longer supported.
  *
  * @see java.security.BasicPermission
  * @see java.security.Permission
@@ -78,13 +64,13 @@ import sun.security.util.SecurityConstants;
  * @see java.security.PermissionCollection
  * @see java.lang.SecurityManager
  *
- *
  * @author Roland Schemers
  * @since 1.2
  *
  * @serial exclude
  */
 
+@Deprecated(since="25", forRemoval=true)
 public final class PropertyPermission extends BasicPermission {
 
     /**
@@ -187,15 +173,11 @@ public final class PropertyPermission extends BasicPermission {
      */
     @Override
     public boolean implies(Permission p) {
-        if (!(p instanceof PropertyPermission))
-            return false;
-
-        PropertyPermission that = (PropertyPermission) p;
-
         // we get the effective mask. i.e., the "and" of this and that.
         // They must be equal to that.mask for implies to return true.
-
-        return ((this.mask & that.mask) == that.mask) && super.implies(that);
+        return p instanceof PropertyPermission that
+                && ((this.mask & that.mask) == that.mask)
+                && super.implies(that);
     }
 
     /**
@@ -211,13 +193,9 @@ public final class PropertyPermission extends BasicPermission {
         if (obj == this)
             return true;
 
-        if (! (obj instanceof PropertyPermission))
-            return false;
-
-        PropertyPermission that = (PropertyPermission) obj;
-
-        return (this.mask == that.mask) &&
-            (this.getName().equals(that.getName()));
+        return obj instanceof PropertyPermission that
+                && this.mask == that.mask
+                && this.getName().equals(that.getName());
     }
 
     /**
@@ -334,16 +312,12 @@ public final class PropertyPermission extends BasicPermission {
      * @return the canonical string representation of the actions.
      */
     static String getActions(int mask) {
-        switch (mask & (READ|WRITE)) {
-            case READ:
-                return SecurityConstants.PROPERTY_READ_ACTION;
-            case WRITE:
-                return SecurityConstants.PROPERTY_WRITE_ACTION;
-            case READ|WRITE:
-                return SecurityConstants.PROPERTY_RW_ACTION;
-            default:
-                return "";
-        }
+        return switch (mask & (READ | WRITE)) {
+            case READ         -> SecurityConstants.PROPERTY_READ_ACTION;
+            case WRITE        -> SecurityConstants.PROPERTY_WRITE_ACTION;
+            case READ | WRITE -> SecurityConstants.PROPERTY_RW_ACTION;
+            default           -> "";
+        };
     }
 
     /**
@@ -439,6 +413,7 @@ final class PropertyPermissionCollection extends PermissionCollection
      * Key is property name; value is PropertyPermission.
      * Not serialized; see serialization section at end of class.
      */
+    @SuppressWarnings("removal")
     private transient ConcurrentHashMap<String, PropertyPermission> perms;
 
     /**
@@ -470,39 +445,32 @@ final class PropertyPermissionCollection extends PermissionCollection
      *                                object has been marked readonly
      */
     @Override
+    @SuppressWarnings("removal")
     public void add(Permission permission) {
-        if (! (permission instanceof PropertyPermission))
+        if (! (permission instanceof PropertyPermission pp))
             throw new IllegalArgumentException("invalid permission: "+
                                                permission);
         if (isReadOnly())
             throw new SecurityException(
                 "attempt to add a Permission to a readonly PermissionCollection");
 
-        PropertyPermission pp = (PropertyPermission) permission;
         String propName = pp.getName();
 
         // Add permission to map if it is absent, or replace with new
-        // permission if applicable. NOTE: cannot use lambda for
-        // remappingFunction parameter until JDK-8076596 is fixed.
-        perms.merge(propName, pp,
-            new java.util.function.BiFunction<>() {
-                @Override
-                public PropertyPermission apply(PropertyPermission existingVal,
-                                                PropertyPermission newVal) {
-
-                    int oldMask = existingVal.getMask();
-                    int newMask = newVal.getMask();
-                    if (oldMask != newMask) {
-                        int effective = oldMask | newMask;
-                        if (effective == newMask) {
-                            return newVal;
-                        }
-                        if (effective != oldMask) {
-                            return new PropertyPermission(propName, effective);
-                        }
+        // permission if applicable.
+        perms.merge(propName, pp, (existingVal, newVal) -> {
+                int oldMask = existingVal.getMask();
+                int newMask = newVal.getMask();
+                if (oldMask != newMask) {
+                    int effective = oldMask | newMask;
+                    if (effective == newMask) {
+                        return newVal;
                     }
-                    return existingVal;
+                    if (effective != oldMask) {
+                        return new PropertyPermission(propName, effective);
+                    }
                 }
+                return existingVal;
             }
         );
 
@@ -522,11 +490,11 @@ final class PropertyPermissionCollection extends PermissionCollection
      * the set, false if not.
      */
     @Override
+    @SuppressWarnings("removal")
     public boolean implies(Permission permission) {
-        if (! (permission instanceof PropertyPermission))
+        if (! (permission instanceof PropertyPermission pp))
             return false;
 
-        PropertyPermission pp = (PropertyPermission) permission;
         PropertyPermission x;
 
         int desired = pp.getMask();
@@ -649,6 +617,7 @@ final class PropertyPermissionCollection extends PermissionCollection
      * perms field. Reads in all_allowed.
      */
     @java.io.Serial
+    @SuppressWarnings("removal")
     private void readObject(ObjectInputStream in)
         throws IOException, ClassNotFoundException
     {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,8 +24,8 @@
  */
 
 #import <Accelerate/Accelerate.h> // for vImage_Buffer
-#import <JavaNativeFoundation/JavaNativeFoundation.h>
 
+#import "JNIUtilities.h"
 #import "CGGlyphImages.h"
 #import "CoreTextSupport.h"
 #import "fontscalerdefs.h" // contains the definition of GlyphInfo struct
@@ -237,6 +237,7 @@ CGGI_CopyImageFromCanvasToRGBInfo(CGGI_GlyphCanvas *canvas, GlyphInfo *info)
 {
     UInt32 *src = (UInt32 *)canvas->image->data;
     size_t srcRowWidth = canvas->image->width;
+    size_t srcHeight = canvas->image->height;
 
     UInt8 *dest = (UInt8 *)info->image;
     size_t destRowWidth = info->width;
@@ -246,12 +247,12 @@ CGGI_CopyImageFromCanvasToRGBInfo(CGGI_GlyphCanvas *canvas, GlyphInfo *info)
     size_t y;
 
     // fill empty glyph image with black-on-white glyph
-    for (y = 0; y < height; y++) {
+    for (y = 0; y < height && y < srcHeight; y++) {
         size_t destRow = y * destRowWidth * 3;
         size_t srcRow = y * srcRowWidth;
 
         size_t x;
-        for (x = 0; x < destRowWidth; x++) {
+        for (x = 0; x < destRowWidth && x < srcRowWidth; x++) {
             CGGI_CopyARGBPixelToRGBPixel(src[srcRow + x],
                                          dest + destRow + x * 3);
         }
@@ -289,6 +290,7 @@ CGGI_CopyImageFromCanvasToAlphaInfo(CGGI_GlyphCanvas *canvas, GlyphInfo *info)
 {
     UInt32 *src = (UInt32 *)canvas->image->data;
     size_t srcRowWidth = canvas->image->width;
+    size_t srcHeight = canvas->image->height;
 
     UInt8 *dest = (UInt8 *)info->image;
     size_t destRowWidth = info->width;
@@ -298,17 +300,53 @@ CGGI_CopyImageFromCanvasToAlphaInfo(CGGI_GlyphCanvas *canvas, GlyphInfo *info)
     size_t y;
 
     // fill empty glyph image with black-on-white glyph
-    for (y = 0; y < height; y++) {
+    for (y = 0; y < height && y < srcHeight; y++) {
         size_t destRow = y * destRowWidth;
         size_t srcRow = y * srcRowWidth;
         size_t x;
-        for (x = 0; x < destRowWidth; x++) {
+        for (x = 0; x < destRowWidth && x < srcRowWidth; x++) {
             UInt32 p = src[srcRow + x];
             dest[destRow + x] = CGGI_ConvertBWPixelToByteGray(p);
         }
     }
 }
 
+static void
+CGGI_CopyImageFromCanvasToARGBInfo(CGGI_GlyphCanvas *canvas, GlyphInfo *info)
+{
+    CGBitmapInfo bitmapInfo = CGBitmapContextGetBitmapInfo(canvas->context);
+    bool littleEndian = (bitmapInfo & kCGBitmapByteOrderMask) == kCGBitmapByteOrder32Little;
+
+    UInt32 *src = (UInt32 *)canvas->image->data;
+    size_t srcRowWidth = canvas->image->width;
+    size_t srcHeight = canvas->image->height;
+
+    UInt8 *dest = (UInt8 *)info->image;
+    size_t destRowWidth = info->width;
+
+    size_t height = info->height;
+
+    size_t y;
+
+    for (y = 0; y < height && y < srcHeight; y++) {
+        size_t srcRow = y * srcRowWidth;
+        if (littleEndian) {
+            size_t srcRowBytes = canvas->image->rowBytes;
+            UInt16 destRowBytes = (info->rowBytes < srcRowBytes) ? info->rowBytes : srcRowBytes;
+            memcpy(dest, src + srcRow, destRowBytes);
+            dest += destRowBytes;
+        } else {
+            size_t x;
+            for (x = 0; x < destRowWidth && x < srcRowWidth; x++) {
+                UInt32 p = src[srcRow + x];
+                *dest++ = (p >> 24  & 0xFF); // blue  (alpha-premultiplied)
+                *dest++ = (p >> 16 & 0xFF); // green (alpha-premultiplied)
+                *dest++ = (p >> 8   & 0xFF); // red   (alpha-premultiplied)
+                *dest++ = (p & 0xFF); // alpha
+            }
+        }
+    }
+}
 
 #pragma mark --- Pixel Size, Modes, and Canvas Shaping Helper Functions ---
 
@@ -326,6 +364,14 @@ static CGGI_GlyphInfoDescriptor grey =
     { 1, &CGGI_CopyImageFromCanvasToAlphaInfo };
 static CGGI_GlyphInfoDescriptor rgb =
     { 3, &CGGI_CopyImageFromCanvasToRGBInfo };
+static CGGI_GlyphInfoDescriptor argb =
+    { 4, &CGGI_CopyImageFromCanvasToARGBInfo };
+
+static inline CGGI_GlyphInfoDescriptor*
+CGGI_GetGlyphInfoDescriptor(const CGGI_RenderingMode *mode, CTFontRef font)
+{
+    return IsEmojiFont(font) ? &argb : mode->glyphDescriptor;
+}
 
 static inline CGGI_RenderingMode
 CGGI_GetRenderingMode(const AWTStrike *strike)
@@ -362,7 +408,7 @@ CGGI_GetRenderingMode(const AWTStrike *strike)
 }
 
 
-#pragma mark --- Canvas Managment ---
+#pragma mark --- Canvas Management ---
 
 /*
  * Creates a new canvas of a fixed size, and initializes the CGContext as
@@ -384,8 +430,10 @@ CGGI_InitCanvas(CGGI_GlyphCanvas *canvas,
 
     canvas->image->data = (void *)calloc(byteCount, sizeof(UInt8));
     if (canvas->image->data == NULL) {
-        [[NSException exceptionWithName:NSMallocException
-            reason:@"Failed to allocate memory for the buffer which backs the CGContext for glyph strikes." userInfo:nil] raise];
+        canvas->image->width = 0;
+        canvas->image->height = 0;
+        canvas->image->rowBytes = 0;
+        canvas->image->data = malloc(0);
     }
 
     uint32_t bmpInfo = kCGImageAlphaPremultipliedFirst;
@@ -435,6 +483,10 @@ CGGI_FreeCanvas(CGGI_GlyphCanvas *canvas)
 
 /*
  * Quick and easy inline to check if this canvas is big enough.
+ * This function only increases the size. To get a smaller canvas, free it first.
+ * This function adds padding / slack multiplier to the requested size.
+ * So resizes must be based on the size you need, not the size of the canvas.
+ * The function will internally account for the multiplier it uses.
  */
 static inline void
 CGGI_SizeCanvas(CGGI_GlyphCanvas *canvas, const vImagePixelCount width,
@@ -442,45 +494,67 @@ CGGI_SizeCanvas(CGGI_GlyphCanvas *canvas, const vImagePixelCount width,
         const CGGI_RenderingMode* mode)
 {
     if (canvas->image != NULL &&
-        width  < canvas->image->width &&
+        width < canvas->image->width &&
         height < canvas->image->height)
     {
         return;
+    }
+
+    vImagePixelCount w = width * CGGI_GLYPH_CANVAS_SLACK;
+    vImagePixelCount h = height * CGGI_GLYPH_CANVAS_SLACK;
+
+    // Do not allow the canvas to be resized smaller.
+    if (canvas->image != NULL) {
+       if (w < canvas->image->width) {
+           w = canvas->image->width;
+       }
+       if (h < canvas->image->height) {
+           h = canvas->image->height;
+       }
     }
 
     // if we don't have enough space to strike the largest glyph in the
     // run, resize the canvas
     CGGI_FreeCanvas(canvas);
     CGGI_InitCanvas(canvas,
-                    width * CGGI_GLYPH_CANVAS_SLACK,
-                    height * CGGI_GLYPH_CANVAS_SLACK,
+                    w,
+                    h,
                     mode);
     JRSFontSetRenderingStyleOnContext(canvas->context, mode->cgFontMode);
 }
 
 /*
- * Clear the canvas by blitting white only into the region of interest
+ * Clear the canvas by blitting white (or transparent background for color glyphs) only into the region of interest
  * (the rect which we will copy out of once the glyph is struck).
  */
 static inline void
-CGGI_ClearCanvas(CGGI_GlyphCanvas *canvas, GlyphInfo *info)
+CGGI_ClearCanvas(CGGI_GlyphCanvas *canvas, GlyphInfo *info, bool transparent)
 {
     vImage_Buffer canvasRectToClear;
     canvasRectToClear.data = canvas->image->data;
     canvasRectToClear.height = info->height;
     canvasRectToClear.width = info->width;
+    if (canvas->image->width < canvasRectToClear.width) {
+          canvasRectToClear.width = canvas->image->width;
+    }
+    if (canvas->image->height < canvasRectToClear.height) {
+          canvasRectToClear.height = canvas->image->height;
+    }
     // use the row stride of the canvas, not the info
     canvasRectToClear.rowBytes = canvas->image->rowBytes;
 
     // clean the canvas
 #ifdef CGGI_DEBUG
-    Pixel_8888 opaqueWhite = { 0xE0, 0xE0, 0xE0, 0xE0 };
+    Pixel_8888 background = { 0xE0, 0xE0, 0xE0, 0xE0 };
 #else
-    Pixel_8888 opaqueWhite = { 0xFF, 0xFF, 0xFF, 0xFF };
+    Pixel_8888 background = { transparent ? 0 : 0xFF,
+                               transparent ? 0 : 0xFF,
+                               transparent ? 0 : 0xFF,
+                               transparent ? 0 : 0xFF };
 #endif
 
-    // clear canvas background and set foreground color
-    vImageBufferFill_ARGB8888(&canvasRectToClear, opaqueWhite, kvImageNoFlags);
+    // clear canvas background
+    vImageBufferFill_ARGB8888(&canvasRectToClear, background, kvImageNoFlags);
 }
 
 
@@ -493,9 +567,9 @@ CGGI_ClearCanvas(CGGI_GlyphCanvas *canvas, GlyphInfo *info)
 static inline GlyphInfo *
 CGGI_CreateNewGlyphInfoFrom(CGSize advance, CGRect bbox,
                             const AWTStrike *strike,
-                            const CGGI_RenderingMode *mode)
+                            const CGGI_GlyphInfoDescriptor *glyphDescriptor)
 {
-    size_t pixelSize = mode->glyphDescriptor->pixelSize;
+    size_t pixelSize = glyphDescriptor->pixelSize;
 
     // adjust the bounding box to be 1px bigger on each side than what
     // CGFont-whatever suggests - because it gives a bounding box that
@@ -560,7 +634,7 @@ CGGI_CreateNewGlyphInfoFrom(CGSize advance, CGRect bbox,
 static inline void
 CGGI_CreateImageForGlyph
     (CGGI_GlyphCanvas *canvas, const CGGlyph glyph,
-     GlyphInfo *info, const CGGI_RenderingMode *mode)
+     GlyphInfo *info, const CGGI_GlyphInfoDescriptor *glyphDescriptor, const AWTStrike *strike, CTFontRef font)
 {
     if (isnan(info->topLeftX) || isnan(info->topLeftY)) {
         // Explicitly set glyphInfo width/height to be 0 to ensure
@@ -569,20 +643,48 @@ CGGI_CreateImageForGlyph
         info->height = 0;
 
         // copy the "empty" glyph from the canvas into the info
-        (*mode->glyphDescriptor->copyFxnPtr)(canvas, info);
+        (*glyphDescriptor->copyFxnPtr)(canvas, info);
         return;
     }
 
     // clean the canvas
-    CGGI_ClearCanvas(canvas, info);
+    CGGI_ClearCanvas(canvas, info, glyphDescriptor == &argb);
 
     // strike the glyph in the upper right corner
-    CGContextShowGlyphsAtPoint(canvas->context,
-                               -info->topLeftX,
-                               canvas->image->height + info->topLeftY,
-                               &glyph, 1);
+    CGFloat x = -info->topLeftX;
+    CGFloat y = canvas->image->height + info->topLeftY;
+
+    if (glyphDescriptor == &argb) {
+        // Emoji glyphs are not rendered by CGContextShowGlyphsAtPoint.
+        // Also, it's not possible to use transformation matrix to get the emoji glyph
+        // rendered for the desired font size - actual-size font object is needed.
+        // The logic here must match the logic in CGGlyphImages_GetGlyphMetrics,
+        // which calculates glyph metrics.
+
+        CGAffineTransform matrix = CGContextGetTextMatrix(canvas->context);
+        CGFloat fontSize = sqrt(fabs(matrix.a * matrix.d - matrix.b * matrix.c));
+        CTFontRef sizedFont = CTFontCreateCopyWithSymbolicTraits(font, fontSize, NULL, 0, 0);
+
+        CGFloat normFactor = 1.0 / fontSize;
+        CGAffineTransform normalizedMatrix = CGAffineTransformScale(matrix, normFactor, normFactor);
+        CGContextSetTextMatrix(canvas->context, normalizedMatrix);
+
+        CGPoint userPoint = CGPointMake(x, y);
+        CGAffineTransform normalizedMatrixInv = CGAffineTransformInvert(normalizedMatrix);
+        CGPoint textPoint = CGPointApplyAffineTransform(userPoint, normalizedMatrixInv);
+
+        CTFontDrawGlyphs(sizedFont, &glyph, &textPoint, 1, canvas->context);
+
+        CFRelease(sizedFont);
+        // restore context's original state
+        CGContextSetTextMatrix(canvas->context, matrix);
+        CGContextSetFontSize(canvas->context, 1); // CTFontDrawGlyphs tampers with it
+    } else {
+        CGContextShowGlyphsAtPoint(canvas->context, x, y, &glyph, 1);
+    }
+
     // copy the glyph from the canvas into the info
-    (*mode->glyphDescriptor->copyFxnPtr)(canvas, info);
+    (*glyphDescriptor->copyFxnPtr)(canvas, info);
 }
 
 /*
@@ -615,13 +717,13 @@ CGGI_CreateImageForUnicode
     JRSFontRenderingStyle style = JRSFontAlignStyleForFractionalMeasurement(strike->fStyle);
 
     CGRect bbox;
-    JRSFontGetBoundingBoxesForGlyphsAndStyle(fallback, &tx, style, &glyph, 1, &bbox);
-
     CGSize advance;
-    CTFontGetAdvancesForGlyphs(fallback, kCTFontDefaultOrientation, &glyph, &advance, 1);
+    CGGlyphImages_GetGlyphMetrics(fallback, &tx, style, &glyph, 1, &bbox, &advance);
+
+    CGGI_GlyphInfoDescriptor *glyphDescriptor = CGGI_GetGlyphInfoDescriptor(mode, fallback);
 
     // create the Sun2D GlyphInfo we are going to strike into
-    GlyphInfo *info = CGGI_CreateNewGlyphInfoFrom(advance, bbox, strike, mode);
+    GlyphInfo *info = CGGI_CreateNewGlyphInfoFrom(advance, bbox, strike, glyphDescriptor);
 
     // fix the context size, just in case the substituted character is unexpectedly large
     CGGI_SizeCanvas(canvas, info->width, info->height, mode);
@@ -634,7 +736,7 @@ CGGI_CreateImageForUnicode
     CFRelease(cgFallback);
 
     // clean the canvas - align, strike, and copy the glyph from the canvas into the info
-    CGGI_CreateImageForGlyph(canvas, glyph, info, mode);
+    CGGI_CreateImageForGlyph(canvas, glyph, info, glyphDescriptor, strike, fallback);
 
     // restore the state of the world
     CGContextRestoreGState(canvas->context);
@@ -655,7 +757,7 @@ CGGI_CreateImageForUnicode
 }
 
 
-#pragma mark --- GlyphInfo Filling and Canvas Managment ---
+#pragma mark --- GlyphInfo Filling and Canvas Management ---
 
 /*
  * Sets all the per-run properties for the canvas, and then iterates through
@@ -677,11 +779,14 @@ CGGI_FillImagesForGlyphsWithSizedCanvas(CGGI_GlyphCanvas *canvas,
     CGContextSetFont(canvas->context, strike->fAWTFont->fNativeCGFont);
     JRSFontSetRenderingStyleOnContext(canvas->context, strike->fStyle);
 
+    CTFontRef mainFont = (CTFontRef)strike->fAWTFont->fFont;
+    CGGI_GlyphInfoDescriptor* mainFontDescriptor = CGGI_GetGlyphInfoDescriptor(mode, mainFont);
+
     CFIndex i;
     for (i = 0; i < len; i++) {
         GlyphInfo *info = (GlyphInfo *)jlong_to_ptr(glyphInfos[i]);
         if (info != NULL) {
-            CGGI_CreateImageForGlyph(canvas, glyphs[i], info, mode);
+            CGGI_CreateImageForGlyph(canvas, glyphs[i], info, mainFontDescriptor, strike, mainFont);
         } else {
             info = CGGI_CreateImageForUnicode(canvas, strike, mode, uniChars[i]);
             glyphInfos[i] = ptr_to_jlong(info);
@@ -761,7 +866,7 @@ CGGI_FillImagesForGlyphs(jlong *glyphInfos, const AWTStrike *strike,
  *
  * Creates a GlyphInfo struct with a malloc that also encapsulates the
  * image the struct points to.  This is done to meet memory layout
- * expectations in the Sun text rasterizer memory managment code.
+ * expectations in the Sun text rasterizer memory management code.
  * The image immediately follows the struct physically in memory.
  */
 static inline void
@@ -774,8 +879,9 @@ CGGI_CreateGlyphInfos(jlong *glyphInfos, const AWTStrike *strike,
     CGAffineTransform tx = strike->fTx;
     JRSFontRenderingStyle bboxCGMode = JRSFontAlignStyleForFractionalMeasurement(strike->fStyle);
 
-    JRSFontGetBoundingBoxesForGlyphsAndStyle((CTFontRef)font->fFont, &tx, bboxCGMode, glyphs, len, bboxes);
-    CTFontGetAdvancesForGlyphs((CTFontRef)font->fFont, kCTFontDefaultOrientation, glyphs, advances, len);
+    CTFontRef fontRef = (CTFontRef)font->fFont;
+    CGGlyphImages_GetGlyphMetrics(fontRef, &tx, bboxCGMode, glyphs, len, bboxes, advances);
+    CGGI_GlyphInfoDescriptor* mainFontDescriptor = CGGI_GetGlyphInfoDescriptor(mode, fontRef);
 
     size_t maxWidth = 1;
     size_t maxHeight = 1;
@@ -792,8 +898,7 @@ CGGI_CreateGlyphInfos(jlong *glyphInfos, const AWTStrike *strike,
         CGSize advance = advances[i];
         CGRect bbox = bboxes[i];
 
-        GlyphInfo *glyphInfo = CGGI_CreateNewGlyphInfoFrom(advance, bbox, strike, mode);
-
+        GlyphInfo *glyphInfo = CGGI_CreateNewGlyphInfoFrom(advance, bbox, strike, mainFontDescriptor);
         if (maxWidth < glyphInfo->width)   maxWidth = glyphInfo->width;
         if (maxHeight < glyphInfo->height) maxHeight = glyphInfo->height;
 
@@ -869,22 +974,121 @@ CGGlyphImages_GetGlyphImagePtrs(jlong glyphInfos[],
         return;
     }
 
-    // just do one malloc, and carve it up for all the buffers
-    void *buffer = malloc(sizeof(CGRect) * sizeof(CGSize) *
-                          sizeof(CGGlyph) * sizeof(UnicodeScalarValue) * len);
-    if (buffer == NULL) {
+    CGRect *bboxes   = (CGRect*)calloc(len, sizeof(CGRect));
+    CGSize *advances = (CGSize*)calloc(len, sizeof(CGSize));
+    CGGlyph *glyphs  = (CGGlyph*)calloc(len, sizeof(CGGlyph));
+    UnicodeScalarValue *uniChars = (UnicodeScalarValue*)calloc(len, sizeof(UnicodeScalarValue));
+
+    if (bboxes == NULL || advances == NULL || glyphs == NULL || uniChars == NULL) {
+        free(bboxes);
+        free(advances);
+        free(glyphs);
+        free(uniChars);
         [[NSException exceptionWithName:NSMallocException
             reason:@"Failed to allocate memory for the temporary glyph strike and measurement buffers." userInfo:nil] raise];
     }
-
-    CGRect *bboxes = (CGRect *)(buffer);
-    CGSize *advances = (CGSize *)(bboxes + sizeof(CGRect) * len);
-    CGGlyph *glyphs = (CGGlyph *)(advances + sizeof(CGGlyph) * len);
-    UnicodeScalarValue *uniChars = (UnicodeScalarValue *)(glyphs + sizeof(UnicodeScalarValue) * len);
 
     CGGI_CreateGlyphsAndScanForComplexities(glyphInfos, strike, &mode,
                                             rawGlyphCodes, uniChars, glyphs,
                                             advances, bboxes, len);
 
-    free(buffer);
+    free(bboxes);
+    free(advances);
+    free(glyphs);
+    free(uniChars);
 }
+
+#define TX_FIXED_UNSAFE(v)  (isinf(v) || isnan(v) || fabs(v) >= (1<<30))
+
+/*
+ * Calculates bounding boxes (for given transform) and advance (for untransformed 1pt-size font) for specified glyphs.
+ */
+void
+CGGlyphImages_GetGlyphMetrics(const CTFontRef font,
+                              const CGAffineTransform *tx,
+                              const JRSFontRenderingStyle style,
+                              const CGGlyph glyphs[],
+                              size_t count,
+                              CGRect bboxes[],
+                              CGSize advances[]) {
+
+    if (TX_FIXED_UNSAFE(tx->a) || TX_FIXED_UNSAFE(tx->b) || TX_FIXED_UNSAFE(tx->c) ||
+        TX_FIXED_UNSAFE(tx->d) || TX_FIXED_UNSAFE(tx->tx) || TX_FIXED_UNSAFE(tx->tx)) {
+
+        if (bboxes) {
+            for (int i = 0; i < count; i++) {
+                bboxes[i].origin.x = 0;
+                bboxes[i].origin.y = 0;
+                bboxes[i].size.width = 0;
+                bboxes[i].size.height = 0;
+            }
+        }
+        if (advances) {
+            for (int i = 0; i < count; i++) {
+                advances[i].width = 0;
+                advances[i].height = 0;
+            }
+        }
+        return;
+    }
+
+    if (IsEmojiFont(font)) {
+        // Glyph metrics for emoji font are not strictly proportional to font size,
+        // so we need to construct real-sized font object to calculate them.
+        // The logic here must match the logic in CGGI_CreateImageForGlyph,
+        // which performs glyph drawing.
+
+        CGFloat fontSize = sqrt(fabs(tx->a * tx->d - tx->b * tx->c));
+        CTFontRef sizedFont = CTFontCreateCopyWithSymbolicTraits(font, fontSize, NULL, 0, 0);
+
+        if (bboxes) {
+            // JRSFontGetBoundingBoxesForGlyphsAndStyle works incorrectly for AppleColorEmoji font:
+            // it uses bottom left corner of the glyph's bounding box as a fixed point of transformation
+            // instead of glyph's origin point (used at drawing). So, as a workaround,
+            // we request a bounding box for the untransformed glyph, and apply the transform ourselves.
+            JRSFontGetBoundingBoxesForGlyphsAndStyle(sizedFont, &CGAffineTransformIdentity, style, glyphs, count, bboxes);
+            CGAffineTransform txNormalized = CGAffineTransformMake(tx->a / fontSize,
+                                                                   tx->b / fontSize,
+                                                                   tx->c / fontSize,
+                                                                   tx->d / fontSize,
+                                                                   0, 0);
+            for (int i = 0; i < count; i++) {
+                bboxes[i] = CGRectApplyAffineTransform(bboxes[i], txNormalized);
+            }
+        }
+
+        if (advances) {
+            CTFontGetAdvancesForGlyphs(sizedFont, kCTFontDefaultOrientation, glyphs, advances, count);
+            for (int i = 0; i < count; i++) {
+                // Calling code will scale the result back
+                advances[i].width /= fontSize;
+                advances[i].height /= fontSize;
+            }
+        }
+
+        CFRelease(sizedFont);
+    } else {
+        if (bboxes) {
+            JRSFontGetBoundingBoxesForGlyphsAndStyle(font, tx, style, glyphs, count, bboxes);
+        }
+        if (advances) {
+            CTFontGetAdvancesForGlyphs(font, kCTFontDefaultOrientation, glyphs, advances, count);
+        }
+    }
+    int MAX_SIZE = 1 << 30;
+    if (bboxes) {
+        for (int i = 0; i < count; i++) {
+           if (bboxes[i].origin.x > (double)MAX_SIZE) bboxes[i].origin.x = 0;
+           if (bboxes[i].origin.y > (double)MAX_SIZE) bboxes[i].origin.y = 0;
+           if (bboxes[i].size.width > (double)MAX_SIZE) bboxes[i].size.width = 0;
+           if (bboxes[i].size.height > (double)MAX_SIZE) bboxes[i].size.height = 0;
+        }
+    }
+    if (advances) {
+        for (int i = 0; i < count; i++) {
+           if (advances[i].width > (double)MAX_SIZE) advances[i].width = 0;
+           if (advances[i].height > (double)MAX_SIZE) advances[i].height = 0;
+        }
+    }
+}
+

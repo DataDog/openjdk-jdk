@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "gc/shared/gcConfig.hpp"
 #include "runtime/globals_extension.hpp"
 #include "runtime/java.hpp"
@@ -83,7 +82,7 @@ SHENANDOAHGC_ONLY_ARG(IncludedGC(UseShenandoahGC,    CollectedHeap::Shenandoah, 
     vm_exit_during_initialization("Option -XX:+" #option " not supported"); \
   }
 
-GCArguments* GCConfig::_arguments = NULL;
+GCArguments* GCConfig::_arguments = nullptr;
 bool GCConfig::_gc_selected_ergonomically = false;
 
 void GCConfig::fail_if_non_included_gc_is_selected() {
@@ -96,10 +95,11 @@ void GCConfig::fail_if_non_included_gc_is_selected() {
 }
 
 void GCConfig::select_gc_ergonomically() {
-  if (os::is_server_class_machine()) {
 #if INCLUDE_G1GC
-    FLAG_SET_ERGO_IF_DEFAULT(UseG1GC, true);
-#elif INCLUDE_PARALLELGC
+  FLAG_SET_ERGO_IF_DEFAULT(UseG1GC, true);
+#else
+  if (os::is_server_class_machine()) {
+#if INCLUDE_PARALLELGC
     FLAG_SET_ERGO_IF_DEFAULT(UseParallelGC, true);
 #elif INCLUDE_SERIALGC
     FLAG_SET_ERGO_IF_DEFAULT(UseSerialGC, true);
@@ -109,6 +109,7 @@ void GCConfig::select_gc_ergonomically() {
     FLAG_SET_ERGO_IF_DEFAULT(UseSerialGC, true);
 #endif
   }
+#endif
 }
 
 bool GCConfig::is_no_gc_selected() {
@@ -150,7 +151,7 @@ GCArguments* GCConfig::select_gc() {
     if (is_no_gc_selected()) {
       // Failed to select GC ergonomically
       vm_exit_during_initialization("Garbage collector not selected "
-                                    "(default collector explicitly disabled)", NULL);
+                                    "(default collector explicitly disabled)", nullptr);
     }
 
     // Succeeded to select GC ergonomically
@@ -159,7 +160,7 @@ GCArguments* GCConfig::select_gc() {
 
   if (!is_exactly_one_gc_selected()) {
     // More than one GC selected
-    vm_exit_during_initialization("Multiple garbage collectors selected", NULL);
+    vm_exit_during_initialization("Multiple garbage collectors selected", nullptr);
   }
 
   // Exactly one GC selected
@@ -171,11 +172,11 @@ GCArguments* GCConfig::select_gc() {
 
   fatal("Should have found the selected GC");
 
-  return NULL;
+  return nullptr;
 }
 
 void GCConfig::initialize() {
-  assert(_arguments == NULL, "Already initialized");
+  assert(_arguments == nullptr, "Already initialized");
   _arguments = select_gc();
 }
 
@@ -209,7 +210,7 @@ bool GCConfig::is_gc_selected_ergonomically() {
 
 const char* GCConfig::hs_err_name() {
   if (is_exactly_one_gc_selected()) {
-    // Exacly one GC selected
+    // Exactly one GC selected
     FOR_EACH_INCLUDED_GC(gc) {
       if (gc->_flag) {
         return gc->_hs_err_name;
@@ -231,6 +232,6 @@ const char* GCConfig::hs_err_name(CollectedHeap::Name name) {
 }
 
 GCArguments* GCConfig::arguments() {
-  assert(_arguments != NULL, "Not initialized");
+  assert(_arguments != nullptr, "Not initialized");
   return _arguments;
 }

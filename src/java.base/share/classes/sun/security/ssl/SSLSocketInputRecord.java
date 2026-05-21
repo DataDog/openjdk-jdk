@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2026, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2020, Azul Systems, Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -27,10 +27,10 @@
 package sun.security.ssl;
 
 import java.io.EOFException;
-import java.io.InterruptedIOException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
@@ -74,7 +74,7 @@ final class SSLSocketInputRecord extends InputRecord implements SSLRecord {
         }
 
         byte byteZero = header[0];
-        int len = 0;
+        int len;
 
         /*
          * If we have already verified previous packets, we can
@@ -138,7 +138,7 @@ final class SSLSocketInputRecord extends InputRecord implements SSLRecord {
                 //
                 len = ((byteZero & 0x7F) << 8) + (header[1] & 0xFF) + 2;
             } else {
-                // Gobblygook!
+                // Gobbledygook!
                 throw new SSLException(
                         "Unrecognized SSL message, plaintext connection?");
             }
@@ -147,7 +147,7 @@ final class SSLSocketInputRecord extends InputRecord implements SSLRecord {
         return len;
     }
 
-    // Note that the input arguments are not used actually.
+    // Note that the input arguments are not actually used.
     @Override
     Plaintext[] decode(ByteBuffer[] srcs, int srcsOffset,
             int srcsLength) throws IOException, BadPaddingException {
@@ -176,11 +176,11 @@ final class SSLSocketInputRecord extends InputRecord implements SSLRecord {
                 }
             }
 
-            // The record header should has consumed.
+            // The record header should be consumed.
             if (plaintext == null) {
                 plaintext = decodeInputRecord();
             }
-        } catch(InterruptedIOException e) {
+        } catch (SocketTimeoutException e) {
             // do not clean header and recordBody in case of Socket Timeout
             cleanInBuffer = false;
             throw e;
@@ -210,7 +210,7 @@ final class SSLSocketInputRecord extends InputRecord implements SSLRecord {
         int contentLen = ((header[3] & 0xFF) << 8) +
                            (header[4] & 0xFF);          // pos: 3, 4
 
-        if (SSLLogger.isOn && SSLLogger.isOn("record")) {
+        if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.RECORD)) {
             SSLLogger.fine(
                     "READ: " +
                     ProtocolVersion.nameOf(majorVersion, minorVersion) +
@@ -222,15 +222,15 @@ final class SSLSocketInputRecord extends InputRecord implements SSLRecord {
         // Check for upper bound.
         //
         // Note: May check packetSize limit in the future.
-        if (contentLen < 0 || contentLen > maxLargeRecordSize - headerSize) {
+        if (contentLen > maxLargeRecordSize - headerSize) {
             throw new SSLProtocolException(
                 "Bad input record size, TLSCiphertext.length = " + contentLen);
         }
 
         //
-        // Read a complete record and store in the recordBody
+        // Read a complete record and store in the recordBody.
         // recordBody is used to cache incoming record and restore in case of
-        // read operation timedout
+        // read operation timeout
         //
         if (recordBody.position() == 0) {
             if (recordBody.capacity() < contentLen) {
@@ -243,7 +243,7 @@ final class SSLSocketInputRecord extends InputRecord implements SSLRecord {
         readFully(contentLen);
         recordBody.flip();
 
-        if (SSLLogger.isOn && SSLLogger.isOn("record")) {
+        if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.RECORD)) {
             SSLLogger.fine(
                     "READ: " +
                     ProtocolVersion.nameOf(majorVersion, minorVersion) +
@@ -255,7 +255,11 @@ final class SSLSocketInputRecord extends InputRecord implements SSLRecord {
         // Decrypt the fragment
         //
         ByteBuffer fragment;
+        recordLock.lock();
         try {
+            if (isClosed) {
+                return null;
+            }
             Plaintext plaintext =
                     readCipher.decrypt(contentType, recordBody, null);
             fragment = plaintext.fragment;
@@ -263,8 +267,9 @@ final class SSLSocketInputRecord extends InputRecord implements SSLRecord {
         } catch (BadPaddingException bpe) {
             throw bpe;
         } catch (GeneralSecurityException gse) {
-            throw (SSLProtocolException)(new SSLProtocolException(
-                    "Unexpected exception")).initCause(gse);
+            throw new SSLProtocolException("Unexpected exception", gse);
+        } finally {
+            recordLock.unlock();
         }
 
         if (contentType != ContentType.HANDSHAKE.id &&
@@ -279,6 +284,12 @@ final class SSLSocketInputRecord extends InputRecord implements SSLRecord {
         //
         if (contentType == ContentType.HANDSHAKE.id) {
             ByteBuffer handshakeFrag = fragment;
+            if (contentLen == 0) {
+                // From RFC 8446: "Implementations MUST NOT send zero-length fragments
+                // of Handshake types, even if those fragments contain padding."
+                throw new SSLProtocolException("Handshake fragments must not be zero length.");
+            }
+
             if ((handshakeBuffer != null) &&
                     (handshakeBuffer.remaining() != 0)) {
                 ByteBuffer bb = ByteBuffer.wrap(new byte[
@@ -368,7 +379,7 @@ final class SSLSocketInputRecord extends InputRecord implements SSLRecord {
             };
     }
 
-    private Plaintext[] handleUnknownRecord() throws IOException, BadPaddingException {
+    private Plaintext[] handleUnknownRecord() throws IOException {
         byte firstByte = header[0];
         byte thirdByte = header[2];
 
@@ -395,13 +406,13 @@ final class SSLSocketInputRecord extends InputRecord implements SSLRecord {
                  */
                 os.write(SSLRecord.v2NoCipher);      // SSLv2Hello
 
-                if (SSLLogger.isOn) {
-                    if (SSLLogger.isOn("record")) {
+                if (SSLLogger.isOn()) {
+                    if (SSLLogger.isOn(SSLLogger.Opt.RECORD)) {
                          SSLLogger.fine(
                                 "Requested to negotiate unsupported SSLv2!");
                     }
 
-                    if (SSLLogger.isOn("packet")) {
+                    if (SSLLogger.isOn(SSLLogger.Opt.RECORD_PACKET)) {
                         SSLLogger.fine("Raw write", SSLRecord.v2NoCipher);
                     }
                 }
@@ -434,7 +445,8 @@ final class SSLSocketInputRecord extends InputRecord implements SSLRecord {
 
             ByteBuffer converted = convertToClientHello(recordBody);
 
-            if (SSLLogger.isOn && SSLLogger.isOn("packet")) {
+            if (SSLLogger.isOn() &&
+                    SSLLogger.isOn(SSLLogger.Opt.RECORD_PACKET)) {
                 SSLLogger.fine(
                         "[Converted] ClientHello", converted);
             }
@@ -477,13 +489,14 @@ final class SSLSocketInputRecord extends InputRecord implements SSLRecord {
     private static int read(InputStream is, byte[] buf, int off, int len)  throws IOException {
         int readLen = is.read(buf, off, len);
         if (readLen < 0) {
-            if (SSLLogger.isOn && SSLLogger.isOn("packet")) {
+            if (SSLLogger.isOn() &&
+                    SSLLogger.isOn(SSLLogger.Opt.RECORD_PACKET)) {
                 SSLLogger.fine("Raw read: EOF");
             }
             throw new EOFException("SSL peer shut down incorrectly");
         }
 
-        if (SSLLogger.isOn && SSLLogger.isOn("packet")) {
+        if (SSLLogger.isOn() && SSLLogger.isOn(SSLLogger.Opt.RECORD_PACKET)) {
             ByteBuffer bb = ByteBuffer.wrap(buf, off, readLen);
             SSLLogger.fine("Raw read", bb);
         }

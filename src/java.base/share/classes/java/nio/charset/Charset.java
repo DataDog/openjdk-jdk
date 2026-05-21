@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,27 +26,25 @@
 package java.nio.charset;
 
 import jdk.internal.misc.VM;
+import jdk.internal.util.StaticProperty;
+import jdk.internal.vm.annotation.Stable;
 import sun.nio.cs.ThreadLocalCoders;
-import sun.security.action.GetPropertyAction;
 
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.spi.CharsetProvider;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Objects;
-import java.util.ServiceConfigurationError;
 import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.function.Supplier;
 
 
 /**
@@ -167,37 +165,54 @@ import java.util.TreeMap;
  * <tr><th scope="row" style="vertical-align:top">{@code UTF-16}</th>
  *     <td>Sixteen-bit UCS Transformation Format,
  *         byte&nbsp;order identified by an optional byte-order mark</td></tr>
+ * <tr><th scope="row" style="vertical-align:top">{@code UTF-32BE}</th>
+ *     <td>Thirty-two-bit UCS Transformation Format,
+ *         big-endian byte&nbsp;order</td></tr>
+ * <tr><th scope="row" style="vertical-align:top">{@code UTF-32LE}</th>
+ *     <td>Thirty-two-bit UCS Transformation Format,
+ *         little-endian byte&nbsp;order</td></tr>
+ * <tr><th scope="row" style="vertical-align:top">{@code UTF-32}</th>
+ *     <td>Thirty-two-bit UCS Transformation Format,
+ *         byte&nbsp;order identified by an optional byte-order mark</td></tr>
  * </tbody>
  * </table></blockquote>
  *
  * <p> The {@code UTF-8} charset is specified by <a
  * href="http://www.ietf.org/rfc/rfc2279.txt"><i>RFC&nbsp;2279</i></a>; the
  * transformation format upon which it is based is specified in
- * Amendment&nbsp;2 of ISO&nbsp;10646-1 and is also described in the <a
- * href="http://www.unicode.org/unicode/standard/standard.html"><i>Unicode
+ * ISO&nbsp;10646-1 and is also described in the <a
+ * href="http://www.unicode.org/standard/standard.html"><i>Unicode
  * Standard</i></a>.
  *
  * <p> The {@code UTF-16} charsets are specified by <a
  * href="http://www.ietf.org/rfc/rfc2781.txt"><i>RFC&nbsp;2781</i></a>; the
  * transformation formats upon which they are based are specified in
- * Amendment&nbsp;1 of ISO&nbsp;10646-1 and are also described in the <a
- * href="http://www.unicode.org/unicode/standard/standard.html"><i>Unicode
+ * ISO&nbsp;10646-1 and are also described in the <a
+ * href="http://www.unicode.org/standard/standard.html"><i>Unicode
  * Standard</i></a>.
  *
- * <p> The {@code UTF-16} charsets use sixteen-bit quantities and are
+ * <p> The {@code UTF-32} charsets are based upon transformation formats
+ * which are specified in
+ * ISO&nbsp;10646-1 and are also described in the <a
+ * href="http://www.unicode.org/standard/standard.html"><i>Unicode
+ * Standard</i></a>.
+ *
+ * <p> The {@code UTF-16} and {@code UTF-32} charsets use sixteen-bit and thirty-two-bit
+ * quantities respectively, and are
  * therefore sensitive to byte order.  In these encodings the byte order of a
  * stream may be indicated by an initial <i>byte-order mark</i> represented by
- * the Unicode character <code>'&#92;uFEFF'</code>.  Byte-order marks are handled
+ * the Unicode character {@code U+FEFF}.  Byte-order marks are handled
  * as follows:
  *
  * <ul>
  *
- *   <li><p> When decoding, the {@code UTF-16BE} and {@code UTF-16LE}
+ *   <li><p> When decoding, the {@code UTF-16BE}, {@code UTF-16LE},
+ *   {@code UTF-32BE}, and {@code UTF-32LE}
  *   charsets interpret the initial byte-order marks as a <small>ZERO-WIDTH
  *   NON-BREAKING SPACE</small>; when encoding, they do not write
  *   byte-order marks. </p></li>
  *
- *   <li><p> When decoding, the {@code UTF-16} charset interprets the
+ *   <li><p> When decoding, the {@code UTF-16} and {@code UTF-32} charsets interpret the
  *   byte-order mark at the beginning of the input stream to indicate the
  *   byte-order of the stream but defaults to big-endian if there is no
  *   byte-order mark; when encoding, it uses big-endian byte order and writes
@@ -210,9 +225,8 @@ import java.util.TreeMap;
  * <small>ZERO-WIDTH NON-BREAKING SPACE</small>.
  *
  * <p> Every instance of the Java virtual machine has a default charset, which
- * may or may not be one of the standard charsets.  The default charset is
- * determined during virtual-machine startup and typically depends upon the
- * locale and charset being used by the underlying operating system. </p>
+ * is {@code UTF-8} unless changed in an implementation specific manner. Refer to
+ * {@link #defaultCharset()} for more detail.
  *
  * <p> The {@link StandardCharsets} class defines constants for each of the
  * standard charsets.
@@ -262,6 +276,13 @@ import java.util.TreeMap;
  * of chars) and sequences of bytes. </p>
  *
  *
+ * @spec http://www.iana.org/assignments/character-sets Character Sets
+ * @spec https://www.rfc-editor.org/info/rfc2278
+ *      RFC 2278: IANA Charset Registration Procedures
+ * @spec https://www.rfc-editor.org/info/rfc2279
+ *      RFC 2279: UTF-8, a transformation format of ISO 10646
+ * @spec https://www.rfc-editor.org/info/rfc2781
+ *      RFC 2781: UTF-16, an encoding of ISO 10646
  * @author Mark Reinhold
  * @author JSR-51 Expert Group
  * @since 1.4
@@ -323,9 +344,7 @@ public abstract class Charset
         cache1 = new Object[] { charsetName, cs };
     }
 
-    // Creates an iterator that walks over the available providers, ignoring
-    // those whose lookup or instantiation causes a security exception to be
-    // thrown.  Should be invoked with full privileges.
+    // Creates an iterator that walks over the available providers
     //
     private static Iterator<CharsetProvider> providers() {
         return new Iterator<>() {
@@ -337,17 +356,9 @@ public abstract class Charset
 
                 private boolean getNext() {
                     while (next == null) {
-                        try {
-                            if (!i.hasNext())
-                                return false;
-                            next = i.next();
-                        } catch (ServiceConfigurationError sce) {
-                            if (sce.getCause() instanceof SecurityException) {
-                                // Ignore security exceptions
-                                continue;
-                            }
-                            throw sce;
-                        }
+                        if (!i.hasNext())
+                            return false;
+                        next = i.next();
                     }
                     return true;
                 }
@@ -371,9 +382,7 @@ public abstract class Charset
             };
     }
 
-    // Thread-local gate to prevent recursive provider lookups
-    private static ThreadLocal<ThreadLocal<?>> gate =
-            new ThreadLocal<ThreadLocal<?>>();
+    private static final ScopedValue<Boolean> IN_LOOKUP = ScopedValue.newInstance();
 
     private static Charset lookupViaProviders(final String charsetName) {
 
@@ -388,58 +397,54 @@ public abstract class Charset
         if (!VM.isBooted())
             return null;
 
-        if (gate.get() != null)
+        if (IN_LOOKUP.isBound()) {
             // Avoid recursive provider lookups
             return null;
-        try {
-            gate.set(gate);
-
-            return AccessController.doPrivileged(
-                new PrivilegedAction<>() {
-                    public Charset run() {
-                        for (Iterator<CharsetProvider> i = providers();
-                             i.hasNext();) {
-                            CharsetProvider cp = i.next();
-                            Charset cs = cp.charsetForName(charsetName);
-                            if (cs != null)
-                                return cs;
-                        }
-                        return null;
-                    }
-                });
-
-        } finally {
-            gate.set(null);
         }
+        try {
+            return ScopedValue.where(IN_LOOKUP, true).call(
+                    new ScopedValue.CallableOp<Charset, Exception>() {
+                        @Override
+                        public Charset call() {
+                            for (Iterator<CharsetProvider> i = providers(); i.hasNext(); ) {
+                                CharsetProvider cp = i.next();
+                                Charset cs = cp.charsetForName(charsetName);
+                                if (cs != null)
+                                    return cs;
+                            }
+                            return null;
+                        }
+                    }
+            );
+        } catch (Exception t) {
+            // Should not happen
+            throw new RuntimeException(t);
+        }
+
     }
 
     /* The extended set of charsets */
-    private static class ExtendedProviderHolder {
-        static final CharsetProvider[] extendedProviders = extendedProviders();
-        // returns ExtendedProvider, if installed
-        private static CharsetProvider[] extendedProviders() {
-            return AccessController.doPrivileged(new PrivilegedAction<>() {
-                    public CharsetProvider[] run() {
-                        CharsetProvider[] cps = new CharsetProvider[1];
-                        int n = 0;
-                        ServiceLoader<CharsetProvider> sl =
-                            ServiceLoader.loadInstalled(CharsetProvider.class);
-                        for (CharsetProvider cp : sl) {
-                            if (n + 1 > cps.length) {
-                                cps = Arrays.copyOf(cps, cps.length << 1);
-                            }
-                            cps[n++] = cp;
-                        }
-                        return n == cps.length ? cps : Arrays.copyOf(cps, n);
-                    }});
+    private static final LazyConstant<List<CharsetProvider>> EXTENDED_PROVIDERS = LazyConstant.of(
+            new Supplier<>() { public List<CharsetProvider> get() { return extendedProviders0(); }});
+
+    private static List<CharsetProvider> extendedProviders0() {
+        CharsetProvider[] cps = new CharsetProvider[1];
+        int n = 0;
+        final ServiceLoader<CharsetProvider> sl =
+                ServiceLoader.loadInstalled(CharsetProvider.class);
+        for (CharsetProvider cp : sl) {
+            if (n + 1 > cps.length) {
+                cps = Arrays.copyOf(cps, cps.length << 1);
+            }
+            cps[n++] = cp;
         }
+        return List.of(n == cps.length ? cps : Arrays.copyOf(cps, n));
     }
 
     private static Charset lookupExtendedCharset(String charsetName) {
         if (!VM.isBooted())  // see lookupViaProviders()
             return null;
-        CharsetProvider[] ecps = ExtendedProviderHolder.extendedProviders;
-        for (CharsetProvider cp : ecps) {
+        for (CharsetProvider cp : EXTENDED_PROVIDERS.get()) {
             Charset cs = cp.charsetForName(charsetName);
             if (cs != null)
                 return cs;
@@ -526,14 +531,46 @@ public abstract class Charset
         throw new UnsupportedCharsetException(charsetName);
     }
 
+    /**
+     * Returns a charset object for the named charset. If the charset object
+     * for the named charset is not available or {@code charsetName} is not a
+     * legal charset name, then {@code fallback} is returned.
+     *
+     * @param  charsetName
+     *         The name of the requested charset; may be either
+     *         a canonical name or an alias
+     *
+     * @param  fallback
+     *         fallback charset in case the charset object for the named
+     *         charset is not available or {@code charsetName} is not a legal
+     *         charset name. May be {@code null}
+     *
+     * @return  A charset object for the named charset, or {@code fallback}
+     *          in case the charset object for the named charset is not
+     *          available or {@code charsetName} is not a legal charset name
+     *
+     * @throws  IllegalArgumentException
+     *          If the given {@code charsetName} is {@code null}
+     *
+     * @since 18
+     */
+    public static Charset forName(String charsetName,
+                                  Charset fallback) {
+        try {
+            Charset cs = lookup(charsetName);
+            return cs != null ? cs : fallback;
+        } catch (IllegalCharsetNameException icne) {
+            return fallback;
+        }
+    }
+
     // Fold charsets from the given iterator into the given map, ignoring
     // charsets whose names already have entries in the map.
     //
     private static void put(Iterator<Charset> i, Map<String,Charset> m) {
         while (i.hasNext()) {
             Charset cs = i.next();
-            if (!m.containsKey(cs.name()))
-                m.put(cs.name(), cs);
+            m.putIfAbsent(cs.name(), cs);
         }
     }
 
@@ -564,60 +601,63 @@ public abstract class Charset
      *         to charset objects
      */
     public static SortedMap<String,Charset> availableCharsets() {
-        return AccessController.doPrivileged(
-            new PrivilegedAction<>() {
-                public SortedMap<String,Charset> run() {
-                    TreeMap<String,Charset> m =
-                        new TreeMap<>(
-                            String.CASE_INSENSITIVE_ORDER);
-                    put(standardProvider.charsets(), m);
-                    CharsetProvider[] ecps = ExtendedProviderHolder.extendedProviders;
-                    for (CharsetProvider ecp :ecps) {
-                        put(ecp.charsets(), m);
-                    }
-                    for (Iterator<CharsetProvider> i = providers(); i.hasNext();) {
-                        CharsetProvider cp = i.next();
-                        put(cp.charsets(), m);
-                    }
-                    return Collections.unmodifiableSortedMap(m);
-                }
-            });
+        TreeMap<String,Charset> m =
+            new TreeMap<>(
+                String.CASE_INSENSITIVE_ORDER);
+        put(standardProvider.charsets(), m);
+        for (CharsetProvider ecp : EXTENDED_PROVIDERS.get()) {
+            put(ecp.charsets(), m);
+        }
+        for (Iterator<CharsetProvider> i = providers(); i.hasNext();) {
+            CharsetProvider cp = i.next();
+            put(cp.charsets(), m);
+        }
+        return Collections.unmodifiableSortedMap(m);
     }
 
-    private static volatile Charset defaultCharset;
+    private static final LazyConstant<Charset> defaultCharset = LazyConstant.of(
+            new Supplier<>() { public Charset get() { return defaultCharset0(); }});
+
+    private static Charset defaultCharset0() {
+        // do not look for providers other than the standard one
+        final Charset cs = standardProvider.charsetForName(StaticProperty.fileEncoding());
+        return (cs == null)
+                ? sun.nio.cs.UTF_8.INSTANCE
+                : cs;
+    }
 
     /**
      * Returns the default charset of this Java virtual machine.
      *
-     * <p> The default charset is determined during virtual-machine startup and
-     * typically depends upon the locale and charset of the underlying
-     * operating system.
+     * <p> The default charset is {@code UTF-8}, unless changed in an
+     * implementation specific manner.
+     *
+     * @implNote An implementation may override the default charset with
+     * the system property {@code file.encoding} on the command line. If the
+     * value is {@code COMPAT}, the default charset is derived from
+     * the {@code native.encoding} system property, which typically depends
+     * upon the locale and charset of the underlying operating system.
      *
      * @return  A charset object for the default charset
+     * @see System##file.encoding file.encoding
+     * @see System##native.encoding native.encoding
      *
      * @since 1.5
      */
     public static Charset defaultCharset() {
-        if (defaultCharset == null) {
-            synchronized (Charset.class) {
-                String csn = GetPropertyAction
-                        .privilegedGetProperty("file.encoding");
-                Charset cs = lookup(csn);
-                if (cs != null)
-                    defaultCharset = cs;
-                else
-                    defaultCharset = sun.nio.cs.UTF_8.INSTANCE;
-            }
-        }
-        return defaultCharset;
+        return defaultCharset.get();
     }
 
 
     /* -- Instance fields and methods -- */
 
-    private final String name;          // tickles a bug in oldjavac
-    private final String[] aliases;     // tickles a bug in oldjavac
-    private Set<String> aliasSet = null;
+    @Stable
+    private final String name;
+    @Stable
+    private final String[] aliases;
+    @Stable
+    private final LazyConstant<Set<String>> aliasSet = LazyConstant.of(
+            new Supplier<>() { public Set<String> get() { return Set.of(aliases); }});
 
     /**
      * Initializes a new charset with the given canonical name and alias
@@ -633,7 +673,12 @@ public abstract class Charset
      *         If the canonical name or any of the aliases are illegal
      */
     protected Charset(String canonicalName, String[] aliases) {
-        String[] as = Objects.requireNonNullElse(aliases, zeroAliases);
+        String[] as =
+            aliases == null ?
+                zeroAliases :
+                VM.isSystemDomainLoader(getClass().getClassLoader()) ?
+                    aliases :
+                    Arrays.copyOf(aliases, aliases.length);
 
         // Skip checks for the standard, built-in Charsets we always load
         // during initialization.
@@ -664,14 +709,7 @@ public abstract class Charset
      * @return  An immutable set of this charset's aliases
      */
     public final Set<String> aliases() {
-        if (aliasSet != null)
-            return aliasSet;
-        int n = aliases.length;
-        HashSet<String> hs = new HashSet<>(n);
-        for (int i = 0; i < n; i++)
-            hs.add(aliases[i]);
-        aliasSet = Collections.unmodifiableSet(hs);
-        return aliasSet;
+        return aliasSet.get();
     }
 
     /**
@@ -694,6 +732,7 @@ public abstract class Charset
      *
      * @return  {@code true} if, and only if, this charset is known by its
      *          implementor to be registered with the IANA
+     * @spec http://www.iana.org/assignments/character-sets Character Sets
      */
     public final boolean isRegistered() {
         return !name.startsWith("X-") && !name.startsWith("x-");
@@ -785,11 +824,12 @@ public abstract class Charset
      * <p> An invocation of this method upon a charset {@code cs} returns the
      * same result as the expression
      *
-     * <pre>
+     * {@snippet lang=java :
      *     cs.newDecoder()
      *       .onMalformedInput(CodingErrorAction.REPLACE)
      *       .onUnmappableCharacter(CodingErrorAction.REPLACE)
-     *       .decode(bb); </pre>
+     *       .decode(bb);
+     * }
      *
      * except that it is potentially more efficient because it can cache
      * decoders between successive invocations.
@@ -821,11 +861,12 @@ public abstract class Charset
      * <p> An invocation of this method upon a charset {@code cs} returns the
      * same result as the expression
      *
-     * <pre>
+     * {@snippet lang=java :
      *     cs.newEncoder()
      *       .onMalformedInput(CodingErrorAction.REPLACE)
      *       .onUnmappableCharacter(CodingErrorAction.REPLACE)
-     *       .encode(bb); </pre>
+     *       .encode(bb);
+     * }
      *
      * except that it is potentially more efficient because it can cache
      * encoders between successive invocations.
@@ -856,8 +897,9 @@ public abstract class Charset
      * <p> An invocation of this method upon a charset {@code cs} returns the
      * same result as the expression
      *
-     * <pre>
-     *     cs.encode(CharBuffer.wrap(s)); </pre>
+     * {@snippet lang=java :
+     *     cs.encode(CharBuffer.wrap(s));
+     * }
      *
      * @param  str  The string to be encoded
      *
@@ -879,15 +921,15 @@ public abstract class Charset
      * @return A negative integer, zero, or a positive integer as this charset
      *         is less than, equal to, or greater than the specified charset
      */
+    @Override
     public final int compareTo(Charset that) {
         return (name().compareToIgnoreCase(that.name()));
     }
 
     /**
-     * Computes a hashcode for this charset.
-     *
-     * @return  An integer hashcode
+     * {@return the hashcode for this charset}
      */
+    @Override
     public final int hashCode() {
         return name().hashCode();
     }
@@ -901,19 +943,17 @@ public abstract class Charset
      * @return  {@code true} if, and only if, this charset is equal to the
      *          given object
      */
+    @Override
     public final boolean equals(Object ob) {
-        if (!(ob instanceof Charset))
-            return false;
         if (this == ob)
             return true;
-        return name.equals(((Charset)ob).name());
+        return ob instanceof Charset other && name.equals(other.name());
     }
 
     /**
-     * Returns a string describing this charset.
-     *
-     * @return  A string describing this charset
+     * {@return a string describing this charset}
      */
+    @Override
     public final String toString() {
         return name();
     }

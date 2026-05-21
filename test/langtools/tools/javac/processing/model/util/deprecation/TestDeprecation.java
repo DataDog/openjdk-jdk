@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
  * @test
  * @bug 6392818
  * @summary Tests Elements.isDeprecated(Element)
- * @author  Joseph D. Darcy
  * @library /tools/javac/lib
  * @modules java.compiler
  *          jdk.compiler
@@ -43,7 +42,6 @@ import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.*;
 import javax.lang.model.util.*;
-import static javax.tools.Diagnostic.Kind.*;
 import java.io.Writer;
 
 /**
@@ -65,7 +63,7 @@ public class TestDeprecation extends JavacTestingAbstractProcessor {
             }
 
             if (failure)
-                processingEnv.getMessager().printMessage(ERROR, "Deprecation mismatch found!");
+                processingEnv.getMessager().printError("Deprecation mismatch found!");
         }
         return true;
     }

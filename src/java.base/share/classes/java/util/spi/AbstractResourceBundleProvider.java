@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,16 +27,14 @@ package java.util.spi;
 
 import jdk.internal.access.JavaUtilResourceBundleAccess;
 import jdk.internal.access.SharedSecrets;
+import sun.util.resources.Bundles;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.Locale;
 import java.util.PropertyResourceBundle;
 import java.util.ResourceBundle;
-import static sun.security.util.SecurityConstants.GET_CLASSLOADER_PERMISSION;
 
 /**
  * {@code AbstractResourceBundleProvider} is an abstract class that provides
@@ -77,11 +75,10 @@ import static sun.security.util.SecurityConstants.GET_CLASSLOADER_PERMISSION;
  *         return null;
  *     }
  * }}</pre></blockquote>
- *
+ * <p>
  * Refer to {@link ResourceBundleProvider} for details.
  *
- * @see <a href="../ResourceBundle.html#resource-bundle-modules">
- *      Resource Bundles and Named Modules</a>
+ * @see ResourceBundle##resource-bundle-modules Resource Bundles and Named Modules
  * @since 9
  */
 public abstract class AbstractResourceBundleProvider implements ResourceBundleProvider {
@@ -187,6 +184,17 @@ public abstract class AbstractResourceBundleProvider implements ResourceBundlePr
     public ResourceBundle getBundle(String baseName, Locale locale) {
         Module module = this.getClass().getModule();
         String bundleName = toBundleName(baseName, locale);
+        var bundle = getBundle0(module, bundleName);
+        if (bundle == null) {
+            var otherBundleName = Bundles.toOtherBundleName(baseName, bundleName, locale);
+            if (!bundleName.equals(otherBundleName)) {
+                bundle = getBundle0(module, Bundles.toOtherBundleName(baseName, bundleName, locale));
+            }
+        }
+        return bundle;
+    }
+
+    private ResourceBundle getBundle0(Module module, String bundleName) {
         ResourceBundle bundle = null;
 
         for (String format : formats) {
@@ -210,10 +218,8 @@ public abstract class AbstractResourceBundleProvider implements ResourceBundlePr
      * Returns the ResourceBundle of .class format if found in the module
      * of this provider.
      */
-    private static ResourceBundle loadResourceBundle(Module module, String bundleName)
-    {
-        PrivilegedAction<Class<?>> pa = () -> Class.forName(module, bundleName);
-        Class<?> c = AccessController.doPrivileged(pa, null, GET_CLASSLOADER_PERMISSION);
+    private static ResourceBundle loadResourceBundle(Module module, String bundleName) {
+        Class<?> c = Class.forName(module, bundleName);
         if (c != null && ResourceBundle.class.isAssignableFrom(c)) {
             @SuppressWarnings("unchecked")
             Class<ResourceBundle> bundleClass = (Class<ResourceBundle>) c;
@@ -228,28 +234,17 @@ public abstract class AbstractResourceBundleProvider implements ResourceBundlePr
      */
     private static ResourceBundle loadPropertyResourceBundle(Module module,
                                                              String bundleName)
-        throws IOException
-    {
+            throws IOException {
         String resourceName = toResourceName(bundleName, "properties");
         if (resourceName == null) {
             return null;
         }
 
-        PrivilegedAction<InputStream> pa = () -> {
-            try {
-                return module.getResourceAsStream(resourceName);
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-        };
-        try (InputStream stream = AccessController.doPrivileged(pa)) {
-            if (stream != null) {
-                return new PropertyResourceBundle(stream);
-            } else {
-                return null;
-            }
-        } catch (UncheckedIOException e) {
-            throw e.getCause();
+        InputStream stream = module.getResourceAsStream(resourceName);
+        if (stream != null) {
+            return new PropertyResourceBundle(stream);
+        } else {
+            return null;
         }
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,6 @@
 
 package nsk.jdi.ThreadReference.isSuspended;
 
-import nsk.share.*;
 import nsk.share.jpda.*;
 import nsk.share.jdi.*;
 
@@ -59,9 +58,15 @@ public class issuspended002a {
     }
 
     //====================================================== test program
+
+    static Thread test_thread = null;
+    static Thread mainThread = null;
+
     //----------------------------------------------------   main method
 
     public static void main (String argv[]) {
+
+        mainThread = Thread.currentThread();
 
         for (int i = 0; i < argv.length; i++) {
             if (argv[i].equals("-vbs") || argv[i].equals("-verbose")) {
@@ -92,8 +97,8 @@ public class issuspended002a {
     //------------------------------------------------------  section tested
 
                 case 0:
-                    Threadissuspended002a test_thread =
-                        new Threadissuspended002a("testedThread");
+                    test_thread =
+                        JDIThreadFactory.newThread(new Threadissuspended002a("testedThread"));
                     log1("       thread2 is created");
                 label:
                     synchronized (Threadissuspended002a.lockingObject) {
@@ -160,7 +165,7 @@ public class issuspended002a {
     }
 }
 
-class Threadissuspended002a extends Thread {
+class Threadissuspended002a extends NamedTask {
 
     public Threadissuspended002a(String threadName) {
         super(threadName);

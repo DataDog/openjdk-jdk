@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2020 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,10 +23,8 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "jvm.h"
 #include "memory/allocation.inline.hpp"
-#include "runtime/os.hpp"
 #include "utilities/decoder.hpp"
 #include "utilities/vmError.hpp"
 
@@ -38,21 +37,21 @@
   #include "decoder_elf.hpp"
 #endif
 
-AbstractDecoder*  Decoder::_shared_decoder = NULL;
-AbstractDecoder*  Decoder::_error_handler_decoder = NULL;
+AbstractDecoder*  Decoder::_shared_decoder = nullptr;
+AbstractDecoder*  Decoder::_error_handler_decoder = nullptr;
 NullDecoder       Decoder::_do_nothing_decoder;
 
 AbstractDecoder* Decoder::get_shared_instance() {
   assert(shared_decoder_lock()->owned_by_self(), "Require DecoderLock to enter");
 
-  if (_shared_decoder == NULL) {
+  if (_shared_decoder == nullptr) {
     _shared_decoder = create_decoder();
   }
   return _shared_decoder;
 }
 
 AbstractDecoder* Decoder::get_error_handler_instance() {
-  if (_error_handler_decoder == NULL) {
+  if (_error_handler_decoder == nullptr) {
     _error_handler_decoder = create_decoder();
   }
   return _error_handler_decoder;
@@ -69,8 +68,8 @@ AbstractDecoder* Decoder::create_decoder() {
   decoder = new (std::nothrow)ElfDecoder();
 #endif
 
-  if (decoder == NULL || decoder->has_error()) {
-    if (decoder != NULL) {
+  if (decoder == nullptr || decoder->has_error()) {
+    if (decoder != nullptr) {
       delete decoder;
     }
     decoder = &_do_nothing_decoder;
@@ -79,24 +78,21 @@ AbstractDecoder* Decoder::create_decoder() {
 }
 
 Mutex* Decoder::shared_decoder_lock() {
-  assert(SharedDecoder_lock != NULL, "Just check");
+  assert(SharedDecoder_lock != nullptr, "Just check");
   return SharedDecoder_lock;
 }
 
 bool Decoder::decode(address addr, char* buf, int buflen, int* offset, const char* modulepath, bool demangle) {
-  bool error_handling_thread = os::current_thread_id() == VMError::get_first_error_tid();
-  if (error_handling_thread) {
+  if (VMError::is_error_reported_in_current_thread()) {
     return get_error_handler_instance()->decode(addr, buf, buflen, offset, modulepath, demangle);
   } else {
     MutexLocker locker(shared_decoder_lock(), Mutex::_no_safepoint_check_flag);
     return get_shared_instance()->decode(addr, buf, buflen, offset, modulepath, demangle);
   }
-
 }
 
 bool Decoder::decode(address addr, char* buf, int buflen, int* offset, const void* base) {
-  bool error_handling_thread = os::current_thread_id() == VMError::get_first_error_tid();
-  if (error_handling_thread) {
+  if (VMError::is_error_reported_in_current_thread()) {
     return get_error_handler_instance()->decode(addr, buf, buflen, offset, base);
   } else {
     MutexLocker locker(shared_decoder_lock(), Mutex::_no_safepoint_check_flag);
@@ -104,10 +100,8 @@ bool Decoder::decode(address addr, char* buf, int buflen, int* offset, const voi
   }
 }
 
-
 bool Decoder::demangle(const char* symbol, char* buf, int buflen) {
-  bool error_handling_thread = os::current_thread_id() == VMError::get_first_error_tid();
-  if (error_handling_thread) {
+  if (VMError::is_error_reported_in_current_thread()) {
     return get_error_handler_instance()->demangle(symbol, buf, buflen);
   } else {
     MutexLocker locker(shared_decoder_lock(), Mutex::_no_safepoint_check_flag);
@@ -118,8 +112,13 @@ bool Decoder::demangle(const char* symbol, char* buf, int buflen) {
 void Decoder::print_state_on(outputStream* st) {
 }
 
-bool Decoder::get_source_info(address pc, char* buf, size_t buflen, int* line) {
-  return false;
+bool Decoder::get_source_info(address pc, char* filename, size_t filename_len, int* line, bool is_pc_after_call) {
+  if (VMError::is_error_reported_in_current_thread()) {
+    return get_error_handler_instance()->get_source_info(pc, filename, filename_len, line, is_pc_after_call);
+  } else {
+    MutexLocker locker(shared_decoder_lock(), Mutex::_no_safepoint_check_flag);
+    return get_shared_instance()->get_source_info(pc, filename, filename_len, line, is_pc_after_call);
+  }
 }
 
 #endif // !_WINDOWS

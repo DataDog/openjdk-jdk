@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,29 +22,27 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "classfile/vmSymbols.hpp"
 #include "logging/log.hpp"
+#include "logging/logStream.hpp"
 #include "memory/allocation.inline.hpp"
 #include "memory/resourceArea.hpp"
+#include "nmt/memTracker.hpp"
 #include "oops/oop.inline.hpp"
 #include "os_windows.inline.hpp"
+#include "runtime/globals_extension.hpp"
 #include "runtime/handles.inline.hpp"
 #include "runtime/os.hpp"
 #include "runtime/perfMemory.hpp"
-#include "services/memTracker.hpp"
 #include "utilities/exceptions.hpp"
+#include "utilities/formatBuffer.hpp"
 
 #include <windows.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <errno.h>
 #include <lmcons.h>
-
-typedef BOOL (WINAPI *SetSecurityDescriptorControlFnPtr)(
-   IN PSECURITY_DESCRIPTOR pSecurityDescriptor,
-   IN SECURITY_DESCRIPTOR_CONTROL ControlBitsOfInterest,
-   IN SECURITY_DESCRIPTOR_CONTROL ControlBitsToSet);
+#include <securitybaseapi.h>
 
 // Standard Memory Implementation Details
 
@@ -53,19 +51,17 @@ typedef BOOL (WINAPI *SetSecurityDescriptorControlFnPtr)(
 static char* create_standard_memory(size_t size) {
 
   // allocate an aligned chuck of memory
-  char* mapAddress = os::reserve_memory(size);
+  char* mapAddress = os::reserve_memory(size, mtInternal);
 
-  if (mapAddress == NULL) {
-    return NULL;
+  if (mapAddress == nullptr) {
+    return nullptr;
   }
 
   // commit memory
   if (!os::commit_memory(mapAddress, size, !ExecMem)) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("Could not commit PerfData memory\n");
-    }
+    log_debug(perf)("could not commit PerfData memory");
     os::release_memory(mapAddress, size);
-    return NULL;
+    return nullptr;
   }
 
   return mapAddress;
@@ -89,25 +85,21 @@ static void delete_standard_memory(char* addr, size_t size) {
 static void save_memory_to_file(char* addr, size_t size) {
 
   const char* destfile = PerfMemory::get_perfdata_file_path();
-  assert(destfile[0] != '\0', "invalid Perfdata file path");
+  assert(destfile[0] != '\0', "invalid PerfData file path");
 
   int fd = ::_open(destfile, _O_BINARY|_O_CREAT|_O_WRONLY|_O_TRUNC,
                    _S_IREAD|_S_IWRITE);
 
   if (fd == OS_ERR) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("Could not create Perfdata save file: %s: %s\n",
-              destfile, os::strerror(errno));
-    }
+    log_debug(perf)("could not create PerfData save file: %s: %s",
+                    destfile, os::strerror(errno));
   } else {
     for (size_t remaining = size; remaining > 0;) {
 
       int nbytes = ::_write(fd, addr, (unsigned int)remaining);
       if (nbytes == OS_ERR) {
-        if (PrintMiscellaneous && Verbose) {
-          warning("Could not write Perfdata save file: %s: %s\n",
-                  destfile, os::strerror(errno));
-        }
+        log_debug(perf)("could not write PerfData save file: %s: %s",
+                        destfile, os::strerror(errno));
         break;
       }
 
@@ -116,14 +108,12 @@ static void save_memory_to_file(char* addr, size_t size) {
     }
 
     int result = ::_close(fd);
-    if (PrintMiscellaneous && Verbose) {
-      if (result == OS_ERR) {
-        warning("Could not close %s: %s\n", destfile, os::strerror(errno));
-      }
+    if (result == OS_ERR) {
+      log_debug(perf)("could not close %s: %s", destfile, os::strerror(errno));
     }
   }
 
-  FREE_C_HEAP_ARRAY(char, destfile);
+  FREE_C_HEAP_ARRAY(destfile);
 }
 
 // Shared Memory Implementation Details
@@ -141,15 +131,15 @@ static void save_memory_to_file(char* addr, size_t size) {
 // user specific directory and the backing store file be stored in either a
 // RAM based file system or a local disk based file system. Network based
 // file systems are not recommended for performance reasons. In addition,
-// use of SMB network based file systems may result in unsuccesful cleanup
+// use of SMB network based file systems may result in unsuccessful cleanup
 // of the disk based resource on exit of the VM. The Windows TMP and TEMP
-// environement variables, as used by the GetTempPath() Win32 API (see
+// environment variables, as used by the GetTempPath() Win32 API (see
 // os::get_temp_directory() in os_win32.cpp), control the location of the
 // user specific directory and the shared memory backing store file.
 
-static HANDLE sharedmem_fileMapHandle = NULL;
+static HANDLE sharedmem_fileMapHandle = nullptr;
 static HANDLE sharedmem_fileHandle = INVALID_HANDLE_VALUE;
-static char*  sharedmem_fileName = NULL;
+static char*  sharedmem_fileName = nullptr;
 
 // return the user specific temporary directory name.
 //
@@ -163,7 +153,7 @@ static char* get_user_tmp_dir(const char* user) {
   char* dirname = NEW_C_HEAP_ARRAY(char, nbytes, mtInternal);
 
   // construct the path name to user specific tmp directory
-  _snprintf(dirname, nbytes, "%s\\%s_%s", tmpdir, perfdir, user);
+  os::snprintf_checked(dirname, nbytes, "%s\\%s_%s", tmpdir, perfdir, user);
 
   return dirname;
 }
@@ -183,7 +173,7 @@ static int filename_to_pid(const char* filename) {
   // check if file name can be converted to an integer without
   // any leftover characters.
   //
-  char* remainder = NULL;
+  char* remainder = nullptr;
   errno = 0;
   int pid = (int)strtol(filename, &remainder, 10);
 
@@ -194,7 +184,7 @@ static int filename_to_pid(const char* filename) {
   // check for left over characters. If any, then the filename is
   // not a candidate for conversion.
   //
-  if (remainder != NULL && *remainder != '\0') {
+  if (remainder != nullptr && *remainder != '\0') {
     return 0;
   }
 
@@ -219,10 +209,8 @@ static bool is_directory_secure(const char* path) {
     }
     else {
       // unexpected error, declare the path insecure
-      if (PrintMiscellaneous && Verbose) {
-        warning("could not get attributes for file %s: ",
-                " lasterror = %d\n", path, lasterror);
-      }
+      log_debug(perf)("could not get attributes for file %s: lasterror = %d",
+                      path, lasterror);
       return false;
     }
   }
@@ -233,9 +221,7 @@ static bool is_directory_secure(const char* path) {
     // as some types of reparse points might be acceptable, but it
     // is probably more secure to avoid these conditions.
     //
-    if (PrintMiscellaneous && Verbose) {
-      warning("%s is a reparse point\n", path);
-    }
+    log_debug(perf)("%s is a reparse point", path);
     return false;
   }
 
@@ -252,10 +238,8 @@ static bool is_directory_secure(const char* path) {
     // this is either a regular file or some other type of file,
     // any of which are unexpected and therefore insecure.
     //
-    if (PrintMiscellaneous && Verbose) {
-      warning("%s is not a directory, file attributes = "
-              INTPTR_FORMAT "\n", path, fa);
-    }
+    log_debug(perf)("%s is not a directory, file attributes : "
+                    INTPTR_FORMAT, path, fa);
     return false;
   }
 }
@@ -275,12 +259,12 @@ static char* get_user_name() {
   char* user = getenv("USERNAME");
   char buf[UNLEN+1];
   DWORD buflen = sizeof(buf);
-  if (user == NULL || strlen(user) == 0) {
+  if (user == nullptr || strlen(user) == 0) {
     if (GetUserName(buf, &buflen)) {
       user = buf;
     }
     else {
-      return NULL;
+      return nullptr;
     }
   }
 
@@ -301,15 +285,15 @@ static char* get_user_name() {
 static char* get_user_name_slow(int vmid) {
 
   // directory search
-  char* latest_user = NULL;
+  char* latest_user = nullptr;
   time_t latest_ctime = 0;
 
   const char* tmpdirname = os::get_temp_directory();
 
   DIR* tmpdirp = os::opendir(tmpdirname);
 
-  if (tmpdirp == NULL) {
-    return NULL;
+  if (tmpdirp == nullptr) {
+    return nullptr;
   }
 
   // for each entry in the directory that matches the pattern hsperfdata_*,
@@ -319,7 +303,7 @@ static char* get_user_name_slow(int vmid) {
   //
   struct dirent* dentry;
   errno = 0;
-  while ((dentry = os::readdir(tmpdirp)) != NULL) {
+  while ((dentry = os::readdir(tmpdirp)) != nullptr) {
 
     // check if the directory entry is a hsperfdata file
     if (strncmp(dentry->d_name, PERFDATA_NAME, strlen(PERFDATA_NAME)) != 0) {
@@ -334,8 +318,8 @@ static char* get_user_name_slow(int vmid) {
 
     DIR* subdirp = os::opendir(usrdir_name);
 
-    if (subdirp == NULL) {
-      FREE_C_HEAP_ARRAY(char, usrdir_name);
+    if (subdirp == nullptr) {
+      FREE_C_HEAP_ARRAY(usrdir_name);
       continue;
     }
 
@@ -346,14 +330,14 @@ static char* get_user_name_slow(int vmid) {
     // symlink can be exploited.
     //
     if (!is_directory_secure(usrdir_name)) {
-      FREE_C_HEAP_ARRAY(char, usrdir_name);
+      FREE_C_HEAP_ARRAY(usrdir_name);
       os::closedir(subdirp);
       continue;
     }
 
     struct dirent* udentry;
     errno = 0;
-    while ((udentry = os::readdir(subdirp)) != NULL) {
+    while ((udentry = os::readdir(subdirp)) != nullptr) {
 
       if (filename_to_pid(udentry->d_name) == vmid) {
         struct stat statbuf;
@@ -366,13 +350,13 @@ static char* get_user_name_slow(int vmid) {
         strcat(filename, udentry->d_name);
 
         if (::stat(filename, &statbuf) == OS_ERR) {
-           FREE_C_HEAP_ARRAY(char, filename);
+           FREE_C_HEAP_ARRAY(filename);
            continue;
         }
 
         // skip over files that are not regular files.
         if ((statbuf.st_mode & S_IFMT) != S_IFREG) {
-          FREE_C_HEAP_ARRAY(char, filename);
+          FREE_C_HEAP_ARRAY(filename);
           continue;
         }
 
@@ -394,18 +378,18 @@ static char* get_user_name_slow(int vmid) {
         if (statbuf.st_ctime > latest_ctime) {
           char* user = strchr(dentry->d_name, '_') + 1;
 
-          FREE_C_HEAP_ARRAY(char, latest_user);
+          FREE_C_HEAP_ARRAY(latest_user);
           latest_user = NEW_C_HEAP_ARRAY(char, strlen(user)+1, mtInternal);
 
           strcpy(latest_user, user);
           latest_ctime = statbuf.st_ctime;
         }
 
-        FREE_C_HEAP_ARRAY(char, filename);
+        FREE_C_HEAP_ARRAY(filename);
       }
     }
     os::closedir(subdirp);
-    FREE_C_HEAP_ARRAY(char, usrdir_name);
+    FREE_C_HEAP_ARRAY(usrdir_name);
   }
   os::closedir(tmpdirp);
 
@@ -453,7 +437,7 @@ static char *get_sharedmem_objectname(const char* user, int vmid) {
   //
   nbytes += UINT_CHARS;
   char* name = NEW_C_HEAP_ARRAY(char, nbytes, mtInternal);
-  _snprintf(name, nbytes, "%s_%s_%u", PERFDATA_NAME, user, vmid);
+  os::snprintf_checked(name, nbytes, "%s_%s_%u", PERFDATA_NAME, user, vmid);
 
   return name;
 }
@@ -469,7 +453,7 @@ static char* get_sharedmem_filename(const char* dirname, int vmid) {
   size_t nbytes = strlen(dirname) + UINT_CHARS + 2;
 
   char* name = NEW_C_HEAP_ARRAY(char, nbytes, mtInternal);
-  _snprintf(name, nbytes, "%s\\%d", dirname, vmid);
+  os::snprintf_checked(name, nbytes, "%s\\%d", dirname, vmid);
 
   return name;
 }
@@ -491,15 +475,13 @@ static void remove_file(const char* dirname, const char* filename) {
   strcat(path, filename);
 
   if (::unlink(path) == OS_ERR) {
-    if (PrintMiscellaneous && Verbose) {
-      if (errno != ENOENT) {
-        warning("Could not unlink shared memory backing"
-                " store file %s : %s\n", path, os::strerror(errno));
-      }
+    if (errno != ENOENT) {
+      log_debug(perf)("could not unlink shared memory backing store file %s : %s",
+                      path, os::strerror(errno));
     }
   }
 
-  FREE_C_HEAP_ARRAY(char, path);
+  FREE_C_HEAP_ARRAY(path);
 }
 
 // returns true if the process represented by pid is alive, otherwise
@@ -512,22 +494,18 @@ static void remove_file(const char* dirname, const char* filename) {
 static bool is_alive(int pid) {
 
   HANDLE ph = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
-  if (ph == NULL) {
+  if (ph == nullptr) {
     // the process does not exist.
-    if (PrintMiscellaneous && Verbose) {
-      DWORD lastError = GetLastError();
-      if (lastError != ERROR_INVALID_PARAMETER) {
-        warning("OpenProcess failed: %d\n", GetLastError());
-      }
+    DWORD lastError = GetLastError();
+    if (lastError != ERROR_INVALID_PARAMETER) {
+      log_debug(perf)("OpenProcess failed: %d", lastError);
     }
     return false;
   }
 
   DWORD exit_status;
   if (!GetExitCodeProcess(ph, &exit_status)) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("GetExitCodeProcess failed: %d\n", GetLastError());
-    }
+    log_debug(perf)("GetExitCodeProcess failed: %d", GetLastError());
     CloseHandle(ph);
     return false;
   }
@@ -544,17 +522,13 @@ static bool is_filesystem_secure(const char* path) {
   char fs_type[MAX_PATH];
 
   if (PerfBypassFileSystemCheck) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("bypassing file system criteria checks for %s\n", path);
-    }
+    log_debug(perf)("bypassing file system criteria checks for %s", path);
     return true;
   }
 
   char* first_colon = strchr((char *)path, ':');
-  if (first_colon == NULL) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("expected device specifier in path: %s\n", path);
-    }
+  if (first_colon == nullptr) {
+    log_debug(perf)("expected device specifier in path: %s", path);
     return false;
   }
 
@@ -566,38 +540,31 @@ static bool is_filesystem_secure(const char* path) {
 
   // check that we have something like "C:\" or "AA:\"
   assert(strlen(root_path) >= 3, "device specifier too short");
-  assert(strchr(root_path, ':') != NULL, "bad device specifier format");
-  assert(strchr(root_path, '\\') != NULL, "bad device specifier format");
+  assert(strchr(root_path, ':') != nullptr, "bad device specifier format");
+  assert(strchr(root_path, '\\') != nullptr, "bad device specifier format");
 
   DWORD maxpath;
   DWORD flags;
 
-  if (!GetVolumeInformation(root_path, NULL, 0, NULL, &maxpath,
+  if (!GetVolumeInformation(root_path, nullptr, 0, nullptr, &maxpath,
                             &flags, fs_type, MAX_PATH)) {
     // we can't get information about the volume, so assume unsafe.
-    if (PrintMiscellaneous && Verbose) {
-      warning("could not get device information for %s: "
-              " path = %s: lasterror = %d\n",
-              root_path, path, GetLastError());
-    }
+    log_debug(perf)("could not get device information for %s: path = %s: lasterror = %d",
+                    root_path, path, GetLastError());
     return false;
   }
 
   if ((flags & FS_PERSISTENT_ACLS) == 0) {
     // file system doesn't support ACLs, declare file system unsafe
-    if (PrintMiscellaneous && Verbose) {
-      warning("file system type %s on device %s does not support"
-              " ACLs\n", fs_type, root_path);
-    }
+    log_debug(perf)("file system type %s on device %s does not support ACLs",
+                    fs_type, root_path);
     return false;
   }
 
   if ((flags & FS_VOL_IS_COMPRESSED) != 0) {
     // file system is compressed, declare file system unsafe
-    if (PrintMiscellaneous && Verbose) {
-      warning("file system type %s on device %s is compressed\n",
-              fs_type, root_path);
-    }
+    log_debug(perf)("file system type %s on device %s is compressed",
+                    fs_type, root_path);
     return false;
   }
 
@@ -618,7 +585,7 @@ static void cleanup_sharedmem_resources(const char* dirname) {
   // open the user temp directory
   DIR* dirp = os::opendir(dirname);
 
-  if (dirp == NULL) {
+  if (dirp == nullptr) {
     // directory doesn't exist, so there is nothing to cleanup
     return;
   }
@@ -639,7 +606,7 @@ static void cleanup_sharedmem_resources(const char* dirname) {
   //
   struct dirent* entry;
   errno = 0;
-  while ((entry = os::readdir(dirp)) != NULL) {
+  while ((entry = os::readdir(dirp)) != nullptr) {
 
     int pid = filename_to_pid(entry->d_name);
 
@@ -665,7 +632,7 @@ static void cleanup_sharedmem_resources(const char* dirname) {
     // indicates that it is still running, the file file resources
     // are not removed. If the process id is invalid, or if we don't
     // have permissions to check the process status, or if the process
-    // id is valid and the process has terminated, the the file resources
+    // id is valid and the process has terminated, the file resources
     // are assumed to be stale and are removed.
     //
     if (pid == os::current_process_id() || !is_alive(pid)) {
@@ -689,7 +656,7 @@ static HANDLE create_file_mapping(const char* name, HANDLE fh, LPSECURITY_ATTRIB
 
   DWORD lowSize = (DWORD)size;
   DWORD highSize = 0;
-  HANDLE fmh = NULL;
+  HANDLE fmh = nullptr;
 
   // Create a file mapping object with the given name. This function
   // will grow the file to the specified size.
@@ -702,11 +669,9 @@ static HANDLE create_file_mapping(const char* name, HANDLE fh, LPSECURITY_ATTRIB
                lowSize,            /* DWORD Low word of max size */
                name);              /* LPCTSTR name for object */
 
-  if (fmh == NULL) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("CreateFileMapping failed, lasterror = %d\n", GetLastError());
-    }
-    return NULL;
+  if (fmh == nullptr) {
+    log_debug(perf)("CreateFileMapping failed, lasterror = %d", GetLastError());
+    return nullptr;
   }
 
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
@@ -716,12 +681,10 @@ static HANDLE create_file_mapping(const char* name, HANDLE fh, LPSECURITY_ATTRIB
     // the other processes either exit or close their mapping objects
     // and/or mapped views of this mapping object.
     //
-    if (PrintMiscellaneous && Verbose) {
-      warning("file mapping already exists, lasterror = %d\n", GetLastError());
-    }
+    log_debug(perf)("file mapping already exists, lasterror = %d", GetLastError());
 
     CloseHandle(fmh);
-    return NULL;
+    return nullptr;
   }
 
   return fmh;
@@ -736,7 +699,7 @@ static void free_security_desc(PSECURITY_DESCRIPTOR pSD) {
   BOOL success, exists, isdefault;
   PACL pACL;
 
-  if (pSD != NULL) {
+  if (pSD != nullptr) {
 
     // get the access control list from the security descriptor
     success = GetSecurityDescriptorDacl(pSD, &exists, &pACL, &isdefault);
@@ -744,12 +707,12 @@ static void free_security_desc(PSECURITY_DESCRIPTOR pSD) {
     // if an ACL existed and it was not a default acl, then it must
     // be an ACL we enlisted. free the resources.
     //
-    if (success && exists && pACL != NULL && !isdefault) {
-      FREE_C_HEAP_ARRAY(char, pACL);
+    if (success && exists && pACL != nullptr && !isdefault) {
+      FREE_C_HEAP_ARRAY(pACL);
     }
 
     // free the security descriptor
-    FREE_C_HEAP_ARRAY(char, pSD);
+    FREE_C_HEAP_ARRAY(pSD);
   }
 }
 
@@ -758,10 +721,10 @@ static void free_security_desc(PSECURITY_DESCRIPTOR pSD) {
 //
 static void free_security_attr(LPSECURITY_ATTRIBUTES lpSA) {
 
-  if (lpSA != NULL) {
+  if (lpSA != nullptr) {
     // free the contained security descriptor and the ACL
     free_security_desc(lpSA->lpSecurityDescriptor);
-    lpSA->lpSecurityDescriptor = NULL;
+    lpSA->lpSecurityDescriptor = nullptr;
 
     // free the security attributes structure
     FREE_C_HEAP_OBJ(lpSA);
@@ -773,33 +736,29 @@ static void free_security_attr(LPSECURITY_ATTRIBUTES lpSA) {
 static PSID get_user_sid(HANDLE hProcess) {
 
   HANDLE hAccessToken;
-  PTOKEN_USER token_buf = NULL;
+  PTOKEN_USER token_buf = nullptr;
   DWORD rsize = 0;
 
-  if (hProcess == NULL) {
-    return NULL;
+  if (hProcess == nullptr) {
+    return nullptr;
   }
 
   // get the process token
   if (!OpenProcessToken(hProcess, TOKEN_READ, &hAccessToken)) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("OpenProcessToken failure: lasterror = %d \n", GetLastError());
-    }
-    return NULL;
+    log_debug(perf)("OpenProcessToken failure: lasterror = %d", GetLastError());
+    return nullptr;
   }
 
   // determine the size of the token structured needed to retrieve
   // the user token information from the access token.
   //
-  if (!GetTokenInformation(hAccessToken, TokenUser, NULL, rsize, &rsize)) {
+  if (!GetTokenInformation(hAccessToken, TokenUser, nullptr, rsize, &rsize)) {
     DWORD lasterror = GetLastError();
     if (lasterror != ERROR_INSUFFICIENT_BUFFER) {
-      if (PrintMiscellaneous && Verbose) {
-        warning("GetTokenInformation failure: lasterror = %d,"
-                " rsize = %d\n", lasterror, rsize);
-      }
+      log_debug(perf)("GetTokenInformation failure: lasterror = %d, rsize = %d",
+                      lasterror, rsize);
       CloseHandle(hAccessToken);
-      return NULL;
+      return nullptr;
     }
   }
 
@@ -807,32 +766,28 @@ static PSID get_user_sid(HANDLE hProcess) {
 
   // get the user token information
   if (!GetTokenInformation(hAccessToken, TokenUser, token_buf, rsize, &rsize)) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("GetTokenInformation failure: lasterror = %d,"
-              " rsize = %d\n", GetLastError(), rsize);
-    }
-    FREE_C_HEAP_ARRAY(char, token_buf);
+    log_debug(perf)("GetTokenInformation failure: lasterror = %d, rsize = %d",
+                    GetLastError(), rsize);
+    FREE_C_HEAP_ARRAY(token_buf);
     CloseHandle(hAccessToken);
-    return NULL;
+    return nullptr;
   }
 
   DWORD nbytes = GetLengthSid(token_buf->User.Sid);
   PSID pSID = NEW_C_HEAP_ARRAY(char, nbytes, mtInternal);
 
   if (!CopySid(nbytes, pSID, token_buf->User.Sid)) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("GetTokenInformation failure: lasterror = %d,"
-              " rsize = %d\n", GetLastError(), rsize);
-    }
-    FREE_C_HEAP_ARRAY(char, token_buf);
-    FREE_C_HEAP_ARRAY(char, pSID);
+    log_debug(perf)("GetTokenInformation failure: lasterror = %d, rsize = %d",
+                    GetLastError(), rsize);
+    FREE_C_HEAP_ARRAY(token_buf);
+    FREE_C_HEAP_ARRAY(pSID);
     CloseHandle(hAccessToken);
-    return NULL;
+    return nullptr;
   }
 
   // close the access token.
   CloseHandle(hAccessToken);
-  FREE_C_HEAP_ARRAY(char, token_buf);
+  FREE_C_HEAP_ARRAY(token_buf);
 
   return pSID;
 }
@@ -854,10 +809,10 @@ typedef struct ace_data {
 
 static bool add_allow_aces(PSECURITY_DESCRIPTOR pSD,
                            ace_data_t aces[], int ace_count) {
-  PACL newACL = NULL;
-  PACL oldACL = NULL;
+  PACL newACL = nullptr;
+  PACL oldACL = nullptr;
 
-  if (pSD == NULL) {
+  if (pSD == nullptr) {
     return false;
   }
 
@@ -865,10 +820,8 @@ static bool add_allow_aces(PSECURITY_DESCRIPTOR pSD,
 
   // retrieve any existing access control list.
   if (!GetSecurityDescriptorDacl(pSD, &exists, &oldACL, &isdefault)) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("GetSecurityDescriptor failure: lasterror = %d \n",
-              GetLastError());
-    }
+    log_debug(perf)("GetSecurityDescriptor failure: lasterror = %d",
+                    GetLastError());
     return false;
   }
 
@@ -876,8 +829,8 @@ static bool add_allow_aces(PSECURITY_DESCRIPTOR pSD,
   ACL_SIZE_INFORMATION aclinfo;
 
   // GetSecurityDescriptorDacl may return true value for exists (lpbDaclPresent)
-  // while oldACL is NULL for some case.
-  if (oldACL == NULL) {
+  // while oldACL is null for some case.
+  if (oldACL == nullptr) {
     exists = FALSE;
   }
 
@@ -885,13 +838,11 @@ static bool add_allow_aces(PSECURITY_DESCRIPTOR pSD,
     if (!GetAclInformation(oldACL, &aclinfo,
                            sizeof(ACL_SIZE_INFORMATION),
                            AclSizeInformation)) {
-      if (PrintMiscellaneous && Verbose) {
-        warning("GetAclInformation failure: lasterror = %d \n", GetLastError());
-        return false;
-      }
+      log_debug(perf)("GetAclInformation failure: lasterror = %d", GetLastError());
+      return false;
     }
   } else {
-    aclinfo.AceCount = 0; // assume NULL DACL
+    aclinfo.AceCount = 0; // assume null DACL
     aclinfo.AclBytesFree = 0;
     aclinfo.AclBytesInUse = sizeof(ACL);
   }
@@ -913,10 +864,8 @@ static bool add_allow_aces(PSECURITY_DESCRIPTOR pSD,
   newACL = (PACL) NEW_C_HEAP_ARRAY(char, newACLsize, mtInternal);
 
   if (!InitializeAcl(newACL, newACLsize, ACL_REVISION)) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("InitializeAcl failure: lasterror = %d \n", GetLastError());
-    }
-    FREE_C_HEAP_ARRAY(char, newACL);
+    log_debug(perf)("InitializeAcl failure: lasterror = %d", GetLastError());
+    FREE_C_HEAP_ARRAY(newACL);
     return false;
   }
 
@@ -926,10 +875,8 @@ static bool add_allow_aces(PSECURITY_DESCRIPTOR pSD,
     while (ace_index < aclinfo.AceCount) {
       LPVOID ace;
       if (!GetAce(oldACL, ace_index, &ace)) {
-        if (PrintMiscellaneous && Verbose) {
-          warning("InitializeAcl failure: lasterror = %d \n", GetLastError());
-        }
-        FREE_C_HEAP_ARRAY(char, newACL);
+        log_debug(perf)("InitializeAcl failure: lasterror = %d", GetLastError());
+        FREE_C_HEAP_ARRAY(newACL);
         return false;
       }
       if (((ACCESS_ALLOWED_ACE *)ace)->Header.AceFlags && INHERITED_ACE) {
@@ -953,10 +900,8 @@ static bool add_allow_aces(PSECURITY_DESCRIPTOR pSD,
       if (matches == 0) {
         if (!AddAce(newACL, ACL_REVISION, MAXDWORD, ace,
                     ((PACE_HEADER)ace)->AceSize)) {
-          if (PrintMiscellaneous && Verbose) {
-            warning("AddAce failure: lasterror = %d \n", GetLastError());
-          }
-          FREE_C_HEAP_ARRAY(char, newACL);
+          log_debug(perf)("AddAce failure: lasterror = %d", GetLastError());
+          FREE_C_HEAP_ARRAY(newACL);
           return false;
         }
       }
@@ -968,11 +913,9 @@ static bool add_allow_aces(PSECURITY_DESCRIPTOR pSD,
   for (int i = 0; i < ace_count; i++) {
     if (!AddAccessAllowedAce(newACL, ACL_REVISION,
                              aces[i].mask, aces[i].pSid)) {
-      if (PrintMiscellaneous && Verbose) {
-        warning("AddAccessAllowedAce failure: lasterror = %d \n",
-                GetLastError());
-      }
-      FREE_C_HEAP_ARRAY(char, newACL);
+      log_debug(perf)("AddAccessAllowedAce failure: lasterror = %d",
+                      GetLastError());
+      FREE_C_HEAP_ARRAY(newACL);
       return false;
     }
   }
@@ -984,18 +927,14 @@ static bool add_allow_aces(PSECURITY_DESCRIPTOR pSD,
     while (ace_index < aclinfo.AceCount) {
       LPVOID ace;
       if (!GetAce(oldACL, ace_index, &ace)) {
-        if (PrintMiscellaneous && Verbose) {
-          warning("InitializeAcl failure: lasterror = %d \n", GetLastError());
-        }
-        FREE_C_HEAP_ARRAY(char, newACL);
+        log_debug(perf)("InitializeAcl failure: lasterror = %d", GetLastError());
+        FREE_C_HEAP_ARRAY(newACL);
         return false;
       }
       if (!AddAce(newACL, ACL_REVISION, MAXDWORD, ace,
                   ((PACE_HEADER)ace)->AceSize)) {
-        if (PrintMiscellaneous && Verbose) {
-          warning("AddAce failure: lasterror = %d \n", GetLastError());
-        }
-        FREE_C_HEAP_ARRAY(char, newACL);
+        log_debug(perf)("AddAce failure: lasterror = %d", GetLastError());
+        FREE_C_HEAP_ARRAY(newACL);
         return false;
       }
       ace_index++;
@@ -1004,39 +943,23 @@ static bool add_allow_aces(PSECURITY_DESCRIPTOR pSD,
 
   // add the new ACL to the security descriptor.
   if (!SetSecurityDescriptorDacl(pSD, TRUE, newACL, FALSE)) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("SetSecurityDescriptorDacl failure:"
-              " lasterror = %d \n", GetLastError());
-    }
-    FREE_C_HEAP_ARRAY(char, newACL);
+    log_debug(perf)("SetSecurityDescriptorDacl failure: lasterror = %d", GetLastError());
+    FREE_C_HEAP_ARRAY(newACL);
     return false;
   }
 
-  // if running on windows 2000 or later, set the automatic inheritance
-  // control flags.
-  SetSecurityDescriptorControlFnPtr _SetSecurityDescriptorControl;
-  _SetSecurityDescriptorControl = (SetSecurityDescriptorControlFnPtr)
-       GetProcAddress(GetModuleHandle(TEXT("advapi32.dll")),
-                      "SetSecurityDescriptorControl");
-
-  if (_SetSecurityDescriptorControl != NULL) {
-    // We do not want to further propagate inherited DACLs, so making them
-    // protected prevents that.
-    if (!_SetSecurityDescriptorControl(pSD, SE_DACL_PROTECTED,
-                                            SE_DACL_PROTECTED)) {
-      if (PrintMiscellaneous && Verbose) {
-        warning("SetSecurityDescriptorControl failure:"
-                " lasterror = %d \n", GetLastError());
-      }
-      FREE_C_HEAP_ARRAY(char, newACL);
-      return false;
-    }
+  // We do not want to further propagate inherited DACLs, so making them
+  // protected prevents that.
+  if (!SetSecurityDescriptorControl(pSD, SE_DACL_PROTECTED, SE_DACL_PROTECTED)) {
+    log_debug(perf)("SetSecurityDescriptorControl failure: lasterror = %d", GetLastError());
+    FREE_C_HEAP_ARRAY(newACL);
+    return false;
   }
-   // Note, the security descriptor maintains a reference to the newACL, not
-   // a copy of it. Therefore, the newACL is not freed here. It is freed when
-   // the security descriptor containing its reference is freed.
-   //
-   return true;
+
+  // Note, the security descriptor maintains a reference to the newACL, not
+  // a copy of it. Therefore, the newACL is not freed here. It is freed when
+  // the security descriptor containing its reference is freed.
+  return true;
 }
 
 // method to create a security attributes structure, which contains a
@@ -1056,18 +979,15 @@ static LPSECURITY_ATTRIBUTES make_security_attr(ace_data_t aces[], int count) {
 
   // initialize the security descriptor
   if (!InitializeSecurityDescriptor(pSD, SECURITY_DESCRIPTOR_REVISION)) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("InitializeSecurityDescriptor failure: "
-              "lasterror = %d \n", GetLastError());
-    }
+    log_debug(perf)("InitializeSecurityDescriptor failure: lasterror = %d", GetLastError());
     free_security_desc(pSD);
-    return NULL;
+    return nullptr;
   }
 
   // add the access control entries
   if (!add_allow_aces(pSD, aces, count)) {
     free_security_desc(pSD);
-    return NULL;
+    return nullptr;
   }
 
   // allocate and initialize the security attributes structure and
@@ -1102,22 +1022,18 @@ static LPSECURITY_ATTRIBUTES make_user_everybody_admin_security_attr(
   aces[0].mask = umask;
 
   if (aces[0].pSid == 0)
-    return NULL;
+    return nullptr;
 
   // get the well known SID for BUILTIN\Administrators
-  PSID administratorsSid = NULL;
+  PSID administratorsSid = nullptr;
   SID_IDENTIFIER_AUTHORITY SIDAuthAdministrators = SECURITY_NT_AUTHORITY;
 
   if (!AllocateAndInitializeSid( &SIDAuthAdministrators, 2,
            SECURITY_BUILTIN_DOMAIN_RID,
            DOMAIN_ALIAS_RID_ADMINS,
            0, 0, 0, 0, 0, 0, &administratorsSid)) {
-
-    if (PrintMiscellaneous && Verbose) {
-      warning("AllocateAndInitializeSid failure: "
-              "lasterror = %d \n", GetLastError());
-    }
-    return NULL;
+    log_debug(perf)("AllocateAndInitializeSid failure: lasterror = %d", GetLastError());
+    return nullptr;
   }
 
   // initialize the ace data for administrator group
@@ -1125,17 +1041,13 @@ static LPSECURITY_ATTRIBUTES make_user_everybody_admin_security_attr(
   aces[1].mask = amask;
 
   // get the well known SID for the universal Everybody
-  PSID everybodySid = NULL;
+  PSID everybodySid = nullptr;
   SID_IDENTIFIER_AUTHORITY SIDAuthEverybody = SECURITY_WORLD_SID_AUTHORITY;
 
   if (!AllocateAndInitializeSid( &SIDAuthEverybody, 1, SECURITY_WORLD_RID,
            0, 0, 0, 0, 0, 0, 0, &everybodySid)) {
-
-    if (PrintMiscellaneous && Verbose) {
-      warning("AllocateAndInitializeSid failure: "
-              "lasterror = %d \n", GetLastError());
-    }
-    return NULL;
+    log_debug(perf)("AllocateAndInitializeSid failure: lasterror = %d", GetLastError());
+    return nullptr;
   }
 
   // initialize the ace data for everybody else.
@@ -1145,7 +1057,7 @@ static LPSECURITY_ATTRIBUTES make_user_everybody_admin_security_attr(
   // create a security attributes structure with access control
   // entries as initialized above.
   LPSECURITY_ATTRIBUTES lpSA = make_security_attr(aces, 3);
-  FREE_C_HEAP_ARRAY(char, aces[0].pSid);
+  FREE_C_HEAP_ARRAY(aces[0].pSid);
   FreeSid(everybodySid);
   FreeSid(administratorsSid);
   return(lpSA);
@@ -1220,7 +1132,7 @@ static bool make_user_tmp_dir(const char* dirname) {
 
 
   LPSECURITY_ATTRIBUTES pDirSA = make_tmpdir_security_attr();
-  if (pDirSA == NULL) {
+  if (pDirSA == nullptr) {
     return false;
   }
 
@@ -1235,9 +1147,8 @@ static bool make_user_tmp_dir(const char* dirname) {
       //
       if (!is_directory_secure(dirname)) {
         // directory is not secure
-        if (PrintMiscellaneous && Verbose) {
-          warning("%s directory is insecure\n", dirname);
-        }
+        log_debug(perf)("%s directory is insecure", dirname);
+        free_security_attr(pDirSA);
         return false;
       }
       // The administrator should be able to delete this directory.
@@ -1247,24 +1158,16 @@ static bool make_user_tmp_dir(const char* dirname) {
       // DACLs might fix the corrupted the DACLs.
       SECURITY_INFORMATION secInfo = DACL_SECURITY_INFORMATION;
       if (!SetFileSecurity(dirname, secInfo, pDirSA->lpSecurityDescriptor)) {
-        if (PrintMiscellaneous && Verbose) {
-          lasterror = GetLastError();
-          warning("SetFileSecurity failed for %s directory.  lasterror %d \n",
-                                                        dirname, lasterror);
-        }
+        lasterror = GetLastError();
+        log_debug(perf)("SetFileSecurity failed for %s directory. lasterror = %d", dirname, lasterror);
       }
-    }
-    else {
-      if (PrintMiscellaneous && Verbose) {
-        warning("CreateDirectory failed: %d\n", GetLastError());
-      }
+    } else {
+      log_debug(perf)("CreateDirectory failed: %d", GetLastError());
+      free_security_attr(pDirSA);
       return false;
     }
   }
-
-  // free the security attributes structure
   free_security_attr(pDirSA);
-
   return true;
 }
 
@@ -1276,27 +1179,29 @@ static bool make_user_tmp_dir(const char* dirname) {
 static HANDLE create_sharedmem_resources(const char* dirname, const char* filename, const char* objectname, size_t size) {
 
   HANDLE fh = INVALID_HANDLE_VALUE;
-  HANDLE fmh = NULL;
+  HANDLE fmh = nullptr;
 
 
   // create the security attributes for the backing store file
   LPSECURITY_ATTRIBUTES lpFileSA = make_file_security_attr();
-  if (lpFileSA == NULL) {
-    return NULL;
+  if (lpFileSA == nullptr) {
+    return nullptr;
   }
 
   // create the security attributes for the shared memory object
   LPSECURITY_ATTRIBUTES lpSmoSA = make_smo_security_attr();
-  if (lpSmoSA == NULL) {
+  if (lpSmoSA == nullptr) {
     free_security_attr(lpFileSA);
-    return NULL;
+    return nullptr;
   }
 
   // create the user temporary directory
   if (!make_user_tmp_dir(dirname)) {
     // could not make/find the directory or the found directory
     // was not secure
-    return NULL;
+    free_security_attr(lpFileSA);
+    free_security_attr(lpSmoSA);
+    return nullptr;
   }
 
   // Create the file - the FILE_FLAG_DELETE_ON_CLOSE flag allows the
@@ -1318,16 +1223,15 @@ static HANDLE create_sharedmem_resources(const char* dirname, const char* filena
                                                  */
              FILE_FLAG_DELETE_ON_CLOSE,         /* DWORD flags and attributes */
 
-             NULL);                             /* HANDLE template file access */
+             nullptr);                             /* HANDLE template file access */
 
   free_security_attr(lpFileSA);
 
   if (fh == INVALID_HANDLE_VALUE) {
     DWORD lasterror = GetLastError();
-    if (PrintMiscellaneous && Verbose) {
-      warning("could not create file %s: %d\n", filename, lasterror);
-    }
-    return NULL;
+    log_debug(perf)("could not create file %s: %d", filename, lasterror);
+    free_security_attr(lpSmoSA);
+    return nullptr;
   }
 
   // try to create the file mapping
@@ -1335,15 +1239,15 @@ static HANDLE create_sharedmem_resources(const char* dirname, const char* filena
 
   free_security_attr(lpSmoSA);
 
-  if (fmh == NULL) {
+  if (fmh == nullptr) {
     // closing the file handle here will decrement the reference count
     // on the file. When all processes accessing the file close their
     // handle to it, the reference count will decrement to 0 and the
     // OS will delete the file. These semantics are requested by the
     // FILE_FLAG_DELETE_ON_CLOSE flag in CreateFile call above.
     CloseHandle(fh);
-    fh = NULL;
-    return NULL;
+    fh = nullptr;
+    return nullptr;
   } else {
     // We created the file mapping, but rarely the size of the
     // backing store file is reported as zero (0) which can cause
@@ -1351,15 +1255,13 @@ static HANDLE create_sharedmem_resources(const char* dirname, const char* filena
     struct stat statbuf;
     int ret_code = ::stat(filename, &statbuf);
     if (ret_code == OS_ERR) {
-      if (PrintMiscellaneous && Verbose) {
-        warning("Could not get status information from file %s: %s\n",
-            filename, os::strerror(errno));
-      }
+      log_debug(perf)("could not get status information from file %s: %s",
+                      filename, os::strerror(errno));
       CloseHandle(fmh);
       CloseHandle(fh);
-      fh = NULL;
-      fmh = NULL;
-      return NULL;
+      fh = nullptr;
+      fmh = nullptr;
+      return nullptr;
     }
 
     // We could always call FlushFileBuffers() but the Microsoft
@@ -1367,14 +1269,12 @@ static HANDLE create_sharedmem_resources(const char* dirname, const char* filena
     // call it when we observe the size as zero (0).
     if (statbuf.st_size == 0 && FlushFileBuffers(fh) != TRUE) {
       DWORD lasterror = GetLastError();
-      if (PrintMiscellaneous && Verbose) {
-        warning("could not flush file %s: %d\n", filename, lasterror);
-      }
+      log_debug(perf)("could not flush file %s: %d", filename, lasterror);
       CloseHandle(fmh);
       CloseHandle(fh);
-      fh = NULL;
-      fmh = NULL;
-      return NULL;
+      fh = nullptr;
+      fmh = nullptr;
+      return nullptr;
     }
   }
 
@@ -1398,12 +1298,10 @@ static HANDLE open_sharedmem_object(const char* objectname, DWORD ofm_access, TR
                FALSE,            /* BOOL inherit flag - Do not allow inherit */
                objectname);      /* name for object */
 
-  if (fmh == NULL) {
+  if (fmh == nullptr) {
     DWORD lasterror = GetLastError();
-    if (PrintMiscellaneous && Verbose) {
-      warning("OpenFileMapping failed for shared memory object %s:"
-              " lasterror = %d\n", objectname, lasterror);
-    }
+    log_debug(perf)("OpenFileMapping failed for shared memory object %s:"
+                    " lasterror = %d", objectname, lasterror);
     THROW_MSG_(vmSymbols::java_lang_IllegalArgumentException(),
                err_msg("Could not open PerfMemory, error %d", lasterror),
                INVALID_HANDLE_VALUE);
@@ -1434,8 +1332,8 @@ static char* mapping_create_shared(size_t size) {
   // get the name of the user associated with this process
   char* user = get_user_name();
 
-  if (user == NULL) {
-    return NULL;
+  if (user == nullptr) {
+    return nullptr;
   }
 
   // construct the name of the user specific temporary directory
@@ -1443,9 +1341,9 @@ static char* mapping_create_shared(size_t size) {
 
   // check that the file system is secure - i.e. it supports ACLs.
   if (!is_filesystem_secure(dirname)) {
-    FREE_C_HEAP_ARRAY(char, dirname);
-    FREE_C_HEAP_ARRAY(char, user);
-    return NULL;
+    FREE_C_HEAP_ARRAY(dirname);
+    FREE_C_HEAP_ARRAY(user);
+    return nullptr;
   }
 
   // create the names of the backing store files and for the
@@ -1460,18 +1358,18 @@ static char* mapping_create_shared(size_t size) {
   assert(((size != 0) && (size % os::vm_page_size() == 0)),
          "unexpected PerfMemry region size");
 
-  FREE_C_HEAP_ARRAY(char, user);
+  FREE_C_HEAP_ARRAY(user);
 
   // create the shared memory resources
   sharedmem_fileMapHandle =
                create_sharedmem_resources(dirname, filename, objectname, size);
 
-  FREE_C_HEAP_ARRAY(char, filename);
-  FREE_C_HEAP_ARRAY(char, objectname);
-  FREE_C_HEAP_ARRAY(char, dirname);
+  FREE_C_HEAP_ARRAY(filename);
+  FREE_C_HEAP_ARRAY(objectname);
+  FREE_C_HEAP_ARRAY(dirname);
 
-  if (sharedmem_fileMapHandle == NULL) {
-    return NULL;
+  if (sharedmem_fileMapHandle == nullptr) {
+    return nullptr;
   }
 
   // map the file into the address space
@@ -1482,13 +1380,11 @@ static char* mapping_create_shared(size_t size) {
                    0,                       /* DWORD Low word of offset */
                    (DWORD)size);            /* DWORD Number of bytes to map */
 
-  if (mapAddress == NULL) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("MapViewOfFile failed, lasterror = %d\n", GetLastError());
-    }
+  if (mapAddress == nullptr) {
+    log_debug(perf)("MapViewOfFile failed, lasterror = %d", GetLastError());
     CloseHandle(sharedmem_fileMapHandle);
-    sharedmem_fileMapHandle = NULL;
-    return NULL;
+    sharedmem_fileMapHandle = nullptr;
+    return nullptr;
   }
 
   // clear the shared memory region
@@ -1518,9 +1414,9 @@ static void delete_file_mapping(char* addr, size_t size) {
   // by the OS as long as any other JVM processes has an open file mapping
   // handle or a mapped view of the file.
   //
-  if (sharedmem_fileMapHandle != NULL) {
+  if (sharedmem_fileMapHandle != nullptr) {
     CloseHandle(sharedmem_fileMapHandle);
-    sharedmem_fileMapHandle = NULL;
+    sharedmem_fileMapHandle = nullptr;
   }
 
   // close the file handle. This will decrement the reference count on the
@@ -1544,25 +1440,19 @@ static size_t sharedmem_filesize(const char* filename, TRAPS) {
   //
   // on win95/98/me, _stat returns a file size of 0 bytes, but on
   // winnt/2k the appropriate file size is returned. support for
-  // the sharable aspects of performance counters was abandonded
+  // the shareable aspects of performance counters was abandoned
   // on the non-nt win32 platforms due to this and other api
   // inconsistencies
   //
   if (::stat(filename, &statbuf) == OS_ERR) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("stat %s failed: %s\n", filename, os::strerror(errno));
-    }
+    log_debug(perf)("stat %s failed: %s", filename, os::strerror(errno));
     THROW_MSG_0(vmSymbols::java_io_IOException(),
                 "Could not determine PerfMemory size");
   }
 
   if ((statbuf.st_size == 0) || (statbuf.st_size % os::vm_page_size() != 0)) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("unexpected file size: size = " SIZE_FORMAT "\n",
-              statbuf.st_size);
-    }
-    THROW_MSG_0(vmSymbols::java_io_IOException(),
-                "Invalid PerfMemory size");
+    log_debug(perf)("unexpected file size: size = %zu", statbuf.st_size);
+    THROW_MSG_0(vmSymbols::java_io_IOException(), "Invalid PerfMemory size");
   }
 
   return statbuf.st_size;
@@ -1571,47 +1461,14 @@ static size_t sharedmem_filesize(const char* filename, TRAPS) {
 // this method opens a file mapping object and maps the object
 // into the address space of the process
 //
-static void open_file_mapping(const char* user, int vmid,
-                              PerfMemory::PerfMemoryMode mode,
-                              char** addrp, size_t* sizep, TRAPS) {
+static void open_file_mapping(int vmid, char** addrp, size_t* sizep, TRAPS) {
 
   ResourceMark rm;
+  DWORD ofm_access = FILE_MAP_READ;
+  DWORD mv_access = FILE_MAP_READ;
+  const char* luser = get_user_name(vmid);
 
-  void *mapAddress = 0;
-  size_t size = 0;
-  HANDLE fmh;
-  DWORD ofm_access;
-  DWORD mv_access;
-  const char* luser = NULL;
-
-  if (mode == PerfMemory::PERF_MODE_RO) {
-    ofm_access = FILE_MAP_READ;
-    mv_access = FILE_MAP_READ;
-  }
-  else if (mode == PerfMemory::PERF_MODE_RW) {
-#ifdef LATER
-    ofm_access = FILE_MAP_READ | FILE_MAP_WRITE;
-    mv_access = FILE_MAP_READ | FILE_MAP_WRITE;
-#else
-    THROW_MSG(vmSymbols::java_lang_IllegalArgumentException(),
-              "Unsupported access mode");
-#endif
-  }
-  else {
-    THROW_MSG(vmSymbols::java_lang_IllegalArgumentException(),
-              "Illegal access mode");
-  }
-
-  // if a user name wasn't specified, then find the user name for
-  // the owner of the target vm.
-  if (user == NULL || strlen(user) == 0) {
-    luser = get_user_name(vmid);
-  }
-  else {
-    luser = user;
-  }
-
-  if (luser == NULL) {
+  if (luser == nullptr) {
     THROW_MSG(vmSymbols::java_lang_IllegalArgumentException(),
               "Could not map vmid to user name");
   }
@@ -1623,8 +1480,8 @@ static void open_file_mapping(const char* user, int vmid,
   // store file, we also don't following them when attaching
   //
   if (!is_directory_secure(dirname)) {
-    FREE_C_HEAP_ARRAY(char, dirname);
-    if (luser != user) FREE_C_HEAP_ARRAY(char, luser);
+    FREE_C_HEAP_ARRAY(dirname);
+    FREE_C_HEAP_ARRAY(luser);
     THROW_MSG(vmSymbols::java_lang_IllegalArgumentException(),
               "Process not found");
   }
@@ -1637,17 +1494,16 @@ static void open_file_mapping(const char* user, int vmid,
   // using resource arrays for these names prevents the leaks
   // that would otherwise occur.
   //
-  char* rfilename = NEW_RESOURCE_ARRAY(char, strlen(filename) + 1);
-  char* robjectname = NEW_RESOURCE_ARRAY(char, strlen(objectname) + 1);
-  strcpy(rfilename, filename);
-  strcpy(robjectname, objectname);
+  char* rfilename = ResourceArea::strdup(THREAD, filename);
+  char* robjectname = ResourceArea::strdup(THREAD, objectname);
 
   // free the c heap resources that are no longer needed
-  if (luser != user) FREE_C_HEAP_ARRAY(char, luser);
-  FREE_C_HEAP_ARRAY(char, dirname);
-  FREE_C_HEAP_ARRAY(char, filename);
-  FREE_C_HEAP_ARRAY(char, objectname);
+  FREE_C_HEAP_ARRAY(luser);
+  FREE_C_HEAP_ARRAY(dirname);
+  FREE_C_HEAP_ARRAY(filename);
+  FREE_C_HEAP_ARRAY(objectname);
 
+  size_t size;
   if (*sizep == 0) {
     size = sharedmem_filesize(rfilename, CHECK);
   } else {
@@ -1657,22 +1513,19 @@ static void open_file_mapping(const char* user, int vmid,
   assert(size > 0, "unexpected size <= 0");
 
   // Open the file mapping object with the given name
-  fmh = open_sharedmem_object(robjectname, ofm_access, CHECK);
-
+  HANDLE fmh = open_sharedmem_object(robjectname, ofm_access, CHECK);
   assert(fmh != INVALID_HANDLE_VALUE, "unexpected handle value");
 
   // map the entire file into the address space
-  mapAddress = MapViewOfFile(
+  void* mapAddress = MapViewOfFile(
                  fmh,             /* HANDLE Handle of file mapping object */
                  mv_access,       /* DWORD access flags */
                  0,               /* DWORD High word of offset */
                  0,               /* DWORD Low word of offset */
                  size);           /* DWORD Number of bytes to map */
 
-  if (mapAddress == NULL) {
-    if (PrintMiscellaneous && Verbose) {
-      warning("MapViewOfFile failed, lasterror = %d\n", GetLastError());
-    }
+  if (mapAddress == nullptr) {
+    log_debug(perf)("MapViewOfFile failed, lasterror = %d", GetLastError());
     CloseHandle(fmh);
     THROW_MSG(vmSymbols::java_lang_OutOfMemoryError(),
               "Could not map PerfMemory");
@@ -1690,11 +1543,11 @@ static void open_file_mapping(const char* user, int vmid,
   // invalidating the mapped view of the file
   CloseHandle(fmh);
 
-  log_debug(perf, memops)("mapped " SIZE_FORMAT " bytes for vmid %d at "
+  log_debug(perf, memops)("mapped %zu bytes for vmid %d at "
                           INTPTR_FORMAT, size, vmid, mapAddress);
 }
 
-// this method unmaps the the mapped view of the the
+// this method unmaps the mapped view of the
 // file mapping object.
 //
 static void remove_file_mapping(char* addr) {
@@ -1736,20 +1589,18 @@ void PerfMemory::create_memory_region(size_t size) {
   }
   else {
     _start = create_shared_memory(size);
-    if (_start == NULL) {
+    if (_start == nullptr) {
 
       // creation of the shared memory region failed, attempt
       // to create a contiguous, non-shared memory region instead.
       //
-      if (PrintMiscellaneous && Verbose) {
-        warning("Reverting to non-shared PerfMemory region.\n");
-      }
-      PerfDisableSharedMem = true;
+      log_debug(perf)("Reverting to non-shared PerfMemory region.");
+      FLAG_SET_ERGO(PerfDisableSharedMem, true);
       _start = create_standard_memory(size);
     }
   }
 
-  if (_start != NULL) _capacity = size;
+  if (_start != nullptr) _capacity = size;
 
 }
 
@@ -1761,13 +1612,13 @@ void PerfMemory::create_memory_region(size_t size) {
 //
 void PerfMemory::delete_memory_region() {
 
-  assert((start() != NULL && capacity() > 0), "verify proper state");
+  assert((start() != nullptr && capacity() > 0), "verify proper state");
 
   // If user specifies PerfDataSaveFile, it will save the performance data
   // to the specified file name no matter whether PerfDataSaveToFile is specified
   // or not. In other word, -XX:PerfDataSaveFile=.. overrides flag
   // -XX:+PerfDataSaveToFile.
-  if (PerfDataSaveToFile || PerfDataSaveFile != NULL) {
+  if (PerfDataSaveToFile || PerfDataSaveFile != nullptr) {
     save_memory_to_file(start(), capacity());
   }
 
@@ -1794,8 +1645,7 @@ void PerfMemory::delete_memory_region() {
 // the indicated process's PerfData memory region into this JVMs
 // address space.
 //
-void PerfMemory::attach(const char* user, int vmid, PerfMemoryMode mode,
-                        char** addrp, size_t* sizep, TRAPS) {
+void PerfMemory::attach(int vmid, char** addrp, size_t* sizep, TRAPS) {
 
   if (vmid == 0 || vmid == os::current_process_id()) {
      *addrp = start();
@@ -1803,7 +1653,7 @@ void PerfMemory::attach(const char* user, int vmid, PerfMemoryMode mode,
      return;
   }
 
-  open_file_mapping(user, vmid, mode, addrp, sizep, CHECK);
+  open_file_mapping(vmid, addrp, sizep, CHECK);
 }
 
 // detach from the PerfData memory region of another JVM
@@ -1822,7 +1672,7 @@ void PerfMemory::attach(const char* user, int vmid, PerfMemoryMode mode,
 // the indicated process's PerfData memory region from this
 // process's address space.
 //
-void PerfMemory::detach(char* addr, size_t bytes, TRAPS) {
+void PerfMemory::detach(char* addr, size_t bytes) {
 
   assert(addr != 0, "address sanity check");
   assert(bytes > 0, "capacity sanity check");
@@ -1832,12 +1682,7 @@ void PerfMemory::detach(char* addr, size_t bytes, TRAPS) {
     return;
   }
 
-  if (MemTracker::tracking_level() > NMT_minimal) {
-    // it does not go through os api, the operation has to record from here
-    Tracker tkr(Tracker::release);
-    remove_file_mapping(addr);
-    tkr.record((address)addr, bytes);
-  } else {
-    remove_file_mapping(addr);
-  }
+  // it does not go through os api, the operation has to record from here
+  MemTracker::record_virtual_memory_release(addr, bytes);
+  remove_file_mapping(addr);
 }

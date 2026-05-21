@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,6 @@ package sun.awt.image;
 
 import java.io.InputStream;
 import java.io.ByteArrayInputStream;
-import java.io.BufferedInputStream;
 
 public class ByteArrayImageSource extends InputStreamImageSource {
     byte[] imagedata;
@@ -44,18 +43,9 @@ public class ByteArrayImageSource extends InputStreamImageSource {
         imagelength = length;
     }
 
-    final boolean checkSecurity(Object context, boolean quiet) {
-        // No need to check security.  Applets and downloaded code can
-        // only make byte array image once they already have a handle
-        // on the image data anyway...
-        return true;
-    }
-
     protected ImageDecoder getDecoder() {
-        InputStream is =
-            new BufferedInputStream(new ByteArrayInputStream(imagedata,
-                                                             imageoffset,
-                                                             imagelength));
+        InputStream is = new ByteArrayInputStream(imagedata, imageoffset,
+                imagelength);
         return getDecoder(is);
     }
 }

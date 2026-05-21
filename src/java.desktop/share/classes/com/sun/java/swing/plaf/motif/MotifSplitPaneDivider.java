@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -82,8 +82,9 @@ public class MotifSplitPaneDivider extends BasicSplitPaneDivider
 
     /**
      * overrides to hardcode the size of the divider
-     * PENDING(jeff) - rewrite JSplitPane so that this ins't needed
+     * PENDING(jeff) - rewrite JSplitPane so that this isn't needed
      */
+    @Override
     public void setDividerSize(int newSize) {
         Insets          insets = getInsets();
         int             borderSize = 0;
@@ -109,6 +110,7 @@ public class MotifSplitPaneDivider extends BasicSplitPaneDivider
       */
     // PENDING(jeff) - the thumb's location and size is currently hard coded.
     // It should be dynamic.
+    @Override
     public void paint(Graphics g) {
         Color               bgColor = getBackground();
         Dimension           size = getSize();
@@ -179,14 +181,16 @@ public class MotifSplitPaneDivider extends BasicSplitPaneDivider
     /**
       * The minimums size is the same as the preferredSize
       */
+    @Override
     public Dimension getMinimumSize() {
         return getPreferredSize();
     }
 
     /**
      * Sets the SplitPaneUI that is using the receiver. This is completely
-     * overriden from super to create a different MouseHandler.
+     * overridden from super to create a different MouseHandler.
      */
+    @Override
     public void setBasicSplitPaneUI(BasicSplitPaneUI newUI) {
         if (splitPane != null) {
             splitPane.removePropertyChangeListener(this);
@@ -268,6 +272,7 @@ public class MotifSplitPaneDivider extends BasicSplitPaneDivider
      * in.
      */
     private class MotifMouseHandler extends MouseHandler {
+        @Override
         public void mousePressed(MouseEvent e) {
             // Constrain the mouse pressed to the thumb.
             if (e.getSource() == MotifSplitPaneDivider.this &&
@@ -277,6 +282,7 @@ public class MotifSplitPaneDivider extends BasicSplitPaneDivider
             }
         }
 
+        @Override
         public void mouseMoved(MouseEvent e) {
             if (getDragger() != null) {
                 return;

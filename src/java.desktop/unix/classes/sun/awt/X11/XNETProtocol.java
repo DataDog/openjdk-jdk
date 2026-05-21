@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,13 +23,16 @@
  * questions.
  */
 
-
 package sun.awt.X11;
 
 import java.awt.Frame;
+import java.nio.charset.Charset;
 
 import sun.awt.IconInfo;
 import sun.util.logging.PlatformLogger;
+
+import static java.nio.charset.StandardCharsets.US_ASCII;
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 final class XNETProtocol extends XProtocol implements XStateProtocol, XLayerProtocol
 {
@@ -40,10 +43,12 @@ final class XNETProtocol extends XProtocol implements XStateProtocol, XLayerProt
     /**
      * XStateProtocol
      */
+    @Override
     public boolean supportsState(int state) {
         return doStateProtocol() ; // TODO - check for Frame constants
     }
 
+    @Override
     public void setState(XWindowPeer window, int state) {
         if (log.isLoggable(PlatformLogger.Level.FINE)) {
             log.fine("Setting state of " + window + " to " + state);
@@ -129,6 +134,7 @@ final class XNETProtocol extends XProtocol implements XStateProtocol, XLayerProt
         }
     }
 
+    @Override
     public int getState(XWindowPeer window) {
         return getStateImpl(window);
     }
@@ -151,6 +157,7 @@ final class XNETProtocol extends XProtocol implements XStateProtocol, XLayerProt
         return java_state;
     }
 
+    @Override
     public boolean isStateChange(XPropertyEvent e) {
         boolean res = doStateProtocol() && (e.get_atom() == XA_NET_WM_STATE.getAtom()) ;
 
@@ -165,6 +172,7 @@ final class XNETProtocol extends XProtocol implements XStateProtocol, XLayerProt
     /*
      * Work around for 4775545.
      */
+    @Override
     public void unshadeKludge(XWindowPeer window) {
         XAtomList net_wm_state = window.getNETWMState();
         net_wm_state.remove(XA_NET_WM_STATE_SHADED);
@@ -174,6 +182,7 @@ final class XNETProtocol extends XProtocol implements XStateProtocol, XLayerProt
     /**
      * XLayerProtocol
      */
+    @Override
     public boolean supportsLayer(int layer) {
         return ((layer == LAYER_ALWAYS_ON_TOP) || (layer == LAYER_NORMAL)) && doLayerProtocol();
     }
@@ -241,6 +250,7 @@ final class XNETProtocol extends XProtocol implements XStateProtocol, XLayerProt
         XToolkit.XSync();
     }
 
+    @Override
     public void setLayer(XWindowPeer window, int layer) {
         setStateHelper(window, XA_NET_WM_STATE_ABOVE, layer == LAYER_ALWAYS_ON_TOP);
     }
@@ -382,22 +392,18 @@ final class XNETProtocol extends XProtocol implements XStateProtocol, XLayerProt
          * mandates UTF8_STRING for _NET_WM_NAME but at least sawfish-1.0
          * still uses STRING.  (mmm, moving targets...).
          */
-        String charSet = "UTF8";
+        Charset charSet = UTF_8;
         byte[] net_wm_name = XA_NET_WM_NAME.getByteArrayProperty(NetWindow, XA_UTF8_STRING.getAtom());
         if (net_wm_name == null) {
             net_wm_name = XA_NET_WM_NAME.getByteArrayProperty(NetWindow, XAtom.XA_STRING);
-            charSet = "ASCII";
+            charSet = US_ASCII;
         }
 
         if (net_wm_name == null) {
             return null;
         }
-        try {
-            net_wm_name_cache = new String(net_wm_name, charSet);
-            return net_wm_name_cache;
-        } catch (java.io.UnsupportedEncodingException uex) {
-            return null;
-        }
+        net_wm_name_cache = new String(net_wm_name, charSet);
+        return net_wm_name_cache;
     }
 
     /**

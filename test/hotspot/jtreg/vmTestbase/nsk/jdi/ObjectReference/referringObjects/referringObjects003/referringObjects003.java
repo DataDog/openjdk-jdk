@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -45,12 +45,11 @@
  *         - Debugee VM
  *             - stop all threads and remove all references to threads and thread group
  *       - Debugger VM
- *         - check that thread group have only 1 referrer: parent thread group
- *         - check that threre are no references to test threads in target VM
- *       - Debugger VM
- *         - test ObjectReference.disableCollection, ObjectReference.enableCollection for ThreadGroupReference:
- *         can't force collection of thread group because of thread group always has 1 referrer - parent thread group, so
- *         just test disableCollection/enableCollection don't throw any unexpected exceptions
+ *         - force GC
+ *         - check that the test thread group has been collected. The reference from the
+ *           parent thread group is weak and should not prevent the test thread group from
+ *           being collected.
+ *         - check that there are no references to test threads in target VM
  *
  * @requires !vm.graal.enabled
  * @library /vmTestbase
@@ -80,7 +79,10 @@ import nsk.share.jpda.AbstractDebuggeeTest;
 public class referringObjects003 extends HeapwalkingDebugger {
 
     public static void main(String argv[]) {
-        System.exit(run(argv, System.out) + Consts.JCK_STATUS_BASE);
+        int result = run(argv,System.out);
+        if (result != 0) {
+            throw new RuntimeException("TEST FAILED with result " + result);
+        }
     }
 
     public static int run(String argv[], PrintStream out) {
@@ -104,9 +106,8 @@ public class referringObjects003 extends HeapwalkingDebugger {
 
             if (referrerCount != expectedCount) {
                 setSuccess(false);
-                log
-                        .complain("List with wrong size was returned by ObjectReference.referringObjects(ThreadGroupReference): "
-                                + referrerCount + ", expected: " + expectedCount);
+                log.complain("List with wrong size was returned by ObjectReference.referringObjects(ThreadGroupReference): "
+                             + referrerCount + ", expected: " + expectedCount);
             }
         }
     }
@@ -167,11 +168,10 @@ public class referringObjects003 extends HeapwalkingDebugger {
         List<ObjectReference> threads = HeapwalkingDebugger.filterObjectReferrence(threadsToFilter, HeapwalkingDebugger
                 .getObjectReferences("java.lang.Thread", vm));
 
-        expectedCount = 2 + HeapwalkingDebuggee.includedIntoReferrersCountTypes.size();
+        expectedCount = 1 + HeapwalkingDebuggee.includedIntoReferrersCountTypes.size();
 
-        // 1 referrer is debugee object + 1 referrer is thread group
-        // + 'includedIntoReferrersCountTypes.size()' referrers was additionally
-        // created
+        // 1 referrer is debugee object + 'includedIntoReferrersCountTypes.size()' referrers
+        // was additionally created (there is no longer a reference from ThreadGroup)
         checkThreadReferrersCount(threads, expectedCount);
 
         pipe.println(referringObjects003a.COMMAND_STOP_THREADS);
@@ -179,57 +179,36 @@ public class referringObjects003 extends HeapwalkingDebugger {
         if (!isDebuggeeReady())
             return;
 
-        checkDebugeeAnswer_instances("java.lang.ThreadGroup", threadGroupsToFilter.size() + 1);
+        // Force the test ThreadGroup to be collected. The only reference to it is a weak
+        // reference from the parent ThreadGroup.
+        forceGC();
+
+        checkDebugeeAnswer_instances("java.lang.ThreadGroup", threadGroupsToFilter.size());
         checkDebugeeAnswer_instances("java.lang.Thread", threadsToFilter.size());
 
         threadGroups = HeapwalkingDebugger.filterObjectReferrence(threadGroupsToFilter, HeapwalkingDebugger
                 .getObjectReferences("java.lang.ThreadGroup", vm));
 
-        // 1 referrer(parent thread group) is left
-        checkThreadGroupReferrersCount(threadGroups, 1);
+        if (threadGroups.size() != 0) {
+            setSuccess(false);
+            log.complain("All test threads groups should be removed");
+            log.complain("Unexpected threads groups:");
+            for (ObjectReference objectReference : threadGroups) {
+                log.complain(objectReference.toString());
+            }
+        }
 
         threads = HeapwalkingDebugger.filterObjectReferrence(threadsToFilter, HeapwalkingDebugger.getObjectReferences(
                 "java.lang.Thread",
                 vm));
 
         if (threads.size() != 0) {
+            setSuccess(false);
             log.complain("All test threads should be removed");
             log.complain("Unexpected threads:");
             for (ObjectReference objectReference : threads) {
                 log.complain(objectReference.toString());
             }
-        }
-
-        checkThreadGroupDisableCollection(threadGroups);
-    }
-
-    // can't force collection of thread group because of 1 reference is always
-    // left in parent tread group
-    public void checkThreadGroupDisableCollection(List<ObjectReference> objectReferences) {
-        try {
-            for (ObjectReference objectReference : objectReferences)
-                objectReference.disableCollection();
-        } catch (Throwable t) {
-            log.complain("Unexpected exception: " + t);
-            t.printStackTrace(log.getOutStream());
-        }
-
-        forceGC();
-        try {
-            for (ObjectReference objectReference : objectReferences)
-                objectReference.enableCollection();
-        } catch (Throwable t) {
-            log.complain("Unexpected exception: " + t);
-            t.printStackTrace(log.getOutStream());
-        }
-
-        forceGC();
-        try {
-            for (ObjectReference objectReference : objectReferences)
-                objectReference.referringObjects(0);
-        } catch (Throwable t) {
-            log.complain("Unexpected exception: " + t);
-            t.printStackTrace(log.getOutStream());
         }
     }
 }

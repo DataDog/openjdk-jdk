@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -91,6 +91,8 @@ public class JavacTaskImpl extends BasicJavacTask {
 
     @Override @DefinedBy(Api.COMPILER)
     public Boolean call() {
+        if (used.get())
+            throw new IllegalStateException();
         return doCall().isOK();
     }
 
@@ -207,7 +209,6 @@ public class JavacTaskImpl extends BasicJavacTask {
             // init JavaCompiler and queues
             compiler = JavaCompiler.instance(context);
             compiler.keepComments = true;
-            compiler.genEndPos = true;
             notYetEntered = new HashMap<>();
             if (forParse) {
                 compiler.initProcessAnnotations(processors, args.getFileObjects(), args.getClassNames());
@@ -232,7 +233,7 @@ public class JavacTaskImpl extends BasicJavacTask {
     void cleanup() {
         if (compiler != null)
             compiler.close();
-        if (fileManager instanceof BaseFileManager && ((BaseFileManager) fileManager).autoClose) {
+        if (fileManager instanceof BaseFileManager baseFileManager && baseFileManager.autoClose) {
             try {
                 fileManager.close();
             } catch (IOException ignore) {
@@ -245,6 +246,8 @@ public class JavacTaskImpl extends BasicJavacTask {
 
     @Override @DefinedBy(Api.COMPILER_TREE)
     public Iterable<? extends CompilationUnitTree> parse() {
+        if (used.get())
+            throw new IllegalStateException();
         Pair<Iterable<? extends CompilationUnitTree>, Throwable> result =  invocationHelper(this::parseInternal);
         if (result.snd == null) {
             return result.fst;
@@ -321,10 +324,10 @@ public class JavacTaskImpl extends BasicJavacTask {
         }
         else {
             for (CompilationUnitTree cu : trees) {
-                if (cu instanceof JCCompilationUnit) {
+                if (cu instanceof JCCompilationUnit compilationUnit) {
                     if (roots == null)
                         roots = new ListBuffer<>();
-                    roots.append((JCCompilationUnit)cu);
+                    roots.append(compilationUnit);
                     notYetEntered.remove(cu.getSourceFile());
                 }
                 else
@@ -401,17 +404,18 @@ public class JavacTaskImpl extends BasicJavacTask {
         final ListBuffer<Element> results = new ListBuffer<>();
         try {
             if (classes == null) {
-                handleFlowResults(compiler.flow(compiler.attribute(compiler.todo)), results);
+                handleFlowResults(compiler.warn(compiler.flow(compiler.attribute(compiler.todo))), results);
             } else {
                 Filter f = new Filter() {
                     @Override
                     public void process(Env<AttrContext> env) {
-                        handleFlowResults(compiler.flow(compiler.attribute(env)), results);
+                        handleFlowResults(compiler.warn(compiler.flow(compiler.attribute(env))), results);
                     }
                 };
                 f.run(compiler.todo, classes);
             }
         } finally {
+            compiler.log.reportOutstandingWarnings();
             compiler.log.flush();
         }
         return results;
@@ -483,14 +487,12 @@ public class JavacTaskImpl extends BasicJavacTask {
             }
         }
         finally {
-            if (compiler != null)
+            if (compiler != null) {
+                compiler.log.reportOutstandingWarnings();
                 compiler.log.flush();
+            }
         }
         return results;
-    }
-
-    public Iterable<? extends Tree> pathFor(CompilationUnitTree unit, Tree node) {
-        return TreeInfo.pathFor((JCTree) node, (JCTree.JCCompilationUnit) unit).reverse();
     }
 
     public void ensureEntered() {

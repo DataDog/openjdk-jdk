@@ -27,21 +27,32 @@
 
 #include "gc/shenandoah/heuristics/shenandoahHeuristics.hpp"
 
+/*
+ * The passive heuristic is for use only with the passive mode. In
+ * the passive mode, Shenandoah only performs STW (i.e., degenerated)
+ * collections. All the barriers are disabled and there are no concurrent
+ * activities. Therefore, this heuristic _never_ triggers a cycle. It
+ * will select regions for evacuation based on ShenandoahEvacReserve,
+ * ShenandoahEvacWaste and ShenandoahGarbageThreshold. Note that it does
+ * not attempt to evacuate regions with more garbage.
+ */
 class ShenandoahPassiveHeuristics : public ShenandoahHeuristics {
 public:
-  virtual bool should_start_gc();
+  ShenandoahPassiveHeuristics(ShenandoahSpaceInfo* space_info);
 
-  virtual bool should_unload_classes();
+  bool should_start_gc() override;
 
-  virtual bool should_degenerate_cycle();
+  bool should_unload_classes() override;
 
-  virtual void choose_collection_set_from_regiondata(ShenandoahCollectionSet* set,
-                                                     RegionData* data, size_t data_size,
-                                                     size_t free);
+  bool should_degenerate_cycle() override;
 
-  virtual const char* name()     { return "Passive"; }
-  virtual bool is_diagnostic()   { return true; }
-  virtual bool is_experimental() { return false; }
+  void choose_collection_set_from_regiondata(ShenandoahCollectionSet* set,
+                                             RegionData* data, size_t data_size,
+                                             size_t free) override;
+
+  const char* name() override     { return "Passive"; }
+  bool is_diagnostic() override   { return true; }
+  bool is_experimental() override { return false; }
 };
 
 #endif // SHARE_GC_SHENANDOAH_HEURISTICS_SHENANDOAHPASSIVEHEURISTICS_HPP

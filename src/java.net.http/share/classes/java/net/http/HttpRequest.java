@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,13 +26,14 @@
 package java.net.http;
 
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.net.http.HttpClient.Version;
 import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Iterator;
@@ -66,14 +67,17 @@ import static java.nio.charset.StandardCharsets.UTF_8;
  * <p> The following is an example of a GET request that prints the response
  * body as a String:
  *
- * <pre>{@code    HttpClient client = HttpClient.newHttpClient();
+ * {@snippet :
+ *   HttpClient client = HttpClient.newHttpClient();
+ *
  *   HttpRequest request = HttpRequest.newBuilder()
  *         .uri(URI.create("http://foo.com/"))
  *         .build();
+ *
  *   client.sendAsync(request, BodyHandlers.ofString())
  *         .thenApply(HttpResponse::body)
  *         .thenAccept(System.out::println)
- *         .join(); }</pre>
+ *         .join(); }
  *
  * <p>The class {@link BodyPublishers BodyPublishers} provides implementations
  * of many common publishers. Alternatively, a custom {@code BodyPublisher}
@@ -87,6 +91,24 @@ public abstract class HttpRequest {
      * Creates an HttpRequest.
      */
     protected HttpRequest() {}
+
+    /**
+     * {@return the value configured on this request for the given option, if any}
+     * @param option a request configuration option
+     * @param <T> the type of the option
+     *
+     * @see Builder#setOption(HttpOption, Object)
+     *
+     * @implSpec
+     * The default implementation of this method returns {@link Optional#empty()}
+     * if {@code option} is non-null, otherwise throws {@link NullPointerException}.
+     *
+     * @since 26
+     */
+    public <T> Optional<T> getOption(HttpOption<T> option) {
+        Objects.requireNonNull(option);
+        return Optional.empty();
+    }
 
     /**
      * A builder of {@linkplain HttpRequest HTTP requests}.
@@ -141,13 +163,52 @@ public abstract class HttpRequest {
          *
          * <p> The corresponding {@link HttpResponse} should be checked for the
          * version that was actually used. If the version is not set in a
-         * request, then the version requested will be that of the sending
-         * {@link HttpClient}.
+         * request, then the version requested will be {@linkplain
+         * HttpClient.Builder#version(Version) that of the sending
+         * {@code HttpClient}}.
+         *
+         * @implNote
+         * Constraints may also affect the {@linkplain HttpClient##ProtocolVersionSelection
+         * selection of the actual protocol version}.
          *
          * @param version the HTTP protocol version requested
          * @return this builder
          */
         public Builder version(HttpClient.Version version);
+
+        /**
+         * Provides request configuration option hints modeled as key value pairs
+         * to help an {@link HttpClient} implementation decide how the
+         * request/response exchange should be established or carried out.
+         *
+         * <p> An {@link HttpClient} implementation may decide to ignore request
+         * configuration option hints, or fail the request, if provided with any
+         * option hints that it does not understand.
+         * <p>
+         * If this method is invoked twice for the same {@linkplain HttpOption
+         * request option}, any value previously provided to this builder for the
+         * corresponding option is replaced by the new value.
+         * If {@code null} is supplied as a value, any value previously
+         * provided is discarded.
+         *
+         * @implSpec
+         * The default implementation of this method discards the provided option
+         * hint and does nothing.
+         *
+         * @implNote
+         * The JDK built-in implementation of the {@link HttpClient} understands the
+         * request option {@link HttpOption#H3_DISCOVERY} hint.
+         *
+         * @param option the request configuration option
+         * @param value  the request configuration option value (can be null)
+         *
+         * @return this builder
+         *
+         * @see HttpRequest#getOption(HttpOption)
+         *
+         * @since 26
+         */
+        public default <T> Builder setOption(HttpOption<T> option, T value) { return this; }
 
         /**
          * Adds the given name value pair to the set of headers for this request.
@@ -197,12 +258,28 @@ public abstract class HttpRequest {
          * {@link HttpClient#sendAsync(java.net.http.HttpRequest,
          * java.net.http.HttpResponse.BodyHandler) HttpClient::sendAsync}
          * completes exceptionally with an {@code HttpTimeoutException}. The effect
-         * of not setting a timeout is the same as setting an infinite Duration,
-         * i.e. block forever.
+         * of not setting a timeout is the same as setting an infinite
+         * {@code Duration}, i.e., block forever.
+         *
+         * @implSpec
+         * A timeout applies to the duration measured from the instant the
+         * request execution starts to, <em>at least</em>, the instant an
+         * {@link HttpResponse} is constructed. The elapsed time includes
+         * obtaining a connection for transport and retrieving the response
+         * headers.
+         *
+         * @implNote
+         * The JDK built-in implementation applies timeout over the duration
+         * measured from the instant the request execution starts to <b>the
+         * instant the response body is consumed</b>, if present. This is
+         * implemented by stopping the timer after the response body subscriber
+         * completion.
          *
          * @param duration the timeout duration
          * @return this builder
          * @throws IllegalArgumentException if the duration is non-positive
+         * @see HttpClient.Builder#connectTimeout(Duration) Configuring
+         * timeout for connection establishment
          */
         public abstract Builder timeout(Duration duration);
 
@@ -257,6 +334,19 @@ public abstract class HttpRequest {
         public Builder DELETE();
 
         /**
+         * Sets the request method of this builder to HEAD.
+         *
+         * @implSpec The default implementation is expected to have the same behaviour as:
+         * {@code return method("HEAD", BodyPublishers.noBody());}
+         *
+         * @return this builder
+         * @since 18
+         */
+        default Builder HEAD() {
+            return method("HEAD", BodyPublishers.noBody());
+        }
+
+        /**
          * Sets the request method and request body of this builder to the
          * given values.
          *
@@ -278,6 +368,10 @@ public abstract class HttpRequest {
 
         /**
          * Builds and returns an {@link HttpRequest}.
+         *
+         * @implSpec This method returns a new {@code HttpRequest} each time it is
+         * invoked. Once built, the {@code HttpRequest} is immutable and can be
+         * sent multiple times.
          *
          * @return a new {@code HttpRequest}
          * @throws IllegalStateException if a URI has not been set
@@ -324,13 +418,16 @@ public abstract class HttpRequest {
      * <br><br>
      * <ul>
      *  <li> Retain all headers:
-     *  <pre>{@code HttpRequest.newBuilder(request, (n, v) -> true)}</pre>
+     *  {@snippet :
+     *  HttpRequest.newBuilder(request, (n, v) -> true) }
      *
      *  <li> Remove all headers:
-     *  <pre>{@code HttpRequest.newBuilder(request, (n, v) -> false)}</pre>
+     *  {@snippet :
+     *  HttpRequest.newBuilder(request, (n, v) -> false) }
      *
      *  <li> Remove a particular header (e.g. Foo-Bar):
-     *  <pre>{@code HttpRequest.newBuilder(request, (name, value) -> !name.equalsIgnoreCase("Foo-Bar"))}</pre>
+     *  {@snippet :
+     *  HttpRequest.newBuilder(request, (name, value) -> !name.equalsIgnoreCase("Foo-Bar")) }
      * </ul>
      *
      * @param request the original request
@@ -360,16 +457,19 @@ public abstract class HttpRequest {
         request.bodyPublisher().ifPresentOrElse(
                 // if body is present, set it
                 bodyPublisher -> builder.method(method, bodyPublisher),
-                // otherwise, the body is absent, special case for GET/DELETE,
+                // otherwise, the body is absent, special case for GET/DELETE/HEAD,
                 // or else use empty body
                 () -> {
                     switch (method) {
                         case "GET" -> builder.GET();
                         case "DELETE" -> builder.DELETE();
+                        case "HEAD" -> builder.HEAD();
                         default -> builder.method(method, HttpRequest.BodyPublishers.noBody());
                     }
                 }
         );
+        request.getOption(HttpOption.H3_DISCOVERY)
+                .ifPresent(opt -> builder.setOption(HttpOption.H3_DISCOVERY, opt));
         return builder;
     }
 
@@ -543,25 +643,28 @@ public abstract class HttpRequest {
      * convert common high-level Java objects into a flow of data suitable for
      * sending as a request body:
      *
-     *  <pre>{@code    // Request body from a String
+     * {@snippet :
+     *   // Request body from a String
      *   HttpRequest request = HttpRequest.newBuilder()
      *        .uri(URI.create("https://foo.com/"))
      *        .header("Content-Type", "text/plain; charset=UTF-8")
      *        .POST(BodyPublishers.ofString("some body text"))
-     *        .build();
+     *        .build(); }
      *
+     * {@snippet :
      *   // Request body from a File
      *   HttpRequest request = HttpRequest.newBuilder()
      *        .uri(URI.create("https://foo.com/"))
      *        .header("Content-Type", "application/json")
      *        .POST(BodyPublishers.ofFile(Paths.get("file.json")))
-     *        .build();
+     *        .build(); }
      *
+     * {@snippet :
      *   // Request body from a byte array
      *   HttpRequest request = HttpRequest.newBuilder()
      *        .uri(URI.create("https://foo.com/"))
      *        .POST(BodyPublishers.ofByteArray(new byte[] { ... }))
-     *        .build(); }</pre>
+     *        .build(); }
      *
      * @since 11
      */
@@ -684,24 +787,51 @@ public abstract class HttpRequest {
         /**
          * A request body publisher that takes data from the contents of a File.
          *
-         * <p> Security manager permission checks are performed in this factory
-         * method, when the {@code BodyPublisher} is created. Care must be taken
-         * that the {@code BodyPublisher} is not shared with untrusted code.
-         *
          * @param  path the path to the file containing the body
          * @return a BodyPublisher
          * @throws java.io.FileNotFoundException if the path is not found
-         * @throws SecurityException if
-         *         {@linkplain Files#newInputStream(Path, OpenOption...)
-         *         opening the file for reading} is denied:
-         *         in the case of the system-default file system provider,
-         *         and a security manager is installed,
-         *         {@link SecurityManager#checkRead(String) checkRead}
-         *         is invoked to check read access to the given file
          */
         public static BodyPublisher ofFile(Path path) throws FileNotFoundException {
             Objects.requireNonNull(path);
             return RequestPublishers.FilePublisher.create(path);
+        }
+
+        /**
+         * {@return a request body publisher whose body is the {@code length}
+         * content bytes read from the provided file {@code channel} starting
+         * from the specified {@code offset}}
+         * <p>
+         * This method and the returned {@code BodyPublisher} do not modify the
+         * {@code channel}'s position, and do not close the {@code channel}. The
+         * caller is expected to close the {@code channel} when no longer needed.
+         *
+         * @apiNote
+         * This method can be used to either publish just a region of a file as
+         * the request body or to publish different regions of a file
+         * concurrently. A typical usage would be to publish different regions
+         * of a file by creating a single instance of {@link FileChannel} and
+         * then send multiple concurrent {@code HttpRequest}s, each of which
+         * uses a new {@code ofFileChannel BodyPublisher} created from the same
+         * channel with a different, typically non-overlapping, range of bytes
+         * specified by offset and length.
+         *
+         * @param channel a file channel
+         * @param offset the offset of the first byte
+         * @param length the number of bytes to read from the file channel
+         *
+         * @throws IndexOutOfBoundsException if the specified byte range is
+         * found to be {@linkplain Objects#checkFromIndexSize(long, long, long)
+         * out of bounds} compared with the size of the file referred by the
+         * channel
+         *
+         * @throws IOException if the {@linkplain FileChannel#size() channel's
+         * size} cannot be determined or the {@code channel} is closed
+         *
+         * @since 26
+         */
+        public static BodyPublisher ofFileChannel(FileChannel channel, long offset, long length) throws IOException {
+            Objects.requireNonNull(channel, "channel");
+            return new RequestPublishers.FileChannelPublisher(channel, offset, length);
         }
 
         /**

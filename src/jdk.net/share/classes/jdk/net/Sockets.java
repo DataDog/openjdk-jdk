@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -50,11 +50,6 @@ import java.util.Set;
  * The {@link #supportedOptions(Class)} method can be called to determine
  * the complete set of options available (per socket type) on the
  * current system.
- * <p>
- * When a security manager is installed, some non-standard socket options
- * may require a security permission before being set or get.
- * The details are specified in {@link ExtendedSocketOptions}. No permission
- * is required for {@link java.net.StandardSocketOptions}.
  *
  * @deprecated
  * Java SE 9 added standard methods to set/get socket options, and retrieve the per-Socket
@@ -62,6 +57,8 @@ import java.util.Set;
  * socket's class for the equivalent method to set/get a socket option or retrieve available socket options.
  *
  * @see java.nio.channels.NetworkChannel
+ *
+ * @since 1.8
  */
 @Deprecated(since = "16")
 public class Sockets {
@@ -78,6 +75,7 @@ public class Sockets {
      * @param name The socket option
      * @param value The value of the socket option. May be null for some
      *              options.
+     * @param <T> The type of the socket option
      *
      * @throws UnsupportedOperationException if the socket does not support
      *         the option.
@@ -86,9 +84,6 @@ public class Sockets {
      *         the option.
      *
      * @throws IOException if an I/O error occurs, or socket is closed.
-     *
-     * @throws SecurityException if a security manager is set and the
-     *         caller does not have any required permission.
      *
      * @throws NullPointerException if name is null
      *
@@ -107,6 +102,7 @@ public class Sockets {
      *
      * @param s the socket
      * @param name The socket option
+     * @param <T> The type of the socket option
      *
      * @return The value of the socket option.
      *
@@ -114,9 +110,6 @@ public class Sockets {
      *         the option.
      *
      * @throws IOException if an I/O error occurs
-     *
-     * @throws SecurityException if a security manager is set and the
-     *         caller does not have any required permission.
      *
      * @throws NullPointerException if name is null
      *
@@ -135,7 +128,8 @@ public class Sockets {
      *
      * @param s the socket
      * @param name The socket option
-     * @param value The value of the socket option.
+     * @param value The value of the socket option
+     * @param <T> The type of the socket option
      *
      * @throws UnsupportedOperationException if the socket does not support
      *         the option.
@@ -146,9 +140,6 @@ public class Sockets {
      * @throws IOException if an I/O error occurs
      *
      * @throws NullPointerException if name is null
-     *
-     * @throws SecurityException if a security manager is set and the
-     *         caller does not have any required permission.
      *
      * @deprecated use {@link java.net.ServerSocket#setOption(SocketOption, Object)} instead.
      *
@@ -165,6 +156,7 @@ public class Sockets {
      *
      * @param s the socket
      * @param name The socket option
+     * @param <T> The type of the socket option
      *
      * @return The value of the socket option.
      *
@@ -174,9 +166,6 @@ public class Sockets {
      * @throws IOException if an I/O error occurs
      *
      * @throws NullPointerException if name is null
-     *
-     * @throws SecurityException if a security manager is set and the
-     *         caller does not have any required permission.
      *
      * @deprecated use {@link java.net.ServerSocket#getOption(SocketOption)} instead.
      *
@@ -194,7 +183,8 @@ public class Sockets {
      *
      * @param s the socket
      * @param name The socket option
-     * @param value The value of the socket option.
+     * @param value The value of the socket option
+     * @param <T> The type of the socket option
      *
      * @throws UnsupportedOperationException if the socket does not support
      *         the option.
@@ -205,9 +195,6 @@ public class Sockets {
      * @throws IOException if an I/O error occurs
      *
      * @throws NullPointerException if name is null
-     *
-     * @throws SecurityException if a security manager is set and the
-     *         caller does not have any required permission.
      *
      * @deprecated use {@link java.net.DatagramSocket#setOption(SocketOption, Object)} instead.
      *
@@ -225,6 +212,7 @@ public class Sockets {
      *
      * @param s the socket
      * @param name The socket option
+     * @param <T> The type of the socket option
      *
      * @return The value of the socket option.
      *
@@ -234,9 +222,6 @@ public class Sockets {
      * @throws IOException if an I/O error occurs
      *
      * @throws NullPointerException if name is null
-     *
-     * @throws SecurityException if a security manager is set and the
-     *         caller does not have any required permission.
      *
      * @deprecated use {@link java.net.DatagramSocket#getOption(SocketOption)} instead.
      *
@@ -254,6 +239,8 @@ public class Sockets {
      * non standard extended options.
      *
      * @param socketType the type of java.net socket
+     *
+     * @return A set of socket options
      *
      * @throws IllegalArgumentException if socketType is not a valid
      *         socket type from the java.net package.
@@ -293,7 +280,6 @@ public class Sockets {
         return isReusePortAvailable;
     }
 
-    @SuppressWarnings("removal")
     private static Map<Class<?>,Set<SocketOption<?>>> optionSets() {
         Map<Class<?>,Set<SocketOption<?>>> options = new HashMap<>();
         boolean incomingNapiIdsupported = PlatformSocketOptions.get().incomingNapiIdSupported();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,24 +25,16 @@
 
 package sun.util.cldr;
 
-import java.security.AccessController;
-import java.security.AccessControlException;
-import java.security.PrivilegedAction;
-import java.security.PrivilegedActionException;
-import java.security.PrivilegedExceptionAction;
 import java.text.spi.BreakIteratorProvider;
 import java.text.spi.CollatorProvider;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.ServiceLoader;
-import java.util.ServiceConfigurationError;
 import java.util.Set;
-import java.util.StringTokenizer;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.spi.CalendarDataProvider;
 import java.util.spi.CalendarNameProvider;
@@ -64,14 +56,14 @@ public class CLDRLocaleProviderAdapter extends JRELocaleProviderAdapter {
     private final LocaleDataMetaInfo nonBaseMetaInfo;
 
     // parent locales map
-    private static volatile Map<Locale, Locale> parentLocalesMap;
-    // language aliases map
-    private static volatile Map<String,String> langAliasesMap;
+    private static final Map<Locale, Locale> parentLocalesMap;
     // cache to hold  locale to locale mapping for language aliases.
     private static final Map<Locale, Locale> langAliasesCache;
+    // cache the available locales
+    private static volatile Locale[] AVAILABLE_LOCALES;
+
     static {
         parentLocalesMap = new ConcurrentHashMap<>();
-        langAliasesMap = new ConcurrentHashMap<>();
         langAliasesCache = new ConcurrentHashMap<>();
         // Assuming these locales do NOT have irregular parent locales.
         parentLocalesMap.put(Locale.ROOT, Locale.ROOT);
@@ -80,25 +72,13 @@ public class CLDRLocaleProviderAdapter extends JRELocaleProviderAdapter {
     }
 
     public CLDRLocaleProviderAdapter() {
-        LocaleDataMetaInfo nbmi = null;
-
-        try {
-            nbmi = AccessController.doPrivileged(new PrivilegedExceptionAction<LocaleDataMetaInfo>() {
-                @Override
-                public LocaleDataMetaInfo run() {
-                    for (LocaleDataMetaInfo ldmi : ServiceLoader.loadInstalled(LocaleDataMetaInfo.class)) {
-                        if (ldmi.getType() == LocaleProviderAdapter.Type.CLDR) {
-                            return ldmi;
-                        }
-                    }
-                    return null;
-                }
-            });
-        } catch (PrivilegedActionException pae) {
-            throw new InternalError(pae.getCause());
+        for (LocaleDataMetaInfo ldmi : ServiceLoader.loadInstalled(LocaleDataMetaInfo.class)) {
+            if (ldmi.getType() == Type.CLDR) {
+                nonBaseMetaInfo = ldmi;
+                return;
+            }
         }
-
-        nonBaseMetaInfo = nbmi;
+        nonBaseMetaInfo = null;
     }
 
     /**
@@ -118,11 +98,9 @@ public class CLDRLocaleProviderAdapter extends JRELocaleProviderAdapter {
     @Override
     public CalendarDataProvider getCalendarDataProvider() {
         if (calendarDataProvider == null) {
-            CalendarDataProvider provider = AccessController.doPrivileged(
-                (PrivilegedAction<CalendarDataProvider>) () ->
-                    new CLDRCalendarDataProviderImpl(
+            CalendarDataProvider provider = new CLDRCalendarDataProviderImpl(
                         getAdapterType(),
-                        getLanguageTagSet("CalendarData")));
+                        getLanguageTagSet("CalendarData"));
 
             synchronized (this) {
                 if (calendarDataProvider == null) {
@@ -136,11 +114,9 @@ public class CLDRLocaleProviderAdapter extends JRELocaleProviderAdapter {
     @Override
     public CalendarNameProvider getCalendarNameProvider() {
         if (calendarNameProvider == null) {
-            CalendarNameProvider provider = AccessController.doPrivileged(
-                    (PrivilegedAction<CalendarNameProvider>) ()
-                    -> new CLDRCalendarNameProviderImpl(
+            CalendarNameProvider provider = new CLDRCalendarNameProviderImpl(
                             getAdapterType(),
-                            getLanguageTagSet("FormatData")));
+                            getLanguageTagSet("FormatData"));
 
             synchronized (this) {
                 if (calendarNameProvider == null) {
@@ -159,11 +135,9 @@ public class CLDRLocaleProviderAdapter extends JRELocaleProviderAdapter {
     @Override
     public TimeZoneNameProvider getTimeZoneNameProvider() {
         if (timeZoneNameProvider == null) {
-            TimeZoneNameProvider provider = AccessController.doPrivileged(
-                (PrivilegedAction<TimeZoneNameProvider>) () ->
-                    new CLDRTimeZoneNameProviderImpl(
+            TimeZoneNameProvider provider = new CLDRTimeZoneNameProviderImpl(
                         getAdapterType(),
-                        getLanguageTagSet("TimeZoneNames")));
+                        getLanguageTagSet("TimeZoneNames"));
 
             synchronized (this) {
                 if (timeZoneNameProvider == null) {
@@ -176,29 +150,19 @@ public class CLDRLocaleProviderAdapter extends JRELocaleProviderAdapter {
 
     @Override
     public Locale[] getAvailableLocales() {
-        Set<String> all = createLanguageTagSet("AvailableLocales");
-        Locale[] locs = new Locale[all.size()];
-        int index = 0;
-        for (String tag : all) {
-            locs[index++] = Locale.forLanguageTag(tag);
+        if (AVAILABLE_LOCALES == null) {
+            AVAILABLE_LOCALES = createLanguageTagSet("AvailableLocales").stream()
+                .map(Locale::forLanguageTag)
+                .toArray(Locale[]::new);
         }
-        return locs;
+        return AVAILABLE_LOCALES;
     }
 
     private static Locale applyAliases(Locale loc) {
-        if (langAliasesMap.isEmpty()) {
-            langAliasesMap = baseMetaInfo.getLanguageAliasMap();
-        }
-        Locale locale = langAliasesCache.get(loc);
-        if (locale == null) {
-            String locTag = loc.toLanguageTag();
-            Locale aliasLocale = langAliasesMap.containsKey(locTag)
-                    ? Locale.forLanguageTag(langAliasesMap.get(locTag)) : loc;
-            langAliasesCache.putIfAbsent(loc, aliasLocale);
-            return aliasLocale;
-        } else {
-            return locale;
-        }
+        return langAliasesCache.computeIfAbsent(loc, l -> {
+            var alias = baseMetaInfo.getLanguageAliasMap().get(l.toLanguageTag());
+            return alias != null ? Locale.forLanguageTag(alias) : l;
+        });
     }
 
     @Override
@@ -221,15 +185,9 @@ public class CLDRLocaleProviderAdapter extends JRELocaleProviderAdapter {
                 supportedLocaleString = nonBaseTags;
             }
         }
-        if (supportedLocaleString == null) {
-            return Collections.emptySet();
-        }
-        StringTokenizer tokens = new StringTokenizer(supportedLocaleString);
-        Set<String> tagset = new HashSet<>((tokens.countTokens() * 4 + 2) / 3);
-        while (tokens.hasMoreTokens()) {
-            tagset.add(tokens.nextToken());
-        }
-        return tagset;
+        return supportedLocaleString != null ?
+                Set.of(supportedLocaleString.split("\s+")) :
+                Collections.emptySet();
     }
 
     // Implementation of ResourceBundleBasedAdapter
@@ -239,6 +197,8 @@ public class CLDRLocaleProviderAdapter extends JRELocaleProviderAdapter {
         return applyParentLocales(baseName, candidates);
     }
 
+    private static final Locale NB = Locale.forLanguageTag("nb");
+    private static final Locale NO = Locale.forLanguageTag("no");
     private List<Locale> applyParentLocales(String baseName, List<Locale> candidates) {
         // check irregular parents
         for (int i = 0; i < candidates.size(); i++) {
@@ -248,7 +208,15 @@ public class CLDRLocaleProviderAdapter extends JRELocaleProviderAdapter {
                 if (p != null &&
                     !candidates.get(i+1).equals(p)) {
                     List<Locale> applied = candidates.subList(0, i+1);
-                    applied.addAll(applyParentLocales(baseName, super.getCandidateLocales(baseName, p)));
+                    // Tweak for Norwegian locales, CLDR switched the canonical form of
+                    // Norwegian Bokmal language code from "nb" to "no" in CLDR 39
+                    // (https://unicode-org.atlassian.net/browse/CLDR-2698)
+                    if (p.equals(NB) || p.equals(NO)) {
+                        applied.add(NO);
+                        applied.add(Locale.ROOT);
+                    } else {
+                        applied.addAll(applyParentLocales(baseName, super.getCandidateLocales(baseName, p)));
+                    }
                     return applied;
                 }
             }
@@ -268,6 +236,24 @@ public class CLDRLocaleProviderAdapter extends JRELocaleProviderAdapter {
                     break;
                 }
             }
+
+            if (parent == null) {
+                // check nonlikelyScript locales
+                if (CLDRBaseLocaleDataMetaInfo.nonlikelyScript && locale.getCountry().isEmpty()) {
+                    var lang = " " + locale.getLanguage() + " ";
+                    var script= locale.getScript();
+                    if (!script.isEmpty()) {
+                        parent = baseMetaInfo.likelyScriptMap().entrySet().stream()
+                            .filter(e -> e.getValue().contains(lang))
+                            .findAny()
+                            .map(Map.Entry::getKey)
+                            .map(likely -> likely.equals(script) ? null : Locale.ROOT)
+                            .orElse(null);
+                    }
+                }
+            }
+
+            // no parent found
             if (parent == null) {
                 parent = locale; // non existent marker
             }
@@ -289,12 +275,10 @@ public class CLDRLocaleProviderAdapter extends JRELocaleProviderAdapter {
      * it returns equivalent locale, e.g for zh_HK it returns zh_Hant-HK.
      */
     private static Locale getEquivalentLoc(Locale locale) {
-        switch (locale.toString()) {
-            case "no":
-            case "no_NO":
-                return Locale.forLanguageTag("nb");
-        }
-        return applyAliases(locale);
+        return switch (locale.toString()) {
+            case "no", "no_NO" -> Locale.forLanguageTag("nb");
+            default -> applyAliases(locale);
+        };
     }
 
     @Override

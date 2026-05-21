@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -43,12 +43,6 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OptionalDataException;
 import java.io.Serializable;
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.PermissionCollection;
-import java.security.PrivilegedActionException;
-import java.security.PrivilegedExceptionAction;
-import java.security.ProtectionDomain;
 import java.text.DateFormat;
 import java.text.DateFormatSymbols;
 import java.time.Instant;
@@ -105,6 +99,10 @@ import sun.util.spi.CalendarProvider;
  * the Epoch) or values of the calendar fields. Calling the
  * {@code get}, {@code getTimeInMillis}, {@code getTime},
  * {@code add} and {@code roll} involves such calculation.
+ * Unless otherwise specified, any {@code Calendar} method containing the
+ * parameter {@code int field} will throw an {@code ArrayIndexOutOfBoundsException}
+ * if the specified field is out of range ({@code field} &lt; 0 ||
+ * {@code field} &gt;= {@link #FIELD_COUNT}).
  *
  * <h3>Leniency</h3>
  *
@@ -131,8 +129,8 @@ import sun.util.spi.CalendarProvider;
  * parameters: the first day of the week and the minimal days in first week
  * (from 1 to 7).  These numbers are taken from the locale resource data or the
  * locale itself when a {@code Calendar} is constructed. If the designated
- * locale contains "fw" and/or "rg" <a href="./Locale.html#def_locale_extension">
- * Unicode extensions</a>, the first day of the week will be obtained according to
+ * locale contains "fw" and/or "rg" {@linkplain Locale##def_locale_extension
+ * Unicode extensions}, the first day of the week will be obtained according to
  * those extensions. If both "fw" and "rg" are specified, the value from the "fw"
  * extension supersedes the implicit one from the "rg" extension.
  * They may also be specified explicitly through the methods for setting their
@@ -278,7 +276,9 @@ import sun.util.spi.CalendarProvider;
  * {@code DAY_OF_MONTH} to 30, the closest possible value. Although
  * it is a smaller field, {@code DAY_OF_WEEK} is not adjusted by
  * rule 2, since it is expected to change when the month changes in a
- * {@code GregorianCalendar}.</p>
+ * {@code GregorianCalendar}. In leap years, the adjustment accounts
+ * for the leap day in February to ensure the day of month is valid
+ * for the year.</p>
  *
  * <p><strong>{@code roll(f, delta)}</strong> adds
  * {@code delta} to field {@code f} without changing larger
@@ -459,9 +459,11 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
 
     /**
      * Field number for {@code get} and {@code set} indicating the day
-     * of the week.  This field takes values {@code SUNDAY},
-     * {@code MONDAY}, {@code TUESDAY}, {@code WEDNESDAY},
-     * {@code THURSDAY}, {@code FRIDAY}, and {@code SATURDAY}.
+     * of the week. If the calendar is non-lenient, this field takes values
+     * {@code SUNDAY}, {@code MONDAY}, {@code TUESDAY}, {@code WEDNESDAY},
+     * {@code THURSDAY}, {@code FRIDAY}, and {@code SATURDAY}. Otherwise, any
+     * int values are accepted and normalized to one of the previously
+     * mentioned values.
      *
      * @see #SUNDAY
      * @see #MONDAY
@@ -1016,7 +1018,6 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
     static final int WEEK_OF_YEAR_MASK  = (1 << WEEK_OF_YEAR);
     static final int WEEK_OF_MONTH_MASK = (1 << WEEK_OF_MONTH);
     static final int DAY_OF_MONTH_MASK  = (1 << DAY_OF_MONTH);
-    static final int DATE_MASK          = DAY_OF_MONTH_MASK;
     static final int DAY_OF_YEAR_MASK   = (1 << DAY_OF_YEAR);
     static final int DAY_OF_WEEK_MASK   = (1 << DAY_OF_WEEK);
     static final int DAY_OF_WEEK_IN_MONTH_MASK  = (1 << DAY_OF_WEEK_IN_MONTH);
@@ -1453,7 +1454,7 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
          * parameters haven't been given explicitly.
          * <p>
          * If the locale contains the time zone with "tz"
-         * <a href="Locale.html#def_locale_extension">Unicode extension</a>,
+         * {@linkplain Locale##def_locale_extension Unicode extension},
          * and time zone hasn't been given explicitly, time zone in the locale
          * is used.
          *
@@ -1477,7 +1478,6 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
             if (zone == null) {
                 zone = defaultTimeZone(locale);
             }
-            Calendar cal;
             if (type == null) {
                 type = locale.getUnicodeLocaleType("ca");
             }
@@ -1489,28 +1489,24 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
                     type = "gregory";
                 }
             }
-            switch (type) {
-            case "gregory":
-                cal = new GregorianCalendar(zone, locale, true);
-                break;
-            case "iso8601":
-                GregorianCalendar gcal = new GregorianCalendar(zone, locale, true);
-                // make gcal a proleptic Gregorian
-                gcal.setGregorianChange(new Date(Long.MIN_VALUE));
-                // and week definition to be compatible with ISO 8601
-                setWeekDefinition(MONDAY, 4);
-                cal = gcal;
-                break;
-            case "buddhist":
-                cal = new BuddhistCalendar(zone, locale);
-                cal.clear();
-                break;
-            case "japanese":
-                cal = new JapaneseImperialCalendar(zone, locale, true);
-                break;
-            default:
-                throw new IllegalArgumentException("unknown calendar type: " + type);
-            }
+            final Calendar cal = switch (type) {
+                case "gregory" -> new GregorianCalendar(zone, locale, true);
+                case "iso8601" -> {
+                    GregorianCalendar gcal = new GregorianCalendar(zone, locale, true);
+                    // make gcal a proleptic Gregorian
+                    gcal.setGregorianChange(new Date(Long.MIN_VALUE));
+                    // and week definition to be compatible with ISO 8601
+                    setWeekDefinition(MONDAY, 4);
+                    yield gcal;
+                }
+                case "buddhist" -> {
+                    var buddhistCalendar = new BuddhistCalendar(zone, locale);
+                    buddhistCalendar.clear();
+                    yield buddhistCalendar;
+                }
+                case "japanese" -> new JapaneseImperialCalendar(zone, locale, true);
+                default -> throw new IllegalArgumentException("unknown calendar type: " + type);
+            };
             cal.setLenient(lenient);
             if (firstDayOfWeek != 0) {
                 cal.setFirstDayOfWeek(firstDayOfWeek);
@@ -1619,7 +1615,7 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
      * {@link Locale.Category#FORMAT FORMAT} locale.
      * <p>
      * If the locale contains the time zone with "tz"
-     * <a href="Locale.html#def_locale_extension">Unicode extension</a>,
+     * {@linkplain Locale##def_locale_extension Unicode extension},
      * that time zone is used instead.
      *
      * @return a Calendar.
@@ -1638,6 +1634,7 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
      *
      * @param zone the time zone to use
      * @return a Calendar.
+     * @throws NullPointerException if {@code zone} is {@code null}
      */
     public static Calendar getInstance(TimeZone zone)
     {
@@ -1650,11 +1647,12 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
      * in the default time zone with the given locale.
      * <p>
      * If the locale contains the time zone with "tz"
-     * <a href="Locale.html#def_locale_extension">Unicode extension</a>,
+     * {@linkplain Locale##def_locale_extension Unicode extension},
      * that time zone is used instead.
      *
      * @param aLocale the locale for the week data
      * @return a Calendar.
+     * @throws NullPointerException if {@code aLocale} is {@code null}
      */
     public static Calendar getInstance(Locale aLocale)
     {
@@ -1669,6 +1667,7 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
      * @param zone the time zone to use
      * @param aLocale the locale for the week data
      * @return a Calendar.
+     * @throws NullPointerException if {@code zone} or {@code aLocale} is {@code null}
      */
     public static Calendar getInstance(TimeZone zone,
                                        Locale aLocale)
@@ -1705,17 +1704,12 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
         if (aLocale.hasExtensions()) {
             String caltype = aLocale.getUnicodeLocaleType("ca");
             if (caltype != null) {
-                switch (caltype) {
-                case "buddhist":
-                cal = new BuddhistCalendar(zone, aLocale);
-                    break;
-                case "japanese":
-                    cal = new JapaneseImperialCalendar(zone, aLocale);
-                    break;
-                case "gregory":
-                    cal = new GregorianCalendar(zone, aLocale);
-                    break;
-                }
+                cal = switch (caltype) {
+                    case "buddhist" -> new BuddhistCalendar(zone, aLocale);
+                    case "japanese" -> new JapaneseImperialCalendar(zone, aLocale);
+                    case "gregory"  -> new GregorianCalendar(zone, aLocale);
+                    default         -> null;
+                };
             }
         }
         if (cal == null) {
@@ -1740,8 +1734,9 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
     /**
      * Returns an array of all locales for which the {@code getInstance}
      * methods of this class can return localized instances.
-     * The array returned must contain at least a {@code Locale}
-     * instance equal to {@link java.util.Locale#US Locale.US}.
+     * At a minimum, the returned array must contain a {@code Locale} instance equal to
+     * {@link Locale#ROOT Locale.ROOT} and a {@code Locale} instance equal to
+     * {@link Locale#US Locale.US}.
      *
      * @return An array of locales for which localized
      *         {@code Calendar} instances are available.
@@ -1849,8 +1844,8 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
      *
      * @param field the given calendar field.
      * @return the value for the given calendar field.
-     * @throws ArrayIndexOutOfBoundsException if the specified field is out of range
-     *             (<code>field &lt; 0 || field &gt;= FIELD_COUNT</code>).
+     * @throws IllegalArgumentException if this {@code Calendar} is non-lenient and any
+     * of the calendar fields have invalid values.
      * @see #set(int,int)
      * @see #complete()
      */
@@ -1878,8 +1873,6 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
      * not affect any setting state of the field in this
      * {@code Calendar} instance.
      *
-     * @throws IndexOutOfBoundsException if the specified field is out of range
-     *             (<code>field &lt; 0 || field &gt;= FIELD_COUNT</code>).
      * @see #areFieldsSet
      * @see #isTimeSet
      * @see #areAllFieldsSet
@@ -1896,9 +1889,6 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
      *
      * @param field the given calendar field.
      * @param value the value to be set for the given calendar field.
-     * @throws ArrayIndexOutOfBoundsException if the specified field is out of range
-     *             (<code>field &lt; 0 || field &gt;= FIELD_COUNT</code>).
-     * in non-lenient mode.
      * @see #set(int,int,int)
      * @see #set(int,int,int,int,int)
      * @see #set(int,int,int,int,int,int)
@@ -2087,6 +2077,12 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
      * which a {@link DateFormatSymbols} has names in the given
      * {@code locale}.
      *
+     * <p>If there is no string representation of the {@code Calendar} {@code field}
+     * and the calendar is in non-lenient mode and any calendar fields have invalid values,
+     * {@code null} is returned. If there is a string representation of the {@code Calendar}
+     * {@code field} and the calendar is in non-lenient mode and any calendar fields
+     * have invalid values, {@code IllegalArgumentException} will be thrown.
+     *
      * @param field
      *        the calendar field for which the string representation
      *        is returned
@@ -2180,6 +2176,12 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
      * all strings returned by {@link DateFormatSymbols#getShortMonths()}
      * and {@link DateFormatSymbols#getMonths()}.
      *
+     * <p>Unlike {@link #getDisplayName(int, int, Locale)}, this
+     * method will not throw an {@code IllegalArgumentException} if the
+     * {@code Calendar} is non-lenient and any of the calendar fields have
+     * invalid values. Instead, this method will return either {@code null} or
+     * a {@code Map}.
+     *
      * @param field
      *        the calendar field for which the display names are returned
      * @param style
@@ -2194,9 +2196,7 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
      *        field values, or {@code null} if no display names
      *        are defined for {@code field}
      * @throws    IllegalArgumentException
-     *        if {@code field} or {@code style} is invalid,
-     *        or if this {@code Calendar} is non-lenient and any
-     *        of the calendar fields have invalid values
+     *        if {@code field} or {@code style} is invalid
      * @throws    NullPointerException
      *        if {@code locale} is null
      * @since 1.6
@@ -2267,25 +2267,13 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
             return null;
         }
 
-        String[] strings = null;
-        switch (field) {
-        case ERA:
-            strings = symbols.getEras();
-            break;
-
-        case MONTH:
-            strings = (baseStyle == LONG) ? symbols.getMonths() : symbols.getShortMonths();
-            break;
-
-        case DAY_OF_WEEK:
-            strings = (baseStyle == LONG) ? symbols.getWeekdays() : symbols.getShortWeekdays();
-            break;
-
-        case AM_PM:
-            strings = symbols.getAmPmStrings();
-            break;
-        }
-        return strings;
+        return switch (field) {
+            case ERA         -> symbols.getEras();
+            case MONTH       -> (baseStyle == LONG) ? symbols.getMonths() : symbols.getShortMonths();
+            case DAY_OF_WEEK -> (baseStyle == LONG) ? symbols.getWeekdays() : symbols.getShortWeekdays();
+            case AM_PM       -> symbols.getAmPmStrings();
+            default -> null;
+        };
     }
 
     /**
@@ -2638,14 +2626,14 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
         if (stamp_a == UNSET || stamp_b == UNSET) {
             return UNSET;
         }
-        return (stamp_a > stamp_b) ? stamp_a : stamp_b;
+        return Math.max(stamp_a, stamp_b);
     }
 
     /**
      * Returns an unmodifiable {@code Set} containing all calendar types
      * supported by {@code Calendar} in the runtime environment. The available
-     * calendar types can be used for the <a
-     * href="Locale.html#def_locale_extension">Unicode locale extensions</a>.
+     * calendar types can be used for the {@linkplain Locale##def_locale_extension
+     * Unicode locale extensions}.
      * The {@code Set} returned contains at least {@code "gregory"}. The
      * calendar types don't include aliases, such as {@code "gregorian"} for
      * {@code "gregory"}.
@@ -2661,14 +2649,7 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
     }
 
     private static class AvailableCalendarTypes {
-        private static final Set<String> SET;
-        static {
-            Set<String> set = new HashSet<>(3);
-            set.add("gregory");
-            set.add("buddhist");
-            set.add("japanese");
-            SET = Collections.unmodifiableSet(set);
-        }
+        private static final Set<String> SET = Set.of("gregory", "buddhist", "japanese");
         private AvailableCalendarTypes() {
         }
     }
@@ -2686,7 +2667,7 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
      * @return the LDML-defined calendar type or the class name of this
      *         {@code Calendar} instance
      * @since 1.8
-     * @see <a href="Locale.html#def_extensions">Locale extensions</a>
+     * @see Locale##def_locale_extension Locale extensions
      * @see Locale.Builder#setLocale(Locale)
      * @see Locale.Builder#setUnicodeLocaleKeyword(String, String)
      */
@@ -2716,25 +2697,25 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
      * @return {@code true} if this object is equal to {@code obj};
      * {@code false} otherwise.
      */
-    @SuppressWarnings("EqualsWhichDoesntCheckParameterClass")
     @Override
     public boolean equals(Object obj) {
         if (this == obj) {
             return true;
         }
-        try {
-            Calendar that = (Calendar)obj;
-            return compareTo(getMillisOf(that)) == 0 &&
-                lenient == that.lenient &&
-                firstDayOfWeek == that.firstDayOfWeek &&
-                minimalDaysInFirstWeek == that.minimalDaysInFirstWeek &&
-                (zone instanceof ZoneInfo ?
-                    zone.equals(that.zone) :
-                    zone.equals(that.getTimeZone()));
-        } catch (Exception e) {
-            // Note: GregorianCalendar.computeTime throws
-            // IllegalArgumentException if the ERA value is invalid
-            // even it's in lenient mode.
+        if (obj instanceof Calendar that) {
+            try {
+                return compareTo(getMillisOf(that)) == 0 &&
+                    lenient == that.lenient &&
+                    firstDayOfWeek == that.firstDayOfWeek &&
+                    minimalDaysInFirstWeek == that.minimalDaysInFirstWeek &&
+                    (zone instanceof ZoneInfo ?
+                        zone.equals(that.zone) :
+                        zone.equals(that.getTimeZone()));
+            } catch (Exception e) {
+                // Note: GregorianCalendar.computeTime throws
+                // IllegalArgumentException if the ERA value is invalid
+                // even it's in lenient mode.
+            }
         }
         return false;
     }
@@ -2830,6 +2811,9 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
      *
      * @param field the calendar field.
      * @param amount the amount of date or time to be added to the field.
+     * @throws IllegalArgumentException if this {@code Calendar} is non-lenient
+     * and any of the calendar fields have invalid values or if {@code field} is
+     * {@code ZONE_OFFSET}, {@code DST_OFFSET}, or unknown.
      * @see #roll(int,int)
      * @see #set(int,int)
      */
@@ -2852,6 +2836,9 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
      * @param field the time field.
      * @param up indicates if the value of the specified time field is to be
      * rolled up or rolled down. Use true if rolling up, false otherwise.
+     * @throws IllegalArgumentException if this {@code Calendar} is non-lenient
+     * and any of the calendar fields have invalid values or if {@code field} is
+     * {@code ZONE_OFFSET}, {@code DST_OFFSET}, or unknown.
      * @see Calendar#add(int,int)
      * @see Calendar#set(int,int)
      */
@@ -2871,6 +2858,9 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
      *
      * @param field the calendar field.
      * @param amount the signed amount to add to the calendar {@code field}.
+     * @throws IllegalArgumentException if this {@code Calendar} is non-lenient
+     * and any of the calendar fields have invalid values or if {@code field} is
+     * {@code ZONE_OFFSET}, {@code DST_OFFSET}, or unknown.
      * @since 1.2
      * @see #roll(int,boolean)
      * @see #add(int,int)
@@ -3437,8 +3427,7 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
     }
 
     private int compareTo(long t) {
-        long thisTime = getMillisOf(this);
-        return (thisTime > t) ? 1 : (thisTime == t) ? 0 : -1;
+        return Long.compare(getMillisOf(this), t);
     }
 
     private static long getMillisOf(Calendar calendar) {
@@ -3569,20 +3558,6 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
         }
     }
 
-    private static class CalendarAccessControlContext {
-        private static final AccessControlContext INSTANCE;
-        static {
-            RuntimePermission perm = new RuntimePermission("accessClassInPackage.sun.util.calendar");
-            PermissionCollection perms = perm.newPermissionCollection();
-            perms.add(perm);
-            INSTANCE = new AccessControlContext(new ProtectionDomain[] {
-                                                    new ProtectionDomain(null, perms)
-                                                });
-        }
-        private CalendarAccessControlContext() {
-        }
-    }
-
     /**
      * Reconstitutes this object from a stream (i.e., deserialize it).
      */
@@ -3620,16 +3595,8 @@ public abstract class Calendar implements Serializable, Cloneable, Comparable<Ca
         // If there's a ZoneInfo object, use it for zone.
         ZoneInfo zi = null;
         try {
-            zi = AccessController.doPrivileged(
-                    new PrivilegedExceptionAction<>() {
-                        @Override
-                        public ZoneInfo run() throws Exception {
-                            return (ZoneInfo) input.readObject();
-                        }
-                    },
-                    CalendarAccessControlContext.INSTANCE);
-        } catch (PrivilegedActionException pae) {
-            Exception e = pae.getException();
+            zi = (ZoneInfo) input.readObject();
+        } catch (Exception e) {
             if (!(e instanceof OptionalDataException)) {
                 if (e instanceof RuntimeException) {
                     throw (RuntimeException) e;

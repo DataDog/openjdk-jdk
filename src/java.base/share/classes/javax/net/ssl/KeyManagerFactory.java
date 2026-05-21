@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
 
 package javax.net.ssl;
 
-import java.security.Security;
 import java.security.*;
 import java.util.Objects;
 
@@ -42,13 +41,13 @@ import sun.security.jca.GetInstance;
  */
 public class KeyManagerFactory {
     // The provider
-    private Provider provider;
+    private final Provider provider;
 
     // The provider implementation (delegate)
-    private KeyManagerFactorySpi factorySpi;
+    private final KeyManagerFactorySpi factorySpi;
 
     // The name of the key management algorithm.
-    private String algorithm;
+    private final String algorithm;
 
     /**
      * Obtains the default KeyManagerFactory algorithm name.
@@ -63,14 +62,7 @@ public class KeyManagerFactory {
      *          implementation-specific default if no such property exists.
      */
     public static final String getDefaultAlgorithm() {
-        String type;
-        type = AccessController.doPrivileged(new PrivilegedAction<>() {
-            @Override
-            public String run() {
-                return Security.getProperty(
-                    "ssl.KeyManagerFactory.algorithm");
-            }
-        });
+        String type = Security.getProperty("ssl.KeyManagerFactory.algorithm");
         if (type == null) {
             type = "SunX509";
         }
@@ -122,7 +114,7 @@ public class KeyManagerFactory {
      * {@code jdk.security.provider.preferred}
      * {@link Security#getProperty(String) Security} property to determine
      * the preferred provider order for the specified algorithm. This
-     * may be different than the order of providers returned by
+     * may be different from the order of providers returned by
      * {@link Security#getProviders() Security.getProviders()}.
      *
      * @param algorithm the standard name of the requested algorithm.
@@ -132,6 +124,7 @@ public class KeyManagerFactory {
      *          Algorithm Names Specification for information about standard
      *          algorithm names.
      *
+     * @spec security/standard-names.html Java Security Standard Algorithm Names
      * @return the new {@code KeyManagerFactory} object
      *
      * @throws NoSuchAlgorithmException if no {@code Provider} supports a
@@ -173,6 +166,7 @@ public class KeyManagerFactory {
      *
      * @param provider the name of the provider.
      *
+     * @spec security/standard-names.html Java Security Standard Algorithm Names
      * @return the new {@code KeyManagerFactory} object
      *
      * @throws IllegalArgumentException if the provider name is {@code null}
@@ -218,6 +212,7 @@ public class KeyManagerFactory {
      *
      * @param provider an instance of the provider.
      *
+     * @spec security/standard-names.html Java Security Standard Algorithm Names
      * @return the new {@code KeyManagerFactory} object
      *
      * @throws IllegalArgumentException if provider is {@code null}

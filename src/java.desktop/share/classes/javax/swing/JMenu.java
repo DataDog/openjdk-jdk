@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,6 +22,7 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+
 package javax.swing;
 
 import java.awt.Component;
@@ -35,20 +36,29 @@ import java.awt.Insets;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.Toolkit;
-import java.awt.event.*;
-import java.beans.JavaBean;
+import java.awt.event.KeyEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.beans.BeanProperty;
+import java.beans.JavaBean;
 import java.beans.PropertyChangeListener;
-
-import java.util.*;
-
-import java.io.Serializable;
-import java.io.ObjectOutputStream;
 import java.io.IOException;
+import java.io.ObjectOutputStream;
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.ArrayList;
 
-import javax.swing.event.*;
-import javax.swing.plaf.*;
-import javax.accessibility.*;
+import javax.accessibility.Accessible;
+import javax.accessibility.AccessibleContext;
+import javax.accessibility.AccessibleRole;
+import javax.accessibility.AccessibleSelection;
+import javax.swing.event.ChangeEvent;
+import javax.swing.event.ChangeListener;
+import javax.swing.event.EventListenerList;
+import javax.swing.event.MenuEvent;
+import javax.swing.event.MenuListener;
+import javax.swing.plaf.MenuItemUI;
+import javax.swing.plaf.PopupMenuUI;
 
 /**
  * An implementation of a menu -- a popup window containing
@@ -186,9 +196,9 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
 
 
     /**
-     * Overriden to do nothing. We want JMenu to be focusable, but
+     * Overridden to do nothing. We want JMenu to be focusable, but
      * <code>JMenuItem</code> doesn't want to be, thus we override this
-     * do nothing. We don't invoke <code>setFocusable(true)</code> after
+     * to do nothing. We don't invoke <code>setFocusable(true)</code> after
      * super's constructor has completed as this has the side effect that
      * <code>JMenu</code> will be considered traversable via the
      * keyboard, which we don't want. Making a Component traversable by
@@ -352,7 +362,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
         int x;
         int y;
         JPopupMenu pm = getPopupMenu();
-        // Figure out the sizes needed to caclulate the menu position
+        // Figure out the sizes needed to calculate the menu position
         Dimension s = getSize();
         Dimension pmSize = pm.getSize();
         // For the first time the menu is popped up,
@@ -468,6 +478,23 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
                 y = 0 - yOffset - pmSize.height;   // Otherwise drop 'up'
             }
         }
+        // Note that the position may be later adjusted to fit the menu into the screen if possible.
+        // However, the code that does it (JPopupMenu.adjustPopupLocationToFitScreen) has no idea which screen
+        // to fit into, and determines it by the position calculated here, so we need to make sure it's on
+        // the correct screen, otherwise the menu may appear on the wrong screen (JDK-6415065).
+        // (Both x and y are relative to the JMenu position here, that's why we need these +-position.x/y here.)
+        if (position.y + y < screenBounds.y) { // Above the current screen?
+            y = screenBounds.y - position.y; // The top of the screen relative to this JMenu.
+        }
+        if (position.y + y >= screenBounds.y + screenBounds.height) { // Below the current screen?
+            y = screenBounds.y + screenBounds.height - 1 - position.y; // The bottom of the screen...
+        }
+        if (position.x + x < screenBounds.x) { // To the left of the current screen?
+            x = screenBounds.x - position.x; // The left edge of the screen...
+        }
+        if (position.x + x >= screenBounds.x + screenBounds.width) { // To the right of the current screen?
+            x = screenBounds.x + screenBounds.width - 1 - position.x; // The right edge of the screen...
+        }
         return new Point(x,y);
     }
 
@@ -498,7 +525,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
      * to manage the idiosyncrasies of the various UI implementations.
      *
      * @param       d the number of milliseconds to delay
-     * @exception   IllegalArgumentException if <code>d</code>
+     * @throws   IllegalArgumentException if <code>d</code>
      *                       is less than 0
      */
     @BeanProperty(bound = false, expert = true, description
@@ -664,7 +691,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
      * @param s the text for the menu item to add
      * @param pos an integer specifying the position at which to add the
      *               new menu item
-     * @exception IllegalArgumentException when the value of
+     * @throws IllegalArgumentException when the value of
      *                  <code>pos</code> &lt; 0
      */
     public void insert(String s, int pos) {
@@ -683,7 +710,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
      * @param pos an integer specifying the position at which to add the
      *               new <code>JMenuitem</code>
      * @return the new menu item
-     * @exception IllegalArgumentException if the value of
+     * @throws IllegalArgumentException if the value of
      *                  <code>pos</code> &lt; 0
      */
     public JMenuItem insert(JMenuItem mi, int pos) {
@@ -703,7 +730,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
      * @param pos an integer specifying the position at which to add the
      *               new menu item
      * @return the new menu item
-     * @exception IllegalArgumentException if the value of
+     * @throws IllegalArgumentException if the value of
      *                  <code>pos</code> &lt; 0
      */
     public JMenuItem insert(Action a, int pos) {
@@ -724,7 +751,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
      *
      * @param       index an integer specifying the position at which to
      *                    insert the menu separator
-     * @exception   IllegalArgumentException if the value of
+     * @throws   IllegalArgumentException if the value of
      *                       <code>index</code> &lt; 0
      */
     public void insertSeparator(int index) {
@@ -745,7 +772,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
      * @param pos  an integer specifying the position
      * @return  the menu item at the specified position; or <code>null</code>
      *          if the item as the specified position is not a menu item
-     * @exception  IllegalArgumentException if the value of
+     * @throws  IllegalArgumentException if the value of
      *             {@code pos} &lt; 0
      */
     public JMenuItem getItem(int pos) {
@@ -780,7 +807,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
      * yet implemented.
      *
      * @return true if the menu can be torn off, else false
-     * @exception  Error  if invoked -- this method is not yet implemented
+     * @throws  Error  if invoked -- this method is not yet implemented
      */
     @BeanProperty(bound = false)
     public boolean isTearOff() {
@@ -802,7 +829,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
      * Removes the menu item at the specified index from this menu.
      *
      * @param       pos the position of the item to be removed
-     * @exception   IllegalArgumentException if the value of
+     * @throws   IllegalArgumentException if the value of
      *                       <code>pos</code> &lt; 0, or if <code>pos</code>
      *                       is greater than the number of menu items
      */
@@ -1014,7 +1041,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
      * notification on this event type.  The event instance
      * is created lazily.
      *
-     * @exception Error  if there is a <code>null</code> listener
+     * @throws Error  if there is a <code>null</code> listener
      * @see EventListenerList
      */
     protected void fireMenuSelected() {
@@ -1044,7 +1071,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
      * notification on this event type.  The event instance
      * is created lazily.
      *
-     * @exception Error if there is a <code>null</code> listener
+     * @throws Error if there is a <code>null</code> listener
      * @see EventListenerList
      */
     protected void fireMenuDeselected() {
@@ -1074,7 +1101,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
      * notification on this event type.  The event instance
      * is created lazily.
      *
-     * @exception Error if there is a <code>null</code> listener
+     * @throws Error if there is a <code>null</code> listener
      * @see EventListenerList
      */
     protected void fireMenuCanceled() {
@@ -1100,7 +1127,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
         }
     }
 
-    // Overriden to do nothing, JMenu doesn't support an accelerator
+    // Overridden to do nothing, JMenu doesn't support an accelerator
     void configureAcceleratorFromAction(Action a) {
     }
 
@@ -1228,7 +1255,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
      *
      * @param o the new component orientation of this menu and
      *        the components contained within it.
-     * @exception NullPointerException if <code>orientation</code> is null.
+     * @throws NullPointerException if <code>orientation</code> is null.
      * @see java.awt.Component#setComponentOrientation
      * @see java.awt.Component#getComponentOrientation
      * @since 1.4
@@ -1245,6 +1272,13 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
         }
     }
 
+    /**
+     * Sets the orientation for this menu and its associated popup menu
+     * determined by the {@code ComponentOrientation} argument.
+     *
+     * @param o the new orientation for this menu and
+     *          its associated popup menu.
+     */
     public void setComponentOrientation(ComponentOrientation o) {
         super.setComponentOrientation(o);
         if ( popupMenu != null ) {
@@ -1258,7 +1292,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
      * @param keyStroke  the keystroke combination which will invoke
      *                  the <code>JMenuItem</code>'s actionlisteners
      *                  without navigating the menu hierarchy
-     * @exception Error  if invoked -- this method is not defined for JMenu.
+     * @throws Error  if invoked -- this method is not defined for JMenu.
      *                  Use <code>setMnemonic</code> instead
      */
     public void setAccelerator(KeyStroke keyStroke) {
@@ -1296,7 +1330,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
      * @return the array of menu items
      */
     private MenuElement[] buildMenuElementArray(JMenu leaf) {
-        Vector<MenuElement> elements = new Vector<>();
+        ArrayList<MenuElement> elements = new ArrayList<>();
         Component current = leaf.getPopupMenu();
         JPopupMenu pop;
         JMenu menu;
@@ -1305,22 +1339,21 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
         while (true) {
             if (current instanceof JPopupMenu) {
                 pop = (JPopupMenu) current;
-                elements.insertElementAt(pop, 0);
+                elements.add(0, pop);
                 current = pop.getInvoker();
             } else if (current instanceof JMenu) {
                 menu = (JMenu) current;
-                elements.insertElementAt(menu, 0);
+                elements.add(0, menu);
                 current = menu.getParent();
             } else if (current instanceof JMenuBar) {
                 bar = (JMenuBar) current;
-                elements.insertElementAt(bar, 0);
+                elements.add(0, bar);
                 break;
             } else {
                 break;
             }
         }
-        MenuElement[] me = new MenuElement[elements.size()];
-        elements.copyInto(me);
+        MenuElement[] me = elements.toArray(new MenuElement[0]);
         return me;
     }
 
@@ -1330,6 +1363,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
      * <code>JComponent</code> for more
      * information about serialization in Swing.
      */
+    @Serial
     private void writeObject(ObjectOutputStream s) throws IOException {
         s.defaultWriteObject();
         if (getUIClassID().equals(uiClassID)) {
@@ -1581,7 +1615,7 @@ public class JMenu extends JMenuItem implements Accessible,MenuElement
                 return;
             }
             JMenuItem mi = getItem(i);
-            if (mi != null && mi instanceof JMenu) {
+            if (mi instanceof JMenu) {
                 if (mi.isSelected()) {
                     MenuElement[] old =
                         MenuSelectionManager.defaultManager().getSelectedPath();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,8 @@
 #define SHARE_JFR_RECORDER_STORAGE_JFRBUFFER_HPP
 
 #include "memory/allocation.hpp"
-#include "runtime/atomic.hpp"
+#include "runtime/atomicAccess.hpp"
+#include "utilities/sizes.hpp"
 
 //
 // Represents a piece of committed memory.
@@ -70,17 +71,18 @@ class JfrBuffer {
   const void* _identity;
   u1* _pos;
   mutable const u1* _top;
-  u4 _size;
+  size_t _size;
   u2 _header_size;
   u1 _flags;
   u1 _context;
+  LP64_ONLY(const u4 _pad;)
 
   const u1* stable_top() const;
 
  public:
   JfrBuffer();
-  bool initialize(size_t header_size, size_t size);
-  void reinitialize(bool exclusion = false);
+  void initialize(size_t header_size, size_t size);
+  void reinitialize();
 
   const u1* start() const {
     return ((const u1*)this) + _header_size;
@@ -110,7 +112,7 @@ class JfrBuffer {
 
   void set_pos(u1* new_pos) {
     assert(new_pos <= end(), "invariant");
-    Atomic::release_store(&_pos, new_pos);
+    AtomicAccess::release_store(&_pos, new_pos);
   }
 
   void set_pos(size_t size) {
@@ -125,7 +127,7 @@ class JfrBuffer {
   void release_critical_section_top(const u1* new_top);
 
   size_t size() const {
-    return _size * BytesPerWord;
+    return _size;
   }
 
   size_t total_size() const {
@@ -133,17 +135,17 @@ class JfrBuffer {
   }
 
   size_t free_size() const {
-    return end() - Atomic::load_acquire(&_pos);
+    return end() - AtomicAccess::load_acquire(&_pos);
   }
 
   size_t unflushed_size() const;
 
   bool empty() const {
-    return Atomic::load_acquire(&_pos) == start();
+    return AtomicAccess::load_acquire(&_pos) == start();
   }
 
   const void* identity() const {
-    return Atomic::load_acquire(&_identity);
+    return AtomicAccess::load_acquire(&_identity);
   }
 
   // use only if implied owner already
@@ -170,13 +172,14 @@ class JfrBuffer {
   void set_retired();
   void clear_retired();
 
-  bool excluded() const;
-  void set_excluded();
-  void clear_excluded();
-
   u1 context() const;
   void set_context(u1 context);
   void clear_context();
+
+  // Code generation
+  static ByteSize pos_offset();
+  static ByteSize flags_offset();
+
 };
 
 #endif // SHARE_JFR_RECORDER_STORAGE_JFRBUFFER_HPP

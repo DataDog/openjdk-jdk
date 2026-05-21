@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,8 +26,15 @@
 package jdk.jfr;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
+import jdk.jfr.internal.PlatformEventType;
+import jdk.jfr.internal.PlatformRecorder;
+import jdk.jfr.internal.PlatformRecording;
+import jdk.jfr.internal.PrivateAccess;
+import jdk.jfr.internal.Type;
 import jdk.jfr.internal.management.EventSettingsModifier;
 
 /**
@@ -38,24 +45,126 @@ import jdk.jfr.internal.management.EventSettingsModifier;
  * chaining.
  * <p>
  * The following example shows how to use the {@code EventSettings} class.
- * <pre>
- * {@code
- * Recording r = new Recording();
- * r.enable("jdk.CPULoad")
- *    .withPeriod(Duration.ofSeconds(1));
- * r.enable("jdk.FileWrite")
- *    .withoutStackTrace()
- *    .withThreshold(Duration.ofNanos(10));
- * r.start();
- * Thread.sleep(10_000);
- * r.stop();
- * r.dump(Files.createTempFile("recording", ".jfr"));
  *
- * }
- * </pre>
+ * {@snippet class="Snippets" region="EventSettingOverview"}
+ *
  * @since 9
  */
 public abstract class EventSettings {
+
+    // Purpose of InternalAccess is to give classes in jdk.jfr.internal
+    // access to package private methods in this package (jdk.jfr).
+    //
+    // The initialization could be done in any class in this package,
+    // but this one was chosen because it is lightweight.
+    static {
+        PrivateAccess.setPrivateAccess(new InternalAccess());
+    }
+
+    private static final class InternalAccess extends PrivateAccess {
+
+        @Override
+        public Type getType(Object o) {
+            if (o instanceof AnnotationElement ae) {
+                return ae.getType();
+            }
+            if (o instanceof EventType et) {
+                return et.getType();
+            }
+            if (o instanceof ValueDescriptor vd) {
+                return vd.getType();
+            }
+            if (o instanceof SettingDescriptor sd) {
+                return sd.getType();
+            }
+            throw new Error("Unknown type " + o.getClass());
+        }
+
+        @Override
+        public Configuration newConfiguration(String name, String label, String description, String provider, Map<String, String> settings, String contents) {
+            return new Configuration(name, label, description, provider, settings, contents);
+        }
+
+        @Override
+        public EventType newEventType(PlatformEventType platformEventType) {
+            return new EventType(platformEventType);
+        }
+
+        @Override
+        public AnnotationElement newAnnotation(Type annotationType, List<Object> values, boolean boot) {
+            return new AnnotationElement(annotationType, values, boot);
+        }
+
+        @Override
+        public ValueDescriptor newValueDescriptor(String name, Type fieldType, List<AnnotationElement> annos, int dimension, boolean constantPool, String fieldName) {
+            return new ValueDescriptor(fieldType, name, annos, dimension, constantPool, fieldName);
+        }
+
+        @Override
+        public PlatformRecording getPlatformRecording(Recording r) {
+            return r.getInternal();
+        }
+
+        @Override
+        public PlatformEventType getPlatformEventType(EventType eventType) {
+            return eventType.getPlatformEventType();
+        }
+
+        @Override
+        public boolean isConstantPool(ValueDescriptor v) {
+            return v.isConstantPool();
+        }
+
+        @Override
+        public void setAnnotations(ValueDescriptor v, List<AnnotationElement> a) {
+            v.setAnnotations(a);
+        }
+
+        @Override
+        public void setAnnotations(SettingDescriptor s, List<AnnotationElement> a) {
+           s.setAnnotations(a);
+        }
+
+        @Override
+        public String getFieldName(ValueDescriptor v) {
+            return v.getJavaFieldName();
+        }
+
+        @Override
+        public ValueDescriptor newValueDescriptor(Class<?> type, String name) {
+            return new ValueDescriptor(type, name, List.of(), true);
+        }
+
+        @Override
+        public SettingDescriptor newSettingDescriptor(Type type, String name, String defaultValue, List<AnnotationElement> annotations) {
+            return new SettingDescriptor(type, name, defaultValue, annotations);
+        }
+
+        @Override
+        public boolean isUnsigned(ValueDescriptor v) {
+            return v.isUnsigned();
+        }
+
+        @Override
+        public PlatformRecorder getPlatformRecorder() {
+            return FlightRecorder.getFlightRecorder().getInternal();
+        }
+
+        @Override
+        public Recording newRecording(Boolean register) {
+            return new Recording(register, Map.of());
+        }
+
+        @Override
+        public EventSettings newEventSettings(EventSettingsModifier esm) {
+            return new EventSettings.DelegatedEventSettings(esm);
+        }
+
+        @Override
+        public boolean isVisible(EventType t) {
+            return t.isVisible();
+        }
+    }
 
     // Used to provide EventSettings for jdk.management.jfr module
     static class DelegatedEventSettings extends EventSettings {
@@ -67,8 +176,10 @@ public abstract class EventSettings {
 
         @Override
         public EventSettings with(String name, String value) {
-             delegate.with(name, value);
-             return this;
+            Objects.requireNonNull(name, "name");
+            Objects.requireNonNull(value, "value");
+            delegate.with(name, value);
+            return this;
         }
 
         @Override
@@ -88,7 +199,7 @@ public abstract class EventSettings {
      *
      * @return event settings object for further configuration, not {@code null}
      */
-    final public EventSettings withStackTrace() {
+    public final EventSettings withStackTrace() {
         return with(StackTrace.NAME, "true");
     }
 
@@ -99,7 +210,7 @@ public abstract class EventSettings {
      *
      * @return event settings object for further configuration, not {@code null}
      */
-    final public EventSettings withoutStackTrace() {
+    public final EventSettings withoutStackTrace() {
         return with(StackTrace.NAME, "false");
     }
 
@@ -111,7 +222,7 @@ public abstract class EventSettings {
      *
      * @return event settings object for further configuration, not {@code null}
      */
-    final public EventSettings withoutThreshold() {
+    public final EventSettings withoutThreshold() {
         return with(Threshold.NAME, "0 s");
     }
 
@@ -122,7 +233,8 @@ public abstract class EventSettings {
      *
      * @return event settings object for further configuration, not {@code null}
      */
-    final public EventSettings withPeriod(Duration duration) {
+    public final EventSettings withPeriod(Duration duration) {
+        Objects.requireNonNull(duration, "duration");
         return with(Period.NAME, duration.toNanos() + " ns");
     }
 
@@ -133,7 +245,7 @@ public abstract class EventSettings {
      *
      * @return event settings object for further configuration, not {@code null}
      */
-    final public EventSettings withThreshold(Duration duration) {
+    public final EventSettings withThreshold(Duration duration) {
         if (duration == null) {
             return with(Threshold.NAME, "0 ns");
         } else {
@@ -151,7 +263,7 @@ public abstract class EventSettings {
      *
      * @return event settings object for further configuration, not {@code null}
      */
-    abstract public EventSettings with(String name, String value);
+    public abstract EventSettings with(String name, String value);
 
     /**
      * Creates a settings {@code Map} for the event that is associated with this

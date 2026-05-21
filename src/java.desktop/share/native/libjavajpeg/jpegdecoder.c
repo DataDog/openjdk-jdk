@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -64,12 +64,12 @@ static jmethodID InputStream_availableID;
 
 /* Initialize the Java VM instance variable when the library is
    first loaded */
-JavaVM *jvm;
+JavaVM *the_jvm;
 
 JNIEXPORT jint JNICALL
 DEF_JNI_OnLoad(JavaVM *vm, void *reserved)
 {
-    jvm = vm;
+    the_jvm = vm;
     return JNI_VERSION_1_2;
 }
 
@@ -221,25 +221,25 @@ static void RELEASE_ARRAYS(JNIEnv *env, sun_jpeg_source_ptr src)
 
 static int GET_ARRAYS(JNIEnv *env, sun_jpeg_source_ptr src)
 {
-    if (src->hInputBuffer) {
-        assert(src->inbuf == 0);
-        src->inbuf = (JOCTET *)(*env)->GetPrimitiveArrayCritical
-            (env, src->hInputBuffer, 0);
-        if (src->inbuf == 0) {
-            return 0;
-        }
-        if ((int)(src->inbufoffset) >= 0) {
-            src->pub.next_input_byte = src->inbuf + src->inbufoffset;
-        }
-    }
     if (src->hOutputBuffer) {
         assert(src->outbuf.ip == 0);
         src->outbufSize = (*env)->GetArrayLength(env, src->hOutputBuffer);
         src->outbuf.ip = (int *)(*env)->GetPrimitiveArrayCritical
             (env, src->hOutputBuffer, 0);
         if (src->outbuf.ip == 0) {
+            return 0;
+        }
+    }
+    if (src->hInputBuffer) {
+        assert(src->inbuf == 0);
+        src->inbuf = (JOCTET *)(*env)->GetPrimitiveArrayCritical
+            (env, src->hInputBuffer, 0);
+        if (src->inbuf == 0) {
             RELEASE_ARRAYS(env, src);
             return 0;
+        }
+        if ((int)(src->inbufoffset) >= 0) {
+            src->pub.next_input_byte = src->inbuf + src->inbufoffset;
         }
     }
     return 1;
@@ -284,7 +284,7 @@ GLOBAL(boolean)
 sun_jpeg_fill_input_buffer(j_decompress_ptr cinfo)
 {
     sun_jpeg_source_ptr src = (sun_jpeg_source_ptr) cinfo->src;
-    JNIEnv *env = (JNIEnv *)JNU_GetEnv(jvm, JNI_VERSION_1_2);
+    JNIEnv *env = (JNIEnv *)JNU_GetEnv(the_jvm, JNI_VERSION_1_2);
     int ret, buflen;
 
     if (src->suspendable) {
@@ -298,7 +298,7 @@ sun_jpeg_fill_input_buffer(j_decompress_ptr cinfo)
     ret = (*env)->CallIntMethod(env, src->hInputStream, InputStream_readID,
                                 src->hInputBuffer, 0, buflen);
     if (ret > buflen) ret = buflen;
-    if ((*env)->ExceptionOccurred(env) || !GET_ARRAYS(env, src)) {
+    if ((*env)->ExceptionCheck(env) || !GET_ARRAYS(env, src)) {
         cinfo->err->error_exit((struct jpeg_common_struct *) cinfo);
     }
     if (ret <= 0) {
@@ -327,14 +327,14 @@ GLOBAL(void)
 sun_jpeg_fill_suspended_buffer(j_decompress_ptr cinfo)
 {
     sun_jpeg_source_ptr src = (sun_jpeg_source_ptr) cinfo->src;
-    JNIEnv *env = (JNIEnv *)JNU_GetEnv(jvm, JNI_VERSION_1_2);
+    JNIEnv *env = (JNIEnv *)JNU_GetEnv(the_jvm, JNI_VERSION_1_2);
     size_t offset, buflen;
     int ret;
 
     RELEASE_ARRAYS(env, src);
     ret = (*env)->CallIntMethod(env, src->hInputStream,
                                 InputStream_availableID);
-    if ((*env)->ExceptionOccurred(env) || !GET_ARRAYS(env, src)) {
+    if ((*env)->ExceptionCheck(env) || !GET_ARRAYS(env, src)) {
         cinfo->err->error_exit((struct jpeg_common_struct *) cinfo);
     }
     if (ret < 0 || (unsigned int)ret <= src->remaining_skip) {
@@ -359,7 +359,7 @@ sun_jpeg_fill_suspended_buffer(j_decompress_ptr cinfo)
     ret = (*env)->CallIntMethod(env, src->hInputStream, InputStream_readID,
                                 src->hInputBuffer, offset, buflen);
     if ((ret > 0) && ((unsigned int)ret > buflen)) ret = (int)buflen;
-    if ((*env)->ExceptionOccurred(env) || !GET_ARRAYS(env, src)) {
+    if ((*env)->ExceptionCheck(env) || !GET_ARRAYS(env, src)) {
         cinfo->err->error_exit((struct jpeg_common_struct *) cinfo);
     }
     if (ret <= 0) {
@@ -397,7 +397,7 @@ GLOBAL(void)
 sun_jpeg_skip_input_data(j_decompress_ptr cinfo, long num_bytes)
 {
     sun_jpeg_source_ptr src = (sun_jpeg_source_ptr) cinfo->src;
-    JNIEnv *env = (JNIEnv *)JNU_GetEnv(jvm, JNI_VERSION_1_2);
+    JNIEnv *env = (JNIEnv *)JNU_GetEnv(the_jvm, JNI_VERSION_1_2);
     int ret;
     int buflen;
 
@@ -406,6 +406,10 @@ sun_jpeg_skip_input_data(j_decompress_ptr cinfo, long num_bytes)
         return;
     }
     num_bytes += src->remaining_skip;
+    // Check for overflow if remaining_skip value is too large
+    if (num_bytes < 0) {
+        return;
+    }
     src->remaining_skip = 0;
     ret = (int)src->pub.bytes_in_buffer; /* this conversion is safe, because capacity of the buffer is limited by jnit */
     if (ret >= num_bytes) {
@@ -435,7 +439,7 @@ sun_jpeg_skip_input_data(j_decompress_ptr cinfo, long num_bytes)
                                     InputStream_readID,
                                     src->hInputBuffer, 0, buflen);
         if (ret > buflen) ret = buflen;
-        if ((*env)->ExceptionOccurred(env)) {
+        if ((*env)->ExceptionCheck(env)) {
             cinfo->err->error_exit((struct jpeg_common_struct *) cinfo);
         }
         if (ret < 0) {
@@ -534,7 +538,7 @@ Java_sun_awt_image_JPEGImageDecoder_readImage(JNIEnv *env,
      */
     jpeg_destroy_decompress(&cinfo);
     RELEASE_ARRAYS(env, &jsrc);
-    if (!(*env)->ExceptionOccurred(env)) {
+    if (!(*env)->ExceptionCheck(env)) {
         char buffer[JMSG_LENGTH_MAX];
         (*cinfo.err->format_message) ((struct jpeg_common_struct *) &cinfo,
                                       buffer);
@@ -580,7 +584,7 @@ Java_sun_awt_image_JPEGImageDecoder_readImage(JNIEnv *env,
   ret = (*env)->CallBooleanMethod(env, this, sendHeaderInfoID,
                                   cinfo.image_width, cinfo.image_height,
                                   grayscale, hasalpha, buffered_mode);
-  if ((*env)->ExceptionOccurred(env) || !ret) {
+  if ((*env)->ExceptionCheck(env) || !ret) {
     /* No more interest in this image... */
     jpeg_destroy_decompress(&cinfo);
     return;
@@ -690,7 +694,7 @@ Java_sun_awt_image_JPEGImageDecoder_readImage(JNIEnv *env,
                                               jsrc.hOutputBuffer,
                                               cinfo.output_scanline - 1);
           }
-          if ((*env)->ExceptionOccurred(env) || !ret ||
+          if ((*env)->ExceptionCheck(env) || !ret ||
               !GET_ARRAYS(env, &jsrc)) {
               /* No more interest in this image... */
               jpeg_destroy_decompress(&cinfo);

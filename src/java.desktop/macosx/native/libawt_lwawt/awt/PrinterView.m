@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,14 +28,15 @@
 #import "java_awt_print_Pageable.h"
 #import "java_awt_print_PageFormat.h"
 
-#import <JavaNativeFoundation/JavaNativeFoundation.h>
-
 #import "ThreadUtilities.h"
 #import "GeomUtilities.h"
+#import "JNIUtilities.h"
 
-
-static JNF_CLASS_CACHE(sjc_CPrinterJob, "sun/lwawt/macosx/CPrinterJob");
-static JNF_CLASS_CACHE(sjc_PageFormat, "java/awt/print/PageFormat");
+static jclass sjc_CPrinterJob = NULL;
+static jclass sjc_PAbortEx = NULL;
+#define GET_CPRINTERJOB_CLASS() (sjc_CPrinterJob, "sun/lwawt/macosx/CPrinterJob");
+#define GET_CPRINTERJOB_CLASS_RETURN(ret) GET_CLASS_RETURN(sjc_CPrinterJob, "sun/lwawt/macosx/CPrinterJob", ret);
+#define GET_PRINERABORTEXCEPTION_CLASS(ret) GET_CLASS_RETURN(sjc_PAbortEx, "java/awt/print/PrinterAbortException", ret);
 
 @implementation PrinterView
 
@@ -44,7 +45,7 @@ static JNF_CLASS_CACHE(sjc_PageFormat, "java/awt/print/PageFormat");
     self = [super initWithFrame:aRect];
     if (self)
     {
-        fPrinterJob = JNFNewGlobalRef(env, printerJob);
+        fPrinterJob = (*env)->NewGlobalRef(env, printerJob);
         fCurPageFormat = NULL;
         fCurPainter = NULL;
         fCurPeekGraphics = NULL;
@@ -56,38 +57,41 @@ static JNF_CLASS_CACHE(sjc_PageFormat, "java/awt/print/PageFormat");
 {
     if (fCurPageFormat != NULL)
     {
-        JNFDeleteGlobalRef(env, fCurPageFormat);
+        (*env)->DeleteGlobalRef(env, fCurPageFormat);
         fCurPageFormat = NULL;
     }
     if (fCurPainter != NULL)
     {
-        JNFDeleteGlobalRef(env, fCurPainter);
+        (*env)->DeleteGlobalRef(env, fCurPainter);
         fCurPainter = NULL;
     }
     if (fCurPeekGraphics != NULL)
     {
-        JNFDeleteGlobalRef(env, fCurPeekGraphics);
+        (*env)->DeleteGlobalRef(env, fCurPeekGraphics);
         fCurPeekGraphics = NULL;
     }
 }
 
-- (void)setFirstPage:(jint)firstPage lastPage:(jint)lastPage {
-    fFirstPage = firstPage;
-    fLastPage = lastPage;
+- (void)setTotalPages:(jint)totalPages {
+    fTotalPages = totalPages;
 }
 
 - (void)drawRect:(NSRect)aRect
 {
     AWT_ASSERT_NOT_APPKIT_THREAD;
 
-    static JNF_MEMBER_CACHE(jm_printToPathGraphics, sjc_CPrinterJob, "printToPathGraphics", "(Lsun/print/PeekGraphics;Ljava/awt/print/PrinterJob;Ljava/awt/print/Printable;Ljava/awt/print/PageFormat;IJ)V");
+    JNIEnv* env = [ThreadUtilities getJNIEnvUncached];
+
+    GET_CPRINTERJOB_CLASS();
+    DECLARE_METHOD(jm_printToPathGraphics, sjc_CPrinterJob, "printToPathGraphics",
+                   "(Lsun/print/PeekGraphics;Ljava/awt/print/PrinterJob;Ljava/awt/print/Printable;Ljava/awt/print/PageFormat;IJ)V");
+    DECLARE_METHOD(jm_getXRes, sjc_CPrinterJob, "getXRes", "(Ljava/awt/print/PageFormat;)D");
+    DECLARE_METHOD(jm_getYRes, sjc_CPrinterJob, "getYRes", "(Ljava/awt/print/PageFormat;)D");
 
     // Create and draw into a new CPrinterGraphics with the current Context.
     assert(fCurPageFormat != NULL);
     assert(fCurPainter != NULL);
     assert(fCurPeekGraphics != NULL);
-
-    JNIEnv* env = [ThreadUtilities getJNIEnvUncached];
 
     if ([self cancelCheck:env])
     {
@@ -100,9 +104,26 @@ static JNF_CLASS_CACHE(sjc_PageFormat, "java/awt/print/PageFormat");
 
     jlong context = ptr_to_jlong([printLoop context]);
     CGContextRef cgRef = (CGContextRef)[[printLoop context] graphicsPort];
+
+    // Scale from the java document DPI to the user space DPI
+    jdouble hRes = (*env)->CallDoubleMethod(env, fPrinterJob, jm_getXRes, fCurPageFormat);
+    CHECK_EXCEPTION();
+    jdouble vRes = (*env)->CallDoubleMethod(env, fPrinterJob, jm_getYRes, fCurPageFormat);
+    CHECK_EXCEPTION();
+    if (hRes > 0 && vRes > 0) {
+        double defaultDeviceDPI = 72;
+        double scaleX = defaultDeviceDPI / hRes;
+        double scaleY = defaultDeviceDPI / vRes;
+        if (scaleX != 1 || scaleY != 1) {
+            CGContextScaleCTM(cgRef, scaleX, scaleY);
+        }
+    }
+
     CGContextSaveGState(cgRef); //04/28/2004: state needs to be saved here due to addition of lazy state management
 
-    JNFCallVoidMethod(env, fPrinterJob, jm_printToPathGraphics, fCurPeekGraphics, fPrinterJob, fCurPainter, fCurPageFormat, jPageIndex, context); // AWT_THREADING Safe (AWTRunLoop)
+    (*env)->CallVoidMethod(env, fPrinterJob, jm_printToPathGraphics, fCurPeekGraphics, fPrinterJob,
+                           fCurPainter, fCurPageFormat, jPageIndex, context);
+    CHECK_EXCEPTION();
 
     CGContextRestoreGState(cgRef);
 
@@ -113,12 +134,13 @@ static JNF_CLASS_CACHE(sjc_PageFormat, "java/awt/print/PageFormat");
 {
     AWT_ASSERT_NOT_APPKIT_THREAD;
 
-    static JNF_MEMBER_CACHE(jm_getJobName, sjc_CPrinterJob, "getJobName", "()Ljava/lang/String;");
-
     JNIEnv* env = [ThreadUtilities getJNIEnvUncached];
+    GET_CPRINTERJOB_CLASS_RETURN(nil);
+    DECLARE_METHOD_RETURN(jm_getJobName, sjc_CPrinterJob, "getJobName", "()Ljava/lang/String;", nil);
 
-    jobject o = JNFCallObjectMethod(env, fPrinterJob, jm_getJobName); // AWT_THREADING Safe (known object)
-    id result = JNFJavaToNSString(env, o);
+    jobject o = (*env)->CallObjectMethod(env, fPrinterJob, jm_getJobName);
+    CHECK_EXCEPTION();
+    id result = JavaStringToNSString(env, o);
     (*env)->DeleteLocalRef(env, o);
     return result;
 }
@@ -133,15 +155,15 @@ static JNF_CLASS_CACHE(sjc_PageFormat, "java/awt/print/PageFormat");
         return NO;
     }
 
-    aRange->location = fFirstPage + 1;
+    aRange->location = 1;
 
-    if (fLastPage == java_awt_print_Pageable_UNKNOWN_NUMBER_OF_PAGES)
+    if (fTotalPages == java_awt_print_Pageable_UNKNOWN_NUMBER_OF_PAGES)
     {
         aRange->length = NSIntegerMax;
     }
     else
     {
-        aRange->length = (fLastPage + 1) - fFirstPage;
+        aRange->length = fTotalPages;
     }
 
     return YES;
@@ -151,26 +173,30 @@ static JNF_CLASS_CACHE(sjc_PageFormat, "java/awt/print/PageFormat");
 {
     AWT_ASSERT_NOT_APPKIT_THREAD;
 
-    static JNF_MEMBER_CACHE(jm_getPageformatPrintablePeekgraphics, sjc_CPrinterJob, "getPageformatPrintablePeekgraphics", "(I)[Ljava/lang/Object;");
-    static JNF_MEMBER_CACHE(jm_printAndGetPageFormatArea, sjc_CPrinterJob, "printAndGetPageFormatArea", "(Ljava/awt/print/Printable;Ljava/awt/Graphics;Ljava/awt/print/PageFormat;I)Ljava/awt/geom/Rectangle2D;");
-    static JNF_MEMBER_CACHE(jm_getOrientation, sjc_PageFormat, "getOrientation", "()I");
+    JNIEnv* env = [ThreadUtilities getJNIEnvUncached];
+    GET_CPRINTERJOB_CLASS_RETURN(NSZeroRect);
+    DECLARE_METHOD_RETURN(jm_getPageformatPrintablePeekgraphics, sjc_CPrinterJob,
+                           "getPageformatPrintablePeekgraphics", "(I)[Ljava/lang/Object;", NSZeroRect);
+    DECLARE_METHOD_RETURN(jm_printAndGetPageFormatArea, sjc_CPrinterJob, "printAndGetPageFormatArea",
+                          "(Ljava/awt/print/Printable;Ljava/awt/Graphics;Ljava/awt/print/PageFormat;I)Ljava/awt/geom/Rectangle2D;", NSZeroRect);
+    DECLARE_CLASS_RETURN(sjc_PageFormat, "java/awt/print/PageFormat", NSZeroRect);
+    DECLARE_METHOD_RETURN(jm_getOrientation, sjc_PageFormat, "getOrientation", "()I", NSZeroRect);
 
-    // Assertions removed, and corresponding JNFDeleteGlobalRefs added, for radr://3962543
+    // Assertions removed, and corresponding DeleteGlobalRefs added, for radr://3962543
     // Actual fix that will keep these assertions from being true is radr://3205462 ,
     // which will hopefully be fixed by the blocking AppKit bug radr://3056694
     //assert(fCurPageFormat == NULL);
     //assert(fCurPainter == NULL);
     //assert(fCurPeekGraphics == NULL);
 
-    JNIEnv* env = [ThreadUtilities getJNIEnvUncached];
     if(fCurPageFormat != NULL) {
-        JNFDeleteGlobalRef(env, fCurPageFormat);
+        (*env)->DeleteGlobalRef(env, fCurPageFormat);
     }
     if(fCurPainter != NULL) {
-        JNFDeleteGlobalRef(env, fCurPainter);
+        (*env)->DeleteGlobalRef(env, fCurPainter);
     }
     if(fCurPeekGraphics != NULL) {
-        JNFDeleteGlobalRef(env, fCurPeekGraphics);
+        (*env)->DeleteGlobalRef(env, fCurPeekGraphics);
     }
 
     //+++gdb Check the pageNumber for validity (PageAttrs)
@@ -184,29 +210,33 @@ static JNF_CLASS_CACHE(sjc_PageFormat, "java/awt/print/PageFormat");
         return NSZeroRect;
     }
 
-    jobjectArray objectArray = JNFCallObjectMethod(env, fPrinterJob, jm_getPageformatPrintablePeekgraphics, jPageNumber); // AWT_THREADING Safe (AWTRunLoopMode)
+    jobjectArray objectArray = (*env)->CallObjectMethod(env, fPrinterJob,
+                                jm_getPageformatPrintablePeekgraphics, jPageNumber);
+    CHECK_EXCEPTION();
     if (objectArray != NULL) {
         // Get references to the return objects -> PageFormat, Printable, PeekGraphics
         // Cheat - we know we either got NULL or a 3 element array
         jobject pageFormat = (*env)->GetObjectArrayElement(env, objectArray, 0);
-        fCurPageFormat = JNFNewGlobalRef(env, pageFormat);
+        fCurPageFormat = (*env)->NewGlobalRef(env, pageFormat);
         (*env)->DeleteLocalRef(env, pageFormat);
 
         jobject painter = (*env)->GetObjectArrayElement(env, objectArray, 1);
-        fCurPainter = JNFNewGlobalRef(env, painter);
+        fCurPainter = (*env)->NewGlobalRef(env, painter);
         (*env)->DeleteLocalRef(env, painter);
 
         jobject peekGraphics = (*env)->GetObjectArrayElement(env, objectArray, 2);
-        fCurPeekGraphics = JNFNewGlobalRef(env, peekGraphics);
+        fCurPeekGraphics = (*env)->NewGlobalRef(env, peekGraphics);
         (*env)->DeleteLocalRef(env, peekGraphics);
 
         // Actually print and get the PageFormatArea
-        jobject pageFormatArea = JNFCallObjectMethod(env, fPrinterJob, jm_printAndGetPageFormatArea, fCurPainter, fCurPeekGraphics, fCurPageFormat, jPageNumber); // AWT_THREADING Safe (AWTRunLoopMode)
+        jobject pageFormatArea = (*env)->CallObjectMethod(env, fPrinterJob, jm_printAndGetPageFormatArea, fCurPainter,
+                                    fCurPeekGraphics, fCurPageFormat, jPageNumber);
+        CHECK_EXCEPTION();
         if (pageFormatArea != NULL) {
             NSPrintingOrientation currentOrientation =
                     [[[NSPrintOperation currentOperation] printInfo] orientation];
             // set page orientation
-            switch (JNFCallIntMethod(env, fCurPageFormat, jm_getOrientation)) {
+            switch ((*env)->CallIntMethod(env, fCurPageFormat, jm_getOrientation)) {
                 case java_awt_print_PageFormat_PORTRAIT:
                 default:
                     if (currentOrientation != NSPortraitOrientation) {
@@ -223,6 +253,7 @@ static JNF_CLASS_CACHE(sjc_PageFormat, "java/awt/print/PageFormat");
                     }
                     break;
                 }
+            CHECK_EXCEPTION();
             result = JavaToNSRect(env, pageFormatArea);
             (*env)->DeleteLocalRef(env, pageFormatArea);
         } else {
@@ -243,9 +274,17 @@ static JNF_CLASS_CACHE(sjc_PageFormat, "java/awt/print/PageFormat");
 {
     AWT_ASSERT_NOT_APPKIT_THREAD;
 
-    static JNF_MEMBER_CACHE(jm_cancelCheck, sjc_CPrinterJob, "cancelCheck", "()Z");
+    GET_CPRINTERJOB_CLASS_RETURN(NO);
+    DECLARE_METHOD_RETURN(jm_cancelCheck, sjc_CPrinterJob, "cancelCheck", "()Z", NO);
 
-    return JNFCallBooleanMethod(env, fPrinterJob, jm_cancelCheck); // AWT_THREADING Safe (known object)
+    BOOL b = (*env)->CallBooleanMethod(env, fPrinterJob, jm_cancelCheck); // AWT_THREADING Safe (known object)
+    if (b) {
+        GET_PRINERABORTEXCEPTION_CLASS(b);
+        (*env)->ThrowNew(env, sjc_PAbortEx, "Printer Job cancelled");
+    } else {
+        CHECK_EXCEPTION();
+    }
+    return b;
 }
 
 // This is called by -[PrintModel safePrintLoop]
@@ -253,15 +292,20 @@ static JNF_CLASS_CACHE(sjc_PageFormat, "java/awt/print/PageFormat");
 {
     AWT_ASSERT_NOT_APPKIT_THREAD;
 
-    static JNF_MEMBER_CACHE(jf_completePrintLoop, sjc_CPrinterJob, "completePrintLoop", "()V");
-    JNFCallVoidMethod(env, fPrinterJob, jf_completePrintLoop);
+    jthrowable excpn = (*env)->ExceptionOccurred(env);
+    if (excpn != NULL) {
+        (*env)->ExceptionClear(env);
+    }
+    DECLARE_METHOD(jf_completePrintLoop, sjc_CPrinterJob, "completePrintLoop", "(Ljava/lang/Throwable;)V");
+    (*env)->CallVoidMethod(env, fPrinterJob, jf_completePrintLoop, excpn);
+    CHECK_EXCEPTION();
 
     // Clean up after ourselves
     // Can't put these into -dealloc since that happens (potentially) after the JNIEnv is stale
     [self releaseReferences:env];
     if (fPrinterJob != NULL)
     {
-        JNFDeleteGlobalRef(env, fPrinterJob);
+        (*env)->DeleteGlobalRef(env, fPrinterJob);
         fPrinterJob = NULL;
     }
 }

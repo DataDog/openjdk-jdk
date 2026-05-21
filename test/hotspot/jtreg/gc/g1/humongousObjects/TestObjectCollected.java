@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@ package gc.g1.humongousObjects;
 
 import gc.testlibrary.Helpers;
 import jdk.test.lib.Asserts;
-import sun.hotspot.WhiteBox;
+import jdk.test.whitebox.WhiteBox;
 
 import java.lang.ref.Reference;
 import java.lang.ref.ReferenceQueue;
@@ -40,12 +40,12 @@ import java.lang.ref.WeakReference;
  * @library /test/lib /
  * @modules java.base/jdk.internal.misc
  * @modules java.management
- * @build sun.hotspot.WhiteBox
- * @run driver ClassFileInstaller sun.hotspot.WhiteBox
+ * @build jdk.test.whitebox.WhiteBox
+ * @run driver jdk.test.lib.helpers.ClassFileInstaller jdk.test.whitebox.WhiteBox
  *
  * @run main/othervm -XX:+UseG1GC -XX:+UnlockDiagnosticVMOptions -XX:+UnlockExperimentalVMOptions
- *                   -XX:+WhiteBoxAPI -Xbootclasspath/a:. -Xms200m -Xmx200m -Xlog:gc
- *                   -XX:InitiatingHeapOccupancyPercent=100 -XX:G1HeapRegionSize=1M -Xlog:gc=info:file=TestObjectCollected.gc.log
+ *                   -XX:+WhiteBoxAPI -Xbootclasspath/a:. -Xms200m -Xmx200m -Xlog:gc,gc+humongous=debug
+ *                   -XX:G1IHOP=100 -XX:G1HeapRegionSize=1M -Xlog:gc,gc+humongous=debug:file=TestObjectCollected.gc.log
  *                    gc.g1.humongousObjects.TestObjectCollected
  */
 
@@ -79,9 +79,7 @@ public class TestObjectCollected {
         CMC {
             @Override
             public void provoke() {
-                Helpers.waitTillCMCFinished(WHITE_BOX, 0);
-                WHITE_BOX.g1StartConcMarkCycle();
-                Helpers.waitTillCMCFinished(WHITE_BOX, 0);
+                WHITE_BOX.g1RunConcurrentGC();
             }
         },
         FULL_GC_MEMORY_PRESSURE {
@@ -105,11 +103,21 @@ public class TestObjectCollected {
             public Reference<byte[]> create() {
                 return new WeakReference<>(new byte[ALLOCATION_SIZE], referenceQueqe);
             }
+
+            @Override
+            public boolean expectCleared() {
+                return true;
+            }
         },
         SOFT {
             @Override
             public Reference<byte[]> create() {
                 return new SoftReference<>(new byte[ALLOCATION_SIZE], referenceQueqe);
+            }
+
+            @Override
+            public boolean expectCleared() {
+                return false;
             }
         };
 
@@ -122,6 +130,11 @@ public class TestObjectCollected {
          * @return weak/soft reference on byte array of ALLOCATION_SIZE
          */
         public abstract Reference<byte[]> create();
+
+        /**
+         * For WeakReferences we expect the referent to always be cleared after GC.
+         */
+        public abstract boolean expectCleared();
     }
 
 
@@ -164,8 +177,13 @@ public class TestObjectCollected {
         isRegionFree = WHITE_BOX.g1BelongsToFreeRegion(adr);
 
         boolean isObjCollected = isRegionFree || !isRegionHumongous;
-
-        Asserts.assertEquals(isRefNulled, isObjCollected,
+        if (ref.expectCleared()) {
+            Asserts.assertEquals(isRefNulled, true,
+                "Reference.get() did not return null for a reference where it is expected");
+            Asserts.assertEquals(isObjCollected, true,
+                "The humonogus object was not collected as expected");
+        } else {
+            Asserts.assertEquals(isRefNulled, isObjCollected,
                 String.format("There is an inconsistensy between reference and white box "
                                 + "method behavior - one considers object referenced with "
                                 + "%s type collected and another doesn't!\n"
@@ -174,7 +192,7 @@ public class TestObjectCollected {
                         reference.getClass().getSimpleName(),
                         (isRefNulled ? "" : "not "),
                         (isObjCollected ? "" : " not")));
-
+        }
         System.out.println("Passed");
     }
 

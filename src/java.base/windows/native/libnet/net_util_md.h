@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -51,23 +51,11 @@
 /* true if SO_RCVTIMEO is supported by underlying provider */
 extern jboolean isRcvTimeoutSupported;
 
-void NET_ThrowCurrent(JNIEnv *env, char *msg);
-
 typedef union {
     struct sockaddr     sa;
     struct sockaddr_in  sa4;
     struct sockaddr_in6 sa6;
 } SOCKETADDRESS;
-
-/*
- * passed to NET_BindV6. Both ipv4_fd and ipv6_fd must be created and unbound
- * sockets. On return they may refer to different sockets.
- */
-struct ipv6bind {
-    SOCKETADDRESS      *addr;
-    SOCKET              ipv4_fd;
-    SOCKET              ipv6_fd;
-};
 
 #define SOCKETADDRESS_COPY(DST,SRC) {                           \
     if ((SRC)->sa_family == AF_INET6) {                         \
@@ -90,51 +78,38 @@ struct ipv6bind {
 /**
  * With dual socket implementation the
  * IPv4 addresseses might be mapped as IPv6.
- * The IPv4 loopback adapter address will
- * be mapped as the following IPv6 ::ffff:127.0.0.1.
+ * The IPv4 loopback adapter address ranges (127.0.0.0 through 127.255.255.255) will
+ * be mapped as the following IPv6 ::ffff:127.0.0.0 through ::ffff:127.255.255.255.
  * For example, this is done by NET_InetAddressToSockaddr.
  */
 #define IN6_IS_ADDR_V4MAPPED_LOOPBACK(x) ( \
-    (((x)->s6_words[0] == 0)      &&  \
-     ((x)->s6_words[1] == 0)      &&  \
-     ((x)->s6_words[2] == 0)      &&  \
-     ((x)->s6_words[3] == 0)      &&  \
-     ((x)->s6_words[4] == 0)      &&  \
-     ((x)->s6_words[5] == 0xFFFF) &&  \
-     ((x)->s6_words[6] == 0x007F) &&  \
-     ((x)->s6_words[7] == 0x0100))    \
+    (((x)->s6_words[0] == 0)               &&  \
+     ((x)->s6_words[1] == 0)               &&  \
+     ((x)->s6_words[2] == 0)               &&  \
+     ((x)->s6_words[3] == 0)               &&  \
+     ((x)->s6_words[4] == 0)               &&  \
+     ((x)->s6_words[5] == 0xFFFF)          &&  \
+     (((x)->s6_words[6] & 0x00FF) == 0x007F)) \
+)
+
+/**
+ * Check for IPv4 loopback adapter address ranges (127.0.0.0 through 127.255.255.255)
+ */
+#define IN4_IS_ADDR_NETLONG_LOOPBACK(l) ( \
+    ((l & 0xFF000000) == 0x7F000000) \
 )
 
 #define IS_LOOPBACK_ADDRESS(x) ( \
     ((x)->sa.sa_family == AF_INET) ? \
-        (ntohl((x)->sa4.sin_addr.s_addr) == INADDR_LOOPBACK) : \
+        (IN4_IS_ADDR_NETLONG_LOOPBACK(ntohl((x)->sa4.sin_addr.s_addr))) : \
         ((IN6_IS_ADDR_LOOPBACK(&(x)->sa6.sin6_addr)) || \
          (IN6_IS_ADDR_V4MAPPED_LOOPBACK(&(x)->sa6.sin6_addr))) \
 )
-
-JNIEXPORT int JNICALL NET_SocketClose(int fd);
-
-JNIEXPORT int JNICALL NET_Timeout(int fd, long timeout);
 
 int NET_Socket(int domain, int type, int protocol);
 
 void NET_ThrowByNameWithLastError(JNIEnv *env, const char *name,
                                   const char *defaultDetail);
-
-/*
- * differs from NET_Timeout() as follows:
- *
- * If timeout = -1, it blocks forever.
- *
- * returns 1 or 2 depending if only one or both sockets
- * fire at same time.
- *
- * *fdret is (one of) the active fds. If both sockets
- * fire at same time, *fd == fd always.
- */
-JNIEXPORT int JNICALL NET_Timeout2(int fd, int fd1, long timeout, int *fdret);
-
-JNIEXPORT int JNICALL NET_BindV6(struct ipv6bind *b, jboolean exclBind);
 
 JNIEXPORT int JNICALL NET_WinBind(int s, SOCKETADDRESS *sa, int len,
                                   jboolean exclBind);

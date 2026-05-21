@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -63,6 +63,9 @@ Java_com_sun_management_internal_OperatingSystemImpl_getCpuLoad0
 
     jlong used_delta  = used - last_used;
     jlong total_delta = total - last_total;
+    if (total_delta == 0) {
+        return 0;
+    }
 
     jdouble cpu = (jdouble) used_delta / total_delta;
 
@@ -165,6 +168,13 @@ Java_com_sun_management_internal_OperatingSystemImpl_getSingleCpuLoad0
 (JNIEnv *env, jobject dummy, jint cpu_number)
 {
     return -1.0;
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_sun_management_internal_OperatingSystemImpl_getHostTotalCpuTicks0
+(JNIEnv *env, jobject mbean)
+{
+    return -1;
 }
 
 JNIEXPORT jint JNICALL

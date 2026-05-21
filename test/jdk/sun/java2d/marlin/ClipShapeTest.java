@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -52,24 +52,43 @@ import javax.imageio.ImageWriteParam;
 import javax.imageio.ImageWriter;
 import javax.imageio.stream.ImageOutputStream;
 
-/**
- * @test
+/*
+ * @test id=Poly
  * @bug 8191814
- * @summary Verifies that Marlin rendering generates the same
- * images with and without clipping optimization with all possible
- * stroke (cap/join) and/or dashes or fill modes (EO rules)
- * for paths made of either 9 lines, 4 quads, 2 cubics (random)
- * Note: Use the argument -slow to run more intensive tests (too much time)
- *
- * @run main/othervm/timeout=300 -Dsun.java2d.renderer=sun.java2d.marlin.MarlinRenderingEngine ClipShapeTest -poly
- * @run main/othervm/timeout=300 -Dsun.java2d.renderer=sun.java2d.marlin.MarlinRenderingEngine ClipShapeTest -poly -doDash
- * @run main/othervm/timeout=300 -Dsun.java2d.renderer=sun.java2d.marlin.MarlinRenderingEngine ClipShapeTest -cubic
- * @run main/othervm/timeout=300 -Dsun.java2d.renderer=sun.java2d.marlin.MarlinRenderingEngine ClipShapeTest -cubic -doDash
+ * @summary Runs the test with "-poly" option
  * @run main/othervm/timeout=300 -Dsun.java2d.renderer=sun.java2d.marlin.DMarlinRenderingEngine ClipShapeTest -poly
+ */
+
+/*
+ * @test id=PolyDoDash
+ * @bug 8191814
+ * @summary Runs the test with "-poly -doDash" options
  * @run main/othervm/timeout=300 -Dsun.java2d.renderer=sun.java2d.marlin.DMarlinRenderingEngine ClipShapeTest -poly -doDash
+ */
+
+/*
+ * @test id=Cubic
+ * @bug 8191814
+ * @summary Runs the test with "-cubic" option
  * @run main/othervm/timeout=300 -Dsun.java2d.renderer=sun.java2d.marlin.DMarlinRenderingEngine ClipShapeTest -cubic
+ */
+
+/*
+ * @test id=CubicDoDash
+ * @bug 8191814
+ * @summary Runs the test with "-cubic -doDash" options
  * @run main/othervm/timeout=300 -Dsun.java2d.renderer=sun.java2d.marlin.DMarlinRenderingEngine ClipShapeTest -cubic -doDash
-*/
+ */
+
+/**
+ * Verifies that Marlin rendering generates the same images with and without
+ * clipping optimization with all possible stroke (cap/join) and/or dashes or
+ * fill modes (EO rules) for paths made of either 9 lines, 4 quads, 2 cubics
+ * (random).
+ * <p>
+ * Note: Use the argument {@code -slow} to run more intensive tests (too much
+ * time).
+ */
 public final class ClipShapeTest {
 
     // test options:
@@ -133,16 +152,14 @@ public final class ClipShapeTest {
     static final File OUTPUT_DIR = new File(".");
 
     static final AtomicBoolean isMarlin = new AtomicBoolean();
-    static final AtomicBoolean isMarlinFloat = new AtomicBoolean();
     static final AtomicBoolean isClipRuntime = new AtomicBoolean();
+
+    static final Logger log = Logger.getLogger("sun.java2d.marlin");
 
     static {
         Locale.setDefault(Locale.US);
 
         // FIRST: Get Marlin runtime state from its log:
-
-        // initialize j.u.l Looger:
-        final Logger log = Logger.getLogger("sun.java2d.marlin");
         log.addHandler(new Handler() {
             @Override
             public void publish(LogRecord record) {
@@ -150,8 +167,7 @@ public final class ClipShapeTest {
                 if (msg != null) {
                     // last space to avoid matching other settings:
                     if (msg.startsWith("sun.java2d.renderer ")) {
-                        isMarlin.set(msg.contains("MarlinRenderingEngine"));
-                        isMarlinFloat.set(!msg.contains("DMarlinRenderingEngine"));
+                        isMarlin.set(msg.contains("DMarlinRenderingEngine"));
                     }
                     if (msg.startsWith("sun.java2d.renderer.clip.runtime.enable")) {
                         isClipRuntime.set(msg.contains("true"));
@@ -294,10 +310,7 @@ public final class ClipShapeTest {
                 // Define uncertainty for lines:
                 // float variant have higher uncertainty
                 THRESHOLD_DELTA = 2;
-                THRESHOLD_NBPIX = (USE_DASHES) ?
-                    // float variant have higher uncertainty
-                    ((isMarlinFloat.get()) ? 30 : 6) // low for double
-                    : (isMarlinFloat.get()) ? 10 : 0;
+                THRESHOLD_NBPIX = (USE_DASHES) ? 6 : 0;
         }
 
 // Visual inspection (low threshold):

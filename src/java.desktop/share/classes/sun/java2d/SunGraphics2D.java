@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -69,7 +69,6 @@ import java.awt.image.renderable.RenderContext;
 import java.awt.image.renderable.RenderableImage;
 import java.lang.annotation.Native;
 import java.text.AttributedCharacterIterator;
-import java.util.Iterator;
 import java.util.Map;
 
 import sun.awt.ConstrainableGraphics;
@@ -102,7 +101,7 @@ import static java.awt.geom.AffineTransform.TYPE_MASK_SCALE;
 import static java.awt.geom.AffineTransform.TYPE_TRANSLATION;
 
 /**
- * This is a the master Graphics2D superclass for all of the Sun
+ * This is the master Graphics2D superclass for all of the Sun
  * Graphics implementations.  This class relies on subclasses to
  * manage the various device information, but provides an overall
  * general framework for performing all of the requests in the
@@ -250,11 +249,6 @@ public final class SunGraphics2D
     private FontInfo fontInfo;
     private FontInfo glyphVectorFontInfo;
     private FontRenderContext glyphVectorFRC;
-
-    private static final int slowTextTransformMask =
-                            AffineTransform.TYPE_GENERAL_TRANSFORM
-                        |   AffineTransform.TYPE_MASK_ROTATION
-                        |   AffineTransform.TYPE_FLIP;
 
     static {
         if (PerformanceLogger.loggingEnabled()) {
@@ -409,7 +403,7 @@ public final class SunGraphics2D
      * drawback of the workaround is that the resulting
      * clip and device origin cannot be "enforced".
      *
-     * @exception IllegalStateException If the Graphics
+     * @throws IllegalStateException If the Graphics
      * to be constrained has a complex transform.
      */
     @Override
@@ -454,13 +448,13 @@ public final class SunGraphics2D
      * or whether that shape must be "kept" unmodified.
      */
     Shape intersectShapes(Shape s1, Shape s2, boolean keep1, boolean keep2) {
-        if (s1 instanceof Rectangle && s2 instanceof Rectangle) {
-            return ((Rectangle) s1).intersection((Rectangle) s2);
+        if (s1 instanceof Rectangle r1 && s2 instanceof Rectangle r2) {
+            return r1.intersection(r2);
         }
-        if (s1 instanceof Rectangle2D) {
-            return intersectRectShape((Rectangle2D) s1, s2, keep1, keep2);
-        } else if (s2 instanceof Rectangle2D) {
-            return intersectRectShape((Rectangle2D) s2, s1, keep2, keep1);
+        if (s1 instanceof Rectangle2D r1) {
+            return intersectRectShape(r1, s2, keep1, keep2);
+        } else if (s2 instanceof Rectangle2D r2) {
+            return intersectRectShape(r2, s1, keep2, keep1);
         }
         return intersectByArea(s1, s2, keep1, keep2);
     }
@@ -474,8 +468,7 @@ public final class SunGraphics2D
      */
     Shape intersectRectShape(Rectangle2D r, Shape s,
                              boolean keep1, boolean keep2) {
-        if (s instanceof Rectangle2D) {
-            Rectangle2D r2 = (Rectangle2D) s;
+        if (s instanceof Rectangle2D r2) {
             Rectangle2D outrect;
             if (!keep1) {
                 outrect = r;
@@ -523,7 +516,7 @@ public final class SunGraphics2D
     Shape intersectByArea(Shape s1, Shape s2, boolean keep1, boolean keep2) {
         Area a1, a2;
 
-        // First see if we can find an overwriteable source shape
+        // First see if we can find an overwritable source shape
         // to use as our destination area to avoid duplication.
         if (!keep1 && (s1 instanceof Area)) {
             a1 = (Area) s1;
@@ -597,15 +590,15 @@ public final class SunGraphics2D
         }
 
         float ptSize = font.getSize2D();
-        int txFontType;
         AffineTransform devAt, textAt=null;
         if (font.isTransformed()) {
             textAt = font.getTransform();
             textAt.scale(ptSize, ptSize);
-            txFontType = textAt.getType();
             info.originX = (float)textAt.getTranslateX();
             info.originY = (float)textAt.getTranslateY();
-            textAt.translate(-info.originX, -info.originY);
+            textAt.setTransform(textAt.getScaleX(), textAt.getShearY(),
+                                textAt.getShearX(), textAt.getScaleY(),
+                                0, 0);
             if (transformState >= TRANSFORM_TRANSLATESCALE) {
                 transform.getMatrix(info.devTx = new double[4]);
                 devAt = new AffineTransform(info.devTx);
@@ -622,7 +615,6 @@ public final class SunGraphics2D
             }
             info.pixelHeight = (int)(Math.abs(scaley)+0.5);
         } else {
-            txFontType = AffineTransform.TYPE_IDENTITY;
             info.originX = info.originY = 0;
             if (transformState >= TRANSFORM_TRANSLATESCALE) {
                 transform.getMatrix(info.devTx = new double[4]);
@@ -784,18 +776,6 @@ public final class SunGraphics2D
         return info;
     }
 
-    public static boolean isRotated(double [] mtx) {
-        if ((mtx[0] == mtx[3]) &&
-            (mtx[1] == 0.0) &&
-            (mtx[2] == 0.0) &&
-            (mtx[0] > 0.0))
-        {
-            return false;
-        }
-
-        return true;
-    }
-
     public void setFont(Font font) {
         /* replacing the reference equality test font != this.font with
          * !font.equals(this.font) did not yield any measurable difference
@@ -945,8 +925,7 @@ public final class SunGraphics2D
         }
         int newCompState;
         CompositeType newCompType;
-        if (comp instanceof AlphaComposite) {
-            AlphaComposite alphacomp = (AlphaComposite) comp;
+        if (comp instanceof AlphaComposite alphacomp) {
             newCompType = CompositeType.forAlphaComposite(alphacomp);
             if (newCompType == CompositeType.SrcOverNoEa) {
                 if (paintState == PAINT_OPAQUECOLOR ||
@@ -975,7 +954,6 @@ public final class SunGraphics2D
         } else if (comp == null) {
             throw new IllegalArgumentException("null Composite");
         } else {
-            surfaceData.checkCustomComposite();
             newCompState = COMP_CUSTOM;
             newCompType = CompositeType.General;
         }
@@ -1002,8 +980,8 @@ public final class SunGraphics2D
      * @see TexturePaint
      */
     public void setPaint(Paint paint) {
-        if (paint instanceof Color) {
-            setColor((Color) paint);
+        if (paint instanceof Color c) {
+            setColor(c);
             return;
         }
         if (paint == null || this.paint == paint) {
@@ -1164,8 +1142,8 @@ public final class SunGraphics2D
         }
         int saveStrokeState = strokeState;
         stroke = s;
-        if (s instanceof BasicStroke) {
-            validateBasicStroke((BasicStroke) s);
+        if (s instanceof BasicStroke bs) {
+            validateBasicStroke(bs);
         } else {
             strokeState = STROKE_CUSTOM;
         }
@@ -1195,11 +1173,10 @@ public final class SunGraphics2D
             throw new IllegalArgumentException
                 (hintValue+" is not compatible with "+hintKey);
         }
-        if (hintKey instanceof SunHints.Key) {
+        if (hintKey instanceof SunHints.Key sunKey) {
             boolean stateChanged;
             boolean textStateChanged = false;
             boolean recognized = true;
-            SunHints.Key sunKey = (SunHints.Key) hintKey;
             int newHint;
             if (sunKey == SunHints.KEY_TEXT_ANTIALIAS_LCD_CONTRAST) {
                 newHint = ((Integer)hintValue).intValue();
@@ -1299,7 +1276,6 @@ public final class SunGraphics2D
         hints.put(hintKey, hintValue);
     }
 
-
     /**
      * Returns the preferences for the rendering algorithms.
      * @param hintKey The category of hint to be set. The strings
@@ -1312,10 +1288,10 @@ public final class SunGraphics2D
         if (hints != null) {
             return hints.get(hintKey);
         }
-        if (!(hintKey instanceof SunHints.Key)) {
+        if (!(hintKey instanceof SunHints.Key shk)) {
             return null;
         }
-        int keyindex = ((SunHints.Key)hintKey).getIndex();
+        int keyindex = shk.getIndex();
         switch (keyindex) {
         case SunHints.INTKEY_RENDERING:
             return SunHints.Value.get(SunHints.INTKEY_RENDERING,
@@ -1368,9 +1344,7 @@ public final class SunGraphics2D
         interpolationHint = -1;
         interpolationType = AffineTransformOp.TYPE_NEAREST_NEIGHBOR;
         boolean customHintPresent = false;
-        Iterator<?> iter = hints.keySet().iterator();
-        while (iter.hasNext()) {
-            Object key = iter.next();
+        for (Object key : hints.keySet()) {
             if (key == SunHints.KEY_RENDERING ||
                 key == SunHints.KEY_ANTIALIASING ||
                 key == SunHints.KEY_TEXT_ANTIALIASING ||
@@ -1399,9 +1373,7 @@ public final class SunGraphics2D
      */
     public void addRenderingHints(Map<?,?> hints) {
         boolean customHintPresent = false;
-        Iterator<?> iter = hints.keySet().iterator();
-        while (iter.hasNext()) {
-            Object key = iter.next();
+        for (Object key : hints.keySet()) {
             if (key == SunHints.KEY_RENDERING ||
                 key == SunHints.KEY_ANTIALIASING ||
                 key == SunHints.KEY_TEXT_ANTIALIASING ||
@@ -1575,7 +1547,7 @@ public final class SunGraphics2D
     /**
      * Composes a Transform object with the transform in this
      * Graphics2D according to the rule last-specified-first-applied.
-     * If the currrent transform is Cx, the result of composition
+     * If the current transform is Cx, the result of composition
      * with Tx is a new transform Cx'.  Cx' becomes the current
      * transform for this Graphics2D.
      * Transforming a point p by the updated transform Cx' is
@@ -1788,7 +1760,7 @@ public final class SunGraphics2D
 
     /**
      * Sets the background color in this context used for clearing a region.
-     * When Graphics2D is constructed for a component, the backgroung color is
+     * When Graphics2D is constructed for a component, the background color is
      * inherited from the component. Setting the background color in the
      * Graphics2D context only affects the subsequent clearRect() calls and
      * not the background color of the component. To change the background
@@ -1828,8 +1800,8 @@ public final class SunGraphics2D
     public Rectangle getClipBounds(Rectangle r) {
         if (clipState != CLIP_DEVICE) {
             if (transformState <= TRANSFORM_INT_TRANSLATE) {
-                if (usrClip instanceof Rectangle) {
-                    r.setBounds((Rectangle) usrClip);
+                if (usrClip instanceof Rectangle usrClipRect) {
+                    r.setBounds(usrClipRect);
                 } else {
                     r.setFrame(usrClip.getBounds2D());
                 }
@@ -1904,14 +1876,16 @@ public final class SunGraphics2D
 
     protected void validateCompClip() {
         int origClipState = clipState;
-        if (usrClip == null) {
+        final Shape clip = usrClip;
+
+        if (clip == null) {
             clipState = CLIP_DEVICE;
             clipRegion = devClip;
-        } else if (usrClip instanceof Rectangle2D) {
+        } else if (clip instanceof Rectangle2D rect2d) {
             clipState = CLIP_RECTANGULAR;
-            clipRegion = devClip.getIntersection((Rectangle2D) usrClip);
+            clipRegion = devClip.getIntersection(rect2d);
         } else {
-            PathIterator cpi = usrClip.getPathIterator(null);
+            PathIterator cpi = clip.getPathIterator(null);
             int[] box = new int[4];
             ShapeSpanIterator sr = LoopPipe.getFillSSI(this);
             try {
@@ -1974,8 +1948,7 @@ public final class SunGraphics2D
             r.translate(tx, ty);
             return r;
         }
-        if (s instanceof Rectangle2D) {
-            Rectangle2D rect = (Rectangle2D) s;
+        if (s instanceof Rectangle2D rect) {
             return new Rectangle2D.Double(rect.getX() + tx,
                                           rect.getY() + ty,
                                           rect.getWidth(),
@@ -1995,10 +1968,9 @@ public final class SunGraphics2D
             return null;
         }
 
-        if (clip instanceof Rectangle2D &&
+        if (clip instanceof Rectangle2D rect &&
             (tx.getType() & NON_RECTILINEAR_TRANSFORM_MASK) == 0)
         {
-            Rectangle2D rect = (Rectangle2D) clip;
             double[] matrix = new double[4];
             matrix[0] = rect.getX();
             matrix[1] = rect.getY();
@@ -2155,87 +2127,34 @@ public final class SunGraphics2D
         }
 
         Blit ob = lastCAblit;
-        if (dy == 0 && dx > 0 && dx < w) {
-            while (w > 0) {
-                int partW = Math.min(w, dx);
-                w -= partW;
-                int sx = x + w;
-                ob.Blit(theData, theData, comp, clip,
-                        sx, y, sx+dx, y+dy, partW, h);
-            }
-            return;
-        }
-        if (dy > 0 && dy < h && dx > -w && dx < w) {
-            while (h > 0) {
-                int partH = Math.min(h, dy);
-                h -= partH;
-                int sy = y + h;
-                ob.Blit(theData, theData, comp, clip,
-                        x, sy, x+dx, sy+dy, w, partH);
-            }
-            return;
-        }
-            ob.Blit(theData, theData, comp, clip, x, y, x+dx, y+dy, w, h);
-    }
-
-    /*
-    public void XcopyArea(int x, int y, int w, int h, int dx, int dy) {
-        Rectangle rect = new Rectangle(x, y, w, h);
-        rect = transformBounds(rect, transform);
-        Point2D    point = new Point2D.Float(dx, dy);
-        Point2D    root  = new Point2D.Float(0, 0);
-        point = transform.transform(point, point);
-        root  = transform.transform(root, root);
-        int fdx = (int)(point.getX()-root.getX());
-        int fdy = (int)(point.getY()-root.getY());
-
-        Rectangle r = getCompBounds().intersection(rect.getBounds());
-
-        if (r.isEmpty()) {
-            return;
-        }
-
-        // Begin Rasterizer for Clip Shape
-        boolean skipClip = true;
-        byte[] clipAlpha = null;
-
-        if (clipState == CLIP_SHAPE) {
-
-            int box[] = new int[4];
-
-            clipRegion.getBounds(box);
-            Rectangle devR = new Rectangle(box[0], box[1],
-                                           box[2] - box[0],
-                                           box[3] - box[1]);
-            if (!devR.isEmpty()) {
-                OutputManager mgr = getOutputManager();
-                RegionIterator ri = clipRegion.getIterator();
-                while (ri.nextYRange(box)) {
-                    int spany = box[1];
-                    int spanh = box[3] - spany;
-                    while (ri.nextXBand(box)) {
-                        int spanx = box[0];
-                        int spanw = box[2] - spanx;
-                        mgr.copyArea(this, null,
-                                     spanw, 0,
-                                     spanx, spany,
-                                     spanw, spanh,
-                                     fdx, fdy,
-                                     null);
-                    }
+        try {
+            if (dy == 0 && dx > 0 && dx < w) {
+                while (w > 0) {
+                    int partW = Math.min(w, dx);
+                    w -= partW;
+                    int sx = Math.addExact(x, w);
+                    ob.Blit(theData, theData, comp, clip,
+                            sx, y, sx+dx, y+dy, partW, h);
                 }
+                return;
             }
+            if (dy > 0 && dy < h && dx > -w && dx < w) {
+                while (h > 0) {
+                    int partH = Math.min(h, dy);
+                    h -= partH;
+                    int sy = Math.addExact(y, h);
+                    ob.Blit(theData, theData, comp, clip,
+                            x, sy, Math.addExact(x, dx), sy+dy, w, partH);
+                }
+                return;
+            }
+            ob.Blit(theData, theData, comp, clip, x, y,
+                Math.addExact(x, dx), Math.addExact(y, dy), w, h);
+        } catch (ArithmeticException ex) {
+            // We are hitting integer overflow in Math.addExact()
             return;
         }
-        // End Rasterizer for Clip Shape
-
-        getOutputManager().copyArea(this, null,
-                                    r.width, 0,
-                                    r.x, r.y, r.width,
-                                    r.height, fdx, fdy,
-                                    null);
     }
-    */
 
     public void drawLine(int x1, int y1, int x2, int y2) {
         try {
@@ -2463,8 +2382,8 @@ public final class SunGraphics2D
             if (paintState <= PAINT_ALPHACOLOR) {
                 validateColor();
             }
-            if (composite instanceof XORComposite) {
-                Color c = ((XORComposite) composite).getXorColor();
+            if (composite instanceof XORComposite xorComp) {
+                Color c = xorComp.getXorColor();
                 setComposite(new XORComposite(c, surfaceData));
             }
             validatePipe();
@@ -2579,7 +2498,7 @@ public final class SunGraphics2D
      * Returns a rectangle in image coordinates that may be required
      * in order to draw the given image into the given clipping region
      * through a pair of AffineTransforms.  In addition, horizontal and
-     * vertical padding factors for antialising and interpolation may
+     * vertical padding factors for antialiasing and interpolation may
      * be used.
      */
     private static Rectangle getImageRegion(RenderedImage img,
@@ -2666,8 +2585,7 @@ public final class SunGraphics2D
         }
 
         // BufferedImage case: use a simple drawImage call
-        if (img instanceof BufferedImage) {
-            BufferedImage bufImg = (BufferedImage)img;
+        if (img instanceof BufferedImage bufImg) {
             drawImage(bufImg,xform,null);
             return;
         }
@@ -2842,22 +2760,22 @@ public final class SunGraphics2D
                 WritableRaster wRaster = null;
                 if (raster instanceof WritableRaster) {
                     wRaster = (WritableRaster)raster;
+
+                    // Translate wRaster to start at (0, 0) and to contain
+                    // only the relevant portion of the tile
+                    wRaster = wRaster.createWritableChild(tileRect.x, tileRect.y,
+                                                          tileRect.width,
+                                                          tileRect.height,
+                                                          0, 0,
+                                                          null);
                 } else {
                     // Create a WritableRaster in the same coordinate system
-                    // as the original raster.
+                    // as the original raster, except origin which is (0,0).
                     wRaster =
                         Raster.createWritableRaster(raster.getSampleModel(),
                                                     raster.getDataBuffer(),
                                                     null);
                 }
-
-                // Translate wRaster to start at (0, 0) and to contain
-                // only the relevent portion of the tile
-                wRaster = wRaster.createWritableChild(tileRect.x, tileRect.y,
-                                                      tileRect.width,
-                                                      tileRect.height,
-                                                      0, 0,
-                                                      null);
 
                 // Wrap wRaster in a BufferedImage
                 BufferedImage bufImg =
@@ -2901,21 +2819,6 @@ public final class SunGraphics2D
 
         RenderedImage rendering = img.createRendering(rc);
         drawRenderedImage(rendering,reverseTransform);
-    }
-
-
-
-    /*
-     * Transform the bounding box of the BufferedImage
-     */
-    protected Rectangle transformBounds(Rectangle rect,
-                                        AffineTransform tx) {
-        if (tx.isIdentity()) {
-            return rect;
-        }
-
-        Shape s = transformShape(tx, rect);
-        return s.getBounds();
     }
 
     // text rendering methods
@@ -3128,13 +3031,12 @@ public final class SunGraphics2D
                     invalidateTransform();
                 }
                 return result;
-            } else if (img instanceof MultiResolutionImage) {
+            } else if (img instanceof MultiResolutionImage mrImage) {
                 // get scaled destination image size
 
                 int width = img.getWidth(observer);
                 int height = img.getHeight(observer);
 
-                MultiResolutionImage mrImage = (MultiResolutionImage) img;
                 Image resolutionVariant = getResolutionVariant(mrImage, width, height,
                                                                dx1, dy1, dx2, dy2,
                                                                sx1, sy1, sx2, sy2,
@@ -3309,8 +3211,7 @@ public final class SunGraphics2D
         Image resolutionVariant
                 = img.getResolutionVariant(destImageWidth, destImageHeight);
 
-        if (resolutionVariant instanceof ToolkitImage
-                && ((ToolkitImage) resolutionVariant).hasError()) {
+        if (resolutionVariant instanceof ToolkitImage tki && tki.hasError()) {
             return null;
         }
 
@@ -3638,7 +3539,7 @@ public final class SunGraphics2D
     /**
      * This object has no resources to dispose of per se, but the
      * doc comments for the base method in java.awt.Graphics imply
-     * that this object will not be useable after it is disposed.
+     * that this object will not be usable after it is disposed.
      * So, we sabotage the object to prevent further use to prevent
      * developers from relying on behavior that may not work on
      * other, less forgiving, VMs that really need to dispose of
@@ -3660,7 +3561,7 @@ public final class SunGraphics2D
      * enough to know that if our override is empty then it should not
      * mark us as finalizeable.
      */
-    @SuppressWarnings("deprecation")
+    @SuppressWarnings("removal")
     public void finalize() {
         // DO NOT REMOVE THIS METHOD
     }

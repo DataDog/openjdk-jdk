@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2012, 2018 SAP SE. All rights reserved.
+ * Copyright (c) 2002, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,9 @@
 #include "runtime/icache.hpp"
 #include "runtime/os.hpp"
 #include "runtime/safepointMechanism.hpp"
+#ifdef COMPILER2
+#include "opto/c2_globals.hpp"
+#endif
 
 // We have interfaces for the following instructions:
 //
@@ -48,7 +51,7 @@ class NativeInstruction {
   friend class Relocation;
 
  public:
-  bool is_jump() { return Assembler::is_b(long_at(0)); } // See NativeGeneralJump.
+  bool is_jump() const { return Assembler::is_b(long_at(0)); } // See NativeGeneralJump.
 
   bool is_sigtrap_ic_miss_check() {
     assert(UseSIGTRAP, "precondition");
@@ -64,13 +67,6 @@ class NativeInstruction {
     return MacroAssembler::tdi_get_si16(long_at(0), Assembler::traptoUnconditional, 0);
   }
 
-  // We use an illtrap for marking a method as not_entrant or zombie.
-  bool is_sigill_zombie_not_entrant() {
-    // Work around a C++ compiler bug which changes 'this'.
-    return NativeInstruction::is_sigill_zombie_not_entrant_at(addr_at(0));
-  }
-  static bool is_sigill_zombie_not_entrant_at(address addr);
-
 #ifdef COMPILER2
   // SIGTRAP-based implicit range checks
   bool is_sigtrap_range_check() {
@@ -79,15 +75,26 @@ class NativeInstruction {
   }
 #endif
 
+  bool is_sigtrap_nmethod_entry_barrier() {
+    assert(UseSIGTRAP && TrapBasedNMethodEntryBarriers, "precondition");
+    return Assembler::is_tw(long_at(0), Assembler::traptoLessThanUnsigned | Assembler::traptoGreaterThanUnsigned,
+                            0, -1);
+  }
+
   bool is_safepoint_poll() {
-    // Is the current instruction a POTENTIAL read access to the polling page?
     // The current arguments of the instruction are not checked!
     if (USE_POLL_BIT_ONLY) {
       int encoding = SafepointMechanism::poll_bit();
       return MacroAssembler::is_tdi(long_at(0), Assembler::traptoGreaterThanUnsigned | Assembler::traptoEqual,
                                     -1, encoding);
     }
-    return MacroAssembler::is_load_from_polling_page(long_at(0), NULL);
+    return MacroAssembler::is_load_from_polling_page(long_at(0), nullptr);
+  }
+
+  bool is_safepoint_poll_return() {
+    // Safepoint poll at nmethod return with watermark check.
+    return MacroAssembler::is_td(long_at(0), Assembler::traptoGreaterThanUnsigned,
+                                 /* R1_SP */ 1, /* any reg */ -1);
   }
 
   address get_stack_bang_address(void *ucontext) {
@@ -126,6 +133,8 @@ class NativeCall: public NativeInstruction {
     load_const_from_method_toc_instruction_size = 16,
     instruction_size                            = 16 // Used in shared code for calls with reloc_info.
   };
+
+  static int byte_size() { return instruction_size; }
 
   static bool is_call_at(address a) {
     return Assembler::is_bl(*(int*)(a));
@@ -167,7 +176,7 @@ inline NativeCall* nativeCall_at(address instr) {
 }
 
 inline NativeCall* nativeCall_before(address return_address) {
-  NativeCall* call = NULL;
+  NativeCall* call = nullptr;
   if (MacroAssembler::is_bl(*(int*)(return_address - 4)))
     call = (NativeCall*)(return_address - 4);
   call->verify();
@@ -249,8 +258,8 @@ class NativeMovConstReg: public NativeInstruction {
   // Patch the code stream and oop pool.
   void set_data(intptr_t x);
 
-  // Patch narrow oop constants. Use this also for narrow klass.
-  void set_narrow_oop(narrowOop data, CodeBlob *code = NULL);
+  // Patch narrow oop constants.
+  void set_narrow_oop(narrowOop data, CodeBlob *code = nullptr);
 
   void verify() NOT_DEBUG_RETURN;
 };
@@ -297,7 +306,7 @@ class NativeJump: public NativeInstruction {
       return (address)((NativeMovConstReg *)this)->data();
     } else {
       ShouldNotReachHere();
-      return NULL;
+      return nullptr;
     }
   }
 
@@ -316,15 +325,7 @@ class NativeJump: public NativeInstruction {
     }
   }
 
-  // MT-safe insertion of native jump at verified method entry
-  static void patch_verified_entry(address entry, address verified_entry, address dest);
-
   void verify() NOT_DEBUG_RETURN;
-
-  static void check_verified_entry_alignment(address entry, address verified_entry) {
-    // We just patch one instruction on ppc64, so the jump doesn't have to
-    // be aligned. Nothing to do here.
-  }
 };
 
 // Instantiates a NativeJump object starting at the given instruction
@@ -367,7 +368,7 @@ class NativeCallTrampolineStub : public NativeInstruction {
 
  public:
 
-  address destination(nmethod *nm = NULL) const;
+  address destination(nmethod *nm = nullptr) const;
   int destination_toc_offset() const;
 
   void set_destination(address new_destination);
@@ -465,7 +466,7 @@ class NativeMovRegMem: public NativeInstruction {
     return ((*hi_ptr) << 16) | ((*lo_ptr) & 0xFFFF);
   }
 
-  void set_offset(intptr_t x) {
+  void set_offset(intptr_t x, bool flush_icache = true) {
 #ifdef VM_LITTLE_ENDIAN
     short *hi_ptr = (short*)(addr_at(0));
     short *lo_ptr = (short*)(addr_at(4));
@@ -475,7 +476,9 @@ class NativeMovRegMem: public NativeInstruction {
 #endif
     *hi_ptr = x >> 16;
     *lo_ptr = x & 0xFFFF;
-    ICache::ppc64_flush_icache_bytes(addr_at(0), NativeMovRegMem::instruction_size);
+    if (flush_icache) {
+      ICache::ppc64_flush_icache_bytes(addr_at(0), NativeMovRegMem::instruction_size);
+    }
   }
 
   void add_offset_in_bytes(intptr_t radd_offset) {
@@ -493,6 +496,88 @@ class NativeMovRegMem: public NativeInstruction {
     DEBUG_ONLY( test->verify(); )
     return test;
   }
+};
+
+class NativePostCallNop: public NativeInstruction {
+
+    // We use CMPI/CMPLI to represent Post Call Nops (PCN)
+
+    //   Bit |0         5|6    |9 |10|11     |16                          31|
+    //       +--------------------------------------------------------------+
+    // Field |OPCODE     |BF   |/ |L |RA     |SI                            |
+    //       +--------------------------------------------------------------+
+    //       |0 0 1 0 1|DATA HI| 1|        DATA LO                          |
+    //       |         |4 bits |  |        22 bits                          |
+    //
+    // Bit 9 is always 1 for PCNs to distinguish them from regular CMPI/CMPLI
+    //
+    // Using both, CMPLI (opcode 10 = 0b001010) and CMPI (opcode 11 = 0b001011) for
+    // PCNs allows using bit 5 from the opcode to encode DATA HI.
+
+    enum {
+      ppc_data_lo_bits = 31 - 9,
+      ppc_data_lo_mask = right_n_bits(ppc_data_lo_bits),
+      ppc_data_hi_bits = 9 - 5,
+      ppc_data_hi_shift = ppc_data_lo_bits + 1,
+      ppc_data_hi_mask = right_n_bits(ppc_data_hi_bits) << ppc_data_hi_shift,
+      ppc_data_bits = ppc_data_lo_bits + ppc_data_hi_bits,
+
+      ppc_oopmap_slot_bits = 9,
+      ppc_oopmap_slot_mask = right_n_bits(ppc_oopmap_slot_bits),
+      ppc_cb_offset_bits = ppc_data_bits - ppc_oopmap_slot_bits,
+      ppc_cb_offset_mask = right_n_bits(ppc_cb_offset_bits),
+};
+
+public:
+  enum ppc_specific_constants {
+    // If the check is adjusted to read beyond size of the instruction at the deopt handler stub
+    // code entry point, it has to happen in two stages - to prevent out of bounds access in case
+    // the return address points to the entry point which could be at the end of page.
+    first_check_size = BytesPerInstWord
+  };
+
+  bool is_post_call_nop() const { return MacroAssembler::is_post_call_nop(long_at(0)); }
+  bool check() const { return is_post_call_nop(); }
+  bool decode(int32_t& oopmap_slot, int32_t& cb_offset) const {
+    uint32_t instr_bits = long_at(0);
+    uint32_t data_lo = instr_bits & ppc_data_lo_mask;
+    uint32_t data_hi = (instr_bits & ppc_data_hi_mask) >> 1;
+    uint32_t data = data_hi | data_lo;
+    if (data == 0) {
+      return false; // no data found
+    }
+    cb_offset = (data & ppc_cb_offset_mask) << 2;
+    oopmap_slot = data >> ppc_cb_offset_bits;
+    return true; // decoding succeeded
+  }
+  bool patch(int32_t oopmap_slot, int32_t cb_offset);
+  void make_deopt();
+};
+
+inline NativePostCallNop* nativePostCallNop_at(address address) {
+  NativePostCallNop* nop = (NativePostCallNop*) address;
+  if (nop->check()) {
+    return nop;
+  }
+  return nullptr;
+}
+
+class NativeDeoptInstruction: public NativeInstruction {
+ public:
+  enum {
+    instruction_size            =    4,
+    instruction_offset          =    0,
+  };
+
+  address instruction_address() const       { return addr_at(instruction_offset); }
+  address next_instruction_address() const  { return addr_at(instruction_size); }
+
+  void  verify();
+
+  static bool is_deopt_at(address code_pos);
+
+  // MT-safe patching
+  static void insert(address code_pos);
 };
 
 #endif // CPU_PPC_NATIVEINST_PPC_HPP

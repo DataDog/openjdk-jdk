@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,7 +29,7 @@ import java.util.*;
 
 import nsk.share.Pair;
 
-import static jdk.internal.org.objectweb.asm.Opcodes.*;
+import static org.objectweb.asm.Opcodes.*;
 
 import nsk.share.TestFailure;
 import vm.runtime.defmeth.shared.ClassFileGenerator;
@@ -513,8 +513,11 @@ public class TestBuilder {
      * from it.
      */
     public void run() {
+        if (!underConstruction.isEmpty()) {
+            throw new InternalError("Still under construction");
+        }
         if (tests.isEmpty()) {
-            throw new IllegalStateException("No tests to run");
+            throw new InternalError("No tests to run");
         }
 
         TestExecutor executor = prepare();

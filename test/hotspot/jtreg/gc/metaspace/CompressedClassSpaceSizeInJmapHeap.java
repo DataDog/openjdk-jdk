@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,10 +32,11 @@ package gc.metaspace;
  * @library /test/lib
  * @modules java.base/jdk.internal.misc
  *          java.management
- * @run main/othervm -XX:+IgnoreUnrecognizedVMOptions -XX:CompressedClassSpaceSize=48m gc.metaspace.CompressedClassSpaceSizeInJmapHeap
+ * @run main/timeout=240 gc.metaspace.CompressedClassSpaceSizeInJmapHeap
  */
 
 import jdk.test.lib.JDKToolLauncher;
+import jdk.test.lib.apps.LingeredApp;
 import jdk.test.lib.process.OutputAnalyzer;
 import jdk.test.lib.process.ProcessTools;
 import jdk.test.lib.SA.SATestUtils;
@@ -45,11 +46,14 @@ import java.nio.charset.Charset;
 import java.util.List;
 
 public class CompressedClassSpaceSizeInJmapHeap {
+
     // Note that on some platforms it may require root privileges to run this test.
     public static void main(String[] args) throws Exception {
         SATestUtils.skipIfCannotAttach(); // throws SkippedException if attach not expected to work.
 
-        String pid = Long.toString(ProcessTools.getProcessId());
+        LingeredApp theApp = new LingeredApp();
+        LingeredApp.startApp(theApp, "-XX:CompressedClassSpaceSize=48m");
+        String pid = Long.toString(theApp.getPid());
 
         JDKToolLauncher jmap = JDKToolLauncher.create("jhsdb")
                                               .addToolArg("jmap")
@@ -64,20 +68,25 @@ public class CompressedClassSpaceSizeInJmapHeap {
         File err = new File("CompressedClassSpaceSizeInJmapHeap.stderr.txt");
         pb.redirectError(err);
 
-        run(pb);
-
-        OutputAnalyzer output = new OutputAnalyzer(read(out));
-        output.shouldContain("CompressedClassSpaceSize = 50331648 (48.0MB)");
-        out.delete();
-    }
-
-    private static void run(ProcessBuilder pb) throws Exception {
-        Process p = pb.start();
-        p.waitFor();
-        int exitValue = p.exitValue();
+        // If we attempt to attach to LingeredApp before it has initialized, the heap dump request will fail, so we allow 3 tries
+        int allowedTries = 3;
+        int exitValue;
+        do {
+            exitValue = run(pb);
+        } while ((exitValue != 0) && (allowedTries-- > 0));
         if (exitValue != 0) {
             throw new Exception("jmap -heap exited with error code: " + exitValue);
         }
+        OutputAnalyzer output = new OutputAnalyzer(read(out));
+        output.shouldContain("CompressedClassSpaceSize = 50331648 (48.0MB)");
+        out.delete();
+
+        LingeredApp.stopApp(theApp);
+    }
+
+    private static int run(ProcessBuilder pb) throws Exception {
+        OutputAnalyzer output = ProcessTools.executeProcess(pb);
+        return output.getExitValue();
     }
 
     private static String read(File f) throws Exception {

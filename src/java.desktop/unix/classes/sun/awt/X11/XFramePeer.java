@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,6 +34,7 @@ import java.awt.Insets;
 import java.awt.MenuBar;
 import java.awt.Rectangle;
 import java.awt.peer.FramePeer;
+import sun.awt.SunToolkit;
 import sun.util.logging.PlatformLogger;
 import sun.awt.AWTAccessor;
 
@@ -58,6 +59,7 @@ class XFramePeer extends XDecoratedPeer implements FramePeer {
         super(params);
     }
 
+    @Override
     void preInit(XCreateWindowParams params) {
         super.preInit(params);
         Frame target = (Frame)(this.target);
@@ -66,11 +68,7 @@ class XFramePeer extends XDecoratedPeer implements FramePeer {
         state = 0;
         undecorated = Boolean.valueOf(target.isUndecorated());
         winAttr.nativeDecor = !target.isUndecorated();
-        if (winAttr.nativeDecor) {
-            winAttr.decorations = XWindowAttributesData.AWT_DECOR_ALL;
-        } else {
-            winAttr.decorations = XWindowAttributesData.AWT_DECOR_NONE;
-        }
+        winAttr.decorations = getWindowDecorationBits();
         winAttr.functions = MWMConstants.MWM_FUNC_ALL;
         winAttr.isResizable = true; // target.isResizable();
         winAttr.title = target.getTitle();
@@ -80,8 +78,41 @@ class XFramePeer extends XDecoratedPeer implements FramePeer {
                      Integer.valueOf(winAttr.decorations), Boolean.valueOf(winAttr.initialResizability),
                      Boolean.valueOf(!winAttr.nativeDecor), Integer.valueOf(winAttr.initialState));
         }
+
+        registerWindowDecorationChangeListener();
     }
 
+    private void registerWindowDecorationChangeListener() {
+        if (SunToolkit.isInstanceOf(target, "javax.swing.RootPaneContainer")) { // avoid unnecessary class loading
+            javax.swing.JRootPane rootpane = ((javax.swing.RootPaneContainer) target).getRootPane();
+            rootpane.addPropertyChangeListener(MWM_DECOR_TITLE_PROPERTY_NAME, e -> winAttr.decorations = getWindowDecorationBits() );
+        }
+    }
+
+    private int getWindowDecorationBits() {
+        int decorations = XWindowAttributesData.AWT_DECOR_NONE;
+        final Frame target = (Frame)(this.target);
+        final boolean useNativeDecor = !target.isUndecorated();
+        if (useNativeDecor) {
+            decorations = XWindowAttributesData.AWT_DECOR_ALL;
+
+            if (!getWindowTitleVisible()) {
+                // NB: the window must be [re-]mapped to make this change effective. Also, window insets will probably
+                // change and that'll be caught by one of the subsequent property change events in XDecoratedPeer
+                // (not necessarily the very next event, though).
+                decorations = XWindowAttributesData.AWT_DECOR_BORDER;
+            }
+
+            if (log.isLoggable(PlatformLogger.Level.FINE)) {
+                log.fine("Frame''s initial decorations affected by the client property {0}={1}",
+                         MWM_DECOR_TITLE_PROPERTY_NAME, getMWMDecorTitleProperty());
+            }
+        }
+
+        return decorations;
+    }
+
+    @Override
     void postInit(XCreateWindowParams params) {
         super.postInit(params);
         setupState(true);
@@ -108,7 +139,7 @@ class XFramePeer extends XDecoratedPeer implements FramePeer {
         setExtendedState(state);
     }
 
-    @SuppressWarnings("deprecation")
+    @Override
     public void setMenuBar(MenuBar mb) {
         // state_lock should always be the second after awt_lock
         XToolkit.awtLock();
@@ -142,6 +173,7 @@ class XFramePeer extends XDecoratedPeer implements FramePeer {
         return menubarPeer;
     }
 
+    @Override
     int getMenuBarHeight() {
         if (menubarPeer != null) {
             return menubarPeer.getDesiredHeight();
@@ -150,6 +182,7 @@ class XFramePeer extends XDecoratedPeer implements FramePeer {
         }
     }
 
+    @Override
     void updateChildrenSizes() {
         super.updateChildrenSizes();
         int height = getMenuBarHeight();
@@ -210,6 +243,7 @@ class XFramePeer extends XDecoratedPeer implements FramePeer {
         );
     }
 
+    @Override
     public void setMaximizedBounds(Rectangle b) {
         if (insLog.isLoggable(PlatformLogger.Level.FINE)) {
             insLog.fine("Setting maximized bounds to " + b);
@@ -239,12 +273,14 @@ class XFramePeer extends XDecoratedPeer implements FramePeer {
         }
     }
 
+    @Override
     public int getState() {
         synchronized(getStateLock()) {
             return state;
         }
     }
 
+    @Override
     public void setState(int newState) {
         synchronized(getStateLock()) {
             if (!isShowing()) {
@@ -299,6 +335,16 @@ class XFramePeer extends XDecoratedPeer implements FramePeer {
         XWM.getWM().setExtendedState(this, newState);
     }
 
+    @Override
+    public void toFront() {
+        if ((state & Frame.ICONIFIED) != 0) {
+            changeState(state & ~Frame.ICONIFIED);
+        }
+
+        super.toFront();
+    }
+
+    @Override
     public void handlePropertyNotify(XEvent xev) {
         super.handlePropertyNotify(xev);
         XPropertyEvent ev = xev.get_xproperty();
@@ -341,10 +387,18 @@ class XFramePeer extends XDecoratedPeer implements FramePeer {
             }
         }
         handleStateChange(old_state, state);
+
+        // RepaintManager does not repaint iconified windows. Window needs to be
+        // repainted explicitly, when it is deiconified.
+        if (((changed & Frame.ICONIFIED) != 0) &&
+            ((state & Frame.ICONIFIED) == 0)) {
+            repaint();
+        }
     }
 
     // NOTE: This method may be called by privileged threads.
     //       DO NOT INVOKE CLIENT CODE ON THIS THREAD!
+    @Override
     public void handleStateChange(int oldState, int newState) {
         super.handleStateChange(oldState, newState);
         for (ToplevelStateListener topLevelListenerTmp : toplevelStateListeners) {
@@ -352,6 +406,7 @@ class XFramePeer extends XDecoratedPeer implements FramePeer {
         }
     }
 
+    @Override
     public void setVisible(boolean vis) {
         if (vis) {
             setupState(false);
@@ -382,6 +437,7 @@ class XFramePeer extends XDecoratedPeer implements FramePeer {
         }
     }
 
+    @Override
     public void dispose() {
         if (menubarPeer != null) {
             menubarPeer.dispose();
@@ -389,6 +445,7 @@ class XFramePeer extends XDecoratedPeer implements FramePeer {
         super.dispose();
     }
 
+    @Override
     boolean isMaximized() {
         return (state & (Frame.MAXIMIZED_VERT  | Frame.MAXIMIZED_HORIZ)) != 0;
     }
@@ -437,6 +494,7 @@ class XFramePeer extends XDecoratedPeer implements FramePeer {
      * of Component (and thus it has no "print" method which gets called by
      * default).
      */
+    @Override
     public void print(Graphics g) {
         super.print(g);
 
@@ -659,14 +717,17 @@ class XFramePeer extends XDecoratedPeer implements FramePeer {
         }
     }
 
+    @Override
     public void setBoundsPrivate(int x, int y, int width, int height) {
         setBounds(x, y, width, height, SET_BOUNDS);
     }
 
+    @Override
     public Rectangle getBoundsPrivate() {
         return getBounds();
     }
 
+    @Override
     public void emulateActivation(boolean doActivate) {
         if (doActivate) {
             handleWindowFocusIn(0);

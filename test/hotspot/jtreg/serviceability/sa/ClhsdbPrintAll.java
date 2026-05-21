@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,8 +32,10 @@ import jtreg.SkippedException;
  * @bug 8175384
  * @summary Test clhsdb 'printall' command
  * @requires vm.hasSA
+ * @requires vm.gc != "Z"
+ * @requires (os.arch != "riscv64" | !(vm.cpu.features ~= ".*qemu.*"))
  * @library /test/lib
- * @run main/othervm/timeout=2400 -Xmx1g ClhsdbPrintAll
+ * @run main/othervm/timeout=2400 -Xmx2g ClhsdbPrintAll
  */
 
 public class ClhsdbPrintAll {
@@ -67,7 +69,7 @@ public class ClhsdbPrintAll {
                 "Exception Table",
                 "invokedynamic"));
             unExpStrMap.put("printall", List.of(
-                "cannot be cast to"));
+                "cannot be cast to class"));
             test.run(theApp.getPid(), cmds, expStrMap, unExpStrMap);
         } catch (SkippedException se) {
             throw se;

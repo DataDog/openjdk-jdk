@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,7 @@
 package vm.runtime.defmeth.shared.builder;
 
 import nsk.share.Pair;
-import jdk.internal.org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Opcodes;
 import vm.runtime.defmeth.shared.Util;
 import vm.runtime.defmeth.shared.data.Clazz;
 import vm.runtime.defmeth.shared.data.ConcreteClass;
@@ -37,7 +37,7 @@ import vm.runtime.defmeth.shared.data.method.result.IntResult;
 import vm.runtime.defmeth.shared.data.method.result.Result;
 import vm.runtime.defmeth.shared.data.method.result.ResultIgnore;
 import vm.runtime.defmeth.shared.data.method.result.ThrowExResult;
-import static jdk.internal.org.objectweb.asm.Opcodes.*;
+import static org.objectweb.asm.Opcodes.*;
 import vm.runtime.defmeth.shared.data.Interface;
 import vm.runtime.defmeth.shared.data.method.body.CallMethod;
 import vm.runtime.defmeth.shared.data.method.body.CallMethod.Invoke;
@@ -137,9 +137,16 @@ public class TesterBuilder implements Builder<Tester> {
         return static_(I).callee(methodName, methodDesc, ACC_STATIC);
     }
 
+    public TesterBuilder callSite(Clazz I, String methodName, String methodDesc, int acc) {
+        if ((acc & ACC_PRIVATE) != 0) {
+            testPrivateMethod = true;
+        }
+        return static_(I).callee(methodName, methodDesc, acc);
+    }
+
     public TesterBuilder privateCallSite(Clazz staticReceiver, ConcreteClass receiver,
             String methodName, String methodDesc) {
-        this.testPrivateMethod = true;
+        testPrivateMethod = true;
         return static_(staticReceiver)
                 .dynamic(receiver)
                 .callee(methodName, methodDesc);
@@ -151,6 +158,10 @@ public class TesterBuilder implements Builder<Tester> {
                 .dynamic(receiver)
                 .callee(methodName, methodDesc, ACC_INTERFACE)
                 .cpEntryType(CallMethod.IndexbyteOp.INTERFACEMETHODREF);
+    }
+
+    public TesterBuilder new_(ConcreteClass receiver) {
+        return callSite(receiver, receiver,"<init>", "()V");
     }
 
     public TesterBuilder params(int... intParams) {
@@ -204,7 +215,7 @@ public class TesterBuilder implements Builder<Tester> {
     }
 
     public TesterBuilder loadClass(Clazz clz) {
-        return static_(builder.clazz("java.lang.Class").build())
+        return static_(builder.toClazz(Class.class))
                 .callee("forName", "(Ljava/lang/String;)Ljava/lang/Class;", ACC_STATIC)
                 .params(clz.name());
     }
@@ -217,18 +228,18 @@ public class TesterBuilder implements Builder<Tester> {
     private CallMethod.Invoke getCallInsn() {
         if ((m.acc() & Opcodes.ACC_STATIC) != 0) {
             return Invoke.STATIC;
-        } else {
-            if (staticReceiver instanceof Interface) {
-                return Invoke.INTERFACE;
-            } else if (staticReceiver instanceof ConcreteClass) {
-                if ((m.acc() & Opcodes.ACC_INTERFACE) == 0) {
-                    return Invoke.VIRTUAL;
-                } else {
-                    return Invoke.INTERFACE;
-                }
+        } else if (staticReceiver instanceof Interface) {
+            return Invoke.INTERFACE;
+        } else if (staticReceiver instanceof ConcreteClass) {
+            if (m.isConstructor()) {
+                return Invoke.SPECIAL;
+            } else if ((m.acc() & Opcodes.ACC_INTERFACE) == 0) {
+                return Invoke.VIRTUAL;
             } else {
-                throw new UnsupportedOperationException("Can't detect invoke instruction");
+                return Invoke.INTERFACE;
             }
+        } else {
+            throw new UnsupportedOperationException("Can't detect invoke instruction");
         }
     }
 

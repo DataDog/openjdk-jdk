@@ -1,12 +1,10 @@
 /*
- * Copyright (c) 2019, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * published by the Free Software Foundation.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -27,7 +25,7 @@
  * SealedCompilationTests
  *
  * @test
- * @bug 8246353
+ * @bug 8246353 8273257 8294550 8347562 8344706
  * @summary Negative compilation tests, and positive compilation (smoke) tests for sealed classes
  * @library /lib/combo /tools/lib
  * @modules
@@ -35,21 +33,15 @@
  *     jdk.compiler/com.sun.tools.javac.api
  *     jdk.compiler/com.sun.tools.javac.main
  * @build toolbox.ToolBox toolbox.JavacTask
- * @compile --enable-preview -source ${jdk.version} SealedCompilationTests.java
- * @run testng/othervm -DuseAP=false --enable-preview SealedCompilationTests
- * @run testng/othervm -DuseAP=true --enable-preview SealedCompilationTests
+ * @run junit/othervm -DuseAP=false SealedCompilationTests
+ * @run junit/othervm -DuseAP=true SealedCompilationTests
  */
-
-import java.lang.constant.ClassDesc;
-
-import java.io.File;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -57,16 +49,12 @@ import java.util.stream.Collectors;
 import javax.annotation.processing.AbstractProcessor;
 import javax.annotation.processing.RoundEnvironment;
 import javax.annotation.processing.SupportedAnnotationTypes;
-
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.SourceVersion;
 
 import com.sun.tools.javac.util.Assert;
 
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.fail;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Test;
 import tools.javac.combo.CompilationTestCase;
 
 import toolbox.ToolBox;
@@ -74,22 +62,14 @@ import toolbox.JavacTask;
 import toolbox.Task;
 import toolbox.Task.OutputKind;
 
-@Test
-public class SealedCompilationTests extends CompilationTestCase {
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
+
+class SealedCompilationTests extends CompilationTestCase {
 
     ToolBox tb = new ToolBox();
 
-    // When sealed classes become a permanent feature, we don't need these any more
-    private static String[] PREVIEW_OPTIONS = {
-            "--enable-preview",
-            "-source", Integer.toString(Runtime.version().feature())
-    };
-
-    private static String[] PREVIEW_OPTIONS_WITH_AP = {
-            "--enable-preview",
-            "-source", Integer.toString(Runtime.version().feature()),
-            "-processor", SimplestAP.class.getName()
-    };
+    private static String[] OPTIONS_WITH_AP = { "-processor", SimplestAP.class.getName() };
 
     /* simplest annotation processor just to force a round of annotation processing for all tests
      */
@@ -107,10 +87,10 @@ public class SealedCompilationTests extends CompilationTestCase {
 
     }
 
-    public SealedCompilationTests() {
+    SealedCompilationTests() {
         boolean useAP = System.getProperty("useAP") == null ? false : System.getProperty("useAP").equals("true");
         setDefaultFilename("SealedTest.java");
-        setCompileOptions(useAP ? PREVIEW_OPTIONS_WITH_AP : PREVIEW_OPTIONS);
+        setCompileOptions(useAP ? OPTIONS_WITH_AP : new String[]{});
         System.out.println(useAP ? "running all tests using an annotation processor" : "running all tests without annotation processor");
     }
 
@@ -129,7 +109,8 @@ public class SealedCompilationTests extends CompilationTestCase {
                  """;
     private static final List<String> SHELLS = List.of(NO_SHELL, NEST_SHELL, AUX_SHELL);
 
-    public void testSimpleExtension() {
+    @Test
+    void testSimpleExtension() {
         String CC1 =
             """
             sealed class Sup # { }
@@ -207,7 +188,8 @@ public class SealedCompilationTests extends CompilationTestCase {
                         assertFail("compiler.err.non.sealed.sealed.or.final.expected", shell, expandMarkers(b, p, m));
     }
 
-    public void testSealedAndRecords() {
+    @Test
+    void testSealedAndRecords() {
         String P =
             """
             sealed interface Sup # { }
@@ -223,7 +205,8 @@ public class SealedCompilationTests extends CompilationTestCase {
     }
 
     // Test that a type that explicitly permits one type, can't be extended by another
-    public void testBadExtension() {
+    @Test
+    void testBadExtension() {
         String CC2 =
                 """
                 sealed class Sup permits Sub1 { }
@@ -254,36 +237,15 @@ public class SealedCompilationTests extends CompilationTestCase {
                 assertFail("compiler.err.cant.inherit.from.sealed", shell, b);
     }
 
-    public void testRestrictedKeyword() {
+    @Test
+    void testRestrictedKeyword() {
         for (String s : List.of(
                 "class SealedTest { String sealed; }",
                 "class SealedTest { int sealed = 0; int non = 0; int ns = non-sealed; }",
                 "class SealedTest { void test(String sealed) { } }",
                 "class SealedTest { void sealed(String sealed) { } }",
-                "class SealedTest { void test() { String sealed = null; } }"
-        )) {
-            assertOK(s);
-        }
+                "class SealedTest { void test() { String sealed = null; } }",
 
-        for (String s : List.of(
-                "class sealed {}",
-                "enum sealed {}",
-                "record sealed() {}",
-                "interface sealed {}",
-                "@interface sealed {}"
-        )) {
-            assertFail("compiler.err.restricted.type.not.allowed", s);
-        }
-
-        for (String s : List.of(
-                "class Foo { sealed m() {} }",
-                "class Foo { sealed i; }",
-                "class Foo { void m(sealed i) {} }"
-                )) {
-            assertFail("compiler.err.restricted.type.not.allowed.here", s);
-        }
-
-        for (String s : List.of(
                 "class SealedTest { String permits; }",
                 "class SealedTest { int permits = 0; }",
                 "class SealedTest { void test(String permits) { } }",
@@ -294,6 +256,12 @@ public class SealedCompilationTests extends CompilationTestCase {
         }
 
         for (String s : List.of(
+                "class sealed {}",
+                "enum sealed {}",
+                "record sealed() {}",
+                "interface sealed {}",
+                "@interface sealed {}",
+
                 "class permits {}",
                 "enum permits {}",
                 "record permits() {}",
@@ -304,31 +272,22 @@ public class SealedCompilationTests extends CompilationTestCase {
         }
 
         for (String s : List.of(
+                "class Foo { sealed m() {} }",
+                "class Foo { sealed i; }",
+                "class Foo { void m() { sealed i; } }",
+                "class Foo { void m(sealed i) {} }",
+
                 "class Foo { permits m() {} }",
                 "class Foo { permits i; }",
+                "class Foo { void m() { permits i; } }",
                 "class Foo { void m(permits i) {} }"
-        )) {
+                )) {
             assertFail("compiler.err.restricted.type.not.allowed.here", s);
         }
-
-        String[] testOptions = {/* no options */};
-        String[] previousCompOptions = getCompileOptions();
-        setCompileOptions(testOptions);
-        // now testing with preview disabled
-        for (String s : List.of(
-                "sealed class S {}",
-                "class Outer { sealed class S {} }",
-                "class Outer { void m() { sealed class S {} } }",
-                "non-sealed class S {}",
-                "class Outer { non-sealed class S {} }",
-                "class Outer { void m() { non-sealed class S {} } }"
-        )) {
-            assertFail("compiler.err.preview.feature.disabled.plural", s);
-        }
-        setCompileOptions(previousCompOptions);
     }
 
-    public void testRejectPermitsInNonSealedClass() {
+    @Test
+    void testRejectPermitsInNonSealedClass() {
         assertFail("compiler.err.invalid.permits.clause",
                 "class SealedTest {\n" +
                 "    class NotSealed permits Sub {}\n" +
@@ -341,7 +300,8 @@ public class SealedCompilationTests extends CompilationTestCase {
                 "}");
     }
 
-    public void testTypeInPermitsIsSameClassOrSuper() {
+    @Test
+    void testTypeInPermitsIsSameClassOrSuper() {
         assertFail("compiler.err.invalid.permits.clause",
                 """
                 sealed class Sealed permits Sealed {}
@@ -365,7 +325,8 @@ public class SealedCompilationTests extends CompilationTestCase {
     /* It is a compile-time error if a class declaration has more than one of the class modifiers
      * sealed, non-sealed and final
      */
-    public void testBadModifiers() {
+    @Test
+    void testBadModifiers() {
         assertFail("compiler.err.non.sealed.with.no.sealed.supertype",
                 "class SealedTest { non-sealed class NoSealedSuper {} }");
         assertFail("compiler.err.mod.not.allowed.here",
@@ -378,11 +339,13 @@ public class SealedCompilationTests extends CompilationTestCase {
                 "class SealedTest {\n" +
                 "    sealed class Super {}\n" +
                 "    sealed non-sealed class Sub extends Super {}\n" +
-                "}"))
+                "}",
+                "sealed public @interface SealedTest { }"))
             assertFail("compiler.err.illegal.combination.of.modifiers", s);
     }
 
-    public void testAnonymous_FunctionalExpr_and_Sealed() {
+    @Test
+    void testAnonymous_FunctionalExpr_and_Sealed() {
         for (String s : List.of(
                 """
                 sealed interface I extends Runnable {
@@ -441,7 +404,8 @@ public class SealedCompilationTests extends CompilationTestCase {
         assertFail("compiler.err.local.classes.cant.extend.sealed", s);
     }
 
-    public void testNoLocalSealedClasses() {
+    @Test
+    void testNoLocalSealedClasses() {
         for (String s : List.of(
                 """
                 sealed class C {
@@ -460,7 +424,8 @@ public class SealedCompilationTests extends CompilationTestCase {
             assertFail("compiler.err.sealed.or.non.sealed.local.classes.not.allowed", s);
     }
 
-    public void testLocalCantExtendSealed() {
+    @Test
+    void testLocalCantExtendSealed() {
         for (String s : List.of(
                 """
                 sealed class C {
@@ -492,7 +457,8 @@ public class SealedCompilationTests extends CompilationTestCase {
             assertFail("compiler.err.local.classes.cant.extend.sealed", s);
     }
 
-    public void testSealedInterfaceAndAbstracClasses() {
+    @Test
+    void testSealedInterfaceAndAbstracClasses() {
         for (String s : List.of(
                 """
                 sealed interface I {}
@@ -534,7 +500,8 @@ public class SealedCompilationTests extends CompilationTestCase {
             assertOK(s);
     }
 
-    public void testEnumsCantBeSealedOrNonSealed() {
+    @Test
+    void testEnumsCantBeSealedOrNonSealed() {
         for (String s : List.of(
                 """
                 sealed interface I {}
@@ -549,7 +516,8 @@ public class SealedCompilationTests extends CompilationTestCase {
             assertFail("compiler.err.mod.not.allowed.here", s);
     }
 
-    public void testEnumsCanImplementSealedInterfaces() {
+    @Test
+    void testEnumsCanImplementSealedInterfaces() {
         for (String s : List.of(
                 """
                 sealed interface I {}
@@ -559,7 +527,8 @@ public class SealedCompilationTests extends CompilationTestCase {
             assertOK(s);
     }
 
-    public void testClassesCanExtendNonSealed() {
+    @Test
+    void testClassesCanExtendNonSealed() {
         for (String s : List.of(
                 """
                 sealed class C {}
@@ -572,7 +541,8 @@ public class SealedCompilationTests extends CompilationTestCase {
         }
     }
 
-    public void testEmptyPermits() {
+    @Test
+    void testEmptyPermits() {
         for (String s : List.of(
             """
             sealed class C permits {}
@@ -582,7 +552,8 @@ public class SealedCompilationTests extends CompilationTestCase {
         }
     }
 
-    public void testTypeVarInPermits() {
+    @Test
+    void testTypeVarInPermits() {
         for (String s : List.of(
             """
             class Outer<T> {
@@ -591,9 +562,17 @@ public class SealedCompilationTests extends CompilationTestCase {
             """)) {
             assertFail("compiler.err.invalid.permits.clause", s);
         }
+        assertFail("compiler.err.illegal.forward.ref", _ -> {
+                assertEquals(Collections.nCopies(2, "compiler.err.illegal.forward.ref"), diags.keys());
+            },
+            """
+            sealed class Permits<X, Y> permits X, Y {}
+            """
+        );
     }
 
-    public void testRepeatedTypeInPermits() {
+    @Test
+    void testRepeatedTypeInPermits() {
         for (String s : List.of(
             """
             sealed class C permits Sub, Sub {}
@@ -604,7 +583,8 @@ public class SealedCompilationTests extends CompilationTestCase {
         }
     }
 
-    public void testSubtypeDoesntExtendSealed() {
+    @Test
+    void testSubtypeDoesntExtendSealed() {
         for (String s : List.of(
             """
             sealed class C permits Sub {}
@@ -628,7 +608,8 @@ public class SealedCompilationTests extends CompilationTestCase {
         }
     }
 
-    public void testAPIForPrimitiveAndArrayClasses() {
+    @Test
+    void testAPIForPrimitiveAndArrayClasses() {
         for (Class<?> c : new Class[]{byte.class, byte[].class, short.class, short[].class, int.class, int[].class, long.class, long[].class,
             float.class, float[].class, double.class, double[].class, char.class, char[].class, boolean.class, boolean[].class, void.class,
             String[].class}) {
@@ -637,7 +618,8 @@ public class SealedCompilationTests extends CompilationTestCase {
         }
     }
 
-    public void testPrinting() throws Exception {
+    @Test
+    void testPrinting() throws Exception {
         Path base = Paths.get("testPrinting");
         Path src = base.resolve("src");
         Path test = src.resolve("Test");
@@ -686,7 +668,7 @@ public class SealedCompilationTests extends CompilationTestCase {
 
         List<String> output = new JavacTask(tb)
             .outdir(out)
-            .options("--enable-preview", "-source", Integer.toString(Runtime.version().feature()), "-Xprint")
+            .options("-Xprint")
             .files(findJavaFiles(test))
             .run()
             .writeAll()
@@ -753,7 +735,8 @@ public class SealedCompilationTests extends CompilationTestCase {
         }
     }
 
-    public void testNonSealedErroneousSuper() {
+    @Test
+    void testNonSealedErroneousSuper() {
         assertFail("compiler.err.cant.resolve",
                    d -> {
                        if (diags.keys().size() != 1) {
@@ -765,7 +748,21 @@ public class SealedCompilationTests extends CompilationTestCase {
                    """);
     }
 
-    public void testIllFormedNonSealed() {
+    @Test
+    void testNonSealedErroneousSuperInterface() {
+        assertFail("compiler.err.cant.resolve",
+                   d -> {
+                       if (diags.keys().size() != 1) {
+                           fail("Unexpected errors: " + diags.toString());
+                       }
+                   },
+                   """
+                   non-sealed class C implements Undefined {}
+                   """);
+    }
+
+    @Test
+    void testIllFormedNonSealed() {
         for (String s : List.of(
             """
             sealed class C permits Sub {}
@@ -784,7 +781,7 @@ public class SealedCompilationTests extends CompilationTestCase {
             non/**/sealed class Sub extends C {}
             """
             )) {
-            assertFail("compiler.err.expected4", s);
+            assertFail("compiler.err.class.method.or.field.expected", s);
         }
     }
 
@@ -793,7 +790,8 @@ public class SealedCompilationTests extends CompilationTestCase {
         "byte[]", "short[]", "int[]", "long[]", "float[]", "double[]", "char[]", "boolean[]"
     };
 
-    public void testPermitsClause() {
+    @Test
+    void testPermitsClause() {
         for (String s : List.of(
             // can't include a parameterized type
             """
@@ -855,13 +853,15 @@ public class SealedCompilationTests extends CompilationTestCase {
         return tb.findJavaFiles(paths);
     }
 
-    public void testSealedNonSealedWithOtherModifiers() {
+    @Test
+    void testSealedNonSealedWithOtherModifiers() {
+        // Sup must be static so Sub may be static
         String template1 =
             """
             @interface A {}
 
             class Outer {
-                sealed class Sup { }
+                static sealed class Sup { }
                 # # class Sub extends Sup {}
                 final class Sub2 extends Sub {}
             }
@@ -898,7 +898,8 @@ public class SealedCompilationTests extends CompilationTestCase {
         }
     }
 
-    public void testSubClassBeforeSealedClassInSameCU() {
+    @Test
+    void testSubClassBeforeSealedClassInSameCU() {
         for (String s : List.of(
             """
             final class Sub extends Sealed {}
@@ -977,18 +978,20 @@ public class SealedCompilationTests extends CompilationTestCase {
         }
     }
 
-    public void testDoNotAllowSealedAnnotation() {
+    @Test
+    void testDoNotAllowSealedAnnotation() {
         for (String s : List.of(
             """
             sealed @interface A {}
             non-sealed interface I extends A {}
             """
         )) {
-            assertFail("compiler.err.expected4", s);
+            assertFail("compiler.err.class.method.or.field.expected", s);
         }
     }
 
-    public void testNarrowConversion() {
+    @Test
+    void testNarrowConversion() {
         for (String s : List.of(
                 """
                 interface I {}
@@ -1172,6 +1175,52 @@ public class SealedCompilationTests extends CompilationTestCase {
                         C c = (C) i;
                     }
                 }
+                """,
+                //JDK-8294550:
+                """
+                interface I {}
+                sealed class C permits D {}
+                final class D extends C {}
+
+                class Test {
+                    void test () {
+                        C[] c = null;
+                        I[] i = (I[]) c;
+                    }
+                }
+                """,
+                """
+                class Test {
+                    sealed interface I permits C1 {}
+                    non-sealed class C1 implements I {}
+                    class C2 extends C1 {}
+                    class C3 {}
+                    I m(int s, C3 c3) {
+                        I i = (I)c3;
+                    }
+                }
+                """,
+                """
+                class Test {
+                    sealed interface I permits C1 {}
+                    non-sealed class C1 implements I {}
+                    class C2 extends C1 {}
+                    class C3 {}
+                    I m(int s, C3 c3) {
+                        I i = (C1)c3;
+                    }
+                }
+                """,
+                """
+                class Test {
+                    sealed interface I permits C1 {}
+                    non-sealed class C1 implements I {}
+                    class C2 extends C1 {}
+                    class C3 {}
+                    I m(int s, C3 c3) {
+                        I i = (C2)c3;
+                    }
+                }
                 """
         )) {
             assertFail("compiler.err.prob.found.req", s);
@@ -1249,9 +1298,57 @@ public class SealedCompilationTests extends CompilationTestCase {
                      a = (A)c;
                   }
                 }
+                """,
+                """
+                sealed interface A<T> {
+                    final class B implements A<Object> { }
+                }
+
+                class Test {
+                    void f(A.B a, A<Object> b) {
+                        a = (A.B)b;
+                    }
+                }
+                """,
+                """
+                sealed class C permits D {}
+                final class D extends C {}
+
+                class Test {
+                    void test () {
+                        C[] c = null;
+                        D[] d = (D[]) c;
+                    }
+                }
                 """
         )) {
             assertOK(s);
         }
+    }
+
+    @Test
+    void testIntersectionWithSealedClasses() {
+        assertOK(
+                """
+                class A { }
+                sealed interface I permits B { }
+                final class B extends A implements I { }
+
+                class Foo<X extends A & I> {}
+                """
+        );
+        assertOK(
+                """
+                class Outer {
+                    abstract class Base {}
+                    interface Marker {}
+                    sealed class B extends Base {}
+                    final class C extends B implements Marker {}
+                    private <T extends Base & Marker> void test(T obj) {
+                        B b = (B) obj;
+                    }
+                }
+                """
+        );
     }
 }

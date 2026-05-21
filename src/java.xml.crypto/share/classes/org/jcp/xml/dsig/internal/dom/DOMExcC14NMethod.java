@@ -21,26 +21,28 @@
  * under the License.
  */
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
- */
-/*
- * $Id: DOMExcC14NMethod.java 1854026 2019-02-21 09:30:01Z coheigea $
+ * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
  */
 package org.jcp.xml.dsig.internal.dom;
 
-import javax.xml.crypto.*;
-import javax.xml.crypto.dsig.*;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.spec.AlgorithmParameterSpec;
+import java.util.ArrayList;
+import java.util.List;
+
+import javax.xml.crypto.Data;
+import javax.xml.crypto.MarshalException;
+import javax.xml.crypto.XMLCryptoContext;
+import javax.xml.crypto.XMLStructure;
+import javax.xml.crypto.dsig.CanonicalizationMethod;
+import javax.xml.crypto.dsig.TransformException;
 import javax.xml.crypto.dsig.spec.C14NMethodParameterSpec;
 import javax.xml.crypto.dsig.spec.ExcC14NParameterSpec;
 import javax.xml.crypto.dsig.spec.TransformParameterSpec;
 
-import java.security.InvalidAlgorithmParameterException;
-import java.security.spec.AlgorithmParameterSpec;
-import java.util.*;
-
-import org.w3c.dom.Element;
 import com.sun.org.apache.xml.internal.security.c14n.Canonicalizer;
 import com.sun.org.apache.xml.internal.security.c14n.InvalidCanonicalizerException;
+import org.w3c.dom.Element;
 
 /**
  * DOM-based implementation of CanonicalizationMethod for Exclusive
@@ -50,6 +52,7 @@ import com.sun.org.apache.xml.internal.security.c14n.InvalidCanonicalizerExcepti
  */
 public final class DOMExcC14NMethod extends ApacheCanonicalizer {
 
+    @Override
     public void init(TransformParameterSpec params)
         throws InvalidAlgorithmParameterException
     {
@@ -62,6 +65,7 @@ public final class DOMExcC14NMethod extends ApacheCanonicalizer {
         }
     }
 
+    @Override
     public void init(XMLStructure parent, XMLCryptoContext context)
         throws InvalidAlgorithmParameterException
     {
@@ -128,7 +132,7 @@ public final class DOMExcC14NMethod extends ApacheCanonicalizer {
         for (int i = 0, size = prefixList.size(); i < size; i++) {
             prefixListAttr.append(prefixList.get(i));
             if (i < size - 1) {
-                prefixListAttr.append(" ");
+                prefixListAttr.append(' ');
             }
         }
         DOMUtils.setAttribute(eElem, "PrefixList", prefixListAttr.toString());
@@ -140,6 +144,7 @@ public final class DOMExcC14NMethod extends ApacheCanonicalizer {
         return CanonicalizationMethod.EXCLUSIVE;
     }
 
+    @Override
     public Data transform(Data data, XMLCryptoContext xc)
         throws TransformException
     {
@@ -150,10 +155,8 @@ public final class DOMExcC14NMethod extends ApacheCanonicalizer {
             DOMSubTreeData subTree = (DOMSubTreeData)data;
             if (subTree.excludeComments()) {
                 try {
-                    apacheCanonicalizer = Canonicalizer.getInstance
+                    canonicalizer = Canonicalizer.getInstance
                         (CanonicalizationMethod.EXCLUSIVE);
-                    boolean secVal = Utils.secureValidation(xc);
-                    apacheCanonicalizer.setSecureValidation(secVal);
                 } catch (InvalidCanonicalizerException ice) {
                     throw new TransformException
                         ("Couldn't find Canonicalizer for: " +

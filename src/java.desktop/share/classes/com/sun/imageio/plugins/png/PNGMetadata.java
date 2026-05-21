@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -463,6 +463,7 @@ public class PNGMetadata extends IIOMetadata implements Cloneable {
         IHDR_present = true;
     }
 
+    @Override
     public boolean isReadOnly() {
         return false;
     }
@@ -480,6 +481,7 @@ public class PNGMetadata extends IIOMetadata implements Cloneable {
     }
 
     // Deep clone
+    @Override
     public Object clone() {
         PNGMetadata metadata;
         try {
@@ -495,6 +497,7 @@ public class PNGMetadata extends IIOMetadata implements Cloneable {
         return metadata;
     }
 
+    @Override
     public Node getAsTree(String formatName) {
         if (formatName.equals(nativeMetadataFormatName)) {
             return getNativeTree();
@@ -847,6 +850,7 @@ public class PNGMetadata extends IIOMetadata implements Cloneable {
         return numChannels;
     }
 
+    @Override
     public IIOMetadataNode getStandardChromaNode() {
         IIOMetadataNode chroma_node = new IIOMetadataNode("Chroma");
         IIOMetadataNode node = null; // scratch node
@@ -919,6 +923,7 @@ public class PNGMetadata extends IIOMetadata implements Cloneable {
         return chroma_node;
     }
 
+    @Override
     public IIOMetadataNode getStandardCompressionNode() {
         IIOMetadataNode compression_node = new IIOMetadataNode("Compression");
         IIOMetadataNode node = null; // scratch node
@@ -952,6 +957,7 @@ public class PNGMetadata extends IIOMetadata implements Cloneable {
         return sb.toString();
     }
 
+    @Override
     public IIOMetadataNode getStandardDataNode() {
         IIOMetadataNode data_node = new IIOMetadataNode("Data");
         IIOMetadataNode node = null; // scratch node
@@ -979,14 +985,14 @@ public class PNGMetadata extends IIOMetadata implements Cloneable {
                 sbits = Integer.toString(sBIT_grayBits);
             } else { // sBIT_colorType == PNGImageReader.PNG_COLOR_RGB ||
                      // sBIT_colorType == PNGImageReader.PNG_COLOR_RGB_ALPHA
-                sbits = Integer.toString(sBIT_redBits) + " " +
-                    Integer.toString(sBIT_greenBits) + " " +
-                    Integer.toString(sBIT_blueBits);
+                sbits = sBIT_redBits + " " +
+                        sBIT_greenBits + " " +
+                        sBIT_blueBits;
             }
 
             if (sBIT_colorType == PNGImageReader.PNG_COLOR_GRAY_ALPHA ||
                 sBIT_colorType == PNGImageReader.PNG_COLOR_RGB_ALPHA) {
-                sbits += " " + Integer.toString(sBIT_alphaBits);
+                sbits += " " + sBIT_alphaBits;
             }
 
             node.setAttribute("value", sbits);
@@ -998,6 +1004,7 @@ public class PNGMetadata extends IIOMetadata implements Cloneable {
         return data_node;
     }
 
+    @Override
     public IIOMetadataNode getStandardDimensionNode() {
         IIOMetadataNode dimension_node = new IIOMetadataNode("Dimension");
         IIOMetadataNode node = null; // scratch node
@@ -1027,6 +1034,7 @@ public class PNGMetadata extends IIOMetadata implements Cloneable {
         return dimension_node;
     }
 
+    @Override
     public IIOMetadataNode getStandardDocumentNode() {
         IIOMetadataNode document_node = null;
 
@@ -1067,6 +1075,7 @@ public class PNGMetadata extends IIOMetadata implements Cloneable {
         return document_node;
     }
 
+    @Override
     public IIOMetadataNode getStandardTextNode() {
         int numEntries = tEXt_keyword.size() +
             iTXt_keyword.size() + zTXt_keyword.size();
@@ -1114,6 +1123,7 @@ public class PNGMetadata extends IIOMetadata implements Cloneable {
         return text_node;
     }
 
+    @Override
     public IIOMetadataNode getStandardTransparencyNode() {
         IIOMetadataNode transparency_node =
             new IIOMetadataNode("Transparency");
@@ -1134,9 +1144,9 @@ public class PNGMetadata extends IIOMetadata implements Cloneable {
             node = new IIOMetadataNode("TransparentColor");
             if (tRNS_colorType == PNGImageReader.PNG_COLOR_RGB) {
                 node.setAttribute("value",
-                                  Integer.toString(tRNS_red) + " " +
-                                  Integer.toString(tRNS_green) + " " +
-                                  Integer.toString(tRNS_blue));
+                                  tRNS_red + " " +
+                                  tRNS_green + " " +
+                                  tRNS_blue);
             } else if (tRNS_colorType == PNGImageReader.PNG_COLOR_GRAY) {
                 node.setAttribute("value", Integer.toString(tRNS_gray));
             }
@@ -1285,6 +1295,7 @@ public class PNGMetadata extends IIOMetadata implements Cloneable {
             return getAttribute(node, name, null, true);
     }
 
+    @Override
     public void mergeTree(String formatName, Node root)
         throws IIOInvalidTreeException {
         if (formatName.equals(nativeMetadataFormatName)) {
@@ -1318,7 +1329,7 @@ public class PNGMetadata extends IIOMetadata implements Cloneable {
                 IHDR_width = getIntAttribute(node, "width");
                 IHDR_height = getIntAttribute(node, "height");
                 IHDR_bitDepth =
-                        Integer.valueOf(IHDR_bitDepths[
+                        Integer.parseInt(IHDR_bitDepths[
                                 getEnumeratedAttribute(node,
                                                     "bitDepth",
                                                     IHDR_bitDepths)]);
@@ -1775,7 +1786,7 @@ public class PNGMetadata extends IIOMetadata implements Cloneable {
     }
 
     /*
-     * Accrding to PNG spec, keywords are restricted to 1 to 79 bytes
+     * According to PNG spec, keywords are restricted to 1 to 79 bytes
      * in length. Keywords shall contain only printable Latin-1 characters
      * and spaces; To reduce the chances for human misreading of a keyword,
      * leading spaces, trailing spaces, and consecutive spaces are not
@@ -2267,6 +2278,7 @@ public class PNGMetadata extends IIOMetadata implements Cloneable {
     }
 
     // Reset all instance variables to their initial state
+    @Override
     public void reset() {
         IHDR_present = false;
         PLTE_present = false;

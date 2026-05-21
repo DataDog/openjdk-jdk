@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 
 package javax.print.attribute;
 
+import java.io.Serial;
 import java.io.Serializable;
 import java.util.Locale;
 
@@ -43,6 +44,7 @@ public abstract class TextSyntax implements Serializable, Cloneable {
     /**
      * Use serialVersionUID from JDK 1.4 for interoperability.
      */
+    @Serial
     private static final long serialVersionUID = -8130648736378144102L;
 
     /**
@@ -110,6 +112,7 @@ public abstract class TextSyntax implements Serializable, Cloneable {
      *
      * @return a hashcode value for this object
      */
+    @Override
     public int hashCode() {
         return value.hashCode() ^ locale.hashCode();
     }
@@ -129,11 +132,11 @@ public abstract class TextSyntax implements Serializable, Cloneable {
      * @return {@code true} if {@code object} is equivalent to this text
      *         attribute, {@code false} otherwise
      */
+    @Override
     public boolean equals(Object object) {
-        return(object != null &&
-               object instanceof TextSyntax &&
-               this.value.equals (((TextSyntax) object).value) &&
-               this.locale.equals (((TextSyntax) object).locale));
+        return object instanceof TextSyntax other &&
+                this.value.equals(other.value) &&
+                this.locale.equals(other.locale);
     }
 
     /**
@@ -142,6 +145,7 @@ public abstract class TextSyntax implements Serializable, Cloneable {
      *
      * @return a {@code String} identifying this object
      */
+    @Override
     public String toString(){
         return value;
     }
