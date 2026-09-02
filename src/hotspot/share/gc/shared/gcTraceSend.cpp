@@ -28,6 +28,9 @@
 #include "gc/shared/gcTrace.hpp"
 #include "gc/shared/gcWhen.hpp"
 #include "jfr/jfrEvents.hpp"
+#if defined(LINUX)
+#include "jfrfiles/jfrUsdtFire.hpp"
+#endif
 #include "runtime/os.hpp"
 #include "utilities/macros.hpp"
 
@@ -41,6 +44,10 @@ bool GCTracer::should_send_cpu_time_event() const {
 
 void GCTracer::send_garbage_collection_event() const {
   EventGarbageCollection event(UNTIMED);
+  usdt_fire_garbage_collection(GCId::current(), _shared_gc_info.name(),
+                               (u2)_shared_gc_info.cause(),
+                               _shared_gc_info.sum_of_pauses(),
+                               _shared_gc_info.longest_pause());
   if (event.should_commit()) {
     event.set_gcId(GCId::current());
     event.set_name(_shared_gc_info.name());
@@ -306,7 +313,10 @@ class PhaseSender : public PhaseVisitor {
     assert(phase->level() < PhasesStack::PHASE_LEVELS, "Need more event types for PausePhase");
 
     switch (phase->level()) {
-      case 0: send_phase<EventGCPhasePause>(phase); break;
+      case 0:
+        usdt_fire_gc_phase_pause(GCId::current(), phase->name());
+        send_phase<EventGCPhasePause>(phase);
+        break;
       case 1: send_phase<EventGCPhasePauseLevel1>(phase); break;
       case 2: send_phase<EventGCPhasePauseLevel2>(phase); break;
       case 3: send_phase<EventGCPhasePauseLevel3>(phase); break;

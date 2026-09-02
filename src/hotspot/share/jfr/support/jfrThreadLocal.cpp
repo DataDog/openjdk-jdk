@@ -36,6 +36,7 @@
 #include "jfr/recorder/storage/jfrStorage.hpp"
 #include "jfr/support/jfrThreadId.inline.hpp"
 #include "jfr/support/jfrThreadLocal.hpp"
+#include "jfr/support/jfrUsdtSupport.hpp"
 #include "jfr/writers/jfrJavaEventWriter.hpp"
 #include "logging/log.hpp"
 #include "memory/allocation.inline.hpp"
@@ -503,10 +504,12 @@ traceid JfrThreadLocal::assign_thread_id(const Thread* t, JfrThreadLocal* tl) {
       tid = load_java_thread_id(JavaThread::cast(t));
       tl->_jvm_thread_id = tid;
       AtomicAccess::store(&tl->_vthread_id, tid);
+      JfrUsdtSupport::on_thread_id_assigned(t, tid);
       return tid;
     }
     tid = static_cast<traceid>(ThreadIdentifier::next());
     tl->_jvm_thread_id = tid;
+    JfrUsdtSupport::on_thread_id_assigned(t, tid);
   }
   return tid;
 }

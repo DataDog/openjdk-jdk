@@ -396,7 +396,7 @@
     <Field type="uint" name="numberOfRegions" label="Number of Regions" />
   </Event>
 
-  <Event name="GarbageCollection" category="Java Virtual Machine, GC, Collector" label="Garbage Collection" description="Garbage collection performed by the JVM" thread="true">
+  <Event name="GarbageCollection" category="Java Virtual Machine, GC, Collector" label="Garbage Collection" description="Garbage collection performed by the JVM" thread="true" usdt="true">
     <Field type="uint" name="gcId" label="GC Identifier" relation="GcId" />
     <Field type="GCName" name="name" label="Name" description="The name of the Garbage Collector" />
     <Field type="GCCause" name="cause" label="Cause" description="The reason for triggering this Garbage Collection" />
@@ -567,7 +567,7 @@
     <Field type="ulong" contentType="nanos" name="realTime" label="Real Time" />
   </Event>
 
-  <Event name="GCPhasePause" category="Java Virtual Machine, GC, Phases" label="GC Phase Pause" thread="true">
+  <Event name="GCPhasePause" category="Java Virtual Machine, GC, Phases" label="GC Phase Pause" thread="true" usdt="true">
     <Field type="uint" name="gcId" label="GC Identifier" relation="GcId" />
     <Field type="string" name="name" label="Name" />
   </Event>
@@ -767,7 +767,7 @@
     <Field type="ulong" contentType="bytes" name="allocationSize" label="Allocation Size" />
   </Event>
 
-  <Event name="ObjectAllocationSample" category="Java Application" label="Object Allocation Sample" thread="true" stackTrace="true" startTime="false" throttle="true">
+  <Event name="ObjectAllocationSample" category="Java Application" label="Object Allocation Sample" thread="true" stackTrace="true" startTime="false" throttle="true" usdt="true">
     <Field type="Class" name="objectClass" label="Object Class" description="Class of allocated object" />
     <Field type="long" contentType="bytes" name="weight" label="Sample Weight"
       description="The relative weight of the sample. Aggregating the weights for a large number of samples, for a particular class, thread or stack trace, gives a statistically accurate representation of the allocation pressure" />
@@ -991,7 +991,7 @@
   <Event name="CPUTimeSample" category="Java Virtual Machine, Profiling" label="CPU Time Sample"
     description="Snapshot of a threads state from the CPU time sampler, both threads executing native and Java code are included. The throttle setting can be either an upper bound for the event emission rate, e.g. 100/s, or the cpu-time period, e.g. 10ms, with s, ms, us and ns supported as time units."
     throttle="true" thread="false" experimental="true" startTime="false">
-    <Field type="StackTrace" name="stackTrace" label="Stack Trace" />
+    <Field type="StackTrace" name="stackTrace" label="Stack Trace" usdt="false" />
     <Field type="Thread" name="eventThread" label="Thread" />
     <Field type="boolean" name="failed" label="Failed" description="Failed to obtain the stack trace" />
     <Field type="Tickspan" name="samplingPeriod" label="CPU Time Sampling Period"/>
@@ -1408,7 +1408,7 @@
 
   <Type name="Thread" label="Thread">
     <Field type="string" name="osName" label="OS Thread Name" />
-    <Field type="long" name="osThreadId" label="OS Thread Id" />
+    <Field type="long" name="osThreadId" label="OS Thread Id" usdt="true" />
     <Field type="string" name="javaName" label="Java Thread Name" />
     <Field type="long" name="javaThreadId" label="Java Thread Id" />
     <Field type="ThreadGroup" name="group" label="Java Thread Group" />
@@ -1422,7 +1422,7 @@
 
   <Type name="Class" label="Java Class">
     <Field type="ClassLoader" name="classLoader" label="Class Loader" />
-    <Field type="Symbol" name="name" label="Name" />
+    <Field type="Symbol" name="name" label="Name" usdt="true" />
     <Field type="Package" name="package" label="Package" />
     <Field type="int" name="modifiers" label="Access Modifiers" />
     <Field type="boolean" name="hidden" label="Hidden" />
@@ -1442,7 +1442,7 @@
   </Type>
 
   <Type name="Symbol" label="Symbol">
-    <Field type="string" name="string" label="String" />
+    <Field type="string" name="string" label="String" usdt="true" />
   </Type>
 
   <Type name="ThreadState" label="Java Thread State">
@@ -1450,11 +1450,11 @@
   </Type>
 
   <Type name="GCName" label="GC Name">
-    <Field type="string" name="name" label="Name" />
+    <Field type="string" name="name" label="Name" usdt="true" />
   </Type>
 
   <Type name="GCCause" label="GC Cause">
-    <Field type="string" name="cause" label="Cause" />
+    <Field type="string" name="cause" label="Cause" usdt="true" />
   </Type>
 
   <Type name="GCWhen" label="GC When">

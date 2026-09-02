@@ -82,6 +82,10 @@ endif
 
 ifeq ($(call check-jvm-feature, dtrace), true)
   JVM_CFLAGS_FEATURES += -DDTRACE_ENABLED
+  ifeq ($(call isTargetOs, linux), true)
+    # JFR USDT probe semaphores, defined by dtrace -G (see GensrcJfr.gmk)
+    JVM_EXTRA_OBJECT_FILES += $(JVM_VARIANT_OUTPUTDIR)/gensrc/dtracefiles/jfr.o
+  endif
 endif
 
 ifneq ($(call check-jvm-feature, jvmti), true)
