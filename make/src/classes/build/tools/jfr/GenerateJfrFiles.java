@@ -133,6 +133,8 @@ public class GenerateJfrFiles {
                 printJfrPeriodicHpp(metadata, new File(outputDir, "jfrPeriodic.hpp"));
                 printJfrEventControlHpp(metadata, new File(outputDir, "jfrEventControl.hpp"));
                 printJfrEventClassesHpp(metadata, new File(outputDir, "jfrEventClasses.hpp"));
+                printJfrUsdtD(metadata, new File(outputDir, "jfr.d"));
+                printJfrUsdtFireHpp(metadata, new File(outputDir, "jfrUsdtFire.hpp"));
             }
 
             if (outputMode == OutputMode.metadata) {
@@ -201,6 +203,8 @@ public class GenerateJfrFiles {
         String level = "";
         boolean experimental;
         boolean internal;
+        // usdt="true" in metadata.xml
+        boolean usdt;
         long id;
         boolean isEvent;
         boolean isRelation;
@@ -428,6 +432,9 @@ public class GenerateJfrFiles {
         private boolean array;
         private String annotations;
         public boolean struct;
+        // null = unspecified, TRUE = part of the USDT projection,
+        // FALSE = explicitly excluded from the USDT projection.
+        public Boolean usdt;
 
         FieldElement(Metadata metadata) {
             this.metadata = metadata;
@@ -525,6 +532,7 @@ public class GenerateJfrFiles {
                 currentType.level = getString(attributes, "level");
                 currentType.throttle = getBoolean(attributes, "throttle", false);
                 currentType.commitState = getString(attributes, "commitState");
+                currentType.usdt = getBoolean(attributes, "usdt", false);
                 currentType.isEvent = "Event".equals(qName);
                 currentType.isRelation = "Relation".equals(qName);
                 break;
@@ -540,6 +548,7 @@ public class GenerateJfrFiles {
                 currentField.transition = getString(attributes, "transition");
                 currentField.relation = getString(attributes, "relation");
                 currentField.experimental = getBoolean(attributes, "experimental", false);
+                currentField.usdt = getBooleanObj(attributes, "usdt");
                 break;
             }
         }
@@ -552,6 +561,11 @@ public class GenerateJfrFiles {
         private static boolean getBoolean(Attributes attributes, String name, boolean defaultValue) {
             String value = attributes.getValue(name);
             return value == null ? defaultValue : Boolean.valueOf(value);
+        }
+
+        private static Boolean getBooleanObj(Attributes attributes, String name) {
+            String value = attributes.getValue(name);
+            return value == null ? null : Boolean.valueOf(value);
         }
 
         @Override
@@ -813,6 +827,248 @@ public class GenerateJfrFiles {
             out.write("");
             out.write("#endif // INCLUDE_JFR");
             out.write("#endif // JFRFILES_JFREVENTCLASSES_HPP");
+        }
+    }
+
+    // USDT (DTrace/SystemTap) collector support.
+    //
+    // Events marked usdt="true" in metadata.xml get a probe in the generated
+    // jfr.d provider file plus a usdt_fire_<event>() helper in jfrUsdtFire.hpp,
+    // called from the event's production site with raw argument values. Firing
+    // is gated only by the probe's is-enabled semaphore (JFR_<PROBE>_ENABLED()):
+    // a tracer that attaches flips the semaphore, and unsubscribed probes cost
+    // one byte load and a branch. Firing is independent of JFR recording state.
+
+    // A flattened probe argument. Strings cost one slot: not-NUL-terminated
+    // sources (Symbol bytes) are copied into a per-thread scratch buffer.
+    private record UsdtSlot(String dType, String cppExpr) {}
+
+    // Hard ceiling for flattened probe arguments, matching sys/sdt.h's
+    // STAP_PROBE1..12 macro family and every major eBPF consumer (libbpf,
+    // parca-dev/usdt, OBI).
+    private static final int USDT_MAX_SLOTS = 12;
+
+    private static String usdtFireName(String eventName) {
+        return "usdt_fire_" + usdtProbeName(eventName).replace("__", "_");
+    }
+
+    private static String usdtProbeName(String eventName) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < eventName.length(); i++) {
+            char c = eventName.charAt(i);
+            boolean boundary = i > 0
+                    && ((Character.isUpperCase(c) && i + 1 < eventName.length()
+                            && Character.isLowerCase(eventName.charAt(i + 1)))
+                        || (Character.isLowerCase(eventName.charAt(i - 1)) && Character.isUpperCase(c)));
+            if (boundary) {
+                sb.append("__");
+            }
+            sb.append(Character.toLowerCase(c));
+        }
+        return sb.toString();
+    }
+
+    private static String usdtProbeMacro(String eventName) {
+        return "JFR_" + usdtProbeName(eventName).replace("__", "_").toUpperCase();
+    }
+
+    private static String dTypeForPrimitive(String fieldType) {
+        return switch (fieldType) {
+            case "u1", "b1", "bool", "s1", "u2", "s2", "s4" -> "int";
+            case "unsigned", "u4" -> "unsigned int";
+            case "u8" -> "uint64_t";
+            case "s8" -> "int64_t";
+            default -> null; // char/float/double not supported
+        };
+    }
+
+    private static List<UsdtSlot> usdtProjection(Metadata metadata, TypeElement event) {
+        List<UsdtSlot> slots = new ArrayList<>();
+        for (FieldElement f : event.fields) {
+            if (Boolean.FALSE.equals(f.usdt)) {
+                continue;
+            }
+            String m = f.name;
+            if ("string".equals(f.typeName)) {
+                slots.add(new UsdtSlot("char *", "(" + m + " ? " + m + " : \"\")"));
+                continue;
+            }
+            if ("Tickspan".equals(f.typeName)) {
+                slots.add(new UsdtSlot("uint64_t", m + ".value()"));
+                continue;
+            }
+            if ("Ticks".equals(f.typeName)) {
+                throw new IllegalStateException("Event " + event.name + " field " + f.name
+                        + " of type Ticks has no USDT projection; exclude it with usdt=\"false\"");
+            }
+            if (f.type != null && f.type.primitive) {
+                XmlType xmlType = metadata.xmlTypes.get(f.typeName);
+                String dType = dTypeForPrimitive(xmlType.fieldType);
+                if (dType == null) {
+                    throw new IllegalStateException("Event " + event.name + " field " + f.name
+                            + " of primitive type " + f.typeName + " (" + xmlType.fieldType
+                            + ") has no USDT mapping");
+                }
+                slots.add(new UsdtSlot(dType, m));
+                continue;
+            }
+            slots.addAll(projectMarkedType(metadata, event, f, m));
+        }
+        if (slots.isEmpty()) {
+            throw new IllegalStateException("Event " + event.name
+                    + " is marked usdt=\"true\" but has no projectable fields");
+        }
+        if (slots.size() > USDT_MAX_SLOTS) {
+            throw new IllegalStateException("Event " + event.name
+                    + " USDT projection needs " + slots.size()
+                    + " probe arguments, exceeding the " + USDT_MAX_SLOTS + " slot ceiling");
+        }
+        return slots;
+    }
+
+    // Project an event field of declared type through that type's
+    // usdt="true" sub-fields.
+    private static List<UsdtSlot> projectMarkedType(Metadata metadata, TypeElement event, FieldElement f, String m) {
+        List<UsdtSlot> slots = new ArrayList<>();
+        switch (f.typeName) {
+            case "Thread" -> {
+                requireMarked(metadata, event, f, "Thread", "osThreadId");
+                slots.add(new UsdtSlot("long", "JfrUsdtSupport::os_thread_id(" + m + ")"));
+            }
+            case "Class" -> {
+                requireMarked(metadata, event, f, "Class", "name");
+                requireMarked(metadata, event, f, "Symbol", "string");
+                // Symbol bytes are not NUL-terminated; copy_string copies
+                // them (NUL-terminated, length-capped) into a per-thread
+                // scratch buffer so every string arg is a plain char*.
+                slots.add(new UsdtSlot("char *", "(" + m + " && " + m + "->name()) ? JfrUsdtSupport::copy_string("
+                        + m + "->name()->bytes(), (size_t)" + m + "->name()->utf8_length()) : \"\""));
+            }
+            case "GCName" -> {
+                requireMarked(metadata, event, f, "GCName", "name");
+                slots.add(new UsdtSlot("char *", "GCNameHelper::to_string((GCName)" + m + ")"));
+            }
+            case "GCCause" -> {
+                requireMarked(metadata, event, f, "GCCause", "cause");
+                slots.add(new UsdtSlot("char *", "GCCause::to_string((GCCause::Cause)" + m + ")"));
+            }
+            default -> throw new IllegalStateException("Event " + event.name + " field " + f.name
+                    + " of type " + f.typeName + " has no viable USDT projection; "
+                    + "mark the type's sub-fields with usdt=\"true\", "
+                    + "or exclude the field with usdt=\"false\"");
+        }
+        return slots;
+    }
+
+    private static void requireMarked(Metadata metadata, TypeElement event, FieldElement field,
+            String typeName, String subFieldName) {
+        TypeElement t = metadata.types.get(typeName);
+        if (t == null) {
+            throw new IllegalStateException("Undefined projection type " + typeName);
+        }
+        for (FieldElement sf : t.fields) {
+            if (sf.name.equals(subFieldName)) {
+                if (!Boolean.TRUE.equals(sf.usdt)) {
+                    throw new IllegalStateException("Event " + event.name + " field " + field.name
+                            + " projects through " + typeName + "." + subFieldName
+                            + ", which is not marked usdt=\"true\" in metadata.xml");
+                }
+                return;
+            }
+        }
+        throw new IllegalStateException(typeName + " has no field " + subFieldName);
+    }
+
+    private static void printJfrUsdtFireHpp(Metadata metadata, File outputFile) throws Exception {
+        // Compute all projections up front so validation errors surface
+        // before any file is written.
+        Map<String, List<UsdtSlot>> projections = new LinkedHashMap<>();
+        for (TypeElement e : metadata.getEvents()) {
+            if (e.usdt) {
+                projections.put(e.name, usdtProjection(metadata, e));
+            }
+        }
+        try (var out = new Printer(outputFile)) {
+            out.write("#ifndef JFRFILES_JFRUSDTFIRE_HPP");
+            out.write("#define JFRFILES_JFRUSDTFIRE_HPP");
+            out.write("");
+            out.write("#include \"gc/shared/gcCause.hpp\"");
+            out.write("#include \"gc/shared/gcName.hpp\"");
+            out.write("#include \"jfr/support/jfrUsdtSupport.hpp\"");
+            out.write("#include \"jfr/utilities/jfrTypes.hpp\"");
+            out.write("#include \"oops/klass.hpp\"");
+            out.write("#include \"oops/symbol.hpp\"");
+            out.write("#include \"utilities/ticks.hpp\"");
+            out.write("");
+            out.write("#if defined(LINUX) && defined(DTRACE_ENABLED)");
+            out.write("// The is-enabled semaphore macros below come from the dtrace -h");
+            out.write("// generated jfr.h; its _SDT_HAS_SEMAPHORES prolog is what makes them");
+            out.write("// (and the probe notes' semaphore addresses) exist. The prolog flips");
+            out.write("// EVERY provider in the TU at sys/sdt.h include time, so this header");
+            out.write("// must never be included from a TU that also uses hotspot provider");
+            out.write("// probes (dtrace.hpp includes sys/sdt.h without the prolog, and the");
+            out.write("// jfr probes would silently lose their semaphores).");
+            out.write("#ifdef _SYS_SDT_H");
+            out.write("#error \"jfrUsdtFire.hpp must be included before anything that includes <sys/sdt.h>\"");
+            out.write("#endif");
+            out.write("#include \"dtracefiles/jfr.h\"");
+            out.write("#endif");
+            out.write("");
+            for (var entry : projections.entrySet()) {
+                TypeElement event = metadata.types.get(entry.getKey());
+                String macro = usdtProbeMacro(entry.getKey());
+                List<UsdtSlot> slots = entry.getValue();
+                StringJoiner params = new StringJoiner(", ");
+                for (FieldElement f : event.fields) {
+                    if (Boolean.FALSE.equals(f.usdt)) {
+                        continue;
+                    }
+                    params.add(f.getParameterType() + " " + f.name);
+                }
+                out.write("inline void " + usdtFireName(event.name) + "(" + params + ") {");
+                out.write("#if defined(LINUX) && defined(DTRACE_ENABLED)");
+                out.write("  if (" + macro + "_ENABLED()) {");
+                StringJoiner args = new StringJoiner(", ");
+                for (UsdtSlot slot : slots) {
+                    args.add(slot.cppExpr());
+                }
+                out.write("    " + macro + "(" + args + ");");
+                out.write("  }");
+                out.write("#endif");
+                out.write("}");
+                out.write("");
+            }
+            out.write("#endif // JFRFILES_JFRUSDTFIRE_HPP");
+        }
+    }
+
+    private static void printJfrUsdtD(Metadata metadata, File outputFile) throws Exception {
+        // Compute all projections up front so validation errors surface
+        // before any file is written.
+        Map<String, List<UsdtSlot>> projections = new LinkedHashMap<>();
+        for (TypeElement e : metadata.getEvents()) {
+            if (e.usdt) {
+                projections.put(e.name, usdtProjection(metadata, e));
+            }
+        }
+        try (var out = new Printer(outputFile)) {
+            out.write("provider jfr {");
+            for (var entry : projections.entrySet()) {
+                String probe = usdtProbeName(entry.getKey());
+                StringJoiner args = new StringJoiner(", ");
+                List<UsdtSlot> slots = entry.getValue();
+                for (int i = 0; i < slots.size(); i++) {
+                    args.add(slots.get(i).dType() + " arg" + i);
+                }
+                out.write("  probe " + probe + "(" + args + ");");
+            }
+            out.write("};");
+            out.write("");
+            out.write("#pragma D attributes Evolving/Evolving/Common provider jfr provider");
+            out.write("#pragma D attributes Private/Private/Unknown provider jfr module");
+            out.write("#pragma D attributes Private/Private/Unknown provider jfr function");
+            out.write("#pragma D attributes Evolving/Evolving/Common provider jfr name");
+            out.write("#pragma D attributes Evolving/Evolving/Common provider jfr args");
         }
     }
 

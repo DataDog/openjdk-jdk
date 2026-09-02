@@ -57,6 +57,7 @@
                     <xs:attribute name="relation" type="xs:string" use="optional" />
                     <xs:attribute name="experimental" type="xs:boolean" use="optional" />
                     <xs:attribute name="transition" type="transitionType" use="optional" />
+                    <xs:attribute name="usdt" type="xs:boolean" use="optional" />
                   </xs:complexType>
                 </xs:element>
               </xs:sequence>
@@ -73,6 +74,7 @@
               <xs:attribute name="cutoff" type="xs:boolean" use="optional" />
               <xs:attribute name="throttle" type="xs:boolean" use="optional" />
               <xs:attribute name="level" type="xs:string" use="optional" />
+              <xs:attribute name="usdt" type="xs:boolean" use="optional" />
             </xs:complexType>
           </xs:element>
           <xs:element maxOccurs="unbounded" name="Type">
@@ -90,6 +92,7 @@
                     <xs:attribute name="experimental" type="xs:boolean" use="optional" />
                     <xs:attribute name="internal" type="xs:boolean" use="optional" />
                     <xs:attribute name="relation" type="xs:string" use="optional" />
+                    <xs:attribute name="usdt" type="xs:boolean" use="optional" />
                   </xs:complexType>
                 </xs:element>
               </xs:sequence>

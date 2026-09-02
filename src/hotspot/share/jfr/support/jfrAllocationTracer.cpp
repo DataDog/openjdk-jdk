@@ -26,13 +26,16 @@
 #include "jfr/leakprofiler/leakProfiler.hpp"
 #include "jfr/support/jfrAllocationTracer.hpp"
 #include "jfr/support/jfrObjectAllocationSample.hpp"
+#include "jfr/support/jfrUsdtSupport.hpp"
 #include "runtime/javaThread.hpp"
 
 JfrAllocationTracer::JfrAllocationTracer(const Klass* klass, HeapWord* obj, size_t alloc_size, bool outside_tlab, JavaThread* thread) {
   if (LeakProfiler::is_running()) {
     LeakProfiler::sample(obj, alloc_size, thread);
   }
-  if (EventObjectAllocationSample::is_enabled()) {
+  // The semaphore read keeps the sampler reachable for an external
+  // tracer when no recording enables the event.
+  if (EventObjectAllocationSample::is_enabled() || JfrUsdtSupport::object_allocation_sample_subscribed()) {
     JfrObjectAllocationSample::send_event(klass, alloc_size, outside_tlab, thread);
   }
 }

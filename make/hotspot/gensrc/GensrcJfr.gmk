@@ -49,6 +49,43 @@ $(eval $(call SetupExecute, jfr_gen_headers, \
 TARGETS += $(jfr_gen_headers)
 
 ################################################################################
+# Generate the dtrace -h header and the dtrace -G semaphore object for the
+# generated jfr.d provider file, so that JFR events marked usdt="true" in
+# metadata.xml get SystemTap/DTrace probes compiled into libjvm.so (gated by
+# the jvm feature 'dtrace', Linux only).
+################################################################################
+
+ifeq ($(call check-jvm-feature, dtrace)$(call isTargetOs, linux), truetrue)
+
+  JFR_DTRACE_GENSRC_DIR := $(JVM_VARIANT_OUTPUTDIR)/gensrc/dtracefiles
+  JFR_DTRACE_SUPPORT_DIR := $(JVM_SUPPORT_DIR)/dtrace-jfr
+  JFR_DTRACE_CPP_FLAGS := -x c
+
+  # The generator emits jfr.d as a side effect, so depend on its execution
+  # marker. The preprocessed .d is written to a support dir so that a stale
+  # jfr.d never looks like an input to the GensrcDtrace wildcard rule.
+  #
+  # The jfr.h semaphore prolog is kept: firing is gated by the generated
+  # JFR_<PROBE>_ENABLED() macros, flipped by an attaching tracer, and jfr.o
+  # defines the semaphores. The prolog is TU-global at sys/sdt.h include time
+  # (see jfrfiles/jfrUsdtFire.hpp for the containment rules).
+  $(JFR_DTRACE_GENSRC_DIR)/jfr.h: $(jfr_gen_headers_TARGET)
+	$(call LogInfo, Generating dtrace header file for JFR probes)
+	$(call MakeDir, $(@D) $(JFR_DTRACE_SUPPORT_DIR))
+	$(CPP) $(JFR_DTRACE_CPP_FLAGS) $(SYSROOT_CFLAGS) $(JFR_OUTPUTDIR)/jfr.d > $(JFR_DTRACE_SUPPORT_DIR)/jfr.d
+	$(DTRACE) $(DTRACE_FLAGS) -h -o $@ -s $(JFR_DTRACE_SUPPORT_DIR)/jfr.d
+
+  # Semaphore definitions for the JFR probes, linked into libjvm via
+  # JVM_EXTRA_OBJECT_FILES.
+  $(JFR_DTRACE_GENSRC_DIR)/jfr.o: $(JFR_DTRACE_GENSRC_DIR)/jfr.h
+	$(call LogInfo, Generating dtrace semaphore object for JFR probes)
+	$(DTRACE) $(DTRACE_FLAGS) -G -s $(JFR_DTRACE_SUPPORT_DIR)/jfr.d -o $@
+
+  TARGETS += $(JFR_DTRACE_GENSRC_DIR)/jfr.h $(JFR_DTRACE_GENSRC_DIR)/jfr.o
+
+endif
+
+################################################################################
 
 endif # include guard
 include MakeIncludeEnd.gmk

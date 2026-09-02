@@ -26,6 +26,10 @@
 #include "gc/shared/tlab_globals.hpp"
 #include "jfr/jfrEvents.hpp"
 #include "jfr/support/jfrObjectAllocationSample.hpp"
+#include "jfr/support/jfrUsdtSupport.hpp"
+#if defined(LINUX)
+#include "jfrfiles/jfrUsdtFire.hpp"
+#endif
 #include "runtime/javaThread.hpp"
 #include "utilities/globalDefinitions.hpp"
 
@@ -34,13 +38,21 @@ inline bool send_allocation_sample(const Klass* klass, int64_t allocated_bytes, 
   if (event.should_commit()) {
     const int64_t weight = allocated_bytes - tl->last_allocated_bytes();
     assert(weight > 0, "invariant");
+    usdt_fire_object_allocation_sample(klass, weight);
     event.set_objectClass(klass);
     event.set_weight(weight);
     event.commit();
     tl->set_last_allocated_bytes(allocated_bytes);
     return true;
   }
-  return false;
+  // The JFR throttle did not accept this attempt. With no recording at
+  // all, give a subscribed USDT tracer its own byte-distance sample so
+  // the probe fires with JFR fully off. A recording keeps the throttle
+  // as the single sampling decision for both consumers.
+  if (EventObjectAllocationSample::is_enabled()) {
+    return false;
+  }
+  return JfrUsdtSupport::send_object_allocation_sample(klass, allocated_bytes);
 }
 
 inline int64_t estimate_tlab_size_bytes(JavaThread* jt) {
